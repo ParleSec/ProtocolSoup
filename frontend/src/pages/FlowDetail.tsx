@@ -133,6 +133,108 @@ const data = await fetch('/api/resource', {
 }).then(r => r.json());`
     }
 
+    if (mappedFlowId === 'token_introspection') {
+      return `// Token Introspection (RFC 7662)
+// Resource server validates token with authorization server
+
+const introspectionResult = await fetch('/oauth2/introspect', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Basic ' + btoa(resourceServerId + ':' + resourceServerSecret),
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: new URLSearchParams({
+    token: accessToken,
+    token_type_hint: 'access_token', // optional
+  }),
+}).then(r => r.json());
+
+// Check if token is valid
+if (introspectionResult.active) {
+  console.log('Token is valid');
+  console.log('Scopes:', introspectionResult.scope);
+  console.log('Expires:', new Date(introspectionResult.exp * 1000));
+  console.log('Client:', introspectionResult.client_id);
+} else {
+  console.log('Token is invalid or expired');
+}`
+    }
+
+    if (mappedFlowId === 'token_revocation') {
+      return `// Token Revocation (RFC 7009)
+// Invalidate tokens on logout or security events
+
+await fetch('/oauth2/revoke', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Basic ' + btoa(clientId + ':' + clientSecret),
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: new URLSearchParams({
+    token: refreshToken, // or accessToken
+    token_type_hint: 'refresh_token', // optional but recommended
+  }),
+});
+
+// Note: Response is always 200 OK for security
+// (prevents token existence disclosure)
+
+// Clear local token storage
+localStorage.removeItem('access_token');
+localStorage.removeItem('refresh_token');`
+    }
+
+    if (mappedFlowId === 'oidc_userinfo') {
+      return `// OIDC UserInfo Endpoint
+// Retrieve user claims with access token
+
+const userInfo = await fetch('/oidc/userinfo', {
+  headers: {
+    'Authorization': 'Bearer ' + accessToken,
+  },
+}).then(r => r.json());
+
+console.log('User ID:', userInfo.sub);
+console.log('Name:', userInfo.name);
+console.log('Email:', userInfo.email);
+console.log('Email Verified:', userInfo.email_verified);`
+    }
+
+    if (mappedFlowId === 'oidc_discovery') {
+      return `// OpenID Connect Discovery
+// Auto-configure client from provider metadata
+
+const config = await fetch('/.well-known/openid-configuration')
+  .then(r => r.json());
+
+console.log('Issuer:', config.issuer);
+console.log('Authorization Endpoint:', config.authorization_endpoint);
+console.log('Token Endpoint:', config.token_endpoint);
+console.log('UserInfo Endpoint:', config.userinfo_endpoint);
+
+// Fetch signing keys
+const jwks = await fetch(config.jwks_uri).then(r => r.json());
+console.log('Signing Keys:', jwks.keys);`
+    }
+
+    if (mappedFlowId === 'oidc_hybrid') {
+      return `// OIDC Hybrid Flow
+// Get ID token immediately, exchange code for access token
+
+const authUrl = new URL('/oidc/authorize', origin);
+authUrl.searchParams.set('response_type', 'code id_token');
+authUrl.searchParams.set('client_id', 'your-client-id');
+authUrl.searchParams.set('redirect_uri', 'https://app.com/callback');
+authUrl.searchParams.set('scope', 'openid profile email');
+authUrl.searchParams.set('nonce', crypto.randomUUID());
+authUrl.searchParams.set('state', crypto.randomUUID());
+window.location.href = authUrl;
+
+// In callback: id_token in fragment, code in query
+// Validate ID token immediately for user identity
+// Exchange code for access_token on backend`
+    }
+
     return `// Authorization Code Flow
 const authUrl = new URL('/oauth2/authorize', origin);
 authUrl.searchParams.set('response_type', 'code');

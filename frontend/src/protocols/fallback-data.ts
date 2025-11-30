@@ -224,6 +224,104 @@ export const fallbackFlows: Record<string, FlowData> = {
     ]
   },
 
+  token_introspection: {
+    title: "Token Introspection",
+    description: "Validate tokens and retrieve metadata. Allows resource servers to query the authorization server about the current state of an access token (RFC 7662).",
+    steps: [
+      {
+        order: 1,
+        name: "Introspection Request",
+        description: "Resource server sends token to introspection endpoint for validation.",
+        from: "Resource Server",
+        to: "Authorization Server",
+        type: "request",
+        parameters: {
+          token: "The access token to introspect",
+          token_type_hint: "access_token (optional)",
+          client_id: "Resource server identifier",
+          client_secret: "Resource server secret",
+        },
+      },
+      {
+        order: 2,
+        name: "Introspection Response",
+        description: "Authorization server returns token metadata and validity status.",
+        from: "Authorization Server",
+        to: "Resource Server",
+        type: "response",
+        parameters: {
+          active: "Boolean - is token valid?",
+          scope: "Granted scopes",
+          client_id: "Client that requested token",
+          username: "Resource owner (if applicable)",
+          exp: "Expiration timestamp",
+          iat: "Issued-at timestamp",
+          sub: "Subject identifier",
+          aud: "Intended audience",
+          iss: "Token issuer",
+        },
+      },
+      {
+        order: 3,
+        name: "Access Decision",
+        description: "Resource server uses introspection result to authorize the request.",
+        from: "Resource Server",
+        to: "Resource Server",
+        type: "internal",
+        parameters: {
+          check: "active === true",
+          verify: "scope includes required permissions",
+          validate: "exp > current time",
+        },
+      },
+    ]
+  },
+
+  token_revocation: {
+    title: "Token Revocation",
+    description: "Invalidate access or refresh tokens before their natural expiration. Essential for logout flows and security incident response (RFC 7009).",
+    steps: [
+      {
+        order: 1,
+        name: "Revocation Request",
+        description: "Client sends token to revocation endpoint to invalidate it.",
+        from: "Client",
+        to: "Authorization Server",
+        type: "request",
+        parameters: {
+          token: "The token to revoke",
+          token_type_hint: "refresh_token or access_token (optional)",
+          client_id: "Your client identifier",
+          client_secret: "Your client secret (if confidential)",
+        },
+      },
+      {
+        order: 2,
+        name: "Revocation Response",
+        description: "Server acknowledges revocation (200 OK even if token was already invalid).",
+        from: "Authorization Server",
+        to: "Client",
+        type: "response",
+        parameters: {
+          status: "200 OK (always, for security)",
+          note: "No body content on success",
+        },
+      },
+      {
+        order: 3,
+        name: "Token Invalidated",
+        description: "Token can no longer be used; introspection will return active=false.",
+        from: "Authorization Server",
+        to: "Authorization Server",
+        type: "internal",
+        parameters: {
+          cascade: "Revoking refresh token may revoke associated access tokens",
+          security: "Prevents token reuse after logout or compromise",
+        },
+      },
+    ]
+  },
+
   oidc_authorization_code: {
     title: "OIDC Authorization Code Flow",
     description: "OpenID Connect flow using authorization code for authentication. Returns ID token with user identity claims.",
@@ -401,6 +499,198 @@ export const fallbackFlows: Record<string, FlowData> = {
       },
     ]
   },
+
+  oidc_hybrid: {
+    title: "OIDC Hybrid Flow",
+    description: "Combines authorization code and implicit flows. Returns some tokens from the authorization endpoint and others from the token endpoint.",
+    steps: [
+      {
+        order: 1,
+        name: "Auth Request",
+        description: "Request code and tokens simultaneously.",
+        from: "Client",
+        to: "Authorization Server",
+        type: "redirect",
+        parameters: {
+          response_type: "code id_token (or code token, code id_token token)",
+          scope: "openid profile email",
+          nonce: "Required - binds tokens to session",
+          state: "CSRF protection",
+        },
+      },
+      {
+        order: 2,
+        name: "User Login",
+        description: "User authenticates and consents.",
+        from: "User",
+        to: "Authorization Server",
+        type: "internal",
+      },
+      {
+        order: 3,
+        name: "Hybrid Response",
+        description: "ID token in fragment, code in query (or both in fragment).",
+        from: "Authorization Server",
+        to: "Client",
+        type: "redirect",
+        parameters: {
+          code: "Authorization code (for backend)",
+          id_token: "Immediate identity verification",
+          state: "Must match original",
+        },
+      },
+      {
+        order: 4,
+        name: "Validate ID Token",
+        description: "Verify ID token immediately for quick identity.",
+        from: "Client",
+        to: "Client",
+        type: "internal",
+        parameters: {
+          verify: "Signature using JWKS",
+          check: "nonce, iss, aud claims",
+        },
+      },
+      {
+        order: 5,
+        name: "Token Exchange",
+        description: "Exchange code for access token (backend).",
+        from: "Client",
+        to: "Authorization Server",
+        type: "request",
+        parameters: {
+          grant_type: "authorization_code",
+          code: "The authorization code",
+        },
+      },
+      {
+        order: 6,
+        name: "Access Token",
+        description: "Receive access token for API calls.",
+        from: "Authorization Server",
+        to: "Client",
+        type: "response",
+        parameters: {
+          access_token: "For API access",
+          refresh_token: "For token renewal",
+        },
+      },
+    ]
+  },
+
+  oidc_userinfo: {
+    title: "UserInfo Endpoint",
+    description: "Retrieve claims about the authenticated user using an access token. Returns profile information based on granted scopes.",
+    steps: [
+      {
+        order: 1,
+        name: "UserInfo Request",
+        description: "Request user claims with access token.",
+        from: "Client",
+        to: "Authorization Server",
+        type: "request",
+        parameters: {
+          method: "GET or POST",
+          Authorization: "Bearer {access_token}",
+          endpoint: "/oidc/userinfo",
+        },
+      },
+      {
+        order: 2,
+        name: "Token Validation",
+        description: "Server validates the access token.",
+        from: "Authorization Server",
+        to: "Authorization Server",
+        type: "internal",
+        parameters: {
+          check: "Token not expired",
+          verify: "Token has 'openid' scope",
+          lookup: "Associated user identity",
+        },
+      },
+      {
+        order: 3,
+        name: "UserInfo Response",
+        description: "Return user claims based on token scopes.",
+        from: "Authorization Server",
+        to: "Client",
+        type: "response",
+        parameters: {
+          sub: "Subject identifier (always present)",
+          name: "Full name (profile scope)",
+          email: "Email address (email scope)",
+          email_verified: "Email verification status",
+          picture: "Profile picture URL",
+          updated_at: "Last profile update timestamp",
+        },
+      },
+    ]
+  },
+
+  oidc_discovery: {
+    title: "OpenID Connect Discovery",
+    description: "Auto-configuration mechanism that allows clients to discover the OpenID Provider's endpoints and capabilities.",
+    steps: [
+      {
+        order: 1,
+        name: "Discovery Request",
+        description: "Fetch the OpenID Provider configuration document.",
+        from: "Client",
+        to: "Authorization Server",
+        type: "request",
+        parameters: {
+          endpoint: "/.well-known/openid-configuration",
+          method: "GET",
+        },
+      },
+      {
+        order: 2,
+        name: "Configuration Response",
+        description: "Receive metadata about the OpenID Provider.",
+        from: "Authorization Server",
+        to: "Client",
+        type: "response",
+        parameters: {
+          issuer: "Provider identifier URL",
+          authorization_endpoint: "URL for authorization",
+          token_endpoint: "URL for token exchange",
+          userinfo_endpoint: "URL for user claims",
+          jwks_uri: "URL for signing keys",
+          scopes_supported: "Available scopes",
+          response_types_supported: "Supported response types",
+          claims_supported: "Available user claims",
+        },
+      },
+      {
+        order: 3,
+        name: "JWKS Request",
+        description: "Fetch the JSON Web Key Set for signature validation.",
+        from: "Client",
+        to: "Authorization Server",
+        type: "request",
+        parameters: {
+          endpoint: "Value from jwks_uri",
+          method: "GET",
+        },
+      },
+      {
+        order: 4,
+        name: "JWKS Response",
+        description: "Receive public keys for token validation.",
+        from: "Authorization Server",
+        to: "Client",
+        type: "response",
+        parameters: {
+          keys: "Array of JWK objects",
+          kty: "Key type (RSA, EC)",
+          use: "Key usage (sig)",
+          kid: "Key ID for matching",
+          n: "RSA modulus (if RSA)",
+          e: "RSA exponent (if RSA)",
+        },
+      },
+    ]
+  },
 }
 
 /**
@@ -412,10 +702,15 @@ export const flowIdMap: Record<string, string> = {
   'authorization-code-pkce': 'authorization_code_pkce',
   'client-credentials': 'client_credentials',
   'refresh-token': 'refresh_token',
+  'token-introspection': 'token_introspection',
+  'token-revocation': 'token_revocation',
   // OIDC flows
   'oidc-code': 'oidc_authorization_code',
   'oidc-authorization-code': 'oidc_authorization_code',
   'oidc-implicit': 'oidc_implicit',
+  'hybrid': 'oidc_hybrid',
+  'userinfo': 'oidc_userinfo',
+  'discovery': 'oidc_discovery',
 }
 
 /**

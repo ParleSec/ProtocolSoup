@@ -58,7 +58,7 @@ export function Dashboard() {
             cta="Open Looking Glass"
           />
           <NavCard
-            to="/protocol/oauth2"
+            to="/protocols"
             icon={Shield}
             color="purple"
             title="Protocol Reference"

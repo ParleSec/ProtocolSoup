@@ -1,6 +1,6 @@
 import { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Eye, Home, Github, ExternalLink } from 'lucide-react'
+import { Eye, Home, Github, ExternalLink, BookOpen } from 'lucide-react'
 
 interface LayoutProps {
   children: ReactNode
@@ -12,6 +12,7 @@ export function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', icon: Home, label: 'Home' },
     { path: '/looking-glass', icon: Eye, label: 'Looking Glass' },
+    { path: '/protocols', icon: BookOpen, label: 'Protocols' },
   ]
 
   return (
