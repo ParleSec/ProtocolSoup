@@ -5,4 +5,5 @@
 export { FlowVisualizer, FlowProgressBar, StepIndicator } from './FlowVisualizer'
 export { StepDetail } from './StepDetail'
 export { ProtocolSelector, ProtocolFlowBadge, FlowCard } from './ProtocolSelector'
+export { LiveExecutionPanel } from './LiveExecutionPanel'
 
