@@ -132,12 +132,17 @@ export function createFlowExecutor(
   flowId: string,
   config: ExecutorFactoryConfig
 ): FlowExecutorBase | null {
+  console.log('[ExecutorFactory] Creating executor for flowId:', flowId)
+  console.log('[ExecutorFactory] Available flows:', Object.keys(FLOW_EXECUTOR_MAP))
+  
   const flowConfig = FLOW_EXECUTOR_MAP[flowId]
   
   if (!flowConfig) {
-    console.warn(`No executor found for flow: ${flowId}`)
+    console.warn(`[ExecutorFactory] No executor found for flow: ${flowId}`)
     return null
   }
+  
+  console.log('[ExecutorFactory] Found config:', flowConfig.description)
 
   const baseConfig: FlowExecutorConfig = {
     baseUrl: config.protocolBaseUrl,
@@ -184,12 +189,15 @@ export function getFlowInfo(flowId: string): {
   rfcReference: string
   requiresUserInteraction: boolean
 } | null {
+  console.log('[getFlowInfo] Looking up:', flowId, 'Available:', Object.keys(FLOW_EXECUTOR_MAP))
   const flowConfig = FLOW_EXECUTOR_MAP[flowId]
   
   if (!flowConfig) {
+    console.log('[getFlowInfo] Not found:', flowId)
     return null
   }
 
+  console.log('[getFlowInfo] Found:', flowConfig.description)
   return {
     supported: true,
     description: flowConfig.description,

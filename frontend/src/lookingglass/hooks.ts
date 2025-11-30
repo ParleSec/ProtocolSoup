@@ -382,10 +382,25 @@ export interface RealFlowExecutorResult {
 function mapFlowId(protocolId: string | null, backendFlowId: string | null): string | null {
   if (!backendFlowId) return null
 
-  // Normalize the flow ID
+  // Normalize the flow ID (replace underscores with hyphens, lowercase)
   const normalizedId = backendFlowId.toLowerCase().replace(/_/g, '-')
 
-  // Protocol-specific mappings
+  console.log('[FlowMapping] Protocol:', protocolId, 'Flow:', backendFlowId, '→ Normalized:', normalizedId)
+
+  // Handle OIDC-prefixed flow IDs from backend (e.g., oidc_authorization_code → oidc-authorization-code)
+  if (normalizedId.startsWith('oidc-')) {
+    const oidcFlow = normalizedId.replace('oidc-', '')
+    switch (oidcFlow) {
+      case 'authorization-code':
+        return 'oidc-authorization-code'
+      case 'implicit':
+        return 'oidc-implicit'
+      case 'hybrid':
+        return 'oidc-hybrid'
+    }
+  }
+
+  // Protocol-specific mappings for OIDC protocol
   if (protocolId === 'oidc') {
     switch (normalizedId) {
       case 'authorization-code':
@@ -397,13 +412,11 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
       case 'code-id-token':
       case 'code-token':
         return 'oidc-hybrid'
-      default:
-        // Fall through to OAuth mappings
-        break
+      // Don't break - allow fallthrough for flows like client-credentials that work in OIDC too
     }
   }
 
-  // OAuth 2.0 mappings
+  // OAuth 2.0 mappings (also work for OIDC)
   switch (normalizedId) {
     case 'authorization-code':
       return 'authorization-code'
@@ -426,7 +439,7 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
     case 'ropc':
       return 'password'
     default:
-      // Try the ID as-is
+      console.log('[FlowMapping] No mapping found for:', normalizedId)
       return normalizedId
   }
 }
@@ -462,6 +475,12 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
 
   // Create executor when flow changes
   useEffect(() => {
+    console.log('[useRealFlowExecutor] Effect triggered:', {
+      executorFlowId,
+      protocolId: options.protocolId,
+      flowId: options.flowId,
+    })
+
     // Clean up previous executor
     if (executorRef.current) {
       executorRef.current.abort()
@@ -471,6 +490,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     setError(null)
 
     if (!executorFlowId || !options.protocolId) {
+      console.log('[useRealFlowExecutor] Missing executorFlowId or protocolId, skipping')
       return
     }
 
@@ -486,30 +506,40 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       password: options.password,
     }
 
+    console.log('[useRealFlowExecutor] Creating executor for:', executorFlowId, 'with config:', config)
+
     // Create the executor
     const executor = createFlowExecutor(executorFlowId, config)
 
     if (!executor) {
+      console.log('[useRealFlowExecutor] Failed to create executor for:', executorFlowId)
       setError(`Flow "${options.flowId}" is not supported for live execution yet`)
       return
     }
 
+    console.log('[useRealFlowExecutor] Executor created successfully:', executor.flowName)
     executorRef.current = executor
 
     // Subscribe to state changes
-    const unsubscribe = executor.subscribe(setState)
+    const unsubscribe = executor.subscribe((newState) => {
+      console.log('[useRealFlowExecutor] State update:', newState.status, newState.events.length, 'events')
+      setState(newState)
+    })
 
     return () => {
       unsubscribe()
       executor.abort()
     }
+  // Use JSON stringify for array comparison to avoid unnecessary re-runs
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     executorFlowId,
     options.protocolId,
     options.clientId,
     options.clientSecret,
     options.redirectUri,
-    options.scopes,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(options.scopes),
     options.refreshToken,
     options.username,
     options.password,
@@ -517,15 +547,19 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
   ])
 
   const execute = useCallback(async () => {
+    console.log('[useRealFlowExecutor] Execute called, executor:', executorRef.current?.flowName)
     if (!executorRef.current) {
+      console.error('[useRealFlowExecutor] No executor available!')
       setError('No executor available')
       return
     }
 
     try {
+      console.log('[useRealFlowExecutor] Starting execution...')
       await executorRef.current.execute()
+      console.log('[useRealFlowExecutor] Execution completed')
     } catch (err) {
-      console.error('Flow execution error:', err)
+      console.error('[useRealFlowExecutor] Flow execution error:', err)
     }
   }, [])
 

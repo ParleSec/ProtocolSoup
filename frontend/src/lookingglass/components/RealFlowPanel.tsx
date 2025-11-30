@@ -68,12 +68,10 @@ export function RealFlowPanel({
   const currentStatus = state ? statusConfig[state.status] : statusConfig.idle
   const StatusIcon = currentStatus.icon
 
-  // Check if flow has unmet requirements
-  const hasUnmetRequirements = (
-    (requirements.requiresClientSecret && !state) ||
-    (requirements.requiresRefreshToken && !state) ||
-    (requirements.requiresCredentials && !state)
-  )
+  // For now, allow all flows to be executed
+  // Specific flows that need extra config (client_secret, refresh_token, username/password) 
+  // will show an error when executed if the config is missing
+  const hasUnmetRequirements = false
 
   if (error) {
     return (
@@ -181,76 +179,72 @@ export function RealFlowPanel({
         </div>
       )}
 
-      {/* Tab Navigation */}
-      {state && (
-        <>
-          <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50">
-            {[
-              { id: 'events', label: 'Events', count: state.events.length, icon: Zap },
-              { id: 'http', label: 'HTTP', count: state.exchanges.length, icon: Server },
-              { id: 'tokens', label: 'Tokens', count: state.decodedTokens.length, icon: Key },
-            ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-surface-800 text-white'
-                    : 'text-surface-400 hover:text-white'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                {tab.label}
-                {tab.count > 0 && (
-                  <span className="px-1.5 py-0.5 rounded text-xs bg-surface-700">
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+      {/* Tab Navigation - always shown */}
+      <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50">
+        {[
+          { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
+          { id: 'http', label: 'HTTP', count: state?.exchanges.length || 0, icon: Server },
+          { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as typeof activeTab)}
+            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === tab.id
+                ? 'bg-surface-800 text-white'
+                : 'text-surface-400 hover:text-white'
+            }`}
+          >
+            <tab.icon className="w-4 h-4" />
+            {tab.label}
+            {tab.count > 0 && (
+              <span className="px-1.5 py-0.5 rounded text-xs bg-surface-700">
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-          {/* Tab Content */}
-          <div className="min-h-[400px] max-h-[600px] overflow-y-auto">
-            <AnimatePresence mode="wait">
-              {activeTab === 'events' && (
-                <motion.div
-                  key="events"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <EventsList events={state.events} />
-                </motion.div>
-              )}
-              {activeTab === 'http' && (
-                <motion.div
-                  key="http"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <ExchangesList exchanges={state.exchanges} />
-                </motion.div>
-              )}
-              {activeTab === 'tokens' && (
-                <motion.div
-                  key="tokens"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                >
-                  <TokensList tokens={state.decodedTokens} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Security Parameters */}
-          {(state.securityParams.state || state.securityParams.codeChallenge || state.securityParams.nonce) && (
-            <SecurityParams params={state.securityParams} />
+      {/* Tab Content */}
+      <div className="min-h-[400px] max-h-[600px] overflow-y-auto">
+        <AnimatePresence mode="wait">
+          {activeTab === 'events' && (
+            <motion.div
+              key="events"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <EventsList events={state?.events || []} />
+            </motion.div>
           )}
-        </>
+          {activeTab === 'http' && (
+            <motion.div
+              key="http"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <ExchangesList exchanges={state?.exchanges || []} />
+            </motion.div>
+          )}
+          {activeTab === 'tokens' && (
+            <motion.div
+              key="tokens"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <TokensList tokens={state?.decodedTokens || []} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Security Parameters */}
+      {state && (state.securityParams.state || state.securityParams.codeChallenge || state.securityParams.nonce) && (
+        <SecurityParams params={state.securityParams} />
       )}
     </div>
   )

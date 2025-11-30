@@ -31,12 +31,30 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
     super(config)
     this.flowConfig = config
 
-    if (!config.clientSecret) {
-      throw new Error('Client Credentials flow requires a client_secret')
-    }
+    // Note: clientSecret validation happens when execute() is called
+    // This allows the UI to show the executor is available, but execution will fail
   }
 
   async execute(): Promise<void> {
+    // Validate client secret is present
+    if (!this.flowConfig.clientSecret) {
+      this.updateState({
+        status: 'error',
+        currentStep: 'Configuration Error',
+        error: {
+          code: 'missing_client_secret',
+          description: 'Client Credentials flow requires a client_secret. Use a confidential client.',
+        },
+      })
+      this.addEvent({
+        type: 'error',
+        title: 'Missing Client Secret',
+        description: 'Client Credentials flow requires a confidential client with a client_secret',
+        rfcReference: 'RFC 6749 Section 4.4.2',
+      })
+      return
+    }
+
     this.abortController = new AbortController()
     this.updateState({
       ...this.createInitialState(),

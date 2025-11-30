@@ -6,7 +6,7 @@
  * mode (real RFC-compliant protocol flows against the MockIdP).
  */
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { 
   Eye, Clock, Play, RotateCcw, Zap, Key, 
@@ -65,16 +65,42 @@ export function LookingGlass() {
   // Live session (if sessionId provided in URL)
   const session = useLookingGlassSession(urlSessionId || null)
 
+  // Memoize scopes to prevent unnecessary re-renders
+  const scopes = useMemo(() => 
+    selectedProtocol?.id === 'oidc' 
+      ? ['openid', 'profile', 'email'] 
+      : ['profile', 'email'],
+    [selectedProtocol?.id]
+  )
+
+  // Determine client credentials based on flow type
+  // - Client Credentials flow needs a confidential client (machine-client + machine-secret)
+  // - Other flows use public-app (public client with PKCE)
+  const clientConfig = useMemo(() => {
+    const flowId = selectedFlow?.id?.toLowerCase().replace(/_/g, '-')
+    
+    if (flowId === 'client-credentials') {
+      return {
+        clientId: 'machine-client',
+        clientSecret: 'machine-secret',
+      }
+    }
+    
+    // Public client for browser-based flows (auth code, implicit, etc.)
+    return {
+      clientId: 'public-app',
+      clientSecret: undefined,
+    }
+  }, [selectedFlow?.id])
+
   // NEW: Real flow executor - uses flow-specific RFC-compliant executors
   const realExecutor = useRealFlowExecutor({
     protocolId: selectedProtocol?.id || null,
     flowId: selectedFlow?.id || null,
-    clientId: 'public-app', // Public client for browser-based flows
-    clientSecret: undefined, // Will be needed for client-credentials flow
+    clientId: clientConfig.clientId,
+    clientSecret: clientConfig.clientSecret,
     redirectUri: `${window.location.origin}/callback`,
-    scopes: selectedProtocol?.id === 'oidc' 
-      ? ['openid', 'profile', 'email'] 
-      : ['profile', 'email'],
+    scopes,
   })
 
   // Handle protocol selection
