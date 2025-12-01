@@ -24,6 +24,9 @@ type Config struct {
 
 	// Enable debug logging
 	Debug bool
+
+	// Static files directory (for serving frontend in combined deployment)
+	StaticDir string
 }
 
 // LoadConfig loads configuration from environment variables with sensible defaults
@@ -35,6 +38,7 @@ func LoadConfig() *Config {
 		MockIdPEnabled: getEnvBool("SHOWCASE_MOCK_IDP", true),
 		CORSOrigins:    getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
 		Debug:          getEnvBool("SHOWCASE_DEBUG", false),
+		StaticDir:      getEnv("SHOWCASE_STATIC_DIR", ""),
 	}
 
 	return cfg

@@ -3,6 +3,9 @@ package core
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -97,7 +100,66 @@ func (s *Server) setupRouter() {
 		})
 	}
 
+	// Serve static files if configured (for combined frontend+backend deployment)
+	if s.config.StaticDir != "" {
+		s.setupStaticFileServing(r)
+	}
+
 	s.router = r
+}
+
+// setupStaticFileServing configures static file serving with SPA fallback
+func (s *Server) setupStaticFileServing(r chi.Router) {
+	staticDir := s.config.StaticDir
+	
+	// Check if static directory exists
+	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
+		return
+	}
+
+	// Create file server
+	fileServer := http.FileServer(http.Dir(staticDir))
+
+	// Serve static files with SPA fallback
+	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
+		// Get the requested path
+		path := r.URL.Path
+
+		// Try to serve the exact file
+		fullPath := filepath.Join(staticDir, path)
+		
+		// Check if file exists (not a directory)
+		info, err := os.Stat(fullPath)
+		if err == nil && !info.IsDir() {
+			// Set appropriate cache headers for assets
+			if isStaticAsset(path) {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// For SPA routes, serve index.html
+		indexPath := filepath.Join(staticDir, "index.html")
+		if _, err := os.Stat(indexPath); err == nil {
+			http.ServeFile(w, r, indexPath)
+			return
+		}
+
+		// File not found
+		http.NotFound(w, r)
+	})
+}
+
+// isStaticAsset checks if a path is a static asset that should be cached
+func isStaticAsset(path string) bool {
+	extensions := []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot"}
+	for _, ext := range extensions {
+		if strings.HasSuffix(path, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // Health check response

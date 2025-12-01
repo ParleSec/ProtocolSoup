@@ -13,15 +13,15 @@ import (
 
 // MockIdP provides a mock identity provider for demonstrations
 type MockIdP struct {
-	users       map[string]*models.User
-	clients     map[string]*models.Client
-	authCodes   map[string]*models.AuthorizationCode
-	sessions    map[string]*models.Session
+	users         map[string]*models.User
+	clients       map[string]*models.Client
+	authCodes     map[string]*models.AuthorizationCode
+	sessions      map[string]*models.Session
 	refreshTokens map[string]*models.RefreshToken
-	keySet      *crypto.KeySet
-	jwtService  *crypto.JWTService
-	issuer      string
-	mu          sync.RWMutex
+	keySet        *crypto.KeySet
+	jwtService    *crypto.JWTService
+	issuer        string
+	mu            sync.RWMutex
 }
 
 // NewMockIdP creates a new mock identity provider
@@ -99,26 +99,39 @@ func (idp *MockIdP) initDemoData() {
 	}
 
 	// Demo OAuth clients
+	// Note: Redirect URIs include local development, Fly.io, and custom domain URLs
 	idp.clients["demo-app"] = &models.Client{
-		ID:           "demo-app",
-		Secret:       "demo-secret",
-		Name:         "Demo Application",
-		RedirectURIs: []string{"http://localhost:3000/callback", "http://localhost:5173/callback"},
-		GrantTypes:   []string{"authorization_code", "refresh_token"},
-		Scopes:       []string{"openid", "profile", "email"},
-		Public:       false,
-		CreatedAt:    time.Now(),
+		ID:     "demo-app",
+		Secret: "demo-secret",
+		Name:   "Demo Application",
+		RedirectURIs: []string{
+			"http://localhost:3000/callback",
+			"http://localhost:5173/callback",
+			"https://protocolsoup.com/callback",
+			"https://www.protocolsoup.com/callback",
+			"https://protocolsoup.fly.dev/callback",
+		},
+		GrantTypes: []string{"authorization_code", "refresh_token"},
+		Scopes:     []string{"openid", "profile", "email"},
+		Public:     false,
+		CreatedAt:  time.Now(),
 	}
 
 	idp.clients["public-app"] = &models.Client{
-		ID:           "public-app",
-		Secret:       "",
-		Name:         "Public Application (SPA)",
-		RedirectURIs: []string{"http://localhost:3000/callback", "http://localhost:5173/callback"},
-		GrantTypes:   []string{"authorization_code", "refresh_token"},
-		Scopes:       []string{"openid", "profile", "email"},
-		Public:       true,
-		CreatedAt:    time.Now(),
+		ID:     "public-app",
+		Secret: "",
+		Name:   "Public Application (SPA)",
+		RedirectURIs: []string{
+			"http://localhost:3000/callback",
+			"http://localhost:5173/callback",
+			"https://protocolsoup.com/callback",
+			"https://www.protocolsoup.com/callback",
+			"https://protocolsoup.fly.dev/callback",
+		},
+		GrantTypes: []string{"authorization_code", "refresh_token"},
+		Scopes:     []string{"openid", "profile", "email"},
+		Public:     true,
+		CreatedAt:  time.Now(),
 	}
 
 	idp.clients["machine-client"] = &models.Client{
@@ -375,4 +388,3 @@ func generateRandomString(length int) string {
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)[:length]
 }
-
