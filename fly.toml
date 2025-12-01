@@ -1,0 +1,48 @@
+# fly.toml app configuration file generated for protocolsoup on 2025-12-01T00:37:02+11:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'protocolsoup'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'docker/Dockerfile.fly'
+
+[env]
+  PORT = '8080'
+  SHOWCASE_BASE_URL = 'https://protocolsoup.com'
+  SHOWCASE_CORS_ORIGINS = 'https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev'
+  SHOWCASE_DEBUG = 'false'
+  SHOWCASE_ENV = 'production'
+  SHOWCASE_LISTEN_ADDR = ':8080'
+  SHOWCASE_MOCK_IDP = 'true'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'requests'
+    hard_limit = 250
+    soft_limit = 200
+
+  [[http_service.checks]]
+    interval = '10s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+
+[[metrics]]
+  port = 9091
+  path = '/metrics'

@@ -1,0 +1,32 @@
+# Production frontend build
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY frontend/package.json ./
+
+# Install dependencies
+RUN npm install --legacy-peer-deps
+
+# Copy source code
+COPY frontend/ .
+
+# Set production environment
+ENV NODE_ENV=production
+ENV VITE_APP_ENV=production
+
+# Build the application with optimizations
+RUN npm run build
+
+# Final stage - copy built assets to volume
+FROM alpine:3.19
+
+WORKDIR /app
+
+# Copy built assets
+COPY --from=builder /app/dist ./dist
+
+# Create a script to copy files to the volume
+CMD ["sh", "-c", "cp -r /app/dist/* /app/dist/"]
+
