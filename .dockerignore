@@ -1,57 +1,55 @@
-# flyctl launch added from .gitignore
 # Dependencies
-**\node_modules
-**\vendor
+**/node_modules
+**/vendor
 
 # Build outputs
-**\dist
-**\build
-**\*.exe
-**\*.exe~
-**\*.dll
-**\*.so
-**\*.dylib
+**/dist
+**/build
+**/*.exe
+**/*.exe~
+**/*.dll
+**/*.so
+**/*.dylib
 
 # IDE
-**\.idea
-**\.vscode
-**\*.swp
-**\*.swo
-**\*~
+**/.idea
+**/.vscode
+**/*.swp
+**/*.swo
+**/*~
 
 # OS
-**\.DS_Store
-**\Thumbs.db
+**/.DS_Store
+**/Thumbs.db
 
 # Environment
-**\.env
-**\.env.local
-**\.env.*.local
-**\*.env
+**/.env
+**/.env.local
+**/.env.*.local
+**/*.env
 
 # Logs
-**\*.log
-**\npm-debug.log*
-**\yarn-debug.log*
-**\yarn-error.log*
+**/*.log
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
 
 # Testing
-**\coverage
-**\*.test
-**\*.out
+**/coverage
+**/*.test
+**/*.out
 
 # Go
-**\*.test
-**\*.prof
-**\__debug_bin
+**/*.prof
+**/__debug_bin
 
 # Database
-**\*.db
-**\*.sqlite
+**/*.db
+**/*.sqlite
 
 # Temporary
-**\tmp
-**\temp
-**\.tmp
+**/tmp
+**/temp
+**/.tmp
 
 fly.toml
