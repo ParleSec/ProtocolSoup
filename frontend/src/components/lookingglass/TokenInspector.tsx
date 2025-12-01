@@ -96,9 +96,9 @@ export function TokenInspector({ token }: TokenInspectorProps) {
 
   if (!decoded) {
     return (
-      <div className="p-6 rounded-xl bg-surface-900/50 border border-white/5 text-center">
-        <Info className="w-8 h-8 text-surface-500 mx-auto mb-2" />
-        <p className="text-surface-400">Paste a valid JWT token to inspect</p>
+      <div className="p-4 sm:p-6 rounded-xl bg-surface-900/50 border border-white/5 text-center">
+        <Info className="w-6 h-6 sm:w-8 sm:h-8 text-surface-500 mx-auto mb-2" />
+        <p className="text-surface-400 text-sm sm:text-base">Paste a valid JWT token to inspect</p>
       </div>
     )
   }
@@ -135,9 +135,9 @@ export function TokenInspector({ token }: TokenInspectorProps) {
   const expStatus = getExpirationStatus()
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Token Status Banner */}
-      <div className={`flex items-center gap-3 p-4 rounded-xl border ${
+      <div className={`flex items-start sm:items-center gap-3 p-3 sm:p-4 rounded-xl border ${
         decoded.error
           ? 'bg-red-500/10 border-red-500/30'
           : decoded.isValid
@@ -145,20 +145,20 @@ export function TokenInspector({ token }: TokenInspectorProps) {
           : 'bg-yellow-500/10 border-yellow-500/30'
       }`}>
         {decoded.error ? (
-          <XCircle className="w-5 h-5 text-red-400" />
+          <XCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5 sm:mt-0" />
         ) : decoded.isValid ? (
-          <CheckCircle className="w-5 h-5 text-green-400" />
+          <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5 sm:mt-0" />
         ) : (
-          <AlertTriangle className="w-5 h-5 text-yellow-400" />
+          <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5 sm:mt-0" />
         )}
-        <div className="flex-1">
-          <p className={`font-medium ${
+        <div className="flex-1 min-w-0">
+          <p className={`font-medium text-sm sm:text-base ${
             decoded.error ? 'text-red-400' : decoded.isValid ? 'text-green-400' : 'text-yellow-400'
           }`}>
             {decoded.error || (decoded.isValid ? 'Valid Token' : 'Token Validation Warning')}
           </p>
           {expStatus && (
-            <p className={`text-sm ${
+            <p className={`text-xs sm:text-sm ${
               expStatus.status === 'expired' ? 'text-red-300' :
               expStatus.status === 'expiring' ? 'text-yellow-300' :
               'text-green-300'
@@ -168,39 +168,42 @@ export function TokenInspector({ token }: TokenInspectorProps) {
           )}
         </div>
         {decoded.header.alg !== undefined && (
-          <span className="px-3 py-1 rounded-full bg-white/10 text-xs font-medium text-white">
+          <span className="px-2 sm:px-3 py-1 rounded-full bg-white/10 text-xs font-medium text-white flex-shrink-0">
             {String(decoded.header.alg)}
           </span>
         )}
       </div>
 
       {/* Visual Token Breakdown */}
-      <div className="p-4 rounded-xl bg-surface-900/50 border border-white/5">
+      <div className="p-3 sm:p-4 rounded-xl bg-surface-900/50 border border-white/5">
         <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Token Structure</h4>
-        <div className="flex gap-1 font-mono text-xs overflow-x-auto pb-2">
-          <motion.span 
-            className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 cursor-pointer hover:bg-red-500/30 transition-colors"
+        <div className="flex flex-wrap sm:flex-nowrap gap-1 font-mono text-xs overflow-x-auto pb-2 scrollbar-hide">
+          <motion.button 
+            className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 cursor-pointer hover:bg-red-500/30 active:bg-red-500/40 transition-colors flex-shrink-0"
             onClick={() => setExpandedSection(expandedSection === 'header' ? null : 'header')}
             whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
           >
             Header
-          </motion.span>
-          <span className="text-surface-600 self-center">.</span>
-          <motion.span 
-            className="px-3 py-2 rounded-lg bg-purple-500/20 text-purple-400 cursor-pointer hover:bg-purple-500/30 transition-colors"
+          </motion.button>
+          <span className="text-surface-600 self-center hidden sm:inline">.</span>
+          <motion.button 
+            className="px-3 py-2 rounded-lg bg-purple-500/20 text-purple-400 cursor-pointer hover:bg-purple-500/30 active:bg-purple-500/40 transition-colors flex-shrink-0"
             onClick={() => setExpandedSection(expandedSection === 'payload' ? null : 'payload')}
             whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
           >
             Payload
-          </motion.span>
-          <span className="text-surface-600 self-center">.</span>
-          <motion.span 
-            className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 cursor-pointer hover:bg-cyan-500/30 transition-colors"
+          </motion.button>
+          <span className="text-surface-600 self-center hidden sm:inline">.</span>
+          <motion.button 
+            className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 cursor-pointer hover:bg-cyan-500/30 active:bg-cyan-500/40 transition-colors flex-shrink-0"
             onClick={() => setExpandedSection(expandedSection === 'signature' ? null : 'signature')}
             whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
           >
             Signature
-          </motion.span>
+          </motion.button>
         </div>
       </div>
 
@@ -274,18 +277,18 @@ export function TokenInspector({ token }: TokenInspectorProps) {
           onToggle={() => setExpandedSection(expandedSection === 'signature' ? null : 'signature')}
         >
           <div className="space-y-3">
-            <div className="p-3 rounded-lg bg-surface-800">
+            <div className="p-2.5 sm:p-3 rounded-lg bg-surface-800">
               <p className="text-xs text-surface-500 mb-1">Signature (Base64URL)</p>
-              <p className="font-mono text-xs text-cyan-400 break-all">
+              <p className="font-mono text-[10px] sm:text-xs text-cyan-400 break-all overflow-x-auto scrollbar-hide">
                 {decoded.signature || 'No signature'}
               </p>
             </div>
-            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-              <p className="text-sm text-blue-300 flex items-start gap-2">
+            <div className="p-2.5 sm:p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+              <p className="text-xs sm:text-sm text-blue-300 flex items-start gap-2">
                 <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>
                   To verify this signature, fetch the public key from the issuer's 
-                  JWKS endpoint (/.well-known/jwks.json) and verify using the {String(decoded.header.alg || 'specified')} algorithm.
+                  JWKS endpoint and verify using the {String(decoded.header.alg || 'specified')} algorithm.
                 </span>
               </p>
             </div>
@@ -326,18 +329,18 @@ function TokenSection({
     }`}>
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-4 text-left"
+        className="w-full flex items-center gap-2 sm:gap-3 p-3 sm:p-4 text-left active:bg-white/5"
       >
-        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+        <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
           isExpanded ? colorClasses[color] : 'bg-surface-800'
         }`}>
-          <Icon className={`w-5 h-5 ${isExpanded ? colorClasses[color].split(' ')[0] : 'text-surface-400'}`} />
+          <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${isExpanded ? colorClasses[color].split(' ')[0] : 'text-surface-400'}`} />
         </div>
-        <div className="flex-1">
-          <h3 className={`font-medium ${isExpanded ? 'text-white' : 'text-surface-300'}`}>{title}</h3>
-          <p className="text-xs text-surface-500">{subtitle}</p>
+        <div className="flex-1 min-w-0">
+          <h3 className={`font-medium text-sm sm:text-base ${isExpanded ? 'text-white' : 'text-surface-300'}`}>{title}</h3>
+          <p className="text-xs text-surface-500 truncate">{subtitle}</p>
         </div>
-        <ChevronDown className={`w-5 h-5 text-surface-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-5 h-5 text-surface-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
       <AnimatePresence>
         {isExpanded && (
@@ -348,7 +351,7 @@ function TokenSection({
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 pt-0">
+            <div className="px-3 sm:px-4 pb-3 sm:pb-4 pt-0">
               {children}
             </div>
           </motion.div>
@@ -388,35 +391,36 @@ function ClaimRow({
 
   return (
     <div 
-      className={`flex items-start gap-3 p-3 rounded-lg transition-colors group ${
-        isExpired ? 'bg-red-500/10' : 'bg-surface-900/50 hover:bg-surface-800/50'
+      className={`flex items-start gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg transition-colors group ${
+        isExpired ? 'bg-red-500/10' : 'bg-surface-900/50 hover:bg-surface-800/50 active:bg-surface-800/70'
       }`}
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
+      onClick={onCopy}
     >
       <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${isExpired ? 'text-red-400' : 'text-surface-500'}`} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span className={`text-sm font-medium ${isExpired ? 'text-red-400' : 'text-white'}`}>
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-0.5">
+          <span className={`text-xs sm:text-sm font-medium ${isExpired ? 'text-red-400' : 'text-white'}`}>
             {info?.label || claim}
           </span>
-          <code className="text-xs text-surface-500 font-mono">({claim})</code>
+          <code className="text-[10px] sm:text-xs text-surface-500 font-mono">({claim})</code>
           {isExpired && (
             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400">
               EXPIRED
             </span>
           )}
         </div>
-        <p className="text-sm text-surface-300 font-mono break-all">
+        <p className="text-xs sm:text-sm text-surface-300 font-mono break-all overflow-x-auto scrollbar-hide">
           {formatValue(value)}
         </p>
         {info && showTooltip && (
-          <p className="text-xs text-surface-500 mt-1">{info.description}</p>
+          <p className="text-xs text-surface-500 mt-1 hidden sm:block">{info.description}</p>
         )}
       </div>
       <button
         onClick={(e) => { e.stopPropagation(); onCopy(); }}
-        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-white/10 transition-all"
+        className="opacity-100 sm:opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-white/10 active:bg-white/20 transition-all flex-shrink-0"
       >
         {isCopied ? (
           <Check className="w-3.5 h-3.5 text-green-400" />

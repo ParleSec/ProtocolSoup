@@ -7,18 +7,18 @@ import {
 
 export function Dashboard() {
   return (
-    <div className="max-w-4xl mx-auto space-y-10">
+    <div className="max-w-4xl mx-auto space-y-8 sm:space-y-10">
       {/* Header */}
-      <header className="py-4">
+      <header className="py-2 sm:py-4">
         <div className="flex items-center gap-2 text-amber-400 font-mono text-sm mb-3">
           <Terminal className="w-4 h-4" />
           <span>protocol-soup v1.0</span>
         </div>
-        <h1 className="text-3xl font-semibold text-white mb-3 flex items-center gap-3">
+        <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-3 flex items-center gap-3">
           Protocol Soup
-          <span className="text-3xl">🍜</span>
+          <span className="text-2xl sm:text-3xl">🍜</span>
         </h1>
-        <p className="text-surface-300 text-lg max-w-2xl">
+        <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
           Learn authentication protocols by running them. Execute real OAuth 2.0 and OpenID Connect 
           flows against a local identity provider and see exactly what happens at each step.
         </p>
@@ -94,15 +94,15 @@ export function Dashboard() {
       </section>
 
       {/* Coming Soon */}
-      <section className="rounded-xl border border-dashed border-white/10 p-6 text-center">
+      <section className="rounded-xl border border-dashed border-white/10 p-4 sm:p-6 text-center">
         <p className="text-surface-400 mb-2">More protocols on the roadmap</p>
-        <div className="flex items-center justify-center gap-4 text-surface-500 text-sm">
+        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 text-surface-500 text-sm">
           <span>SAML 2.0</span>
-          <span className="text-surface-700">•</span>
+          <span className="text-surface-700 hidden sm:inline">•</span>
           <span>WebAuthn</span>
-          <span className="text-surface-700">•</span>
+          <span className="text-surface-700 hidden sm:inline">•</span>
           <span>FIDO2</span>
-          <span className="text-surface-700">•</span>
+          <span className="text-surface-700 hidden sm:inline">•</span>
           <span>mTLS</span>
         </div>
       </section>
@@ -112,7 +112,7 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-3">
           Specifications
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
           <RFCLink number="6749" title="OAuth 2.0" />
           <RFCLink number="7636" title="PKCE" />
           <RFCLink number="6750" title="Bearer Token" />

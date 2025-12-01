@@ -142,3 +142,86 @@ body {
   animation: pulseDot 2s ease-in-out infinite;
 }
 
+/* ============================================
+   Mobile-Optimized Utilities
+   ============================================ */
+
+/* Hide scrollbar but keep functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Touch-friendly scrollbar for mobile */
+@media (max-width: 640px) {
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  
+  /* Increase touch target sizes */
+  button, 
+  a, 
+  [role="button"] {
+    min-height: 44px;
+  }
+  
+  /* Ensure code blocks scroll smoothly on mobile */
+  pre, 
+  .code-block {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Prevent horizontal overflow on mobile */
+@media (max-width: 640px) {
+  .max-w-full-mobile {
+    max-width: 100vw;
+  }
+}
+
+/* Safe area insets for notched devices */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Smooth momentum scrolling for iOS */
+.momentum-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Tap highlight removal for cleaner mobile experience */
+@media (max-width: 640px) {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Mobile-specific focus styles */
+@media (max-width: 640px) {
+  :focus {
+    outline: 2px solid var(--accent-cyan);
+    outline-offset: 2px;
+  }
+  
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+
+/* Prevent text size adjustment on orientation change */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+

@@ -75,9 +75,9 @@ export function RealFlowPanel({
 
   if (error) {
     return (
-      <div className="p-6 rounded-xl bg-red-500/5 border border-red-500/20">
+      <div className="p-4 sm:p-6 rounded-xl bg-red-500/5 border border-red-500/20">
         <div className="flex items-center gap-3 mb-3">
-          <AlertTriangle className="w-6 h-6 text-red-400" />
+          <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6 text-red-400 flex-shrink-0" />
           <h3 className="font-medium text-red-400">Flow Not Supported</h3>
         </div>
         <p className="text-red-300 text-sm">{error}</p>
@@ -98,58 +98,64 @@ export function RealFlowPanel({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Flow Info Header */}
-      <div className="flex items-start justify-between gap-4 p-4 rounded-xl bg-surface-900/50 border border-white/5">
-        <div className="flex-1">
-          <div className="flex items-center gap-3 mb-2">
-            <div className={`p-2 rounded-lg ${currentStatus.bg}`}>
-              <StatusIcon className={`w-5 h-5 ${currentStatus.color}`} />
+      <div className="p-3 sm:p-4 rounded-xl bg-surface-900/50 border border-white/5">
+        {/* Top row: Status + Controls */}
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <div className={`p-1.5 sm:p-2 rounded-lg flex-shrink-0 ${currentStatus.bg}`}>
+              <StatusIcon className={`w-4 h-4 ${currentStatus.color}`} />
             </div>
-            <div>
-              <h3 className="font-medium text-white">{flowInfo.description}</h3>
-              <p className={`text-sm ${currentStatus.color}`}>{currentStatus.label}</p>
+            <div className="min-w-0">
+              <p className={`text-xs sm:text-sm font-medium ${currentStatus.color}`}>{currentStatus.label}</p>
             </div>
           </div>
           
-          {/* RFC Reference */}
-          <div className="flex items-center gap-2 mt-3">
-            <Book className="w-4 h-4 text-blue-400" />
-            <span className="text-sm text-blue-400 font-mono">{flowInfo.rfcReference}</span>
-            {flowInfo.requiresUserInteraction && (
-              <span className="ml-2 px-2 py-0.5 rounded text-xs bg-orange-500/10 text-orange-400">
-                Requires User Interaction
-              </span>
+          {/* Controls */}
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            {isExecuting ? (
+              <button
+                onClick={onAbort}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 active:bg-red-500/30 transition-colors text-xs sm:text-sm"
+              >
+                <Square className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>Abort</span>
+              </button>
+            ) : (
+              <button
+                onClick={onExecute}
+                disabled={hasUnmetRequirements || state?.status === 'completed'}
+                className="flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 text-white font-medium hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm"
+              >
+                <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span>Execute</span>
+              </button>
             )}
+            <button
+              onClick={onReset}
+              className="p-1.5 sm:p-2 rounded-lg bg-surface-800 border border-white/10 text-surface-400 hover:text-white active:bg-surface-700 transition-colors"
+              title="Reset"
+            >
+              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            </button>
           </div>
         </div>
-
-        {/* Controls */}
-        <div className="flex items-center gap-2">
-          {isExecuting ? (
-            <button
-              onClick={onAbort}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors"
-            >
-              <Square className="w-4 h-4" />
-              Abort
-            </button>
-          ) : (
-            <button
-              onClick={onExecute}
-              disabled={hasUnmetRequirements || state?.status === 'completed'}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 text-white font-medium hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Play className="w-4 h-4" />
-              Execute Flow
-            </button>
+        
+        {/* Description */}
+        <h3 className="font-medium text-white text-xs sm:text-sm leading-relaxed mb-2">{flowInfo.description}</h3>
+        
+        {/* RFC Reference + Badge */}
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1">
+            <Book className="w-3 h-3 sm:w-4 sm:h-4 text-blue-400 flex-shrink-0" />
+            <span className="text-[10px] sm:text-xs text-blue-400 font-mono">{flowInfo.rfcReference}</span>
+          </div>
+          {flowInfo.requiresUserInteraction && (
+            <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-orange-500/10 text-orange-400">
+              User Action
+            </span>
           )}
-          <button
-            onClick={onReset}
-            className="p-2 rounded-lg bg-surface-800 border border-white/10 text-surface-400 hover:text-white transition-colors"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
         </div>
       </div>
 
@@ -180,7 +186,7 @@ export function RealFlowPanel({
       )}
 
       {/* Tab Navigation - always shown */}
-      <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50">
+      <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50 overflow-x-auto scrollbar-hide">
         {[
           { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
           { id: 'http', label: 'HTTP', count: state?.exchanges.length || 0, icon: Server },
@@ -189,16 +195,17 @@ export function RealFlowPanel({
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as typeof activeTab)}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.id
                 ? 'bg-surface-800 text-white'
-                : 'text-surface-400 hover:text-white'
+                : 'text-surface-400 hover:text-white active:text-white'
             }`}
           >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
+            <tab.icon className="w-4 h-4 flex-shrink-0" />
+            <span className="hidden sm:inline">{tab.label}</span>
+            <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
             {tab.count > 0 && (
-              <span className="px-1.5 py-0.5 rounded text-xs bg-surface-700">
+              <span className="px-1.5 py-0.5 rounded text-xs bg-surface-700 flex-shrink-0">
                 {tab.count}
               </span>
             )}
@@ -207,7 +214,7 @@ export function RealFlowPanel({
       </div>
 
       {/* Tab Content */}
-      <div className="min-h-[400px] max-h-[600px] overflow-y-auto">
+      <div className="min-h-[300px] sm:min-h-[400px] max-h-[450px] sm:max-h-[600px] overflow-y-auto">
         <AnimatePresence mode="wait">
           {activeTab === 'events' && (
             <motion.div
@@ -358,43 +365,45 @@ function ExchangeCard({ exchange }: { exchange: CapturedExchange }) {
     <div className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full p-3 flex items-center gap-3 hover:bg-white/5 transition-colors"
+        className="w-full p-3 flex items-center gap-2 sm:gap-3 hover:bg-white/5 active:bg-white/10 transition-colors text-left"
       >
-        <div className="p-1.5 rounded bg-cyan-500/10">
+        <div className="p-1.5 rounded bg-cyan-500/10 flex-shrink-0">
           <Send className="w-4 h-4 text-cyan-400" />
         </div>
-        <div className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm font-medium text-cyan-400">
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <span className="font-mono text-xs sm:text-sm font-medium text-cyan-400 flex-shrink-0">
               {exchange.request.method}
             </span>
-            <span className="text-sm text-surface-300 truncate">
+            <span className="text-xs sm:text-sm text-surface-300 truncate max-w-full">
               {exchange.request.url}
             </span>
           </div>
-          <p className="text-xs text-surface-500 mt-0.5">{exchange.step}</p>
+          <p className="text-xs text-surface-500 mt-0.5 truncate">{exchange.step}</p>
         </div>
-        {exchange.response && (
-          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-            exchange.response.status < 300 
-              ? 'bg-green-500/10 text-green-400' 
-              : exchange.response.status < 400 
-              ? 'bg-yellow-500/10 text-yellow-400'
-              : 'bg-red-500/10 text-red-400'
-          }`}>
-            {exchange.response.status}
-          </span>
-        )}
-        {exchange.rfcReference && (
-          <span className="px-1.5 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 font-mono">
-            {exchange.rfcReference}
-          </span>
-        )}
-        {isExpanded ? (
-          <ChevronDown className="w-4 h-4 text-surface-400" />
-        ) : (
-          <ChevronRight className="w-4 h-4 text-surface-400" />
-        )}
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          {exchange.response && (
+            <span className={`px-1.5 sm:px-2 py-0.5 rounded text-xs font-medium ${
+              exchange.response.status < 300 
+                ? 'bg-green-500/10 text-green-400' 
+                : exchange.response.status < 400 
+                ? 'bg-yellow-500/10 text-yellow-400'
+                : 'bg-red-500/10 text-red-400'
+            }`}>
+              {exchange.response.status}
+            </span>
+          )}
+          {exchange.rfcReference && (
+            <span className="hidden sm:inline px-1.5 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 font-mono">
+              {exchange.rfcReference}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronDown className="w-4 h-4 text-surface-400" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-surface-400" />
+          )}
+        </div>
       </button>
 
       <AnimatePresence>
@@ -463,45 +472,48 @@ function ExchangeCard({ exchange }: { exchange: CapturedExchange }) {
 function TokensList({ tokens }: { tokens: DecodedToken[] }) {
   if (tokens.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <Key className="w-12 h-12 text-surface-600 mb-3" />
-        <p className="text-surface-400">No tokens captured</p>
-        <p className="text-surface-500 text-sm">Complete the flow to see decoded tokens</p>
+      <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-center px-4">
+        <Key className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600 mb-3" />
+        <p className="text-surface-400 text-sm">No tokens captured</p>
+        <p className="text-surface-500 text-xs sm:text-sm">Complete the flow to see decoded tokens</p>
       </div>
     )
   }
 
-  const tokenConfig: Record<DecodedToken['type'], { label: string; color: string; icon: React.ElementType }> = {
-    access_token: { label: 'Access Token', color: 'text-green-400', icon: Key },
-    id_token: { label: 'ID Token (OIDC)', color: 'text-orange-400', icon: Fingerprint },
-    refresh_token: { label: 'Refresh Token', color: 'text-blue-400', icon: RotateCcw },
+  const tokenConfig: Record<DecodedToken['type'], { label: string; shortLabel: string; color: string; icon: React.ElementType }> = {
+    access_token: { label: 'Access Token', shortLabel: 'Access', color: 'text-green-400', icon: Key },
+    id_token: { label: 'ID Token (OIDC)', shortLabel: 'ID Token', color: 'text-orange-400', icon: Fingerprint },
+    refresh_token: { label: 'Refresh Token', shortLabel: 'Refresh', color: 'text-blue-400', icon: RotateCcw },
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {tokens.map(token => {
         const config = tokenConfig[token.type]
         const Icon = config.icon
 
         return (
           <div key={token.type} className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
-            <div className="p-3 border-b border-white/5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Icon className={`w-5 h-5 ${config.color}`} />
-                  <span className="font-medium text-white">{config.label}</span>
+            <div className="p-2.5 sm:p-3 border-b border-white/5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <Icon className={`w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0 ${config.color}`} />
+                  <span className="font-medium text-white text-sm sm:text-base truncate">
+                    <span className="hidden sm:inline">{config.label}</span>
+                    <span className="sm:hidden">{config.shortLabel}</span>
+                  </span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
                   {token.isValid !== undefined && (
                     token.isValid ? (
-                      <span className="flex items-center gap-1 text-xs text-green-400">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        Valid
+                      <span className="flex items-center gap-1 text-[10px] sm:text-xs text-green-400">
+                        <CheckCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                        <span className="hidden sm:inline">Valid</span>
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1 text-xs text-red-400">
-                        <XCircle className="w-3.5 h-3.5" />
-                        Invalid
+                      <span className="flex items-center gap-1 text-[10px] sm:text-xs text-red-400">
+                        <XCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                        <span className="hidden sm:inline">Invalid</span>
                       </span>
                     )
                   )}
@@ -510,11 +522,11 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
               </div>
             </div>
 
-            <div className="p-3 space-y-3">
+            <div className="p-2.5 sm:p-3 space-y-2 sm:space-y-3">
               {token.header && (
                 <div>
-                  <h4 className="text-xs font-medium text-surface-400 mb-1">Header</h4>
-                  <pre className="p-2 rounded bg-surface-950 text-xs font-mono text-surface-300 overflow-x-auto">
+                  <h4 className="text-[10px] sm:text-xs font-medium text-surface-400 mb-1">Header</h4>
+                  <pre className="p-2 rounded bg-surface-950 text-[10px] sm:text-xs font-mono text-surface-300 overflow-x-auto scrollbar-hide">
                     {JSON.stringify(token.header, null, 2)}
                   </pre>
                 </div>
@@ -522,8 +534,8 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
 
               {token.payload && (
                 <div>
-                  <h4 className="text-xs font-medium text-surface-400 mb-1">Payload</h4>
-                  <pre className="p-2 rounded bg-surface-950 text-xs font-mono text-surface-300 overflow-x-auto">
+                  <h4 className="text-[10px] sm:text-xs font-medium text-surface-400 mb-1">Payload</h4>
+                  <pre className="p-2 rounded bg-surface-950 text-[10px] sm:text-xs font-mono text-surface-300 overflow-x-auto scrollbar-hide">
                     {JSON.stringify(token.payload, null, 2)}
                   </pre>
                 </div>
@@ -531,8 +543,8 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
 
               {token.validationErrors && token.validationErrors.length > 0 && (
                 <div className="p-2 rounded bg-red-500/5 border border-red-500/20">
-                  <h4 className="text-xs font-medium text-red-400 mb-1">Validation Errors</h4>
-                  <ul className="text-xs text-red-300 space-y-0.5">
+                  <h4 className="text-[10px] sm:text-xs font-medium text-red-400 mb-1">Validation Errors</h4>
+                  <ul className="text-[10px] sm:text-xs text-red-300 space-y-0.5">
                     {token.validationErrors.map((err, i) => (
                       <li key={i}>• {err}</li>
                     ))}
@@ -555,22 +567,23 @@ function SecurityParams({ params }: { params: FlowExecutorState['securityParams'
   const [showSecrets, setShowSecrets] = useState(false)
 
   return (
-    <div className="p-4 rounded-lg bg-surface-900/50 border border-white/5">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="flex items-center gap-2 font-medium text-white">
-          <Shield className="w-4 h-4 text-orange-400" />
-          Security Parameters
+    <div className="p-3 sm:p-4 rounded-lg bg-surface-900/50 border border-white/5">
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <h3 className="flex items-center gap-2 font-medium text-white text-sm sm:text-base">
+          <Shield className="w-4 h-4 text-orange-400 flex-shrink-0" />
+          <span className="truncate">Security Parameters</span>
         </h3>
         <button
           onClick={() => setShowSecrets(!showSecrets)}
-          className="flex items-center gap-1 text-xs text-surface-400 hover:text-white transition-colors"
+          className="flex items-center gap-1 text-xs text-surface-400 hover:text-white active:text-white transition-colors whitespace-nowrap flex-shrink-0"
         >
           {showSecrets ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          {showSecrets ? 'Hide Secrets' : 'Show Secrets'}
+          <span className="hidden sm:inline">{showSecrets ? 'Hide Secrets' : 'Show Secrets'}</span>
+          <span className="sm:hidden">{showSecrets ? 'Hide' : 'Show'}</span>
         </button>
       </div>
 
-      <div className="space-y-2 font-mono text-xs">
+      <div className="space-y-2 font-mono text-xs overflow-x-auto">
         {params.state && (
           <ParamRow label="state" value={params.state} color="text-blue-400" />
         )}
@@ -595,9 +608,9 @@ function SecurityParams({ params }: { params: FlowExecutorState['securityParams'
 
 function ParamRow({ label, value, color, truncate }: { label: string; value: string; color: string; truncate?: boolean }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className={color}>{label}:</span>
-      <span className={`text-surface-300 ${truncate ? 'truncate max-w-[200px]' : ''}`}>{value}</span>
+    <div className="flex items-center gap-2 min-w-0">
+      <span className={`${color} flex-shrink-0`}>{label}:</span>
+      <span className={`text-surface-300 break-all ${truncate ? 'truncate max-w-[150px] sm:max-w-[200px]' : ''}`}>{value}</span>
       <CopyButton text={value} />
     </div>
   )
@@ -651,13 +664,13 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="p-1 rounded hover:bg-white/10 transition-colors"
+      className="p-1.5 sm:p-1 rounded hover:bg-white/10 active:bg-white/20 transition-colors flex-shrink-0"
       title="Copy to clipboard"
     >
       {copied ? (
-        <Check className="w-3 h-3 text-green-400" />
+        <Check className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-green-400" />
       ) : (
-        <Copy className="w-3 h-3 text-surface-500" />
+        <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-surface-500" />
       )}
     </button>
   )
