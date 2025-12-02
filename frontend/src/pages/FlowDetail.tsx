@@ -5,7 +5,7 @@ import {
   ArrowLeft, Eye, ChevronDown, ChevronRight,
   Lock, Key, AlertTriangle, Copy, Check,
   Code, ExternalLink, Loader2, ArrowRight,
-  Fingerprint, Server, Globe
+  Fingerprint, Server, Globe, FileKey, Shield
 } from 'lucide-react'
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { FlowDiagram } from '../components/lookingglass/FlowDiagram'
@@ -142,6 +142,66 @@ const config = await fetch('/.well-known/openid-configuration')
 const jwks = await fetch(config.jwks_uri).then(r => r.json());`
     }
 
+    // SAML flows
+    if (mappedFlowId === 'saml_sp_initiated_sso') {
+      return `// SP-Initiated SSO - Redirect to IdP
+// This would typically be handled server-side
+
+// 1. Create AuthnRequest XML
+const authnRequest = \`
+<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+  ID="_\${crypto.randomUUID()}"
+  Version="2.0"
+  IssueInstant="\${new Date().toISOString()}"
+  AssertionConsumerServiceURL="https://sp.example.com/saml/acs">
+  <saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+    https://sp.example.com
+  </saml:Issuer>
+</samlp:AuthnRequest>\`;
+
+// 2. Encode and redirect (HTTP-Redirect binding)
+const encoded = btoa(pako.deflateRaw(authnRequest, { to: 'string' }));
+const redirectUrl = \`\${idpSsoUrl}?SAMLRequest=\${encodeURIComponent(encoded)}\`;`
+    }
+
+    if (mappedFlowId === 'saml_single_logout') {
+      return `// Single Logout - Create LogoutRequest
+const logoutRequest = \`
+<samlp:LogoutRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+  ID="_\${crypto.randomUUID()}"
+  Version="2.0"
+  IssueInstant="\${new Date().toISOString()}"
+  Destination="\${idpSloUrl}">
+  <saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+    https://sp.example.com
+  </saml:Issuer>
+  <saml:NameID xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+    Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">
+    user@example.com
+  </saml:NameID>
+  <samlp:SessionIndex>\${sessionIndex}</samlp:SessionIndex>
+</samlp:LogoutRequest>\`;`
+    }
+
+    if (mappedFlowId === 'saml_metadata') {
+      return `// Fetch and parse SAML metadata
+const metadataUrl = 'https://idp.example.com/saml/metadata';
+const response = await fetch(metadataUrl);
+const xml = await response.text();
+
+// Parse the XML to extract endpoints and certificates
+const parser = new DOMParser();
+const doc = parser.parseFromString(xml, 'application/xml');
+
+// Extract SSO endpoint
+const ssoBinding = doc.querySelector('SingleSignOnService[Binding*="HTTP-POST"]');
+const ssoUrl = ssoBinding?.getAttribute('Location');
+
+// Extract signing certificate
+const cert = doc.querySelector('KeyDescriptor[use="signing"] X509Certificate');
+const certificate = cert?.textContent;`
+    }
+
     return `// Authorization Code Flow
 const authUrl = new URL('/oauth2/authorize', origin);
 authUrl.searchParams.set('response_type', 'code');
@@ -165,7 +225,25 @@ window.location.href = authUrl;`
     if (mappedFlowId.includes('oidc')) {
       badges.push({ label: 'ID Token', color: 'purple', icon: Fingerprint })
     }
+    // SAML badges
+    if (mappedFlowId.includes('saml')) {
+      badges.push({ label: 'XML-Based', color: 'cyan', icon: FileKey })
+    }
+    if (mappedFlowId === 'saml_sp_initiated_sso' || mappedFlowId === 'saml_idp_initiated_sso') {
+      badges.push({ label: 'SSO', color: 'green', icon: Shield })
+    }
+    if (mappedFlowId === 'saml_single_logout') {
+      badges.push({ label: 'Federated Logout', color: 'yellow', icon: Globe })
+    }
     return badges
+  }
+
+  const getProtocolName = (id: string | undefined) => {
+    switch (id) {
+      case 'oidc': return 'OpenID Connect'
+      case 'saml': return 'SAML 2.0'
+      default: return 'OAuth 2.0'
+    }
   }
 
   if (!flow) {
@@ -173,7 +251,7 @@ window.location.href = authUrl;`
       <div className="text-center py-20">
         <h1 className="text-xl font-semibold text-white mb-4">Flow Not Found</h1>
         <Link to={`/protocol/${protocolId}`} className="text-cyan-400 hover:underline">
-          Back to {protocolId === 'oidc' ? 'OpenID Connect' : 'OAuth 2.0'}
+          Back to {getProtocolName(protocolId)}
         </Link>
       </div>
     )
@@ -189,7 +267,7 @@ window.location.href = authUrl;`
           <Link to="/protocols" className="hover:text-white transition-colors">Protocols</Link>
           <ChevronRight className="w-4 h-4" />
           <Link to={`/protocol/${protocolId}`} className="hover:text-white transition-colors">
-            {protocolId === 'oidc' ? 'OpenID Connect' : 'OAuth 2.0'}
+            {getProtocolName(protocolId)}
           </Link>
           <ChevronRight className="w-4 h-4" />
           <span className="text-surface-300">{flow.title}</span>
@@ -221,6 +299,7 @@ window.location.href = authUrl;`
                   ${badge.color === 'yellow' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : ''}
                   ${badge.color === 'blue' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : ''}
                   ${badge.color === 'purple' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : ''}
+                  ${badge.color === 'cyan' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : ''}
                 `}
               >
                 <badge.icon className="w-3 h-3" />

@@ -13,6 +13,8 @@ import { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 import { DeviceCodeExecutor } from './device-code'
 import { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 import { OIDCHybridExecutor, type HybridResponseType } from './oidc-hybrid'
+import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
+import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
 
 // ============================================================================
 // Flow ID Mapping
@@ -100,6 +102,43 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: true,
     additionalConfig: { responseType: 'code id_token' as HybridResponseType },
   },
+
+  // SAML 2.0 Flows
+  'saml-sp-sso': {
+    executorClass: SPInitiatedSSOExecutor,
+    description: 'SP-initiated SAML Single Sign-On',
+    rfcReference: 'SAML 2.0 Profiles Section 4.1.3',
+    requiresUserInteraction: true,
+    additionalConfig: { binding: 'post' as const },
+  },
+  'saml-sp-sso-redirect': {
+    executorClass: SPInitiatedSSOExecutor,
+    description: 'SP-initiated SAML SSO with HTTP-Redirect binding',
+    rfcReference: 'SAML 2.0 Bindings Section 3.4',
+    requiresUserInteraction: true,
+    additionalConfig: { binding: 'redirect' as const },
+  },
+  'saml-idp-sso': {
+    executorClass: IdPInitiatedSSOExecutor,
+    description: 'IdP-initiated SAML SSO (unsolicited response)',
+    rfcReference: 'SAML 2.0 Profiles Section 4.1.5',
+    requiresUserInteraction: true,
+    additionalConfig: { binding: 'post' as const },
+  },
+  'saml-logout': {
+    executorClass: SAMLLogoutExecutor,
+    description: 'SAML Single Logout',
+    rfcReference: 'SAML 2.0 Profiles Section 4.4',
+    requiresUserInteraction: false,
+    additionalConfig: { spInitiated: true, binding: 'post' as const },
+  },
+  'saml-logout-redirect': {
+    executorClass: SAMLLogoutExecutor,
+    description: 'SAML Single Logout with HTTP-Redirect binding',
+    rfcReference: 'SAML 2.0 Bindings Section 3.4',
+    requiresUserInteraction: false,
+    additionalConfig: { spInitiated: true, binding: 'redirect' as const },
+  },
 }
 
 // ============================================================================
@@ -172,6 +211,12 @@ export function createFlowExecutor(
     (fullConfig as ClientCredentialsConfig).clientSecret = config.clientSecret
   }
 
+  // Handle SAML flows
+  if (flowId.startsWith('saml-')) {
+    // SAML flows don't use OAuth scopes
+    (fullConfig as SAMLSSOConfig | SAMLLogoutConfig).scopes = []
+  }
+
   try {
     return new flowConfig.executorClass(fullConfig)
   } catch (error) {
@@ -220,6 +265,7 @@ export function getFlowRequirements(flowId: string): {
   requiresClientSecret: boolean
   requiresRefreshToken: boolean
   requiresCredentials: boolean
+  requiresSessionInfo?: boolean
 } {
   switch (flowId) {
     case 'client-credentials':
@@ -228,6 +274,9 @@ export function getFlowRequirements(flowId: string): {
       return { requiresClientSecret: false, requiresRefreshToken: true, requiresCredentials: false }
     case 'password':
       return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: true }
+    case 'saml-logout':
+    case 'saml-logout-redirect':
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresSessionInfo: true }
     default:
       return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false }
   }

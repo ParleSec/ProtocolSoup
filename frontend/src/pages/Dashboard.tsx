@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { 
   Shield, Eye, Terminal, Fingerprint, 
   ExternalLink, ChevronRight, Key, 
-  Code, FileSearch, Zap
+  Code, FileSearch, Zap, FileKey
 } from 'lucide-react'
 
 export function Dashboard() {
@@ -19,8 +19,8 @@ export function Dashboard() {
           <span className="text-2xl sm:text-3xl">🍜</span>
         </h1>
         <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
-          Learn authentication protocols by running them. Execute real OAuth 2.0 and OpenID Connect 
-          flows against a local identity provider and see exactly what happens at each step.
+          Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, 
+          and SAML 2.0 flows against a local identity provider and see exactly what happens at each step.
         </p>
       </header>
 
@@ -73,7 +73,7 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">
           Supported Protocols
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <ProtocolCard
             icon={Key}
             name="OAuth 2.0"
@@ -90,6 +90,14 @@ export function Dashboard() {
             flows={['oidc_code', 'hybrid', 'userinfo', 'discovery']}
             to="/looking-glass"
           />
+          <ProtocolCard
+            icon={FileKey}
+            name="SAML 2.0"
+            description="XML-based federated identity and SSO"
+            color="cyan"
+            flows={['sp_initiated_sso', 'idp_initiated_sso', 'single_logout']}
+            to="/looking-glass"
+          />
         </div>
       </section>
 
@@ -97,13 +105,13 @@ export function Dashboard() {
       <section className="rounded-xl border border-dashed border-white/10 p-4 sm:p-6 text-center">
         <p className="text-surface-400 mb-2">More protocols on the roadmap</p>
         <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 text-surface-500 text-sm">
-          <span>SAML 2.0</span>
-          <span className="text-surface-700 hidden sm:inline">•</span>
           <span>WebAuthn</span>
           <span className="text-surface-700 hidden sm:inline">•</span>
           <span>FIDO2</span>
           <span className="text-surface-700 hidden sm:inline">•</span>
           <span>mTLS</span>
+          <span className="text-surface-700 hidden sm:inline">•</span>
+          <span>SPIFFE</span>
         </div>
       </section>
 
@@ -205,7 +213,7 @@ function ProtocolCard({
   icon: React.ElementType
   name: string
   description: string
-  color: 'blue' | 'orange'
+  color: 'blue' | 'orange' | 'cyan'
   flows: string[]
   to: string
 }) {
@@ -221,6 +229,12 @@ function ProtocolCard({
       bg: 'bg-orange-500/10',
       text: 'text-orange-400',
       tag: 'bg-orange-500/10 text-orange-300',
+    },
+    cyan: {
+      border: 'border-cyan-500/20 hover:border-cyan-500/40',
+      bg: 'bg-cyan-500/10',
+      text: 'text-cyan-400',
+      tag: 'bg-cyan-500/10 text-cyan-300',
     },
   }
   const c = colors[color]

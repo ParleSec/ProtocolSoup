@@ -170,18 +170,22 @@ export const protocolMeta: Record<string, {
       'Signature Verification',
     ],
   },
-  // Extensibility stubs for future protocols
   saml: {
     icon: 'FileKey',
-    color: 'blue',
-    gradient: 'from-blue-500 to-cyan-500',
+    color: 'cyan',
+    gradient: 'from-cyan-500 to-blue-500',
     features: [
+      'SP-Initiated SSO',
+      'IdP-Initiated SSO',
+      'Single Logout (SLO)',
+      'HTTP-POST Binding',
+      'HTTP-Redirect Binding',
       'XML Assertions',
-      'SP/IdP Architecture',
-      'Single Sign-On',
-      'Single Logout',
+      'Attribute Statements',
+      'Metadata Documents',
     ],
   },
+  // Extensibility stubs for future protocols
   spiffe: {
     icon: 'Key',
     color: 'green',

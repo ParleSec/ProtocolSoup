@@ -5,7 +5,7 @@
 
 import { Link } from 'react-router-dom'
 import { 
-  Key, Fingerprint, ChevronRight, 
+  Key, Fingerprint, FileKey, ChevronRight, 
   ExternalLink, BookOpen
 } from 'lucide-react'
 
@@ -43,13 +43,28 @@ const protocols = [
       { id: 'discovery', name: 'Discovery', rfc: 'Discovery 1.0' },
     ],
   },
+  {
+    id: 'saml',
+    name: 'SAML 2.0',
+    description: 'XML-based standard for exchanging authentication and authorization data between identity providers and service providers. Enables enterprise single sign-on.',
+    icon: FileKey,
+    color: 'cyan',
+    spec: 'SAML 2.0 Core',
+    specUrl: 'https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf',
+    flows: [
+      { id: 'sp-initiated-sso', name: 'SP-Initiated SSO', rfc: 'Profiles §4.1' },
+      { id: 'idp-initiated-sso', name: 'IdP-Initiated SSO', rfc: 'Profiles §4.1.5' },
+      { id: 'single-logout', name: 'Single Logout (SLO)', rfc: 'Profiles §4.4' },
+      { id: 'metadata', name: 'Metadata Exchange', rfc: 'Metadata' },
+    ],
+  },
 ]
 
 const comingSoon = [
-  { name: 'SAML 2.0', description: 'XML-based SSO standard' },
   { name: 'WebAuthn', description: 'Passwordless authentication' },
   { name: 'FIDO2', description: 'Strong authentication framework' },
   { name: 'mTLS', description: 'Mutual TLS authentication' },
+  { name: 'SPIFFE', description: 'Service identity framework' },
 ]
 
 export function Protocols() {
@@ -109,6 +124,12 @@ function ProtocolCard({ protocol }: { protocol: typeof protocols[0] }) {
       bg: 'bg-orange-500/10',
       text: 'text-orange-400',
       tag: 'bg-orange-500/10 text-orange-300 border-orange-500/20',
+    },
+    cyan: {
+      border: 'border-cyan-500/20',
+      bg: 'bg-cyan-500/10',
+      text: 'text-cyan-400',
+      tag: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
     },
   }
   const c = colors[protocol.color as keyof typeof colors]

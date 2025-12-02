@@ -416,6 +416,28 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
     }
   }
 
+  // SAML 2.0 mappings
+  if (protocolId === 'saml') {
+    switch (normalizedId) {
+      case 'sp-initiated-sso':
+      case 'sp-sso':
+        return 'saml-sp-sso'
+      case 'sp-initiated-sso-redirect':
+        return 'saml-sp-sso-redirect'
+      case 'idp-initiated-sso':
+      case 'idp-sso':
+        return 'saml-idp-sso'
+      case 'single-logout':
+      case 'slo':
+      case 'logout':
+        return 'saml-logout'
+      case 'single-logout-redirect':
+        return 'saml-logout-redirect'
+      default:
+        // Fall through to default handling
+    }
+  }
+
   // OAuth 2.0 mappings (also work for OIDC)
   switch (normalizedId) {
     case 'authorization-code':

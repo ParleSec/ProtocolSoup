@@ -16,6 +16,7 @@ import (
 	"github.com/security-showcase/protocol-showcase/internal/plugin"
 	"github.com/security-showcase/protocol-showcase/internal/protocols/oauth2"
 	"github.com/security-showcase/protocol-showcase/internal/protocols/oidc"
+	"github.com/security-showcase/protocol-showcase/internal/protocols/saml"
 )
 
 func main() {
@@ -58,6 +59,12 @@ func main() {
 	oidcPlugin := oidc.NewPlugin(oauth2Plugin)
 	if err := registry.Register(oidcPlugin); err != nil {
 		log.Fatalf("Failed to register OIDC plugin: %v", err)
+	}
+
+	// Register SAML 2.0 plugin
+	samlPlugin := saml.NewPlugin()
+	if err := registry.Register(samlPlugin); err != nil {
+		log.Fatalf("Failed to register SAML plugin: %v", err)
 	}
 
 	// Initialize all plugins

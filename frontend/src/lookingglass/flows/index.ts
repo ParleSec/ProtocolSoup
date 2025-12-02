@@ -28,6 +28,19 @@ export { DeviceCodeExecutor, type DeviceCodeConfig } from './device-code'
 export { OIDCHybridExecutor, type OIDCHybridConfig, type HybridResponseType } from './oidc-hybrid'
 export { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 
+// SAML executors
+export { 
+  SAMLSSOExecutor, 
+  SPInitiatedSSOExecutor, 
+  IdPInitiatedSSOExecutor,
+  type SAMLSSOConfig 
+} from './saml-sso'
+export { 
+  SAMLLogoutExecutor, 
+  SPInitiatedLogoutExecutor,
+  type SAMLLogoutConfig 
+} from './saml-logout'
+
 // Factory
 export {
   createFlowExecutor,

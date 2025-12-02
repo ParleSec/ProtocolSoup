@@ -21,7 +21,7 @@ interface FlowDiagramProps {
   onStepClick?: (step: number) => void
 }
 
-// Actor configurations - supports OAuth 2.0 and OIDC terminology
+// Actor configurations - supports OAuth 2.0, OIDC, and SAML terminology
 const actorConfig: Record<string, { 
   icon: React.ElementType
   label: string
@@ -65,6 +65,37 @@ const actorConfig: Record<string, {
     label: 'Browser',
     shortLabel: 'Browser',
     color: '#60a5fa', // blue
+  },
+  // SAML actors
+  'Service Provider': { 
+    icon: Globe, 
+    label: 'Service Provider',
+    shortLabel: 'SP',
+    color: '#60a5fa', // blue
+  },
+  'Identity Provider': { 
+    icon: Shield, 
+    label: 'Identity Provider',
+    shortLabel: 'IdP',
+    color: '#c084fc', // purple
+  },
+  'Service Providers': { 
+    icon: Database, 
+    label: 'Service Providers',
+    shortLabel: 'SPs',
+    color: '#fb923c', // orange
+  },
+  'Other Service Providers': { 
+    icon: Database, 
+    label: 'Other Service Providers',
+    shortLabel: 'Other SPs',
+    color: '#fb923c', // orange
+  },
+  'Both Parties': { 
+    icon: Shield, 
+    label: 'Both Parties',
+    shortLabel: 'Both',
+    color: '#9ca3af', // gray
   },
 }
 
@@ -119,17 +150,21 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
 
   const totalWidth = leftPadding + rightPadding + actorWidth + (actors.length - 1) * actorSpacing
   const diagramHeight = headerHeight + steps.length * rowHeight + 40
+  
+  // Constrain max dimensions for better display
+  const maxHeight = Math.min(diagramHeight, 600)
 
   const selectedStepData = selectedStep !== null ? steps.find(s => s.order === selectedStep) : null
 
   return (
     <div className="space-y-4">
       {/* Sequence Diagram */}
-      <div className="relative overflow-x-auto">
+      <div className="relative overflow-auto">
         <svg 
           viewBox={`0 0 ${totalWidth} ${diagramHeight}`}
           className="w-full"
-          style={{ minWidth: 600, minHeight: diagramHeight, margin: '0 auto', display: 'block' }}
+          style={{ minWidth: 500, maxWidth: 800, height: maxHeight, margin: '0 auto', display: 'block' }}
+          preserveAspectRatio="xMidYMin meet"
         >
           <defs>
             {/* Arrow markers */}

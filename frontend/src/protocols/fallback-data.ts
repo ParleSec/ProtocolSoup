@@ -691,6 +691,336 @@ export const fallbackFlows: Record<string, FlowData> = {
       },
     ]
   },
+
+  // SAML 2.0 Flows
+  saml_sp_initiated_sso: {
+    title: "SP-Initiated SSO",
+    description: "Service Provider initiates Single Sign-On by redirecting the user to the Identity Provider with an AuthnRequest.",
+    steps: [
+      {
+        order: 1,
+        name: "Access Protected Resource",
+        description: "User attempts to access a protected resource at the Service Provider.",
+        from: "User",
+        to: "Service Provider",
+        type: "request",
+      },
+      {
+        order: 2,
+        name: "Generate AuthnRequest",
+        description: "SP creates a SAML AuthnRequest message to request authentication.",
+        from: "Service Provider",
+        to: "Service Provider",
+        type: "internal",
+        parameters: {
+          ID: "Unique request identifier",
+          IssueInstant: "Timestamp of request creation",
+          Issuer: "SP Entity ID",
+          AssertionConsumerServiceURL: "Where to send the response",
+          ProtocolBinding: "HTTP-POST or HTTP-Redirect",
+        },
+      },
+      {
+        order: 3,
+        name: "Redirect to IdP",
+        description: "SP redirects user to IdP SSO Service with the AuthnRequest.",
+        from: "Service Provider",
+        to: "Identity Provider",
+        type: "redirect",
+        parameters: {
+          SAMLRequest: "Base64-encoded (and deflated for redirect) AuthnRequest",
+          RelayState: "Opaque state to be echoed back",
+          SigAlg: "Signature algorithm (if signed)",
+          Signature: "Request signature (if signed)",
+        },
+      },
+      {
+        order: 4,
+        name: "User Authentication",
+        description: "User authenticates at the Identity Provider.",
+        from: "User",
+        to: "Identity Provider",
+        type: "internal",
+      },
+      {
+        order: 5,
+        name: "Generate SAML Response",
+        description: "IdP creates a SAML Response containing the Assertion with user identity.",
+        from: "Identity Provider",
+        to: "Identity Provider",
+        type: "internal",
+        parameters: {
+          Status: "Success or error code",
+          Assertion: "Signed assertion with user identity",
+          NameID: "User identifier",
+          Attributes: "User attributes (optional)",
+          Conditions: "Validity constraints",
+          AuthnStatement: "Authentication context",
+        },
+      },
+      {
+        order: 6,
+        name: "POST Response to ACS",
+        description: "IdP sends SAML Response to SP's Assertion Consumer Service.",
+        from: "Identity Provider",
+        to: "Service Provider",
+        type: "response",
+        parameters: {
+          SAMLResponse: "Base64-encoded SAML Response",
+          RelayState: "Echoed from request",
+        },
+      },
+      {
+        order: 7,
+        name: "Validate Assertion",
+        description: "SP validates the signature, conditions, and extracts identity.",
+        from: "Service Provider",
+        to: "Service Provider",
+        type: "internal",
+        parameters: {
+          verify_signature: "Check Response/Assertion signature",
+          check_inresponseto: "Must match original request ID",
+          validate_conditions: "NotBefore/NotOnOrAfter timestamps",
+          verify_audience: "SP Entity ID must be in audience",
+          check_replay: "Assertion ID not previously used",
+        },
+      },
+      {
+        order: 8,
+        name: "Create Session",
+        description: "SP creates a local session and grants access to the resource.",
+        from: "Service Provider",
+        to: "User",
+        type: "response",
+      },
+    ]
+  },
+
+  saml_idp_initiated_sso: {
+    title: "IdP-Initiated SSO",
+    description: "Identity Provider initiates Single Sign-On without a prior AuthnRequest. User starts at IdP and is sent to SP with an unsolicited SAML Response.",
+    steps: [
+      {
+        order: 1,
+        name: "User at IdP Portal",
+        description: "User is authenticated at the IdP and selects an SP to access.",
+        from: "User",
+        to: "Identity Provider",
+        type: "request",
+      },
+      {
+        order: 2,
+        name: "Generate Unsolicited Response",
+        description: "IdP creates a SAML Response without a prior AuthnRequest.",
+        from: "Identity Provider",
+        to: "Identity Provider",
+        type: "internal",
+        parameters: {
+          InResponseTo: "Empty (no request to respond to)",
+          Destination: "SP's ACS URL from metadata",
+          note: "No InResponseTo to validate - increased replay risk",
+        },
+      },
+      {
+        order: 3,
+        name: "POST Response to SP",
+        description: "IdP POSTs the SAML Response to SP's Assertion Consumer Service.",
+        from: "Identity Provider",
+        to: "Service Provider",
+        type: "response",
+        parameters: {
+          SAMLResponse: "Base64-encoded SAML Response with Assertion",
+          RelayState: "Optional - target URL at SP",
+        },
+      },
+      {
+        order: 4,
+        name: "Validate Assertion",
+        description: "SP validates the response and extracts identity.",
+        from: "Service Provider",
+        to: "Service Provider",
+        type: "internal",
+        parameters: {
+          verify_signature: "Check Assertion signature",
+          validate_conditions: "Check time constraints",
+          check_audience: "Verify SP is intended recipient",
+          security_note: "Cannot verify InResponseTo - use other replay prevention",
+        },
+      },
+      {
+        order: 5,
+        name: "Create Session",
+        description: "SP creates a local session and grants access.",
+        from: "Service Provider",
+        to: "User",
+        type: "response",
+      },
+    ]
+  },
+
+  saml_single_logout: {
+    title: "Single Logout (SLO)",
+    description: "Terminates all sessions established via SSO across all participating Service Providers and the Identity Provider.",
+    steps: [
+      {
+        order: 1,
+        name: "Initiate Logout",
+        description: "User initiates logout at one participant (SP or IdP).",
+        from: "User",
+        to: "Service Provider",
+        type: "request",
+      },
+      {
+        order: 2,
+        name: "Create LogoutRequest",
+        description: "Initiating party creates a SAML LogoutRequest.",
+        from: "Service Provider",
+        to: "Service Provider",
+        type: "internal",
+        parameters: {
+          NameID: "Identifier of user being logged out",
+          SessionIndex: "Specific session to terminate (optional)",
+          Reason: "Logout reason (optional)",
+        },
+      },
+      {
+        order: 3,
+        name: "Send LogoutRequest to IdP",
+        description: "SP sends LogoutRequest to IdP's SLO endpoint.",
+        from: "Service Provider",
+        to: "Identity Provider",
+        type: "request",
+        parameters: {
+          SAMLRequest: "Base64-encoded LogoutRequest",
+          RelayState: "State to maintain through logout",
+        },
+      },
+      {
+        order: 4,
+        name: "Propagate to Other SPs",
+        description: "IdP sends LogoutRequest to all other SPs with active sessions.",
+        from: "Identity Provider",
+        to: "Other Service Providers",
+        type: "request",
+        parameters: {
+          note: "Each SP must validate and terminate their session",
+        },
+      },
+      {
+        order: 5,
+        name: "SPs Respond",
+        description: "Each SP terminates its session and sends LogoutResponse.",
+        from: "Service Providers",
+        to: "Identity Provider",
+        type: "response",
+        parameters: {
+          Status: "Success or failure",
+        },
+      },
+      {
+        order: 6,
+        name: "IdP Terminates Session",
+        description: "IdP terminates its own session for the user.",
+        from: "Identity Provider",
+        to: "Identity Provider",
+        type: "internal",
+      },
+      {
+        order: 7,
+        name: "Final LogoutResponse",
+        description: "IdP sends LogoutResponse to the initiating SP.",
+        from: "Identity Provider",
+        to: "Service Provider",
+        type: "response",
+        parameters: {
+          Status: "Success or PartialLogout",
+          InResponseTo: "Original LogoutRequest ID",
+        },
+      },
+      {
+        order: 8,
+        name: "Logout Complete",
+        description: "User is logged out of all participants.",
+        from: "Service Provider",
+        to: "User",
+        type: "response",
+      },
+    ]
+  },
+
+  saml_metadata: {
+    title: "Metadata Exchange",
+    description: "Exchange of SAML metadata documents describing entity configurations, endpoints, certificates, and capabilities.",
+    steps: [
+      {
+        order: 1,
+        name: "Request SP Metadata",
+        description: "Retrieve the Service Provider's metadata document.",
+        from: "Identity Provider",
+        to: "Service Provider",
+        type: "request",
+        parameters: {
+          endpoint: "/saml/metadata",
+          method: "GET",
+        },
+      },
+      {
+        order: 2,
+        name: "SP Metadata Response",
+        description: "SP returns its metadata XML document.",
+        from: "Service Provider",
+        to: "Identity Provider",
+        type: "response",
+        parameters: {
+          entityID: "SP's unique identifier",
+          AssertionConsumerService: "ACS URL and binding",
+          SingleLogoutService: "SLO URL and binding",
+          KeyDescriptor: "X.509 certificates for signing/encryption",
+          NameIDFormat: "Supported name identifier formats",
+        },
+      },
+      {
+        order: 3,
+        name: "Request IdP Metadata",
+        description: "Retrieve the Identity Provider's metadata document.",
+        from: "Service Provider",
+        to: "Identity Provider",
+        type: "request",
+        parameters: {
+          endpoint: "/saml/metadata",
+          method: "GET",
+        },
+      },
+      {
+        order: 4,
+        name: "IdP Metadata Response",
+        description: "IdP returns its metadata XML document.",
+        from: "Identity Provider",
+        to: "Service Provider",
+        type: "response",
+        parameters: {
+          entityID: "IdP's unique identifier",
+          SingleSignOnService: "SSO URL and binding",
+          SingleLogoutService: "SLO URL and binding",
+          KeyDescriptor: "X.509 certificates for signing",
+          NameIDFormat: "Supported name identifier formats",
+        },
+      },
+      {
+        order: 5,
+        name: "Configure Trust",
+        description: "Both parties import and configure the other's metadata.",
+        from: "Both Parties",
+        to: "Both Parties",
+        type: "internal",
+        parameters: {
+          verify_signature: "Validate metadata signature if signed",
+          store_certificates: "Cache certificates for validation",
+          configure_endpoints: "Set up SSO/SLO URLs",
+        },
+      },
+    ]
+  },
 }
 
 /**
@@ -712,6 +1042,11 @@ export const flowIdMap: Record<string, string> = {
   'hybrid': 'oidc_hybrid',
   'userinfo': 'oidc_userinfo',
   'discovery': 'oidc_discovery',
+  // SAML 2.0 flows
+  'sp-initiated-sso': 'saml_sp_initiated_sso',
+  'idp-initiated-sso': 'saml_idp_initiated_sso',
+  'single-logout': 'saml_single_logout',
+  'metadata': 'saml_metadata',
 }
 
 /**
