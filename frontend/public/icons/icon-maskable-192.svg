@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="soup" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f97316"/>
+      <stop offset="50%" style="stop-color:#a855f7"/>
+      <stop offset="100%" style="stop-color:#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="bowl" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#64748b"/>
+      <stop offset="100%" style="stop-color:#334155"/>
+    </linearGradient>
+  </defs>
+  <!-- Full background for maskable (no rounded corners) -->
+  <rect width="192" height="192" fill="#0f172a"/>
+  
+  <!-- Content scaled to 80% safe zone (centered) -->
+  <!-- Steam wisps -->
+  <path d="M72 52 Q67 42, 72 32" stroke="#f97316" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M96 45 Q91 34, 96 23" stroke="#a855f7" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M120 52 Q125 42, 120 32" stroke="#06b6d4" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.8"/>
+  
+  <!-- Bowl rim -->
+  <ellipse cx="96" cy="72" rx="48" ry="12" fill="url(#bowl)"/>
+  
+  <!-- Soup surface -->
+  <ellipse cx="96" cy="72" rx="42" ry="9" fill="url(#soup)" opacity="0.9"/>
+  
+  <!-- Bowl body -->
+  <path d="M48 72 Q48 122, 96 128 Q144 122, 144 72" fill="url(#bowl)"/>
+  
+  <!-- Protocol ingredients -->
+  <circle cx="74" cy="84" r="8" fill="#f97316" opacity="0.9"/>
+  <circle cx="96" cy="92" r="9" fill="#a855f7" opacity="0.9"/>
+  <circle cx="118" cy="82" r="6" fill="#06b6d4" opacity="0.9"/>
+  <circle cx="84" cy="100" r="5" fill="#22c55e" opacity="0.8"/>
+  <circle cx="108" cy="104" r="5" fill="#eab308" opacity="0.8"/>
+  
+  <!-- Bowl base -->
+  <ellipse cx="96" cy="134" rx="21" ry="6" fill="#475569"/>
+</svg>
