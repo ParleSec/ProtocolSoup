@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ '**' ]  # Trigger on any branch push
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
 
 # Set default permissions to read-only for security
 permissions:
