@@ -159,6 +159,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "sp_initiated_sso",
 			Name:        "SP-Initiated SSO",
 			Description: "Service Provider initiated Single Sign-On flow",
+			Executable:  true,
+			Category:    "sso",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
@@ -267,6 +269,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "idp_initiated_sso",
 			Name:        "IdP-Initiated SSO",
 			Description: "Identity Provider initiated Single Sign-On flow (unsolicited response)",
+			Executable:  true,
+			Category:    "sso",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
@@ -322,6 +326,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "single_logout",
 			Name:        "Single Logout (SLO)",
 			Description: "Federated logout across all session participants",
+			Executable:  true,
+			Category:    "logout",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,

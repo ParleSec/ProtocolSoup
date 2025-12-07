@@ -184,41 +184,15 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: false,
     additionalConfig: { trustDomain: 'protocolsoup.com', audience: 'api' },
   },
-  'workload-attestation': {
-    executorClass: X509SVIDExecutor,
-    description: 'SPIRE workload identity attestation via Workload API',
-    rfcReference: 'SPIFFE Workload API',
-    requiresUserInteraction: false,
-    additionalConfig: { trustDomain: 'protocolsoup.com' },
-  },
-  'trust-bundle': {
-    executorClass: X509SVIDExecutor,
-    description: 'Fetch trust bundle for certificate chain validation',
-    rfcReference: 'SPIFFE Trust Bundle',
-    requiresUserInteraction: false,
-    additionalConfig: { trustDomain: 'protocolsoup.com' },
-  },
-  'trust-bundle-federation': {
-    executorClass: X509SVIDExecutor,
-    description: 'Cross-trust-domain federation via SPIFFE bundles',
-    rfcReference: 'SPIFFE Federation',
-    requiresUserInteraction: false,
-    additionalConfig: { trustDomain: 'protocolsoup.com' },
-  },
-  'workload-registration': {
-    executorClass: X509SVIDExecutor,
-    description: 'Workload registration with SPIRE Server',
-    rfcReference: 'SPIFFE Workload API',
-    requiresUserInteraction: false,
-    additionalConfig: { trustDomain: 'protocolsoup.com' },
-  },
-  'node-attestation': {
-    executorClass: X509SVIDExecutor,
-    description: 'SPIRE node attestation and agent bootstrap',
-    rfcReference: 'SPIFFE Node Attestation',
-    requiresUserInteraction: false,
-    additionalConfig: { trustDomain: 'protocolsoup.com' },
-  },
+  // Note: The following flows are educational/conceptual and describe SPIRE infrastructure
+  // processes that cannot be demonstrated via the Workload API:
+  // - workload-registration: Admin process via SPIRE Server API
+  // - node-attestation: Agent bootstrap process
+  // - trust-bundle-federation: Admin configuration between trust domains
+  // 
+  // These flow definitions exist in the backend for documentation purposes,
+  // but are not executable from the Looking Glass because they require
+  // administrative access to SPIRE Server, not Workload API access.
 }
 
 // ============================================================================

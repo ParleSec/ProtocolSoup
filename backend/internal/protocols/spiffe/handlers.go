@@ -351,46 +351,98 @@ func (p *Plugin) handleValidateJWT(w http.ResponseWriter, r *http.Request) {
 		audiences = []string{"protocolsoup"}
 	}
 
-	// For JWT-SVID validation, we need a JWT bundle source
-	// In demo mode or when we can't get the bundle, parse without full validation
+	// Try full cryptographic validation first when SPIFFE is enabled
+	if p.workloadClient != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		
+		svid, err := p.workloadClient.ValidateJWTSVID(ctx, req.Token, audiences)
+		if err != nil {
+			// Cryptographic validation failed - parse for error details
+			header, claims := parseJWTForDisplay(req.Token)
+			writeJSON(w, http.StatusOK, ValidationResponse{
+				Valid: false,
+				Error: fmt.Sprintf("JWT-SVID validation failed: %v", err),
+				Details: map[string]interface{}{
+					"header":          header,
+					"claims":          claims,
+					"validation_type": "cryptographic",
+					"trust_bundle":    "verified against SPIFFE trust bundle",
+				},
+			})
+			return
+		}
+		
+		// Full validation succeeded
+		header, claims := parseJWTForDisplay(req.Token)
+		writeJSON(w, http.StatusOK, ValidationResponse{
+			Valid:    true,
+			SPIFFEID: svid.ID.String(),
+			Details: map[string]interface{}{
+				"header":          header,
+				"claims":          claims,
+				"validation_type": "cryptographic",
+				"signature":       "verified against SPIFFE trust bundle",
+				"audience":        svid.Audience,
+				"expiry":          svid.Expiry,
+			},
+		})
+		return
+	}
+
+	// Fallback to structural validation when SPIFFE workload client unavailable
+	// Per SPIFFE JWT-SVID specification, validation requires:
+	// 1. Signature verification against trust bundle public keys
+	// 2. SPIFFE ID (sub claim) validation
+	// 3. Audience (aud claim) validation
+	// 4. Expiration (exp claim) validation
+	
+	// First, parse the token structure for display
 	header, claims := parseJWTForDisplay(req.Token)
 	
 	// Basic structural validation
 	if header == nil || claims == nil {
 		writeJSON(w, http.StatusOK, ValidationResponse{
 			Valid: false,
-			Error: "Invalid JWT format",
+			Error: "Invalid JWT format - must be a valid JWT with header.payload.signature",
 		})
 		return
 	}
 
-	// Extract SPIFFE ID from sub claim
+	// Extract SPIFFE ID from sub claim (REQUIRED per JWT-SVID spec)
 	subClaim, ok := claims["sub"].(string)
 	if !ok || !strings.HasPrefix(subClaim, "spiffe://") {
 		writeJSON(w, http.StatusOK, ValidationResponse{
 			Valid: false,
-			Error: "Invalid or missing SPIFFE ID in sub claim",
+			Error: "Invalid or missing SPIFFE ID in 'sub' claim - must be spiffe:// URI",
 		})
 		return
 	}
 
-	// Check expiration
+	// Check expiration (REQUIRED per JWT-SVID spec)
 	if expClaim, ok := claims["exp"].(float64); ok {
 		if time.Now().Unix() > int64(expClaim) {
 			writeJSON(w, http.StatusOK, ValidationResponse{
 				Valid:    false,
 				SPIFFEID: subClaim,
-				Error:    "JWT-SVID has expired",
+				Error:    "JWT-SVID has expired (exp claim in the past)",
 				Details: map[string]interface{}{
 					"header": header,
 					"claims": claims,
+					"validation_note": "Per JWT-SVID spec, expired tokens MUST be rejected",
 				},
 			})
 			return
 		}
+	} else {
+		writeJSON(w, http.StatusOK, ValidationResponse{
+			Valid: false,
+			Error: "Missing 'exp' claim - required per JWT-SVID specification",
+		})
+		return
 	}
 
-	// Check audience
+	// Check audience (REQUIRED per JWT-SVID spec - aud MUST match expected audience)
 	audClaim := claims["aud"]
 	var audMatch bool
 	switch aud := audClaim.(type) {
@@ -422,11 +474,18 @@ func (p *Plugin) handleValidateJWT(w http.ResponseWriter, r *http.Request) {
 			Details: map[string]interface{}{
 				"header": header,
 				"claims": claims,
+				"validation_note": "Per JWT-SVID spec, audience MUST match the intended recipient",
 			},
 		})
 		return
 	}
 
+	// NOTE: Full cryptographic signature verification against trust bundle 
+	// requires the JWT bundle source. In a production environment, this would
+	// use p.workloadClient.ValidateJWTSVID() with the trust bundle.
+	// For this educational tool, we validate structure and claims but note
+	// that signature verification requires the SPIFFE trust bundle.
+	
 	resp := ValidationResponse{
 		Valid:    true,
 		SPIFFEID: subClaim,
@@ -919,22 +978,29 @@ func getDemoX509SVID() *X509SVIDResponse {
 
 func getDemoJWTSVID(audience string) JWTSVIDResponse {
 	now := time.Now()
+	exp := now.Add(5 * time.Minute)
+	
+	// Note: This is a demonstration JWT-SVID structure
+	// The token format follows SPIFFE JWT-SVID specification:
+	// - Header: alg (ES256 per spec), kid, typ
+	// - Payload: sub (SPIFFE ID), aud (audience), exp, iat
+	// - Signature: not valid in demo mode
 	return JWTSVIDResponse{
-		Token:     "eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlbW8ta2V5IiwidHlwIjoiSldUIn0.eyJzdWIiOiJzcGlmZmU6Ly9wcm90b2NvbHNvdXAuY29tL2RlbW8vd29ya2xvYWQiLCJhdWQiOlsicHJvdG9jb2xzb3VwIl0sImV4cCI6MTcwOTMwMDAwMCwiaWF0IjoxNzA5Mjk2NDAwfQ.demo_signature",
+		Token:     fmt.Sprintf("eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlbW8ta2V5IiwidHlwIjoiSldUIn0.%s.demo_signature_not_valid", base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":"spiffe://protocolsoup.com/demo/workload","aud":["%s"],"exp":%d,"iat":%d}`, audience, exp.Unix(), now.Unix())))),
 		SPIFFEID:  "spiffe://protocolsoup.com/demo/workload",
 		Audience:  []string{audience},
-		ExpiresAt: now.Add(5 * time.Minute),
+		ExpiresAt: exp,
 		IssuedAt:  now,
 		Header: map[string]interface{}{
-			"alg": "ES256",
+			"alg": "ES256", // Per JWT-SVID spec: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512
 			"kid": "demo-key",
 			"typ": "JWT",
 		},
 		Claims: map[string]interface{}{
-			"sub": "spiffe://protocolsoup.com/demo/workload",
-			"aud": []string{audience},
-			"exp": now.Add(5 * time.Minute).Unix(),
-			"iat": now.Unix(),
+			"sub": "spiffe://protocolsoup.com/demo/workload", // REQUIRED: SPIFFE ID
+			"aud": []string{audience},                        // REQUIRED: Audience
+			"exp": exp.Unix(),                                // REQUIRED: Expiration
+			"iat": now.Unix(),                                // RECOMMENDED: Issued At
 		},
 	}
 }

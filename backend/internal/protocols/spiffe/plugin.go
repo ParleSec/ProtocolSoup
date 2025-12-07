@@ -155,89 +155,50 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 }
 
 // GetDemoScenarios returns the available demo scenarios
+// Only includes flows that can be executed via the Workload API
 func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 	return []plugin.DemoScenario{
 		{
 			ID:          "x509-svid-issuance",
-			Name:        "X.509-SVID Issuance",
-			Description: "Demonstrate how workloads obtain X.509 certificates with SPIFFE IDs",
+			Name:        "X.509-SVID Acquisition",
+			Description: "Acquire X.509 certificate with SPIFFE ID from SPIRE Workload API",
 			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Workload Startup", Description: "Workload connects to SPIRE Agent Workload API", Auto: true},
-				{Order: 2, Name: "Workload Attestation", Description: "Agent verifies workload identity via selectors", Auto: true},
-				{Order: 3, Name: "SVID Request", Description: "Agent requests SVID from SPIRE Server", Auto: true},
-				{Order: 4, Name: "SVID Issuance", Description: "Server generates X.509 certificate with SPIFFE ID", Auto: true},
-				{Order: 5, Name: "SVID Delivery", Description: "Agent delivers SVID to workload", Auto: true},
+				{Order: 1, Name: "Connect to Workload API", Description: "Establish connection to SPIRE Agent socket", Auto: true},
+				{Order: 2, Name: "Workload Attestation", Description: "Agent verifies caller identity via selectors", Auto: true},
+				{Order: 3, Name: "SVID Issuance", Description: "Agent fetches X.509-SVID from SPIRE Server", Auto: true},
+				{Order: 4, Name: "Certificate Delivery", Description: "X.509-SVID with private key returned to workload", Auto: true},
 			},
 		},
 		{
 			ID:          "jwt-svid-issuance",
-			Name:        "JWT-SVID Issuance",
-			Description: "Demonstrate JWT-SVID creation for API authentication",
+			Name:        "JWT-SVID Acquisition",
+			Description: "Acquire JWT token with SPIFFE claims from SPIRE Workload API",
 			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Token Request", Description: "Workload requests JWT-SVID with audience", Auto: false},
-				{Order: 2, Name: "Identity Verification", Description: "Agent verifies workload is authorized", Auto: true},
+				{Order: 1, Name: "Token Request", Description: "Request JWT-SVID with target audience", Auto: true},
+				{Order: 2, Name: "Identity Verification", Description: "Agent verifies workload authorization", Auto: true},
 				{Order: 3, Name: "JWT Generation", Description: "Server signs JWT with SPIFFE claims", Auto: true},
 				{Order: 4, Name: "Token Delivery", Description: "JWT-SVID returned to workload", Auto: true},
 			},
 		},
 		{
 			ID:          "mtls-service-call",
-			Name:        "mTLS Service-to-Service Call",
-			Description: "Demonstrate mutual TLS authentication between services using X.509-SVIDs",
+			Name:        "mTLS Configuration",
+			Description: "Prepare X.509-SVID and trust bundle for mutual TLS authentication",
 			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Client Initiates Connection", Description: "Client presents X.509-SVID certificate", Auto: false},
-				{Order: 2, Name: "Server Certificate", Description: "Server responds with its X.509-SVID", Auto: true},
-				{Order: 3, Name: "Mutual Verification", Description: "Both sides verify certificates against trust bundle", Auto: true},
-				{Order: 4, Name: "SPIFFE ID Extraction", Description: "Extract SPIFFE IDs from SAN URI extension", Auto: true},
-				{Order: 5, Name: "Authorization Check", Description: "Verify SPIFFE ID is authorized", Auto: true},
-				{Order: 6, Name: "Secure Communication", Description: "Encrypted channel established", Auto: true},
-			},
-		},
-		{
-			ID:          "jwt-api-auth",
-			Name:        "JWT-SVID API Authentication",
-			Description: "Demonstrate API authentication using JWT-SVIDs",
-			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Obtain JWT-SVID", Description: "Client requests JWT-SVID for target audience", Auto: false},
-				{Order: 2, Name: "API Request", Description: "Include JWT-SVID in Authorization header", Auto: true},
-				{Order: 3, Name: "Token Validation", Description: "API validates JWT signature against trust bundle", Auto: true},
-				{Order: 4, Name: "Claims Verification", Description: "Verify SPIFFE ID and audience claims", Auto: true},
-				{Order: 5, Name: "Authorization", Description: "Grant or deny access based on SPIFFE ID", Auto: true},
+				{Order: 1, Name: "Fetch X.509-SVID", Description: "Obtain certificate for client authentication", Auto: true},
+				{Order: 2, Name: "Fetch Trust Bundle", Description: "Obtain CA certificates for peer verification", Auto: true},
+				{Order: 3, Name: "TLS Configuration", Description: "Configure TLS with SVID and trust bundle", Auto: true},
+				{Order: 4, Name: "mTLS Ready", Description: "Ready to establish mutually authenticated connections", Auto: true},
 			},
 		},
 		{
 			ID:          "certificate-rotation",
-			Name:        "Automatic Certificate Rotation",
-			Description: "Demonstrate automatic X.509-SVID rotation",
+			Name:        "Certificate Rotation Analysis",
+			Description: "Analyze current X.509-SVID and automatic rotation mechanism",
 			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Current SVID", Description: "Display current X.509-SVID details", Auto: true},
-				{Order: 2, Name: "Rotation Trigger", Description: "SVID approaches expiration threshold", Auto: true},
-				{Order: 3, Name: "New SVID Request", Description: "Agent requests fresh SVID from server", Auto: true},
-				{Order: 4, Name: "Seamless Update", Description: "New SVID delivered without service disruption", Auto: true},
-				{Order: 5, Name: "Connection Migration", Description: "Active connections gracefully transition", Auto: true},
-			},
-		},
-		{
-			ID:          "workload-attestation",
-			Name:        "Workload Attestation",
-			Description: "Demonstrate how SPIRE identifies workloads",
-			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Workload API Call", Description: "Workload connects to agent socket", Auto: true},
-				{Order: 2, Name: "Process Inspection", Description: "Agent inspects calling process", Auto: true},
-				{Order: 3, Name: "Selector Collection", Description: "Gather selectors (docker labels, unix uid, etc.)", Auto: true},
-				{Order: 4, Name: "Registration Lookup", Description: "Match selectors against registration entries", Auto: true},
-				{Order: 5, Name: "Identity Assignment", Description: "Assign SPIFFE ID based on matching entry", Auto: true},
-			},
-		},
-		{
-			ID:          "trust-bundle",
-			Name:        "Trust Bundle Distribution",
-			Description: "Demonstrate trust bundle management and distribution",
-			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Bundle Generation", Description: "SPIRE Server generates root CA certificate", Auto: true},
-				{Order: 2, Name: "Agent Sync", Description: "Agents receive trust bundle from server", Auto: true},
-				{Order: 3, Name: "Workload Distribution", Description: "Workloads receive bundle via Workload API", Auto: true},
-				{Order: 4, Name: "Bundle Endpoint", Description: "Bundle available at /.well-known/spiffe-bundle", Auto: true},
+				{Order: 1, Name: "Current SVID", Description: "Fetch and display current X.509-SVID details", Auto: true},
+				{Order: 2, Name: "Validity Analysis", Description: "Calculate time until rotation threshold", Auto: true},
+				{Order: 3, Name: "Rotation Mechanism", Description: "Explain SPIRE streaming API rotation", Auto: true},
 			},
 		},
 	}

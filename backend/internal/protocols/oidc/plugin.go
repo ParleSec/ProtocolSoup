@@ -113,6 +113,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "oidc_authorization_code",
 			Name:        "OIDC Authorization Code Flow",
 			Description: "OpenID Connect flow using authorization code for authentication",
+			Executable:  true,
+			Category:    "authentication",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
@@ -209,6 +211,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "oidc_implicit",
 			Name:        "OIDC Implicit Flow (Legacy)",
 			Description: "Direct token response in redirect - not recommended for new applications",
+			Executable:  true,
+			Category:    "authentication",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,

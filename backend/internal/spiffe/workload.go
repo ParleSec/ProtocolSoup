@@ -307,6 +307,36 @@ func (c *WorkloadClient) GetJWTSVIDToken(ctx context.Context, audience string) (
 	return svid.Marshal(), nil
 }
 
+// ValidateJWTSVID validates a JWT-SVID token against the trust bundle
+// Per SPIFFE JWT-SVID specification, this verifies:
+// - Signature against trust bundle public keys
+// - Expiration (exp claim)
+// - Audience (aud claim) if provided
+// - SPIFFE ID format in sub claim
+func (c *WorkloadClient) ValidateJWTSVID(ctx context.Context, token string, expectedAudiences []string) (*jwtsvid.SVID, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.bundleSet == nil {
+		return nil, errors.New("BundleSource not initialized - cannot validate JWT-SVID")
+	}
+
+	// Get the JWT bundle for validation
+	bundle, err := c.bundleSet.GetBundleForTrustDomain(c.trustDomain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get JWT bundle for validation: %w", err)
+	}
+
+	// Validate the JWT-SVID against the trust bundle
+	// This performs full cryptographic signature verification
+	svid, err := jwtsvid.ParseAndValidate(token, bundle, expectedAudiences)
+	if err != nil {
+		return nil, fmt.Errorf("JWT-SVID validation failed: %w", err)
+	}
+
+	return svid, nil
+}
+
 // GetTrustBundle returns the X.509 trust bundle for the trust domain
 func (c *WorkloadClient) GetTrustBundle() ([]*x509.Certificate, error) {
 	c.mu.RLock()

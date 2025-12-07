@@ -103,6 +103,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "authorization_code",
 			Name:        "Authorization Code Flow",
 			Description: "Standard OAuth 2.0 authorization code flow for server-side applications",
+			Executable:  true,
+			Category:    "authorization",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
@@ -175,6 +177,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "authorization_code_pkce",
 			Name:        "Authorization Code Flow with PKCE",
 			Description: "Authorization code flow with Proof Key for Code Exchange for public clients",
+			Executable:  true,
+			Category:    "authorization",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
@@ -245,6 +249,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "client_credentials",
 			Name:        "Client Credentials Flow",
 			Description: "Machine-to-machine authentication without user context",
+			Executable:  true,
+			Category:    "authorization",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
@@ -273,6 +279,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "refresh_token",
 			Name:        "Refresh Token Flow",
 			Description: "Obtain new access token using refresh token",
+			Executable:  true,
+			Category:    "token-management",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,

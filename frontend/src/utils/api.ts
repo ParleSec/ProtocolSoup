@@ -140,6 +140,8 @@ export interface FlowDefinition {
   name: string
   description: string
   steps: FlowStep[]
+  executable: boolean
+  category?: string // "workload-api", "admin", "infrastructure"
 }
 
 export interface FlowStep {

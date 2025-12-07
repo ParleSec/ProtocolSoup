@@ -17,11 +17,14 @@ func getFlowDefinitions() []plugin.FlowDefinition {
 }
 
 // getWorkloadRegistrationFlow defines the workload registration process
+// This is an administrative process that requires SPIRE Server API access
 func getWorkloadRegistrationFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "workload-registration",
 		Name:        "Workload Registration",
-		Description: "Process of registering a workload identity with SPIRE Server",
+		Description: "Process of registering a workload identity with SPIRE Server (requires admin access)",
+		Executable:  false, // Admin process - not accessible via Workload API
+		Category:    "admin",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -83,11 +86,14 @@ func getWorkloadRegistrationFlow() plugin.FlowDefinition {
 }
 
 // getNodeAttestationFlow defines the node attestation process
+// This is an infrastructure process that occurs during SPIRE Agent bootstrap
 func getNodeAttestationFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "node-attestation",
 		Name:        "Node Attestation",
-		Description: "Process by which SPIRE Agent proves its identity to SPIRE Server",
+		Description: "Process by which SPIRE Agent proves its identity to SPIRE Server (infrastructure)",
+		Executable:  false, // Infrastructure process - happens during agent bootstrap
+		Category:    "infrastructure",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -174,11 +180,14 @@ func getNodeAttestationFlow() plugin.FlowDefinition {
 }
 
 // getWorkloadAttestationFlow defines workload attestation
+// This happens automatically when a workload requests an SVID via the Workload API
 func getWorkloadAttestationFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "workload-attestation",
 		Name:        "Workload Attestation",
-		Description: "Process by which SPIRE Agent identifies workloads and assigns SPIFFE IDs",
+		Description: "Process by which SPIRE Agent identifies workloads and assigns SPIFFE IDs (automatic during SVID fetch)",
+		Executable:  false, // Happens automatically - demonstrated via X.509-SVID flow
+		Category:    "infrastructure",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -268,11 +277,14 @@ func getWorkloadAttestationFlow() plugin.FlowDefinition {
 }
 
 // getX509SVIDIssuanceFlow defines X.509-SVID issuance
+// This flow is executable - it fetches a real X.509-SVID via the Workload API
 func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "x509-svid-issuance",
 		Name:        "X.509-SVID Issuance",
-		Description: "Process of issuing an X.509 certificate containing a SPIFFE ID",
+		Description: "Acquire X.509 certificate with SPIFFE ID via Workload API",
+		Executable:  true, // Uses real Workload API
+		Category:    "workload-api",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -365,11 +377,14 @@ func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 }
 
 // getJWTSVIDIssuanceFlow defines JWT-SVID issuance
+// This flow is executable - it fetches a real JWT-SVID via the Workload API
 func getJWTSVIDIssuanceFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "jwt-svid-issuance",
 		Name:        "JWT-SVID Issuance",
-		Description: "Process of issuing a JWT token containing a SPIFFE ID",
+		Description: "Acquire JWT token with SPIFFE claims via Workload API",
+		Executable:  true, // Uses real Workload API
+		Category:    "workload-api",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -406,23 +421,24 @@ func getJWTSVIDIssuanceFlow() plugin.FlowDefinition {
 			},
 			{
 				Order:       3,
-				Name:        "JWT Generation",
-				Description: "Server generates and signs JWT",
+				Name:        "JWT Generation and Signing",
+				Description: "Server generates and signs JWT per JWT-SVID specification",
 				From:        "SPIRE Server",
 				To:          "JWT Signer",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"header_alg": "RS256 or ES256",
-					"header_kid": "key identifier for rotation",
-					"header_typ": "JWT",
-					"claim_sub":  "SPIFFE ID",
-					"claim_aud":  "audience(s)",
-					"claim_exp":  "expiration time",
-					"claim_iat":  "issued at time",
+					"header_alg": "ES256/ES384/ES512 (ECDSA) or RS256/RS384/RS512 (RSA) per JWT-SVID spec",
+					"header_kid": "key identifier for key rotation support",
+					"header_typ": "JWT (REQUIRED)",
+					"claim_sub":  "SPIFFE ID (REQUIRED) - spiffe://trust-domain/path",
+					"claim_aud":  "audience(s) (REQUIRED) - intended recipient",
+					"claim_exp":  "expiration time (REQUIRED) - typically 5 minutes",
+					"claim_iat":  "issued at time (RECOMMENDED)",
 				},
 				Security: []string{
-					"Short expiration (typically 5 minutes)",
-					"Key ID enables key rotation",
+					"Short expiration reduces token replay window",
+					"Key ID (kid) enables seamless key rotation",
+					"Audience claim prevents token misuse",
 				},
 			},
 			{
@@ -447,11 +463,14 @@ func getJWTSVIDIssuanceFlow() plugin.FlowDefinition {
 }
 
 // getMTLSHandshakeFlow defines mTLS handshake with SPIFFE
+// This flow is executable - it fetches real certificates and explains the mTLS process
 func getMTLSHandshakeFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "mtls-handshake",
 		Name:        "mTLS Handshake with X.509-SVIDs",
-		Description: "Mutual TLS authentication between services using SPIFFE identities",
+		Description: "Prepare X.509-SVID and trust bundle for mutual TLS authentication",
+		Executable:  true, // Fetches real certs via Workload API
+		Category:    "workload-api",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -573,11 +592,14 @@ func getMTLSHandshakeFlow() plugin.FlowDefinition {
 }
 
 // getCertificateRotationFlow defines automatic certificate rotation
+// This flow is executable - it analyzes the current SVID and explains rotation
 func getCertificateRotationFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "certificate-rotation",
 		Name:        "Automatic Certificate Rotation",
-		Description: "Seamless X.509-SVID rotation without service disruption",
+		Description: "Analyze current X.509-SVID and SPIRE automatic rotation mechanism",
+		Executable:  true, // Fetches real SVID to analyze
+		Category:    "workload-api",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,
@@ -665,11 +687,14 @@ func getCertificateRotationFlow() plugin.FlowDefinition {
 }
 
 // getTrustBundleFederationFlow defines federation between trust domains
+// This is an administrative process that requires SPIRE Server configuration
 func getTrustBundleFederationFlow() plugin.FlowDefinition {
 	return plugin.FlowDefinition{
 		ID:          "trust-bundle-federation",
 		Name:        "Trust Domain Federation",
-		Description: "Establishing trust between different SPIFFE trust domains",
+		Description: "Establishing trust between different SPIFFE trust domains (requires admin configuration)",
+		Executable:  false, // Admin process - requires SPIRE Server API access
+		Category:    "admin",
 		Steps: []plugin.FlowStep{
 			{
 				Order:       1,

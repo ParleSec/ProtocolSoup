@@ -58,6 +58,8 @@ type FlowDefinition struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
 	Steps       []FlowStep `json:"steps"`
+	Executable  bool       `json:"executable"`            // Whether this flow can be executed in Looking Glass
+	Category    string     `json:"category,omitempty"`    // "workload-api", "admin", "infrastructure"
 }
 
 // FlowStep represents a single step in a protocol flow

@@ -35,6 +35,8 @@ interface BackendFlow {
   name: string
   description: string
   steps: BackendFlowStep[]
+  executable: boolean
+  category?: string // "workload-api", "admin", "infrastructure"
 }
 
 interface BackendFlowStep {
@@ -260,7 +262,11 @@ class FlowRegistry {
     ])
 
     const baseProtocol = transformProtocol(protocolInfo)
-    const flows = flowsResponse.flows.map(f => transformFlow(f, protocolId))
+    
+    // Filter to only include executable flows in the Looking Glass
+    // Non-executable flows (admin, infrastructure) are for documentation only
+    const executableFlows = flowsResponse.flows.filter(f => f.executable !== false)
+    const flows = executableFlows.map(f => transformFlow(f, protocolId))
 
     return {
       ...baseProtocol,
