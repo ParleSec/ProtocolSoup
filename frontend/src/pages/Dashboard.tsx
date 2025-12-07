@@ -20,7 +20,7 @@ export function Dashboard() {
         </h1>
         <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
           Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, 
-          and SAML 2.0 flows against a local identity provider and see exactly what happens at each step.
+          SAML 2.0, and SPIFFE/SPIRE flows against working infrastructure and see exactly what happens at each step.
         </p>
       </header>
 
@@ -73,7 +73,7 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">
           Supported Protocols
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <ProtocolCard
             icon={Key}
             name="OAuth 2.0"
@@ -98,6 +98,14 @@ export function Dashboard() {
             flows={['sp_initiated_sso', 'idp_initiated_sso', 'single_logout']}
             to="/looking-glass"
           />
+          <ProtocolCard
+            icon={Shield}
+            name="SPIFFE/SPIRE"
+            description="Zero-trust workload identity framework"
+            color="green"
+            flows={['x509_svid', 'jwt_svid', 'mtls', 'cert_rotation']}
+            to="/looking-glass"
+          />
         </div>
       </section>
 
@@ -108,10 +116,6 @@ export function Dashboard() {
           <span>WebAuthn</span>
           <span className="text-surface-700 hidden sm:inline">•</span>
           <span>FIDO2</span>
-          <span className="text-surface-700 hidden sm:inline">•</span>
-          <span>mTLS</span>
-          <span className="text-surface-700 hidden sm:inline">•</span>
-          <span>SPIFFE</span>
         </div>
       </section>
 
@@ -125,6 +129,12 @@ export function Dashboard() {
           <RFCLink number="7636" title="PKCE" />
           <RFCLink number="6750" title="Bearer Token" />
           <RFCLink number="7519" title="JWT" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+          <SpecLink url="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/" title="SPIFFE" label="SPIFFE" />
+          <SpecLink url="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid" title="X.509-SVID" label="X.509-SVID" />
+          <SpecLink url="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#jwt-svid" title="JWT-SVID" label="JWT-SVID" />
+          <SpecLink url="https://spiffe.io/docs/latest/spire-about/" title="SPIRE" label="SPIRE" />
         </div>
       </section>
     </div>
@@ -213,7 +223,7 @@ function ProtocolCard({
   icon: React.ElementType
   name: string
   description: string
-  color: 'blue' | 'orange' | 'cyan'
+  color: 'blue' | 'orange' | 'cyan' | 'green'
   flows: string[]
   to: string
 }) {
@@ -235,6 +245,12 @@ function ProtocolCard({
       bg: 'bg-cyan-500/10',
       text: 'text-cyan-400',
       tag: 'bg-cyan-500/10 text-cyan-300',
+    },
+    green: {
+      border: 'border-green-500/20 hover:border-green-500/40',
+      bg: 'bg-green-500/10',
+      text: 'text-green-400',
+      tag: 'bg-green-500/10 text-green-300',
     },
   }
   const c = colors[color]
@@ -273,6 +289,21 @@ function RFCLink({ number, title }: { number: string; title: string }) {
       className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all text-sm group"
     >
       <span className="text-surface-500 font-mono group-hover:text-amber-400 transition-colors">RFC {number}</span>
+      <span className="text-surface-400 group-hover:text-white transition-colors">{title}</span>
+      <ExternalLink className="w-3 h-3 text-surface-600 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
+    </a>
+  )
+}
+
+function SpecLink({ url, title, label }: { url: string; title: string; label: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all text-sm group"
+    >
+      <span className="text-surface-500 font-mono group-hover:text-green-400 transition-colors">{label}</span>
       <span className="text-surface-400 group-hover:text-white transition-colors">{title}</span>
       <ExternalLink className="w-3 h-3 text-surface-600 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
     </a>
