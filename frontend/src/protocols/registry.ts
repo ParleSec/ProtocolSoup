@@ -187,16 +187,20 @@ export const protocolMeta: Record<string, {
       'Metadata Documents',
     ],
   },
-  // Extensibility stubs for future protocols
+  // SPIFFE/SPIRE - Workload Identity
   spiffe: {
-    icon: 'Key',
+    icon: 'Shield',
     color: 'green',
     gradient: 'from-green-500 to-emerald-500',
     features: [
       'Workload Identity',
-      'SVID Certificates',
+      'X.509-SVID',
+      'JWT-SVID',
       'Trust Domains',
-      'Attestation',
+      'Workload API',
+      'mTLS Authentication',
+      'Auto Certificate Rotation',
+      'Zero Trust Ready',
     ],
   },
 }

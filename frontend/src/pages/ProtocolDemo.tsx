@@ -48,6 +48,28 @@ const flowMeta: Record<string, {
     color: 'from-amber-500 to-orange-600',
     features: ['Legacy Flow', 'Direct Token Response', 'Not Recommended'],
   },
+  // SPIFFE/SPIRE flows
+  'x509-svid-issuance': {
+    icon: Shield,
+    color: 'from-green-500 to-emerald-600',
+    features: ['X.509 Certificate', 'Workload Identity', 'mTLS Ready'],
+    recommended: true,
+  },
+  'jwt-svid-issuance': {
+    icon: Key,
+    color: 'from-teal-500 to-cyan-600',
+    features: ['JWT Token', 'API Authentication', 'Short-Lived'],
+  },
+  'mtls-handshake': {
+    icon: Lock,
+    color: 'from-emerald-500 to-green-600',
+    features: ['Mutual TLS', 'Zero Trust', 'Service-to-Service'],
+  },
+  'certificate-rotation': {
+    icon: Zap,
+    color: 'from-lime-500 to-green-600',
+    features: ['Auto-Rotation', 'Zero Downtime', 'Streaming API'],
+  },
 }
 
 // Map flow IDs to URL slugs
@@ -84,7 +106,15 @@ export function ProtocolDemo() {
   }
 
   const meta = protocolMeta[protocolId || ''] || protocolMeta.oauth2
-  const ProtocolIcon = protocolId === 'oidc' ? Fingerprint : Shield
+  const getProtocolIcon = (id: string | undefined) => {
+    switch (id) {
+      case 'oidc': return Fingerprint
+      case 'spiffe': return Shield
+      case 'saml': return Key
+      default: return Shield
+    }
+  }
+  const ProtocolIcon = getProtocolIcon(protocolId)
 
   // Get first recommended flow for quick action
   const recommendedFlow = flows.find(f => flowMeta[f.id]?.recommended) || flows[0]

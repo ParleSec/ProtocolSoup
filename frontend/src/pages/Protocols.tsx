@@ -6,7 +6,7 @@
 import { Link } from 'react-router-dom'
 import { 
   Key, Fingerprint, FileKey, ChevronRight, 
-  ExternalLink, BookOpen
+  ExternalLink, BookOpen, Shield
 } from 'lucide-react'
 
 const protocols = [
@@ -58,13 +58,26 @@ const protocols = [
       { id: 'metadata', name: 'Metadata Exchange', rfc: 'Metadata' },
     ],
   },
+  {
+    id: 'spiffe',
+    name: 'SPIFFE/SPIRE',
+    description: 'Secure Production Identity Framework for Everyone. Provides cryptographic workload identity for zero-trust architectures via X.509 and JWT SVIDs.',
+    icon: Shield,
+    color: 'green',
+    spec: 'SPIFFE Specifications',
+    specUrl: 'https://spiffe.io/docs/latest/spiffe-about/overview/',
+    flows: [
+      { id: 'x509-svid-issuance', name: 'X.509-SVID Acquisition', rfc: 'X.509-SVID' },
+      { id: 'jwt-svid-issuance', name: 'JWT-SVID Acquisition', rfc: 'JWT-SVID' },
+      { id: 'mtls-handshake', name: 'mTLS with X.509-SVIDs', rfc: 'RFC 8446' },
+      { id: 'certificate-rotation', name: 'Certificate Rotation', rfc: 'Workload API' },
+    ],
+  },
 ]
 
 const comingSoon = [
   { name: 'WebAuthn', description: 'Passwordless authentication' },
   { name: 'FIDO2', description: 'Strong authentication framework' },
-  { name: 'mTLS', description: 'Mutual TLS authentication' },
-  { name: 'SPIFFE', description: 'Service identity framework' },
 ]
 
 export function Protocols() {
@@ -130,6 +143,12 @@ function ProtocolCard({ protocol }: { protocol: typeof protocols[0] }) {
       bg: 'bg-cyan-500/10',
       text: 'text-cyan-400',
       tag: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+    },
+    green: {
+      border: 'border-green-500/20',
+      bg: 'bg-green-500/10',
+      text: 'text-green-400',
+      tag: 'bg-green-500/10 text-green-300 border-green-500/20',
     },
   }
   const c = colors[protocol.color as keyof typeof colors]

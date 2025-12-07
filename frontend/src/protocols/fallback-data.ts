@@ -1021,6 +1021,290 @@ export const fallbackFlows: Record<string, FlowData> = {
       },
     ]
   },
+
+  // ============================================================================
+  // SPIFFE/SPIRE Flows
+  // ============================================================================
+
+  'x509-svid-issuance': {
+    title: "X.509-SVID Acquisition",
+    description: "Acquire an X.509 certificate containing a SPIFFE ID via the Workload API.",
+    steps: [
+      {
+        order: 1,
+        name: "Connect to Workload API",
+        description: "Workload connects to SPIRE Agent via Unix Domain Socket.",
+        from: "Workload",
+        to: "SPIRE Agent",
+        type: "request",
+        parameters: {
+          socket_path: "unix:///run/spire/sockets/agent.sock",
+          protocol: "gRPC",
+          api_method: "FetchX509SVID (streaming)",
+        },
+      },
+      {
+        order: 2,
+        name: "Workload Attestation",
+        description: "Agent verifies the calling workload's identity using selectors.",
+        from: "SPIRE Agent",
+        to: "Workload Attestor",
+        type: "internal",
+        parameters: {
+          unix_selectors: "uid, gid, binary path",
+          docker_selectors: "container labels, image ID",
+          k8s_selectors: "namespace, service account, pod labels",
+        },
+      },
+      {
+        order: 3,
+        name: "SVID Request",
+        description: "Agent requests SVID from SPIRE Server on workload's behalf.",
+        from: "SPIRE Agent",
+        to: "SPIRE Server",
+        type: "request",
+        parameters: {
+          spiffe_id: "From registration entry",
+          csr: "Certificate Signing Request",
+          ttl_hint: "Requested TTL",
+        },
+      },
+      {
+        order: 4,
+        name: "Certificate Signing",
+        description: "Server signs the certificate with the trust domain CA.",
+        from: "SPIRE Server",
+        to: "CA",
+        type: "internal",
+        parameters: {
+          issuer: "Trust domain CA",
+          san_uri: "spiffe://trust-domain/workload/path",
+          validity: "Short-lived (typically 1 hour)",
+        },
+      },
+      {
+        order: 5,
+        name: "SVID Delivery",
+        description: "X.509-SVID delivered to workload with private key.",
+        from: "SPIRE Agent",
+        to: "Workload",
+        type: "response",
+        parameters: {
+          x509_svid: "Signed X.509 certificate",
+          private_key: "Corresponding private key",
+          trust_bundle: "CA certificates for verification",
+        },
+      },
+    ]
+  },
+
+  'jwt-svid-issuance': {
+    title: "JWT-SVID Acquisition",
+    description: "Acquire a JWT token containing SPIFFE claims for API authentication.",
+    steps: [
+      {
+        order: 1,
+        name: "Request JWT-SVID",
+        description: "Workload requests JWT-SVID with target audience.",
+        from: "Workload",
+        to: "SPIRE Agent",
+        type: "request",
+        parameters: {
+          api_method: "FetchJWTSVID",
+          audience: "Intended recipient (e.g., api.example.com)",
+        },
+      },
+      {
+        order: 2,
+        name: "Identity Verification",
+        description: "Agent verifies workload is authorized for this SPIFFE ID.",
+        from: "SPIRE Agent",
+        to: "Registration Cache",
+        type: "internal",
+        parameters: {
+          selector_match: "Verify workload selectors match entry",
+          spiffe_id: "Assigned from matching entry",
+        },
+      },
+      {
+        order: 3,
+        name: "JWT Generation",
+        description: "Server generates and signs JWT with SPIFFE claims.",
+        from: "SPIRE Server",
+        to: "JWT Signer",
+        type: "internal",
+        parameters: {
+          alg: "ES256 or RS256",
+          sub: "SPIFFE ID (spiffe://trust-domain/path)",
+          aud: "Target audience(s)",
+          exp: "Short expiration (typically 5 minutes)",
+          iat: "Issued at timestamp",
+        },
+      },
+      {
+        order: 4,
+        name: "Token Delivery",
+        description: "JWT-SVID returned to workload for API authentication.",
+        from: "SPIRE Agent",
+        to: "Workload",
+        type: "response",
+        parameters: {
+          token: "Signed JWT-SVID",
+          expiry: "Token expiration time",
+        },
+      },
+    ]
+  },
+
+  'mtls-handshake': {
+    title: "mTLS with X.509-SVIDs",
+    description: "Establish mutual TLS authentication between services using SPIFFE identities.",
+    steps: [
+      {
+        order: 1,
+        name: "Client Fetches SVID",
+        description: "Client service obtains its X.509-SVID from Workload API.",
+        from: "Client",
+        to: "SPIRE Agent",
+        type: "request",
+        parameters: {
+          x509_svid: "Client's certificate",
+          private_key: "Client's private key",
+          trust_bundle: "CA certificates",
+        },
+      },
+      {
+        order: 2,
+        name: "TLS Client Hello",
+        description: "Client initiates TLS connection to server.",
+        from: "Client",
+        to: "Server",
+        type: "request",
+        parameters: {
+          tls_version: "TLS 1.2 or 1.3",
+          cipher_suites: "Supported algorithms",
+        },
+      },
+      {
+        order: 3,
+        name: "Server Certificate",
+        description: "Server presents its X.509-SVID certificate.",
+        from: "Server",
+        to: "Client",
+        type: "response",
+        parameters: {
+          certificate: "Server's X.509-SVID",
+          san_uri: "spiffe://trust-domain/server",
+        },
+      },
+      {
+        order: 4,
+        name: "Client Certificate",
+        description: "Client presents its X.509-SVID certificate.",
+        from: "Client",
+        to: "Server",
+        type: "response",
+        parameters: {
+          certificate: "Client's X.509-SVID",
+          san_uri: "spiffe://trust-domain/client",
+        },
+      },
+      {
+        order: 5,
+        name: "Mutual Verification",
+        description: "Both sides verify certificates against SPIFFE trust bundle.",
+        from: "Both",
+        to: "Trust Bundle",
+        type: "internal",
+        parameters: {
+          chain_validation: "Verify to trusted root",
+          spiffe_id_check: "Extract and authorize SPIFFE ID",
+        },
+      },
+      {
+        order: 6,
+        name: "Secure Channel",
+        description: "Encrypted channel established with verified identities.",
+        from: "Client",
+        to: "Server",
+        type: "internal",
+        parameters: {
+          client_id: "spiffe://trust-domain/client",
+          server_id: "spiffe://trust-domain/server",
+          encryption: "TLS 1.3 with forward secrecy",
+        },
+      },
+    ]
+  },
+
+  'certificate-rotation': {
+    title: "Certificate Rotation",
+    description: "Automatic X.509-SVID rotation without service disruption.",
+    steps: [
+      {
+        order: 1,
+        name: "Monitor Expiration",
+        description: "SPIRE Agent monitors certificate lifetime.",
+        from: "SPIRE Agent",
+        to: "SVID Cache",
+        type: "internal",
+        parameters: {
+          check_interval: "Periodic (e.g., every 30s)",
+          rotation_threshold: "Typically 50% of TTL",
+        },
+      },
+      {
+        order: 2,
+        name: "Pre-Rotation Request",
+        description: "Agent requests new SVID before expiration.",
+        from: "SPIRE Agent",
+        to: "SPIRE Server",
+        type: "request",
+        parameters: {
+          reason: "Approaching rotation threshold",
+          current_serial: "For tracking",
+        },
+      },
+      {
+        order: 3,
+        name: "New SVID Issued",
+        description: "Server issues fresh certificate with new validity period.",
+        from: "SPIRE Server",
+        to: "SPIRE Agent",
+        type: "response",
+        parameters: {
+          new_x509_svid: "Fresh certificate",
+          new_serial: "New serial number",
+          validity: "Fresh TTL period",
+        },
+      },
+      {
+        order: 4,
+        name: "Workload Notification",
+        description: "Workload receives new SVID via streaming API.",
+        from: "SPIRE Agent",
+        to: "Workload",
+        type: "response",
+        parameters: {
+          streaming_update: "FetchX509SVID stream delivers new SVID",
+          trust_bundle: "Updated if changed",
+        },
+      },
+      {
+        order: 5,
+        name: "Graceful Transition",
+        description: "Workload uses new certificate for new connections.",
+        from: "Workload",
+        to: "TLS Stack",
+        type: "internal",
+        parameters: {
+          new_connections: "Use new certificate",
+          existing_connections: "Continue with old cert until closed",
+          zero_downtime: "No service interruption",
+        },
+      },
+    ]
+  },
 }
 
 /**
@@ -1047,6 +1331,11 @@ export const flowIdMap: Record<string, string> = {
   'idp-initiated-sso': 'saml_idp_initiated_sso',
   'single-logout': 'saml_single_logout',
   'metadata': 'saml_metadata',
+  // SPIFFE/SPIRE flows (use consistent hyphenated format)
+  'x509-svid-issuance': 'x509-svid-issuance',
+  'jwt-svid-issuance': 'jwt-svid-issuance',
+  'mtls-handshake': 'mtls-handshake',
+  'certificate-rotation': 'certificate-rotation',
 }
 
 /**

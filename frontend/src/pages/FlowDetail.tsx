@@ -202,6 +202,115 @@ const cert = doc.querySelector('KeyDescriptor[use="signing"] X509Certificate');
 const certificate = cert?.textContent;`
     }
 
+    // SPIFFE/SPIRE flows
+    if (mappedFlowId === 'x509-svid-issuance') {
+      return `// X.509-SVID Acquisition using go-spiffe
+import (
+    "github.com/spiffe/go-spiffe/v2/workloadapi"
+)
+
+// Connect to SPIRE Agent Workload API
+ctx := context.Background()
+source, err := workloadapi.NewX509Source(ctx,
+    workloadapi.WithClientOptions(
+        workloadapi.WithAddr("unix:///run/spire/sockets/agent.sock"),
+    ),
+)
+if err != nil {
+    log.Fatal("Failed to create X509Source:", err)
+}
+defer source.Close()
+
+// Get the X.509-SVID (auto-rotates)
+svid, err := source.GetX509SVID()
+if err != nil {
+    log.Fatal("Failed to get X509-SVID:", err)
+}
+
+fmt.Printf("SPIFFE ID: %s\\n", svid.ID)
+fmt.Printf("Not After: %s\\n", svid.Certificates[0].NotAfter)`
+    }
+
+    if (mappedFlowId === 'jwt-svid-issuance') {
+      return `// JWT-SVID Acquisition using go-spiffe
+import (
+    "github.com/spiffe/go-spiffe/v2/workloadapi"
+    "github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+)
+
+// Connect to SPIRE Agent
+source, err := workloadapi.NewJWTSource(ctx,
+    workloadapi.WithClientOptions(
+        workloadapi.WithAddr("unix:///run/spire/sockets/agent.sock"),
+    ),
+)
+if err != nil {
+    log.Fatal("Failed to create JWTSource:", err)
+}
+defer source.Close()
+
+// Fetch JWT-SVID for specific audience
+svid, err := source.FetchJWTSVID(ctx, jwtsvid.Params{
+    Audience: "api.example.com",
+})
+if err != nil {
+    log.Fatal("Failed to get JWT-SVID:", err)
+}
+
+// Use token in API requests
+req.Header.Set("Authorization", "Bearer " + svid.Marshal())`
+    }
+
+    if (mappedFlowId === 'mtls-handshake') {
+      return `// mTLS Server using X.509-SVIDs
+import (
+    "github.com/spiffe/go-spiffe/v2/spiffetls"
+    "github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+)
+
+// Create mTLS listener (auto-rotates certificates)
+listener, err := spiffetls.Listen(ctx, "tcp", ":8443",
+    tlsconfig.AuthorizeMemberOf(trustDomain),
+)
+if err != nil {
+    log.Fatal("Failed to create listener:", err)
+}
+
+// Handle connections with verified SPIFFE IDs
+for {
+    conn, _ := listener.Accept()
+    tlsConn := conn.(*tls.Conn)
+    peerID := tlsConn.ConnectionState().PeerCertificates[0].URIs[0]
+    fmt.Printf("Authenticated peer: %s\\n", peerID)
+}`
+    }
+
+    if (mappedFlowId === 'certificate-rotation') {
+      return `// Automatic Certificate Rotation via Streaming API
+import "github.com/spiffe/go-spiffe/v2/workloadapi"
+
+// X509Source automatically handles rotation
+source, _ := workloadapi.NewX509Source(ctx)
+
+// Get notified of SVID updates
+go func() {
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-time.After(30 * time.Second):
+            svid, _ := source.GetX509SVID()
+            log.Printf("Current SVID expires: %s", 
+                svid.Certificates[0].NotAfter)
+        }
+    }
+}()
+
+// SPIRE Agent rotates at ~50% of TTL
+// Default TTL: 1 hour → Rotates at ~30 minutes
+// New connections automatically use new certificate`
+    }
+
     return `// Authorization Code Flow
 const authUrl = new URL('/oauth2/authorize', origin);
 authUrl.searchParams.set('response_type', 'code');
@@ -232,6 +341,23 @@ window.location.href = authUrl;`
     if (mappedFlowId === 'saml_sp_initiated_sso' || mappedFlowId === 'saml_idp_initiated_sso') {
       badges.push({ label: 'SSO', color: 'green', icon: Shield })
     }
+    // SPIFFE/SPIRE badges
+    if (mappedFlowId === 'x509-svid-issuance') {
+      badges.push({ label: 'X.509 Certificate', color: 'green', icon: Shield })
+      badges.push({ label: 'Workload API', color: 'cyan', icon: Server })
+    }
+    if (mappedFlowId === 'jwt-svid-issuance') {
+      badges.push({ label: 'JWT Token', color: 'purple', icon: Key })
+      badges.push({ label: 'Short-Lived', color: 'yellow', icon: Lock })
+    }
+    if (mappedFlowId === 'mtls-handshake') {
+      badges.push({ label: 'Mutual TLS', color: 'green', icon: Lock })
+      badges.push({ label: 'Zero Trust', color: 'blue', icon: Shield })
+    }
+    if (mappedFlowId === 'certificate-rotation') {
+      badges.push({ label: 'Auto-Rotation', color: 'cyan', icon: Shield })
+      badges.push({ label: 'Zero Downtime', color: 'green', icon: Lock })
+    }
     if (mappedFlowId === 'saml_single_logout') {
       badges.push({ label: 'Federated Logout', color: 'yellow', icon: Globe })
     }
@@ -240,9 +366,11 @@ window.location.href = authUrl;`
 
   const getProtocolName = (id: string | undefined) => {
     switch (id) {
+      case 'oauth2': return 'OAuth 2.0'
       case 'oidc': return 'OpenID Connect'
       case 'saml': return 'SAML 2.0'
-      default: return 'OAuth 2.0'
+      case 'spiffe': return 'SPIFFE/SPIRE'
+      default: return id || 'Protocol'
     }
   }
 

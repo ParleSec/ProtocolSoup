@@ -21,7 +21,7 @@ interface FlowDiagramProps {
   onStepClick?: (step: number) => void
 }
 
-// Actor configurations - supports OAuth 2.0, OIDC, and SAML terminology
+// Actor configurations - supports OAuth 2.0, OIDC, SAML, and SPIFFE terminology
 const actorConfig: Record<string, { 
   icon: React.ElementType
   label: string
@@ -96,6 +96,109 @@ const actorConfig: Record<string, {
     label: 'Both Parties',
     shortLabel: 'Both',
     color: '#9ca3af', // gray
+  },
+  // SPIFFE/SPIRE actors
+  'Workload': {
+    icon: Globe,
+    label: 'Workload',
+    shortLabel: 'Workload',
+    color: '#60a5fa', // blue
+  },
+  'SPIRE Agent': {
+    icon: Shield,
+    label: 'SPIRE Agent',
+    shortLabel: 'Agent',
+    color: '#4ade80', // green
+  },
+  'SPIRE Server': {
+    icon: Database,
+    label: 'SPIRE Server',
+    shortLabel: 'Server',
+    color: '#c084fc', // purple
+  },
+  'Key Manager': {
+    icon: Key,
+    label: 'Key Manager',
+    shortLabel: 'Keys',
+    color: '#fbbf24', // yellow
+  },
+  'Certificate Authority': {
+    icon: Shield,
+    label: 'Certificate Authority',
+    shortLabel: 'CA',
+    color: '#f472b6', // pink
+  },
+  'CA': {
+    icon: Shield,
+    label: 'Certificate Authority',
+    shortLabel: 'CA',
+    color: '#f472b6', // pink
+  },
+  'Workload Attestor': {
+    icon: Shield,
+    label: 'Workload Attestor',
+    shortLabel: 'Attestor',
+    color: '#fb923c', // orange
+  },
+  'Registration Cache': {
+    icon: Database,
+    label: 'Registration Cache',
+    shortLabel: 'Registry',
+    color: '#9ca3af', // gray
+  },
+  'JWT Signer': {
+    icon: Key,
+    label: 'JWT Signer',
+    shortLabel: 'Signer',
+    color: '#fbbf24', // yellow
+  },
+  'Trust Bundle': {
+    icon: Shield,
+    label: 'Trust Bundle',
+    shortLabel: 'Bundle',
+    color: '#4ade80', // green
+  },
+  'Server': {
+    icon: Database,
+    label: 'Server',
+    shortLabel: 'Server',
+    color: '#c084fc', // purple
+  },
+  'Client Service': {
+    icon: Globe,
+    label: 'Client Service',
+    shortLabel: 'Client',
+    color: '#60a5fa', // blue
+  },
+  'Server Service': {
+    icon: Database,
+    label: 'Server Service',
+    shortLabel: 'Server',
+    color: '#c084fc', // purple
+  },
+  'Both Services': {
+    icon: Shield,
+    label: 'Both Services',
+    shortLabel: 'Both',
+    color: '#9ca3af', // gray
+  },
+  'Both': {
+    icon: Shield,
+    label: 'Both Parties',
+    shortLabel: 'Both',
+    color: '#9ca3af', // gray
+  },
+  'TLS Stack': {
+    icon: Shield,
+    label: 'TLS Stack',
+    shortLabel: 'TLS',
+    color: '#4ade80', // green
+  },
+  'SVID Cache': {
+    icon: Database,
+    label: 'SVID Cache',
+    shortLabel: 'Cache',
+    color: '#fb923c', // orange
   },
 }
 
