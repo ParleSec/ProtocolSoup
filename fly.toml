@@ -1,10 +1,12 @@
-# fly.toml app configuration file generated for protocolsoup on 2025-12-01T00:37:02+11:00
+# fly.toml - Protocol Soup main application
+# Deploy with: fly deploy
 #
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# For SPIFFE support, first deploy the SPIRE Server:
+#   fly launch --config fly.spire-server.toml --name protocolsoup-spire
+#   fly secrets set SPIRE_JOIN_TOKEN=$(fly ssh console -a protocolsoup-spire -C "/opt/spire/bin/spire-server token generate -spiffeID spiffe://protocolsoup.com/agent/fly -ttl 86400 | grep Token | awk '{print \$2}'")
 
 app = 'protocolsoup'
-primary_region = 'iad'
+primary_region = 'syd'
 
 [build]
   dockerfile = 'docker/Dockerfile.fly'
@@ -17,6 +19,14 @@ primary_region = 'iad'
   SHOWCASE_ENV = 'production'
   SHOWCASE_LISTEN_ADDR = ':8080'
   SHOWCASE_MOCK_IDP = 'true'
+  
+  # SPIFFE/SPIRE Configuration
+  # The agent will connect to SPIRE Server via Fly private network
+  SPIRE_SERVER_ADDRESS = 'protocolsoup-spire.internal'
+  SPIFFE_TRUST_DOMAIN = 'protocolsoup.com'
+
+# Secrets required (set via `fly secrets set`):
+# - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
 
 [http_service]
   internal_port = 8080
@@ -32,11 +42,16 @@ primary_region = 'iad'
     soft_limit = 200
 
   [[http_service.checks]]
-    interval = '10s'
+    interval = '15s'
     timeout = '5s'
-    grace_period = '10s'
+    grace_period = '30s'  # Extended for SPIRE Agent startup
     method = 'GET'
     path = '/health'
+
+# Persistent volume for SPIRE Agent data (survives restarts)
+[mounts]
+  source = "spire_agent_data"
+  destination = "/opt/spire/data"
 
 [[vm]]
   memory = '512mb'

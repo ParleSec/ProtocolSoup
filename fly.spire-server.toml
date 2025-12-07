@@ -1,0 +1,45 @@
+# SPIRE Server - Fly.io Configuration
+# Deploy with: fly deploy --config fly.spire-server.toml --app protocolsoup-spire
+
+app = "protocolsoup-spire"
+primary_region = "syd"
+
+[build]
+  dockerfile = "docker/Dockerfile.spire-server.fly"
+
+[env]
+  SPIRE_TRUST_DOMAIN = "protocolsoup.com"
+  SPIRE_LOG_LEVEL = "INFO"
+
+# HTTP service for health checks
+[http_service]
+  internal_port = 8080
+  force_https = false
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+# TCP service for SPIRE API (internal only)
+[[services]]
+  internal_port = 8081
+  protocol = "tcp"
+  
+  [[services.ports]]
+    port = 8081
+
+# Persistent volume for SPIRE data
+[mounts]
+  source = "spire_data"
+  destination = "/opt/spire/data"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

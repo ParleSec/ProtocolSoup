@@ -2,13 +2,11 @@
 
 A sandbox for exploring authentication and identity protocols. Run real flows against a local MockIdP, inspect HTTP traffic, decode tokens, and understand security protocols hands-on.
 
-**Currently serving:** **OAuth 2.0** • **OpenID Connect** • **SAML 2.0** • **SPIFFE/SPIRE** *(local only)*
+**Currently serving:** **OAuth 2.0** • **OpenID Connect** • **SAML 2.0** • **SPIFFE/SPIRE**
 
 ## Try it Live
 
-**[protocolsoup.com](https://protocolsoup.com)** - OAuth 2.0, OIDC, and SAML 2.0 flows
-
-> **Note:** SPIFFE/SPIRE requires local SPIRE infrastructure. Run locally with Docker to use SPIFFE flows.
+**[protocolsoup.com](https://protocolsoup.com)** - All protocols including real SPIFFE workload identity!
 
 ## Run Locally
 
@@ -83,7 +81,7 @@ GET  /saml/slo                         # Single Logout (Redirect)
 POST /saml/slo                         # Single Logout (POST)
 ```
 
-### SPIFFE/SPIRE *(local Docker only)*
+### SPIFFE/SPIRE
 ```
 GET  /spiffe/status                    # Workload API connection status
 GET  /spiffe/svid/x509                 # X.509-SVID certificate
@@ -91,8 +89,6 @@ GET  /spiffe/svid/jwt                  # JWT-SVID token
 GET  /spiffe/trust-bundle              # Trust bundle (CA certificates)
 GET  /spiffe/workload                  # Workload identity info
 ```
-
-> Requires SPIRE infrastructure. Available when running locally with `docker compose up`.
 
 ### API
 ```
@@ -149,13 +145,13 @@ ProtocolLens/
 - IdP-Initiated SSO
 - Single Logout (SLO)
 
-### SPIFFE/SPIRE *(local Docker only)*
+### SPIFFE/SPIRE
 - X.509-SVID acquisition via Workload API
 - JWT-SVID acquisition and validation
 - mTLS configuration with automatic certificate rotation
 - Trust bundle distribution
 
-> SPIFFE flows execute against real SPIRE infrastructure provisioned by Docker Compose. On production (protocolsoup.com), SPIFFE flows show "infrastructure required" since SPIRE is not deployed.
+> SPIFFE flows execute against real SPIRE infrastructure on both local Docker and production (protocolsoup.com).
 
 ## Tech Stack
 

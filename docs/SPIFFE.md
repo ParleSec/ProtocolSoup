@@ -32,13 +32,13 @@ ProtocolLens includes a fully functional SPIFFE/SPIRE infrastructure:
 
 ## Running the SPIRE Stack
 
-### Start with Docker Compose
+### Local Development (Docker Compose)
 
 ```bash
 cd docker
 
 # Start the full stack with SPIRE
-docker compose -f docker-compose.yml -f docker-compose.spire.yml up -d
+docker compose up -d
 
 # View SPIRE logs
 docker logs protocolsoup-spire-server
@@ -56,6 +56,101 @@ docker exec protocolsoup-spire-agent /opt/spire/bin/spire-server entry show \
 # Fetch SVIDs (proves SPIRE is issuing real certificates)
 docker exec protocolsoup-spire-agent /opt/spire/bin/spire-agent api fetch x509 \
     -socketPath /run/spire/sockets/agent.sock
+```
+
+### Production Deployment (Fly.io)
+
+SPIFFE/SPIRE can be deployed to Fly.io with two apps:
+1. **protocolsoup-spire** - SPIRE Server (certificate authority)
+2. **protocolsoup** - Main app with embedded SPIRE Agent
+
+#### Step 1: Deploy SPIRE Server
+
+```bash
+# Create and deploy SPIRE Server app
+fly launch --config fly.spire-server.toml --name protocolsoup-spire
+
+# Create persistent volume for SPIRE data
+fly volumes create spire_data -a protocolsoup-spire -s 1
+
+# Deploy
+fly deploy -c fly.spire-server.toml -a protocolsoup-spire
+```
+
+#### Step 2: Generate Join Token
+
+```bash
+# SSH into SPIRE Server and generate a join token
+fly ssh console -a protocolsoup-spire
+
+# Inside the container:
+/opt/spire/bin/spire-server token generate \
+    -socketPath /run/spire/sockets/server.sock \
+    -spiffeID spiffe://protocolsoup.com/agent/fly \
+    -ttl 86400
+
+# Copy the token value
+```
+
+#### Step 3: Configure Main App
+
+```bash
+# Set the join token as a secret
+fly secrets set SPIRE_JOIN_TOKEN=<token-from-step-2> -a protocolsoup
+
+# Deploy the main app (includes embedded SPIRE Agent)
+fly deploy
+```
+
+#### Step 4: Register Workload
+
+```bash
+# SSH into SPIRE Server to register the production workload
+fly ssh console -a protocolsoup-spire
+
+/opt/spire/bin/spire-server entry create \
+    -socketPath /run/spire/sockets/server.sock \
+    -spiffeID spiffe://protocolsoup.com/workload/backend \
+    -parentID spiffe://protocolsoup.com/agent/fly \
+    -selector unix:uid:0 \
+    -ttl 3600
+```
+
+#### Architecture on Fly.io
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 Fly.io Private Network                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────────────┐      ┌─────────────────────────┐   │
+│  │ protocolsoup-spire  │      │ protocolsoup            │   │
+│  │ (SPIRE Server)      │◄────►│ (Backend + Agent)       │   │
+│  │                     │ TCP  │                         │   │
+│  │ Port 8081 (API)     │ 8081 │ Agent → Unix Socket     │   │
+│  │ Port 8080 (Health)  │      │ Backend → Agent Socket  │   │
+│  └─────────────────────┘      └─────────────────────────┘   │
+│         ▲                              │                     │
+│         │                              │                     │
+│    Persistent                     Public                    │
+│    Volume                         HTTPS                     │
+│                                       ▼                     │
+│                              ┌─────────────────┐            │
+│                              │ protocolsoup.com│            │
+│                              └─────────────────┘            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Renewing Join Tokens
+
+Join tokens are single-use. When redeploying the main app:
+
+```bash
+# Generate new token
+fly ssh console -a protocolsoup-spire -C "/opt/spire/bin/spire-server token generate -socketPath /run/spire/sockets/server.sock -spiffeID spiffe://protocolsoup.com/agent/fly -ttl 86400"
+
+# Update secret
+fly secrets set SPIRE_JOIN_TOKEN=<new-token> -a protocolsoup
 ```
 
 ## Configuration
@@ -118,14 +213,14 @@ Connection failed during accept: could not resolve caller information
    - Configure agent to listen on TCP
    - Less secure but works across containers
 
-## Demo Mode
+## Without SPIRE Infrastructure
 
-When SPIFFE cannot connect to a real Workload API, the backend falls back to demo mode:
+When SPIFFE cannot connect to a real Workload API (e.g., on production without SPIRE deployed):
 
-- Simulated X.509-SVIDs with realistic structure
-- Simulated JWT-SVIDs with proper claims
-- Demo trust bundle data
-- All protocol flows work for educational purposes
+- `/spiffe/status` returns `enabled: false`
+- SPIFFE flows in Looking Glass show "Workload API Unavailable"
+- Clear error message explains SPIRE infrastructure is required
+- Other protocols (OAuth 2.0, OIDC, SAML) work normally
 
 ## API Endpoints
 
@@ -157,11 +252,9 @@ POST /spiffe/validate/jwt   # Validate JWT-SVID
 POST /spiffe/validate/x509  # Validate X.509-SVID
 ```
 
-### Demos
+### Workload Info
 ```
-GET /spiffe/demo/mtls       # mTLS demonstration info
-POST /spiffe/demo/mtls/call # Execute mTLS demo
-GET /spiffe/demo/rotation   # Certificate rotation info
+GET /spiffe/workload        # Current workload identity details
 ```
 
 ## File Structure

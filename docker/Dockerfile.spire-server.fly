@@ -1,0 +1,43 @@
+# SPIRE Server for Fly.io Production
+# This creates a production-ready SPIRE Server with:
+# - TCP-based API (for Fly private networking)
+# - HTTP health endpoint
+# - Persistent data storage
+
+FROM ghcr.io/spiffe/spire-server:1.9.6 AS spire-base
+
+# Build health check server
+FROM golang:1.22-alpine AS health-builder
+WORKDIR /app
+COPY docker/spire/server-fly/health-server.go .
+RUN CGO_ENABLED=0 go build -o health-server health-server.go
+
+# Final production image
+FROM alpine:3.19
+LABEL authors="ProtocolLens"
+LABEL description="SPIRE Server for Fly.io production"
+
+RUN apk add --no-cache ca-certificates supervisor
+
+WORKDIR /opt/spire
+
+# Copy SPIRE Server binary
+COPY --from=spire-base /opt/spire/bin/spire-server /opt/spire/bin/spire-server
+
+# Copy health server
+COPY --from=health-builder /app/health-server /opt/spire/bin/health-server
+
+# Create directories
+RUN mkdir -p /opt/spire/data/server /opt/spire/conf/server /run/spire/sockets /var/log && \
+    chown -R nobody:nobody /opt/spire /run/spire
+
+# Copy configuration files
+COPY docker/spire/server-fly/server.conf /opt/spire/conf/server/server.conf
+COPY docker/spire/server-fly/supervisord.conf /etc/supervisord.conf
+
+# Expose ports
+# 8081 - SPIRE Server API (TCP, for agents)
+# 8080 - Health check HTTP
+EXPOSE 8081 8080
+
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

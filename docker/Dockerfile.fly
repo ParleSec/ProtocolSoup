@@ -1,5 +1,6 @@
-# Fly.io Dockerfile - Combined frontend + backend build
-# This creates a single container that serves both the API and static frontend
+# Fly.io Dockerfile - Combined frontend + backend + SPIRE Agent
+# This creates a single container that serves both the API, static frontend,
+# and includes a SPIRE Agent for workload identity.
 
 # ============================================
 # Stage 1: Build Frontend
@@ -42,20 +43,42 @@ RUN go mod tidy && go mod download
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ./cmd/server
 
 # ============================================
-# Stage 3: Production Image
+# Stage 3: Get SPIRE binaries
+# ============================================
+FROM ghcr.io/spiffe/spire-agent:1.9.6 AS spire-agent
+FROM ghcr.io/spiffe/spire-server:1.9.6 AS spire-server
+
+# ============================================
+# Stage 4: Production Image with SPIRE Agent
 # ============================================
 FROM alpine:3.19
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+# Install runtime dependencies
+RUN apk --no-cache add ca-certificates supervisor
 
 # Copy the backend binary
 COPY --from=backend-builder /app/server .
 
 # Copy the frontend build to be served as static files
 COPY --from=frontend-builder /frontend/dist ./static
+
+# Copy SPIRE Agent binary (and server binary for token generation if needed)
+COPY --from=spire-agent /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
+COPY --from=spire-server /opt/spire/bin/spire-server /opt/spire/bin/spire-server
+
+# Create SPIRE directories
+RUN mkdir -p /opt/spire/conf/agent /opt/spire/data/agent /run/spire/sockets /var/log/supervisor
+
+# Copy configuration files
+COPY docker/fly/agent.conf /opt/spire/conf/agent/agent.conf
+COPY docker/fly/start-agent.sh /opt/spire/bin/start-agent.sh
+COPY docker/fly/supervisord.conf /etc/supervisord.conf
+
+# Fix line endings and permissions
+RUN chmod +x /opt/spire/bin/start-agent.sh && \
+    sed -i 's/\r$//' /opt/spire/bin/start-agent.sh
 
 # Set environment variables
 ENV SHOWCASE_ENV=production
@@ -66,9 +89,8 @@ ENV SHOWCASE_STATIC_DIR=/app/static
 EXPOSE 8080
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Run the server
-CMD ["./server"]
-
+# Run with supervisor
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
