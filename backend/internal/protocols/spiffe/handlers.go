@@ -391,7 +391,7 @@ func (p *Plugin) handleValidateJWT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check audience
-	audClaim, _ := claims["aud"]
+	audClaim := claims["aud"]
 	var audMatch bool
 	switch aud := audClaim.(type) {
 	case string:
@@ -835,7 +835,7 @@ func (p *Plugin) handleRotationDemo(w http.ResponseWriter, r *http.Request) {
 		"spiffe_id":       info.SPIFFEID,
 		"current_expiry":  info.NotAfter,
 		"next_rotation":   rotationTime,
-		"time_to_rotation": rotationTime.Sub(time.Now()).String(),
+		"time_to_rotation": time.Until(rotationTime).String(),
 		"rotation_info": map[string]string{
 			"strategy":  "Rotate at 50% of TTL",
 			"mechanism": "Streaming Workload API (FetchX509SVID)",
@@ -867,11 +867,11 @@ func parseJWTForDisplay(token string) (map[string]interface{}, map[string]interf
 	claims := make(map[string]interface{})
 
 	if headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0]); err == nil {
-		json.Unmarshal(headerBytes, &header)
+		_ = json.Unmarshal(headerBytes, &header)
 	}
 
 	if claimsBytes, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-		json.Unmarshal(claimsBytes, &claims)
+		_ = json.Unmarshal(claimsBytes, &claims)
 	}
 
 	return header, claims
