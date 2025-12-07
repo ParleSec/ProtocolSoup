@@ -17,6 +17,7 @@ import (
 	"github.com/security-showcase/protocol-showcase/internal/protocols/oauth2"
 	"github.com/security-showcase/protocol-showcase/internal/protocols/oidc"
 	"github.com/security-showcase/protocol-showcase/internal/protocols/saml"
+	"github.com/security-showcase/protocol-showcase/internal/protocols/spiffe"
 )
 
 func main() {
@@ -65,6 +66,12 @@ func main() {
 	samlPlugin := saml.NewPlugin()
 	if err := registry.Register(samlPlugin); err != nil {
 		log.Fatalf("Failed to register SAML plugin: %v", err)
+	}
+
+	// Register SPIFFE/SPIRE plugin
+	spiffePlugin := spiffe.NewPlugin()
+	if err := registry.Register(spiffePlugin); err != nil {
+		log.Fatalf("Failed to register SPIFFE plugin: %v", err)
 	}
 
 	// Initialize all plugins

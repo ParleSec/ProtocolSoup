@@ -1,0 +1,257 @@
+# Demo Service Dockerfile
+# A simple workload that demonstrates SPIFFE server capabilities
+# - Serves requests over mTLS using X.509-SVID
+# - Validates incoming JWT-SVIDs
+# - Shows certificate rotation in action
+
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+RUN apk add --no-cache gcc musl-dev
+
+# Create demo service source
+COPY <<EOF main.go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
+)
+
+type server struct {
+	x509Source   *workloadapi.X509Source
+	bundleSource *workloadapi.BundleSource
+	trustDomain  spiffeid.TrustDomain
+}
+
+func main() {
+	socketPath := os.Getenv("SPIFFE_SOCKET_PATH")
+	if socketPath == "" {
+		socketPath = "unix:///run/spire/sockets/agent.sock"
+	}
+	
+	listenAddr := os.Getenv("LISTEN_ADDR")
+	if listenAddr == "" {
+		listenAddr = ":8443"
+	}
+
+	log.Printf("Demo Service starting...")
+	log.Printf("SPIFFE socket: %s", socketPath)
+	log.Printf("Listen address: %s", listenAddr)
+
+	ctx := context.Background()
+
+	// Create X.509 source
+	x509Source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(
+		workloadapi.WithAddr(socketPath),
+	))
+	if err != nil {
+		log.Fatalf("Failed to create X509Source: %v", err)
+	}
+	defer x509Source.Close()
+
+	// Create bundle source for JWT validation
+	bundleSource, err := workloadapi.NewBundleSource(ctx, workloadapi.WithClientOptions(
+		workloadapi.WithAddr(socketPath),
+	))
+	if err != nil {
+		log.Fatalf("Failed to create BundleSource: %v", err)
+	}
+	defer bundleSource.Close()
+
+	// Get SVID info
+	svid, err := x509Source.GetX509SVID()
+	if err != nil {
+		log.Fatalf("Failed to get X509-SVID: %v", err)
+	}
+	log.Printf("Got X509-SVID: %s", svid.ID.String())
+
+	trustDomain, _ := spiffeid.TrustDomainFromString("protocolsoup.com")
+	
+	s := &server{
+		x509Source:   x509Source,
+		bundleSource: bundleSource,
+		trustDomain:  trustDomain,
+	}
+
+	// Set up HTTP handlers
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleRoot)
+	mux.HandleFunc("/health", s.handleHealth)
+	mux.HandleFunc("/api/protected", s.handleProtected)
+	mux.HandleFunc("/api/info", s.handleInfo)
+
+	// Create mTLS listener using SPIFFE
+	log.Printf("Starting mTLS server on %s", listenAddr)
+	listener, err := spiffetls.ListenWithMode(ctx, "tcp", listenAddr, 
+		spiffetls.MTLSServerWithSourceOptions(
+			tlsconfig.AuthorizeMemberOf(trustDomain),
+			workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)),
+		),
+	)
+	if err != nil {
+		log.Fatalf("Failed to create listener: %v", err)
+	}
+
+	log.Printf("Demo service listening on %s with mTLS", listenAddr)
+	if err := http.Serve(listener, mux); err != nil {
+		log.Fatalf("Server error: %v", err)
+	}
+}
+
+func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	peerID := extractPeerSPIFFEID(r)
+	
+	response := map[string]interface{}{
+		"service":    "demo-service",
+		"message":    "Hello from SPIFFE-protected service!",
+		"peer_id":    peerID,
+		"timestamp":  time.Now().Format(time.RFC3339),
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (s *server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	svid, err := s.x509Source.GetX509SVID()
+	
+	response := map[string]interface{}{
+		"status": "healthy",
+		"service": "demo-service",
+	}
+	
+	if err == nil {
+		response["spiffe_id"] = svid.ID.String()
+		response["cert_expires"] = svid.Certificates[0].NotAfter.Format(time.RFC3339)
+		response["cert_serial"] = svid.Certificates[0].SerialNumber.String()[:20] + "..."
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (s *server) handleProtected(w http.ResponseWriter, r *http.Request) {
+	// Check for JWT-SVID in Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+		return
+	}
+	
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+		return
+	}
+	
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	
+	// Get trust bundle for validation
+	bundle, err := s.bundleSource.GetBundleForTrustDomain(s.trustDomain)
+	if err != nil {
+		http.Error(w, "Failed to get trust bundle", http.StatusInternalServerError)
+		return
+	}
+	
+	// Validate JWT-SVID
+	svid, err := jwtsvid.ParseAndValidate(token, bundle, []string{"demo-service", "protocolsoup"})
+	if err != nil {
+		log.Printf("JWT validation failed: %v", err)
+		http.Error(w, "Invalid JWT-SVID: " + err.Error(), http.StatusUnauthorized)
+		return
+	}
+	
+	log.Printf("Authenticated request from: %s", svid.ID.String())
+	
+	response := map[string]interface{}{
+		"message":     "Access granted to protected resource",
+		"caller_id":   svid.ID.String(),
+		"audience":    svid.Audience,
+		"expires":     svid.Expiry.Format(time.RFC3339),
+		"mtls_peer":   extractPeerSPIFFEID(r),
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (s *server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	svid, _ := s.x509Source.GetX509SVID()
+	bundle, _ := s.bundleSource.GetBundleForTrustDomain(s.trustDomain)
+	
+	var bundleInfo []map[string]interface{}
+	if bundle != nil {
+		for _, cert := range bundle.X509Authorities() {
+			bundleInfo = append(bundleInfo, map[string]interface{}{
+				"subject":    cert.Subject.String(),
+				"not_after":  cert.NotAfter.Format(time.RFC3339),
+				"is_ca":      cert.IsCA,
+			})
+		}
+	}
+	
+	response := map[string]interface{}{
+		"service_id":   svid.ID.String(),
+		"trust_domain": s.trustDomain.String(),
+		"cert_info": map[string]interface{}{
+			"serial":      svid.Certificates[0].SerialNumber.String(),
+			"not_before":  svid.Certificates[0].NotBefore.Format(time.RFC3339),
+			"not_after":   svid.Certificates[0].NotAfter.Format(time.RFC3339),
+			"issuer":      svid.Certificates[0].Issuer.String(),
+		},
+		"trust_bundle": bundleInfo,
+	}
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func extractPeerSPIFFEID(r *http.Request) string {
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+		for _, uri := range r.TLS.PeerCertificates[0].URIs {
+			if uri.Scheme == "spiffe" {
+				return uri.String()
+			}
+		}
+	}
+	return "unknown"
+}
+EOF
+
+# Initialize module and get dependencies
+RUN go mod init demo-service && \
+    go get github.com/spiffe/go-spiffe/v2@v2.2.0 && \
+    go mod tidy
+
+# Build
+RUN CGO_ENABLED=0 go build -o demo-service .
+
+# Runtime
+FROM alpine:3.19
+
+WORKDIR /app
+
+RUN apk --no-cache add ca-certificates
+
+COPY --from=builder /app/demo-service .
+
+ENV SPIFFE_SOCKET_PATH=unix:///run/spire/sockets/agent.sock
+ENV LISTEN_ADDR=:8443
+
+EXPOSE 8443
+
+CMD ["./demo-service"]
+

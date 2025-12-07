@@ -29,7 +29,7 @@ export function Dashboard() {
         <ValueCard
           icon={Code}
           title="Real Protocol Execution"
-          description="Not simulations — actual HTTP requests to a working identity provider"
+          description="Not simulations - actual HTTP requests to a working identity provider"
         />
         <ValueCard
           icon={FileSearch}

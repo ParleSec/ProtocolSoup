@@ -438,6 +438,47 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
     }
   }
 
+  // SPIFFE/SPIRE mappings
+  if (protocolId === 'spiffe') {
+    switch (normalizedId) {
+      case 'x509-svid-issuance':
+      case 'x509-svid':
+      case 'x509':
+        return 'x509-svid-issuance'
+      case 'jwt-svid-issuance':
+      case 'jwt-svid':
+      case 'jwt':
+        return 'jwt-svid-issuance'
+      case 'mtls-service-call':
+      case 'mtls':
+      case 'mtls-call':
+      case 'mtls-handshake':
+        return 'mtls-service-call'
+      case 'certificate-rotation':
+      case 'cert-rotation':
+      case 'rotation':
+        return 'certificate-rotation'
+      case 'jwt-api-auth':
+      case 'jwt-auth':
+        return 'jwt-api-auth'
+      case 'workload-attestation':
+      case 'attestation':
+        return 'workload-attestation'
+      case 'trust-bundle':
+      case 'bundle':
+      case 'trust-bundle-federation':
+        return 'trust-bundle'
+      case 'workload-registration':
+      case 'registration':
+        return 'workload-registration'
+      case 'node-attestation':
+        return 'node-attestation'
+      default:
+        // Return as-is for SPIFFE
+        return normalizedId
+    }
+  }
+
   // OAuth 2.0 mappings (also work for OIDC)
   switch (normalizedId) {
     case 'authorization-code':
@@ -516,9 +557,11 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       return
     }
 
-    // Build config
+    // Build config - all protocols are mounted at /{protocol-id}
+    const protocolBaseUrl = `/${options.protocolId}`
+
     const config: ExecutorFactoryConfig = {
-      protocolBaseUrl: `/${options.protocolId}`,
+      protocolBaseUrl,
       clientId: options.clientId,
       clientSecret: options.clientSecret,
       redirectUri: options.redirectUri,

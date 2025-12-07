@@ -1,15 +1,14 @@
-# Protocol Lens - Full Stack with SPIFFE/SPIRE
-# Run with: docker compose up -d
-# 
-# This starts:
-# - SPIRE Server (identity authority)
-# - SPIRE Agent (embedded in backend for workload attestation)
-# - Backend API with real SPIFFE workload identity
-# - Frontend UI
+# Docker Compose for SPIFFE/SPIRE Infrastructure
+# This file sets up the SPIRE Server, Agent, and integrates with the main application.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.spire.yml up
+#
+# This adds SPIFFE/SPIRE workload identity to the base application stack.
 
 services:
   # ============================================
-  # SPIRE Server - Identity Authority
+  # SPIRE Server - Trust Domain Root
   # ============================================
   spire-server:
     build:
@@ -18,11 +17,16 @@ services:
     container_name: protocolsoup-spire-server
     hostname: spire-server
     volumes:
+      # Persistent storage for server data (CA keys, datastore)
       - spire-server-data:/opt/spire/data/server
+      # Server socket for local admin operations
       - spire-server-socket:/run/spire/sockets
     networks:
       - spire-network
       - showcase-network
+    ports:
+      # Expose federation bundle endpoint for external trust domains
+      - "8443:8443"
     healthcheck:
       test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck", "-socketPath", "/run/spire/sockets/server.sock"]
       interval: 30s
@@ -30,9 +34,14 @@ services:
       start_period: 15s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ============================================
-  # SPIRE Agent - Standalone for other workloads
+  # SPIRE Agent - Workload Attestation
   # ============================================
   spire-agent:
     build:
@@ -44,8 +53,11 @@ services:
       spire-server:
         condition: service_healthy
     volumes:
+      # Workload API socket - shared with workloads
       - spire-agent-socket:/run/spire/sockets
+      # Agent data directory
       - spire-agent-data:/opt/spire/data/agent
+      # Server socket - needed for bootstrap token generation
       - spire-server-socket:/run/spire/sockets/server:ro
     networks:
       - spire-network
@@ -57,9 +69,14 @@ services:
       start_period: 45s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # ============================================
-  # SPIRE Workload Registration
+  # SPIRE Registration - One-time setup container
   # ============================================
   spire-registration:
     build:
@@ -78,7 +95,9 @@ services:
     restart: "no"
 
   # ============================================
-  # Backend with embedded SPIRE Agent
+  # Backend with embedded SPIFFE Agent (sidecar pattern)
+  # This runs the backend and agent in the same container
+  # so Unix socket attestation works properly
   # ============================================
   backend:
     build:
@@ -92,7 +111,9 @@ services:
       - "app=protocol-backend"
       - "spiffe.io/spiffe-id=spiffe://protocolsoup.com/workload/backend"
     volumes:
+      # Server socket for bootstrap token generation
       - spire-server-socket:/run/spire/sockets/server:ro
+      # Persist agent data for faster restarts
       - backend-agent-data:/opt/spire/data/agent
     environment:
       - SHOWCASE_ENV=demo
@@ -114,42 +135,45 @@ services:
     restart: unless-stopped
 
   # ============================================
-  # Frontend UI
+  # Demo Workloads (disabled - cross-container Unix socket attestation
+  # doesn't work in Docker. The backend has embedded SPIRE agent instead)
   # ============================================
-  frontend:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.frontend
-    container_name: protocol-showcase-frontend
-    ports:
-      - "3000:3000"
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - showcase-network
-    restart: unless-stopped
-
-# ============================================
-# Networks
-# ============================================
-networks:
-  spire-network:
-    driver: bridge
-  showcase-network:
-    driver: bridge
+  # To enable demo workloads, they would need embedded agents like backend
 
 # ============================================
 # Volumes
 # ============================================
 volumes:
+  # SPIRE Server persistent data
   spire-server-data:
     driver: local
+  
+  # SPIRE Server socket (for admin operations)
   spire-server-socket:
     driver: local
+  
+  # SPIRE Agent socket (Workload API)
   spire-agent-socket:
     driver: local
+  
+  # SPIRE Agent persistent data
   spire-agent-data:
     driver: local
+  
+  # Backend embedded agent data
   backend-agent-data:
     driver: local
+
+# ============================================
+# Networks
+# ============================================
+networks:
+  # Dedicated network for SPIRE control plane
+  spire-network:
+    driver: bridge
+    internal: false
+  
+  # Main application network (shared with base compose)
+  showcase-network:
+    driver: bridge
+

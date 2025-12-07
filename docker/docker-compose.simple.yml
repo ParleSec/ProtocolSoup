@@ -1,0 +1,48 @@
+# Protocol Lens - Simple Stack (no SPIFFE/SPIRE)
+# Run with: docker compose -f docker-compose.simple.yml up -d
+#
+# Use this if you only want OAuth2, OIDC, and SAML demos
+# without the SPIFFE/SPIRE workload identity infrastructure.
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: protocol-showcase-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - SHOWCASE_ENV=demo
+      - SHOWCASE_LISTEN_ADDR=:8080
+      - SHOWCASE_BASE_URL=http://localhost:8080
+      - SHOWCASE_MOCK_IDP=true
+      - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      - SHOWCASE_DEBUG=false
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - showcase-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: protocol-showcase-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - showcase-network
+    restart: unless-stopped
+
+networks:
+  showcase-network:
+    driver: bridge
+

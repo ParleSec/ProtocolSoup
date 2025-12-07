@@ -1,0 +1,192 @@
+# Demo Client Dockerfile
+# A simple workload that demonstrates SPIFFE client capabilities
+# - Fetches X.509-SVID and JWT-SVID from SPIRE Agent
+# - Makes mTLS calls to other services
+# - Demonstrates JWT-SVID API authentication
+
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies
+RUN apk add --no-cache gcc musl-dev
+
+# Create demo client source
+COPY <<EOF main.go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
+)
+
+func main() {
+	socketPath := os.Getenv("SPIFFE_SOCKET_PATH")
+	if socketPath == "" {
+		socketPath = "unix:///run/spire/sockets/agent.sock"
+	}
+	
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		backendURL = "https://backend:8443"
+	}
+
+	log.Printf("Demo Client starting...")
+	log.Printf("SPIFFE socket: %s", socketPath)
+	log.Printf("Backend URL: %s", backendURL)
+
+	ctx := context.Background()
+
+	// Create X.509 source
+	x509Source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(
+		workloadapi.WithAddr(socketPath),
+	))
+	if err != nil {
+		log.Fatalf("Failed to create X509Source: %v", err)
+	}
+	defer x509Source.Close()
+
+	// Get our SVID
+	svid, err := x509Source.GetX509SVID()
+	if err != nil {
+		log.Fatalf("Failed to get X509-SVID: %v", err)
+	}
+	log.Printf("Got X509-SVID: %s", svid.ID.String())
+	log.Printf("Certificate expires: %s", svid.Certificates[0].NotAfter.Format(time.RFC3339))
+
+	// Create JWT source
+	jwtSource, err := workloadapi.NewJWTSource(ctx, workloadapi.WithClientOptions(
+		workloadapi.WithAddr(socketPath),
+	))
+	if err != nil {
+		log.Fatalf("Failed to create JWTSource: %v", err)
+	}
+	defer jwtSource.Close()
+
+	// Create HTTP client with mTLS
+	trustDomain, _ := spiffeid.TrustDomainFromString("protocolsoup.com")
+	tlsConfig := tlsconfig.MTLSClientConfig(x509Source, x509Source, tlsconfig.AuthorizeMemberOf(trustDomain))
+	
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+		Timeout: 30 * time.Second,
+	}
+
+	// Demo loop - periodically make calls
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	// Initial call
+	performDemoCall(ctx, client, jwtSource, svid.ID, backendURL)
+
+	for {
+		select {
+		case <-ticker.C:
+			// Get updated SVID (may have rotated)
+			newSvid, err := x509Source.GetX509SVID()
+			if err != nil {
+				log.Printf("Error getting SVID: %v", err)
+				continue
+			}
+			
+			if newSvid.Certificates[0].SerialNumber.Cmp(svid.Certificates[0].SerialNumber) != 0 {
+				log.Printf("Certificate rotated! New serial: %s", newSvid.Certificates[0].SerialNumber.String()[:20])
+				svid = newSvid
+			}
+			
+			performDemoCall(ctx, client, jwtSource, svid.ID, backendURL)
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func performDemoCall(ctx context.Context, client *http.Client, jwtSource *workloadapi.JWTSource, id spiffeid.ID, backendURL string) {
+	log.Println("--- Performing demo call ---")
+	
+	// 1. mTLS call (uses X.509-SVID automatically via TLS config)
+	log.Println("1. Making mTLS call to backend...")
+	resp, err := client.Get(backendURL + "/health")
+	if err != nil {
+		log.Printf("   mTLS call failed: %v", err)
+	} else {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		log.Printf("   mTLS call succeeded: %d - %s", resp.Status, string(body)[:min(100, len(body))])
+	}
+
+	// 2. Get JWT-SVID
+	log.Println("2. Fetching JWT-SVID...")
+	jwt, err := jwtSource.FetchJWTSVID(ctx, jwtsvid.Params{
+		Subject:  id,
+		Audience: "protocolsoup",
+	})
+	if err != nil {
+		log.Printf("   Failed to get JWT-SVID: %v", err)
+	} else {
+		log.Printf("   Got JWT-SVID for %s", jwt.ID.String())
+		log.Printf("   Expires: %s", jwt.Expiry.Format(time.RFC3339))
+	}
+
+	// 3. Make API call with JWT-SVID
+	if jwt != nil {
+		log.Println("3. Making API call with JWT-SVID...")
+		req, _ := http.NewRequest("GET", backendURL + "/api/protocols", nil)
+		req.Header.Set("Authorization", "Bearer " + jwt.Marshal())
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("   API call failed: %v", err)
+		} else {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			var result map[string]interface{}
+			json.Unmarshal(body, &result)
+			log.Printf("   API call succeeded: %d", resp.StatusCode)
+		}
+	}
+
+	log.Println("--- Demo call complete ---")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+EOF
+
+# Initialize module and get dependencies
+RUN go mod init demo-client && \
+    go get github.com/spiffe/go-spiffe/v2@v2.2.0 && \
+    go mod tidy
+
+# Build
+RUN CGO_ENABLED=0 go build -o demo-client .
+
+# Runtime
+FROM alpine:3.19
+
+WORKDIR /app
+
+RUN apk --no-cache add ca-certificates
+
+COPY --from=builder /app/demo-client .
+
+ENV SPIFFE_SOCKET_PATH=unix:///run/spire/sockets/agent.sock
+ENV BACKEND_URL=https://backend:8443
+
+CMD ["./demo-client"]
+

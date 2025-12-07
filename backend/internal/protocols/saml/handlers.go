@@ -276,7 +276,7 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, r *http.Request, requestIn
             {{end}}
         </div>
         
-        <div class="divider">— or enter credentials —</div>
+        <div class="divider">- or enter credentials -</div>
         
         <form method="POST" action="/saml/login">
             <input type="hidden" name="request_id" value="{{.RequestID}}">

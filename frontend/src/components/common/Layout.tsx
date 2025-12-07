@@ -193,8 +193,8 @@ export function Layout({ children }: LayoutProps) {
       <footer className="relative border-t border-white/5 py-4 sm:py-6">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-surface-600">
-            <p>Protocol Soup — explore authentication protocols</p>
-            <p className="font-mono">OAuth 2.0 · OIDC · more soon</p>
+            <p>Protocol Soup - explore authentication protocols</p>
+            <p className="font-mono">OAuth 2.0 · OIDC · SAML · SPIFFE</p>
           </div>
         </div>
       </footer>

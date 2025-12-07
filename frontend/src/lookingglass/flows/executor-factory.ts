@@ -15,6 +15,7 @@ import { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owne
 import { OIDCHybridExecutor, type HybridResponseType } from './oidc-hybrid'
 import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
 import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
+import { X509SVIDExecutor, JWTSVIDExecutor, MTLSExecutor, CertRotationExecutor, type SPIFFESVIDConfig } from './spiffe-svid'
 
 // ============================================================================
 // Flow ID Mapping
@@ -139,6 +140,85 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: false,
     additionalConfig: { spInitiated: true, binding: 'redirect' as const },
   },
+
+  // SPIFFE/SPIRE Flows
+  'x509-svid-issuance': {
+    executorClass: X509SVIDExecutor,
+    description: 'X.509-SVID certificate acquisition from SPIRE Workload API',
+    rfcReference: 'SPIFFE X.509-SVID Specification',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'jwt-svid-issuance': {
+    executorClass: JWTSVIDExecutor,
+    description: 'JWT-SVID token acquisition from SPIRE Workload API',
+    rfcReference: 'SPIFFE JWT-SVID Specification',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com', audience: 'protocolsoup' },
+  },
+  'mtls-service-call': {
+    executorClass: MTLSExecutor,
+    description: 'Mutual TLS service-to-service call using X.509-SVIDs',
+    rfcReference: 'SPIFFE mTLS + RFC 8446',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'mtls-handshake': {
+    executorClass: MTLSExecutor,
+    description: 'mTLS handshake with X.509-SVIDs',
+    rfcReference: 'SPIFFE mTLS + RFC 8446',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'certificate-rotation': {
+    executorClass: CertRotationExecutor,
+    description: 'Analyze automatic X.509-SVID certificate rotation mechanism',
+    rfcReference: 'SPIFFE Workload API',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'jwt-api-auth': {
+    executorClass: JWTSVIDExecutor,
+    description: 'Acquire JWT-SVID for API authentication',
+    rfcReference: 'SPIFFE JWT-SVID Specification',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com', audience: 'api' },
+  },
+  'workload-attestation': {
+    executorClass: X509SVIDExecutor,
+    description: 'SPIRE workload identity attestation via Workload API',
+    rfcReference: 'SPIFFE Workload API',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'trust-bundle': {
+    executorClass: X509SVIDExecutor,
+    description: 'Fetch trust bundle for certificate chain validation',
+    rfcReference: 'SPIFFE Trust Bundle',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'trust-bundle-federation': {
+    executorClass: X509SVIDExecutor,
+    description: 'Cross-trust-domain federation via SPIFFE bundles',
+    rfcReference: 'SPIFFE Federation',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'workload-registration': {
+    executorClass: X509SVIDExecutor,
+    description: 'Workload registration with SPIRE Server',
+    rfcReference: 'SPIFFE Workload API',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
+  'node-attestation': {
+    executorClass: X509SVIDExecutor,
+    description: 'SPIRE node attestation and agent bootstrap',
+    rfcReference: 'SPIFFE Node Attestation',
+    requiresUserInteraction: false,
+    additionalConfig: { trustDomain: 'protocolsoup.com' },
+  },
 }
 
 // ============================================================================
@@ -215,6 +295,15 @@ export function createFlowExecutor(
   if (flowId.startsWith('saml-')) {
     // SAML flows don't use OAuth scopes
     (fullConfig as SAMLSSOConfig | SAMLLogoutConfig).scopes = []
+  }
+
+  // Handle SPIFFE flows
+  if (flowId.includes('svid') || flowId.includes('mtls') || flowId.includes('rotation') || flowId.includes('attestation') || flowId.includes('bundle')) {
+    // SPIFFE flows need trustDomain
+    (fullConfig as SPIFFESVIDConfig).trustDomain = (flowConfig.additionalConfig?.trustDomain as string) || 'protocolsoup.com'
+    if (flowConfig.additionalConfig?.audience) {
+      (fullConfig as SPIFFESVIDConfig).audience = flowConfig.additionalConfig.audience as string
+    }
   }
 
   try {

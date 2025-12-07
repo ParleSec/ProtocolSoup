@@ -137,7 +137,7 @@ export function LookingGlass() {
         <section>
           <div className="flex items-center gap-2 text-surface-500 text-sm mb-3">
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>Quick start — select a flow to begin</span>
+            <span>Quick start - select a flow to begin</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <FlowButton

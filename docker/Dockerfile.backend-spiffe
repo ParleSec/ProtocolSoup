@@ -1,0 +1,81 @@
+# Backend with SPIFFE Agent Sidecar
+# Runs the backend inside the agent container for proper workload attestation
+
+FROM ghcr.io/spiffe/spire-agent:1.9.6 AS spire-agent
+FROM ghcr.io/spiffe/spire-server:1.9.6 AS spire-server
+
+# Build backend
+FROM golang:1.22-alpine AS backend-builder
+
+WORKDIR /app
+
+RUN apk add --no-cache gcc musl-dev
+
+COPY backend/go.mod ./
+COPY backend/ .
+
+RUN go mod tidy && go mod download
+RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ./cmd/server
+
+# Final image with agent + backend
+FROM alpine:3.19
+
+# Install required packages
+RUN apk add --no-cache ca-certificates supervisor
+
+# Copy SPIRE binaries
+COPY --from=spire-agent /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
+COPY --from=spire-server /opt/spire/bin/spire-server /opt/spire/bin/spire-server
+
+# Copy backend binary
+COPY --from=backend-builder /app/server /app/server
+
+# Create directories
+RUN mkdir -p /opt/spire/conf/agent /opt/spire/data/agent /run/spire/sockets /var/log/supervisor
+
+# Copy agent config
+COPY docker/spire/agent/agent.conf /opt/spire/conf/agent/agent.conf
+
+# Copy bootstrap and startup scripts
+COPY docker/spire/agent/bootstrap-agent.sh /opt/spire/bin/bootstrap-agent.sh
+RUN chmod +x /opt/spire/bin/bootstrap-agent.sh && \
+    sed -i 's/\r$//' /opt/spire/bin/bootstrap-agent.sh
+
+# Create supervisor config
+RUN cat > /etc/supervisord.conf << 'EOF'
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisor/supervisord.log
+pidfile=/var/run/supervisord.pid
+user=root
+
+[program:spire-agent]
+command=/opt/spire/bin/bootstrap-agent.sh
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/supervisor/spire-agent.log
+stderr_logfile=/var/log/supervisor/spire-agent-err.log
+priority=1
+
+[program:backend]
+command=/app/server
+autostart=true
+autorestart=true
+startsecs=5
+startretries=10
+stdout_logfile=/var/log/supervisor/backend.log
+stderr_logfile=/var/log/supervisor/backend-err.log
+environment=SHOWCASE_SPIFFE_ENABLED=true,SHOWCASE_SPIFFE_SOCKET_PATH=unix:///run/spire/sockets/agent.sock,SHOWCASE_SPIFFE_TRUST_DOMAIN=protocolsoup.com,SHOWCASE_LISTEN_ADDR=:8080
+priority=10
+EOF
+
+# Expose ports
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+# Run supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+

@@ -41,6 +41,22 @@ export {
   type SAMLLogoutConfig 
 } from './saml-logout'
 
+// SPIFFE/SPIRE executors
+export {
+  X509SVIDExecutor,
+  JWTSVIDExecutor,
+  MTLSExecutor,
+  CertRotationExecutor,
+  createSPIFFEExecutor,
+  SPIFFE_FLOWS,
+  type SPIFFESVIDConfig,
+  type SPIFFEFlowType,
+  type X509SVIDInfo,
+  type JWTSVIDInfo,
+  type TrustBundleInfo,
+  type WorkloadInfo,
+} from './spiffe-svid'
+
 // Factory
 export {
   createFlowExecutor,
