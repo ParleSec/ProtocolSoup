@@ -52,24 +52,43 @@ jobs:
         with:
           args: --severity-threshold=high --sarif-file-output=snyk-frontend.sarif --file=frontend/package.json
       
-      - name: Check if Frontend SARIF file exists
-        id: check_frontend_sarif
+      - name: Validate and Filter Frontend SARIF
+        id: validate_frontend_sarif
         run: |
-          if [ -f snyk-frontend.sarif ]; then
-            echo "sarif_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "sarif_exists=false" >> $GITHUB_OUTPUT
+          if [ ! -f snyk-frontend.sarif ]; then
+            echo "sarif_valid=false" >> $GITHUB_OUTPUT
             echo "⚠️ Frontend SARIF file not generated. Snyk scan may have failed or SNYK_TOKEN not configured."
+            exit 0
+          fi
+          
+          # Check if SARIF has multiple runs from the same tool (CodeQL v4 requirement)
+          run_count=$(jq '[.runs[] | select(.tool.driver.name == "Snyk Open Source")] | length' snyk-frontend.sarif 2>/dev/null || echo "0")
+          
+          if [ "$run_count" -gt 1 ]; then
+            echo "⚠️ Multiple runs detected ($run_count). Filtering to single run for CodeQL v4 compatibility..."
+            # Keep only the first run from each tool
+            jq '.runs = [.runs[0]]' snyk-frontend.sarif > snyk-frontend-filtered.sarif
+            mv snyk-frontend-filtered.sarif snyk-frontend.sarif
+          fi
+          
+          # Validate SARIF structure
+          if jq -e '.runs | length > 0' snyk-frontend.sarif > /dev/null 2>&1; then
+            echo "sarif_valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Frontend SARIF validated successfully ($(jq '.runs | length' snyk-frontend.sarif) run(s))"
+          else
+            echo "sarif_valid=false" >> $GITHUB_OUTPUT
+            echo "❌ Frontend SARIF validation failed - no runs found"
           fi
         shell: bash
       
       - name: Upload Frontend Snyk results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: steps.check_frontend_sarif.outputs.sarif_exists == 'true'
-        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        if: steps.validate_frontend_sarif.outputs.sarif_valid == 'true'
+        continue-on-error: false
         with:
           sarif_file: snyk-frontend.sarif
           category: frontend-security
+          wait-for-processing: true
 
   # Job 2: Backend Security Scanning
   backend-security-scan:
@@ -102,24 +121,43 @@ jobs:
         with:
           args: --severity-threshold=high --sarif-file-output=snyk-backend.sarif --file=backend/go.mod
       
-      - name: Check if Backend SARIF file exists
-        id: check_backend_sarif
+      - name: Validate and Filter Backend SARIF
+        id: validate_backend_sarif
         run: |
-          if [ -f snyk-backend.sarif ]; then
-            echo "sarif_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "sarif_exists=false" >> $GITHUB_OUTPUT
+          if [ ! -f snyk-backend.sarif ]; then
+            echo "sarif_valid=false" >> $GITHUB_OUTPUT
             echo "⚠️ Backend SARIF file not generated. Snyk scan may have failed or SNYK_TOKEN not configured."
+            exit 0
+          fi
+          
+          # Check if SARIF has multiple runs from the same tool (CodeQL v4 requirement)
+          run_count=$(jq '[.runs[] | select(.tool.driver.name == "Snyk Open Source")] | length' snyk-backend.sarif 2>/dev/null || echo "0")
+          
+          if [ "$run_count" -gt 1 ]; then
+            echo "⚠️ Multiple runs detected ($run_count). Filtering to single run for CodeQL v4 compatibility..."
+            # Keep only the first run from each tool
+            jq '.runs = [.runs[0]]' snyk-backend.sarif > snyk-backend-filtered.sarif
+            mv snyk-backend-filtered.sarif snyk-backend.sarif
+          fi
+          
+          # Validate SARIF structure
+          if jq -e '.runs | length > 0' snyk-backend.sarif > /dev/null 2>&1; then
+            echo "sarif_valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Backend SARIF validated successfully ($(jq '.runs | length' snyk-backend.sarif) run(s))"
+          else
+            echo "sarif_valid=false" >> $GITHUB_OUTPUT
+            echo "❌ Backend SARIF validation failed - no runs found"
           fi
         shell: bash
       
       - name: Upload Backend Snyk results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: steps.check_backend_sarif.outputs.sarif_exists == 'true'
-        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        if: steps.validate_backend_sarif.outputs.sarif_valid == 'true'
+        continue-on-error: false
         with:
           sarif_file: snyk-backend.sarif
           category: backend-security
+          wait-for-processing: true
 
   # Job 3: Snyk Code Analysis (SAST)
   code-security-scan:
@@ -143,24 +181,43 @@ jobs:
           command: code test
           args: --sarif-file-output=snyk-code.sarif
       
-      - name: Check if Code SARIF file exists
-        id: check_code_sarif
+      - name: Validate and Filter Code SARIF
+        id: validate_code_sarif
         run: |
-          if [ -f snyk-code.sarif ]; then
-            echo "sarif_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "sarif_exists=false" >> $GITHUB_OUTPUT
+          if [ ! -f snyk-code.sarif ]; then
+            echo "sarif_valid=false" >> $GITHUB_OUTPUT
             echo "⚠️ Code SARIF file not generated. Snyk Code scan may have failed."
+            exit 0
+          fi
+          
+          # Check if SARIF has multiple runs from the same tool (CodeQL v4 requirement)
+          run_count=$(jq '[.runs[] | select(.tool.driver.name == "SnykCode")] | length' snyk-code.sarif 2>/dev/null || echo "0")
+          
+          if [ "$run_count" -gt 1 ]; then
+            echo "⚠️ Multiple runs detected ($run_count). Filtering to single run for CodeQL v4 compatibility..."
+            # Keep only the first run from each tool
+            jq '.runs = [.runs[0]]' snyk-code.sarif > snyk-code-filtered.sarif
+            mv snyk-code-filtered.sarif snyk-code.sarif
+          fi
+          
+          # Validate SARIF structure
+          if jq -e '.runs | length > 0' snyk-code.sarif > /dev/null 2>&1; then
+            echo "sarif_valid=true" >> $GITHUB_OUTPUT
+            echo "✅ Code SARIF validated successfully ($(jq '.runs | length' snyk-code.sarif) run(s))"
+          else
+            echo "sarif_valid=false" >> $GITHUB_OUTPUT
+            echo "❌ Code SARIF validation failed - no runs found"
           fi
         shell: bash
       
       - name: Upload Snyk Code results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
-        if: steps.check_code_sarif.outputs.sarif_exists == 'true'
-        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
+        if: steps.validate_code_sarif.outputs.sarif_valid == 'true'
+        continue-on-error: false
         with:
           sarif_file: snyk-code.sarif
           category: code-security
+          wait-for-processing: true
 
   # Job 4: Frontend Linting and Type Checking
   frontend-lint-and-typecheck:
