@@ -11,9 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/security-showcase/protocol-showcase/internal/crypto"
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
-	"github.com/security-showcase/protocol-showcase/internal/plugin"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 )
 
 // Server is the main HTTP server for the protocol showcase

@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/security-showcase/protocol-showcase/internal/crypto"
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
-	"github.com/security-showcase/protocol-showcase/internal/mockidp"
-	"github.com/security-showcase/protocol-showcase/internal/plugin"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
+	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 )
 
 // Plugin implements the SAML 2.0 protocol plugin

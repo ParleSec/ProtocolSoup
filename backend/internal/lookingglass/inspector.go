@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/security-showcase/protocol-showcase/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 )
 
 // Engine is the main looking glass inspection engine

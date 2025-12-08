@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/security-showcase/protocol-showcase/pkg/models"
+	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
 // handleDiscovery returns the OpenID Connect discovery document

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
 // handleUserInfo handles the UserInfo endpoint

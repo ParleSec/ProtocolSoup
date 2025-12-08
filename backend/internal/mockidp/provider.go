@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/security-showcase/protocol-showcase/internal/crypto"
-	"github.com/security-showcase/protocol-showcase/pkg/models"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
 // MockIdP provides a mock identity provider for demonstrations

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
 // ============================================================================

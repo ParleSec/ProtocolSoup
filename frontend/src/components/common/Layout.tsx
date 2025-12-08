@@ -79,7 +79,7 @@ export function Layout({ children }: LayoutProps) {
               })}
               <div className="w-px h-4 bg-white/10 mx-2" />
               <a
-                href="https://github.com"
+                href="https://github.com/ParleSec/ProtocolSoup"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-surface-500 hover:text-white hover:bg-white/5 transition-colors text-sm"
@@ -166,7 +166,7 @@ export function Layout({ children }: LayoutProps) {
                 {/* Drawer Footer */}
                 <div className="p-4 border-t border-white/5">
                   <a
-                    href="https://github.com"
+                    href="https://github.com/ParleSec/ProtocolSoup"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center justify-center gap-2 w-full px-4 py-3 rounded-xl bg-surface-800 text-surface-400 hover:text-white transition-colors"
@@ -192,9 +192,33 @@ export function Layout({ children }: LayoutProps) {
       {/* Footer */}
       <footer className="relative border-t border-white/5 py-4 sm:py-6">
         <div className="max-w-5xl mx-auto px-4 sm:px-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-surface-600">
-            <p>Protocol Soup - explore authentication protocols</p>
-            <p className="font-mono">OAuth 2.0 · OIDC · SAML · SPIFFE</p>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-2">
+            <div className="flex flex-col sm:flex-row items-center gap-2 text-xs text-surface-600">
+              <p>Protocol Soup - explore authentication protocols</p>
+              <span className="hidden sm:inline text-surface-700">·</span>
+              <p className="font-mono">OAuth 2.0 · OIDC · SAML · SPIFFE</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-surface-600">Built by</span>
+              <a 
+                href="https://www.linkedin.com/in/mason-parle/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-surface-400 hover:text-amber-400 transition-colors font-medium"
+              >
+                Mason Parle
+              </a>
+              <span className="text-surface-700">·</span>
+              <a
+                href="https://github.com/ParleSec/ProtocolSoup"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-surface-400 hover:text-amber-400 transition-colors inline-flex items-center gap-1"
+              >
+                <Github className="w-3 h-3" />
+                <span>GitHub</span>
+              </a>
+            </div>
           </div>
         </div>
       </footer>

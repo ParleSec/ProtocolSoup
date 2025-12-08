@@ -1,4 +1,4 @@
-module github.com/security-showcase/protocol-showcase
+module github.com/ParleSec/ProtocolSoup
 
 go 1.22
 

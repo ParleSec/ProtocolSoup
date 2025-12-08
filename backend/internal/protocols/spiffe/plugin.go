@@ -8,9 +8,9 @@ import (
 	"log"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
-	"github.com/security-showcase/protocol-showcase/internal/plugin"
-	spiffelib "github.com/security-showcase/protocol-showcase/internal/spiffe"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	spiffelib "github.com/ParleSec/ProtocolSoup/internal/spiffe"
 )
 
 // Plugin implements the SPIFFE/SPIRE protocol plugin

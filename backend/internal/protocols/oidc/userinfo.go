@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
-	"github.com/security-showcase/protocol-showcase/pkg/models"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
 // getSessionFromRequest extracts the session ID from request headers or query params

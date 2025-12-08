@@ -164,6 +164,12 @@ ProtocolLens/
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [SPIFFE/SPIRE Integration](docs/SPIFFE.md)
 
+## Built By
+
+**Built by [Mason Parle](https://www.linkedin.com/in/mason-parle/)**
+
+Security engineer passionate about authentication protocols and identity systems. Check out more projects on [GitHub](https://github.com/ParleSec).
+
 ## License
 
-MIT
+MIT © 2024 Mason Parle

@@ -4,11 +4,11 @@ import (
 	"context"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/security-showcase/protocol-showcase/internal/crypto"
-	"github.com/security-showcase/protocol-showcase/internal/lookingglass"
-	"github.com/security-showcase/protocol-showcase/internal/mockidp"
-	"github.com/security-showcase/protocol-showcase/internal/plugin"
-	"github.com/security-showcase/protocol-showcase/internal/protocols/oauth2"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
+	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
 )
 
 // Plugin implements the OpenID Connect protocol plugin

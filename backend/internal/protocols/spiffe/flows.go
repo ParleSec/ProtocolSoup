@@ -1,6 +1,6 @@
 package spiffe
 
-import "github.com/security-showcase/protocol-showcase/internal/plugin"
+import "github.com/ParleSec/ProtocolSoup/internal/plugin"
 
 // getFlowDefinitions returns all SPIFFE protocol flow definitions
 func getFlowDefinitions() []plugin.FlowDefinition {
