@@ -68,8 +68,10 @@ COPY --from=frontend-builder /frontend/dist ./static
 COPY --from=spire-agent /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
 COPY --from=spire-server /opt/spire/bin/spire-server /opt/spire/bin/spire-server
 
-# Create SPIRE directories
-RUN mkdir -p /opt/spire/conf/agent /opt/spire/data/agent /run/spire/sockets /var/log/supervisor
+# Create directories for SPIRE and SCIM
+# Note: /data is the mount point for persistent volume on Fly.io
+# Subdirectories are created at runtime by start-agent.sh
+RUN mkdir -p /opt/spire/conf/agent /run/spire/sockets /var/log/supervisor /data/spire /data/scim
 
 # Copy configuration files
 COPY docker/fly/agent.conf /opt/spire/conf/agent/agent.conf

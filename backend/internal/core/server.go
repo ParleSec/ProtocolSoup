@@ -56,9 +56,9 @@ func (s *Server) setupRouter() {
 	// CORS configuration
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.config.CORSOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID"},
-		ExposedHeaders:   []string{"Link", "X-Request-ID"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "If-Match", "If-None-Match"},
+		ExposedHeaders:   []string{"Link", "X-Request-ID", "ETag", "Location"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))

@@ -94,11 +94,16 @@ services:
     volumes:
       - spire-server-socket:/run/spire/sockets/server:ro
       - backend-agent-data:/opt/spire/data/agent
+      - scim-data:/app/data
     environment:
       - SHOWCASE_ENV=demo
       - SHOWCASE_BASE_URL=http://localhost:8080
       - SHOWCASE_MOCK_IDP=true
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      # SCIM API Token for Okta/Azure AD integration
+      # Set this to enable authentication on SCIM endpoints
+      # Generate with: openssl rand -hex 32
+      - SCIM_API_TOKEN=${SCIM_API_TOKEN:-}
     depends_on:
       spire-server:
         condition: service_healthy
@@ -152,4 +157,6 @@ volumes:
   spire-agent-data:
     driver: local
   backend-agent-data:
+    driver: local
+  scim-data:
     driver: local

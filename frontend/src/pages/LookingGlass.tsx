@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Terminal, Square,
   ChevronRight, Fingerprint, Shield, Lock, Sparkles,
-  RefreshCw, FileKey
+  RefreshCw, FileKey, KeyRound
 } from 'lucide-react'
 
 import {
@@ -30,8 +30,32 @@ export function LookingGlass() {
   const [inspectedToken, setInspectedToken] = useState('')
   const [refreshTokenInput, setRefreshTokenInput] = useState('')
   const [storedRefreshToken, setStoredRefreshToken] = useState<string | null>(null)
+  const [scimBearerToken, setScimBearerToken] = useState('')
+  const [scimTokenLoading, setScimTokenLoading] = useState(false)
+  const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
 
   const { protocols, loading: protocolsLoading } = useProtocols()
+
+  // Fetch SCIM token when SCIM protocol is selected
+  useEffect(() => {
+    if (selectedProtocol?.id === 'scim' && !scimBearerToken) {
+      setScimTokenLoading(true)
+      fetch('/scim/internal/token')
+        .then(res => res.json())
+        .then(data => {
+          if (data.token) {
+            setScimBearerToken(data.token)
+          }
+          setScimAuthEnabled(data.authEnabled ?? true)
+        })
+        .catch(err => {
+          console.error('Failed to fetch SCIM token:', err)
+        })
+        .finally(() => {
+          setScimTokenLoading(false)
+        })
+    }
+  }, [selectedProtocol?.id, scimBearerToken])
 
   const scopes = useMemo(() => 
     selectedProtocol?.id === 'oidc' 
@@ -46,6 +70,7 @@ export function LookingGlass() {
   )
 
   const isRefreshTokenFlow = flowId === 'refresh-token'
+  const isSCIMFlow = selectedProtocol?.id === 'scim'
 
   const clientConfig = useMemo(() => {
     if (flowId === 'client-credentials') {
@@ -67,6 +92,7 @@ export function LookingGlass() {
     redirectUri: `${window.location.origin}/callback`,
     scopes,
     refreshToken: isRefreshTokenFlow ? activeRefreshToken : undefined,
+    bearerToken: isSCIMFlow ? scimBearerToken : undefined,
   })
 
   // Store refresh token from completed flows
@@ -247,6 +273,60 @@ export function LookingGlass() {
             {!activeRefreshToken && (
               <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
                 ⚠️ No token available. Run Auth Code flow first.
+              </p>
+            )}
+          </motion.div>
+        )}
+
+        {/* SCIM Bearer Token Input - shown when SCIM protocol is selected */}
+        {isSCIMFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-400" />
+              <span className="text-xs sm:text-sm font-medium text-surface-300">SCIM Bearer Token</span>
+              {scimTokenLoading && (
+                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-blue-500/10 text-blue-400 animate-pulse">
+                  Loading...
+                </span>
+              )}
+              {!scimTokenLoading && scimBearerToken && (
+                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-green-500/10 text-green-400">
+                  Auto-configured ✓
+                </span>
+              )}
+              {!scimTokenLoading && !scimAuthEnabled && (
+                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-amber-500/10 text-amber-400">
+                  Auth Disabled
+                </span>
+              )}
+            </div>
+            {scimAuthEnabled ? (
+              <>
+                <p className="text-[10px] sm:text-xs text-surface-500 mb-2 sm:mb-3 leading-relaxed">
+                  Bearer token for SCIM API authentication. This is the same token configured for external IdPs like Okta.
+                </p>
+                <input
+                  type="password"
+                  value={scimBearerToken}
+                  onChange={(e) => setScimBearerToken(e.target.value)}
+                  placeholder={scimTokenLoading ? "Loading token..." : "Enter your SCIM bearer token..."}
+                  disabled={scimTokenLoading}
+                  className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-all disabled:opacity-50"
+                />
+                {!scimBearerToken && !scimTokenLoading && (
+                  <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
+                    ⚠️ Bearer token required. Set SCIM_API_TOKEN in production or enter manually.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-[10px] sm:text-xs text-surface-400 leading-relaxed">
+                SCIM authentication is disabled. Set <code className="text-purple-400">SCIM_API_TOKEN</code> environment variable to enable.
               </p>
             )}
           </motion.div>

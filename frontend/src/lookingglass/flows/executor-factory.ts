@@ -16,6 +16,14 @@ import { OIDCHybridExecutor, type HybridResponseType } from './oidc-hybrid'
 import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
 import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
 import { X509SVIDExecutor, JWTSVIDExecutor, MTLSExecutor, CertRotationExecutor, type SPIFFESVIDConfig } from './spiffe-svid'
+import { 
+  UserLifecycleExecutor, 
+  GroupManagementExecutor, 
+  FilterQueryExecutor, 
+  SchemaDiscoveryExecutor, 
+  BulkOperationsExecutor,
+  type SCIMProvisioningConfig 
+} from './scim-provisioning'
 
 // ============================================================================
 // Flow ID Mapping
@@ -193,6 +201,43 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
   // These flow definitions exist in the backend for documentation purposes,
   // but are not executable from the Looking Glass because they require
   // administrative access to SPIRE Server, not Workload API access.
+
+  // SCIM 2.0 Flows
+  'user-lifecycle': {
+    executorClass: UserLifecycleExecutor,
+    description: 'Complete user provisioning lifecycle: Create → Update → Deactivate → Delete',
+    rfcReference: 'RFC 7644',
+    requiresUserInteraction: false,
+    additionalConfig: { scimBaseUrl: '/scim/v2' },
+  },
+  'group-membership': {
+    executorClass: GroupManagementExecutor,
+    description: 'Create groups and manage user membership',
+    rfcReference: 'RFC 7644',
+    requiresUserInteraction: false,
+    additionalConfig: { scimBaseUrl: '/scim/v2' },
+  },
+  'user-discovery': {
+    executorClass: FilterQueryExecutor,
+    description: 'Query users using SCIM filter expressions',
+    rfcReference: 'RFC 7644 Section 3.4.2.2',
+    requiresUserInteraction: false,
+    additionalConfig: { scimBaseUrl: '/scim/v2' },
+  },
+  'bulk-operations': {
+    executorClass: BulkOperationsExecutor,
+    description: 'Execute multiple SCIM operations in a single request',
+    rfcReference: 'RFC 7644 Section 3.7',
+    requiresUserInteraction: false,
+    additionalConfig: { scimBaseUrl: '/scim/v2' },
+  },
+  'schema-discovery': {
+    executorClass: SchemaDiscoveryExecutor,
+    description: 'Discover SCIM server capabilities and schema definitions',
+    rfcReference: 'RFC 7643, RFC 7644',
+    requiresUserInteraction: false,
+    additionalConfig: { scimBaseUrl: '/scim/v2' },
+  },
 }
 
 // ============================================================================
@@ -216,6 +261,8 @@ export interface ExecutorFactoryConfig {
   username?: string
   /** Password (for password flow) */
   password?: string
+  /** Bearer token (for SCIM flows) */
+  bearerToken?: string
 }
 
 /**
@@ -277,6 +324,15 @@ export function createFlowExecutor(
     (fullConfig as SPIFFESVIDConfig).trustDomain = (flowConfig.additionalConfig?.trustDomain as string) || 'protocolsoup.com'
     if (flowConfig.additionalConfig?.audience) {
       (fullConfig as SPIFFESVIDConfig).audience = flowConfig.additionalConfig.audience as string
+    }
+  }
+
+  // Handle SCIM flows - require bearer token for real authentication
+  if (flowId === 'user-lifecycle' || flowId === 'group-membership' || flowId === 'user-discovery' || 
+      flowId === 'bulk-operations' || flowId === 'schema-discovery') {
+    (fullConfig as SCIMProvisioningConfig).scimBaseUrl = (flowConfig.additionalConfig?.scimBaseUrl as string) || '/scim/v2'
+    if (config.bearerToken) {
+      (fullConfig as SCIMProvisioningConfig).bearerToken = config.bearerToken
     }
   }
 

@@ -226,6 +226,13 @@ export const STANDARD_ACTORS: Record<string, LookingGlassActor> = {
     description: 'OpenID Provider authenticating users',
     icon: 'key',
   },
+  scim_server: {
+    id: 'scim_server',
+    name: 'SCIM Server',
+    type: 'resource',
+    description: 'SCIM 2.0 server for user/group provisioning',
+    icon: 'users',
+  },
 }
 
 

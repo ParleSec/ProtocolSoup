@@ -4,8 +4,13 @@
 
 set -e
 
-AGENT_DATA_DIR="/opt/spire/data/agent"
+# Use consolidated volume at /data/spire
+AGENT_DATA_DIR="/data/spire"
 AGENT_CONF="/opt/spire/conf/agent/agent.conf"
+
+# Ensure data directories exist
+mkdir -p "$AGENT_DATA_DIR"
+mkdir -p /data/scim
 
 # Wait for network to be ready
 sleep 2

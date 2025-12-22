@@ -24,9 +24,14 @@ primary_region = 'syd'
   # The agent will connect to SPIRE Server via Fly private network
   SPIRE_SERVER_ADDRESS = 'protocolsoup-spire.internal'
   SPIFFE_TRUST_DOMAIN = 'protocolsoup.com'
+  SPIRE_DATA_DIR = '/data/spire'
+  
+  # SCIM Configuration - uses subdirectory of shared volume
+  SCIM_DATA_DIR = '/data/scim'
 
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
+# - SCIM_API_TOKEN: Bearer token for SCIM authentication
 
 [http_service]
   internal_port = 8080
@@ -48,10 +53,11 @@ primary_region = 'syd'
     method = 'GET'
     path = '/health'
 
-# Persistent volume for SPIRE Agent data (survives restarts)
-[mounts]
-  source = "spire_agent_data"
-  destination = "/opt/spire/data"
+# Persistent volume for all app data (SPIRE + SCIM)
+# Using single volume since Fly.io only supports 1 mount per machine
+[[mounts]]
+  source = "protocolsoup_data"
+  destination = "/data"
 
 [[vm]]
   memory = '512mb'

@@ -59,6 +59,8 @@ const PROTOCOL_COLORS: Record<string, string> = {
   saml: 'purple',
   webauthn: 'green',
   fido2: 'cyan',
+  spiffe: 'emerald',
+  scim: 'pink',
 }
 
 /**
@@ -70,6 +72,8 @@ const PROTOCOL_ICONS: Record<string, string> = {
   saml: 'shield',
   webauthn: 'smartphone',
   fido2: 'lock',
+  spiffe: 'certificate',
+  scim: 'users',
 }
 
 /**
@@ -343,6 +347,10 @@ export function getActorsForFlow(flow: LookingGlassFlow): LookingGlassActor[] {
       'idp': 'idp',
       'resource_server': 'resource_server',
       'api': 'resource_server',
+      // SCIM actors
+      'scim_server': 'scim_server',
+      'scim_client': 'idp',
+      'provisioning_client': 'idp',
     }
 
     const mappedId = standardMappings[id]

@@ -17,6 +17,7 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oidc"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/scim"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/spiffe"
 )
 
@@ -72,6 +73,12 @@ func main() {
 	spiffePlugin := spiffe.NewPlugin()
 	if err := registry.Register(spiffePlugin); err != nil {
 		log.Fatalf("Failed to register SPIFFE plugin: %v", err)
+	}
+
+	// Register SCIM 2.0 plugin
+	scimPlugin := scim.NewPlugin()
+	if err := registry.Register(scimPlugin); err != nil {
+		log.Fatalf("Failed to register SCIM plugin: %v", err)
 	}
 
 	// Initialize all plugins

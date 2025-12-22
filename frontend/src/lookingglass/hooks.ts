@@ -346,6 +346,8 @@ export interface UseRealFlowExecutorOptions {
   username?: string
   /** Password (for password flow) */
   password?: string
+  /** Bearer token (for SCIM flows) */
+  bearerToken?: string
 }
 
 export interface RealFlowExecutorResult {
@@ -479,6 +481,31 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
     }
   }
 
+  // SCIM 2.0 mappings
+  if (protocolId === 'scim') {
+    switch (normalizedId) {
+      case 'user-lifecycle':
+      case 'user-provisioning':
+        return 'user-lifecycle'
+      case 'group-membership':
+      case 'group-management':
+        return 'group-membership'
+      case 'user-discovery':
+      case 'filter-query':
+      case 'filter-queries':
+        return 'user-discovery'
+      case 'bulk-operations':
+      case 'bulk':
+        return 'bulk-operations'
+      case 'schema-discovery':
+      case 'discovery':
+        return 'schema-discovery'
+      default:
+        // Return as-is for SCIM
+        return normalizedId
+    }
+  }
+
   // OAuth 2.0 mappings (also work for OIDC)
   switch (normalizedId) {
     case 'authorization-code':
@@ -569,6 +596,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       refreshToken: options.refreshToken,
       username: options.username,
       password: options.password,
+      bearerToken: options.bearerToken,
     }
 
     console.log('[useRealFlowExecutor] Creating executor for:', executorFlowId, 'with config:', config)
@@ -608,6 +636,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.refreshToken,
     options.username,
     options.password,
+    options.bearerToken,
     options.flowId,
   ])
 

@@ -57,6 +57,24 @@ export {
   type WorkloadInfo,
 } from './spiffe-svid'
 
+// SCIM 2.0 executors
+export {
+  UserLifecycleExecutor,
+  GroupManagementExecutor,
+  FilterQueryExecutor,
+  SchemaDiscoveryExecutor,
+  BulkOperationsExecutor,
+  createSCIMExecutor,
+  SCIM_FLOWS,
+  type SCIMProvisioningConfig,
+  type SCIMFlowType,
+  type SCIMUser,
+  type SCIMGroup,
+  type SCIMListResponse,
+  type SCIMPatchOperation,
+  type SCIMPatchRequest,
+} from './scim-provisioning'
+
 // Factory
 export {
   createFlowExecutor,
