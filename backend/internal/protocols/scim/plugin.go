@@ -207,8 +207,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "bulk-operations",
 			Name:        "Bulk Operations",
-			Description: "Execute multiple SCIM operations in a single request",
-			Executable:  true,
+			Description: "Execute multiple SCIM operations in a single request (reference only - creates orphan data)",
+			Executable:  false, // Disabled: creates multiple users without cleanup
 			Category:    "provisioning",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Bulk Request", Description: "POST /Bulk - Submit multiple operations", From: "IdP", To: "SCIM Server", Type: "request", Parameters: map[string]string{"operations": "multiple"}},
@@ -234,8 +234,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "outbound-provisioning",
 			Name:        "Outbound Provisioning",
-			Description: "Provision users to an external SCIM server",
-			Executable:  true,
+			Description: "Provision users to an external SCIM server (reference only - requires external configuration)",
+			Executable:  false, // Disabled: requires external SCIM server configuration
 			Category:    "provisioning",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Configure Target", Description: "Set external SCIM server URL and credentials", From: "Admin", To: "SCIM Client", Type: "internal"},
@@ -300,4 +300,3 @@ func getDataDir() string {
 	}
 	return filepath.Join(cwd, "data")
 }
-

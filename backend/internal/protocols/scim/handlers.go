@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -88,9 +89,16 @@ func (p *Plugin) handleSchemas(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) handleSchema(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	
-	schema := GetSchema(p.baseURL, id)
+	// URL-decode the schema ID (URNs contain colons which are URL-encoded)
+	decodedID, err := url.PathUnescape(id)
+	if err != nil {
+		WriteError(w, ErrInvalidValue("Invalid schema ID URL encoding"))
+		return
+	}
+	
+	schema := GetSchema(p.baseURL, decodedID)
 	if schema == nil {
-		WriteError(w, ErrResourceNotFound("Schema", id))
+		WriteError(w, ErrResourceNotFound("Schema", decodedID))
 		return
 	}
 

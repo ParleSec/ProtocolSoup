@@ -63,7 +63,6 @@ export {
   GroupManagementExecutor,
   FilterQueryExecutor,
   SchemaDiscoveryExecutor,
-  BulkOperationsExecutor,
   createSCIMExecutor,
   SCIM_FLOWS,
   type SCIMProvisioningConfig,

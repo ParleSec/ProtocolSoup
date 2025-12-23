@@ -21,7 +21,6 @@ import {
   GroupManagementExecutor, 
   FilterQueryExecutor, 
   SchemaDiscoveryExecutor, 
-  BulkOperationsExecutor,
   type SCIMProvisioningConfig 
 } from './scim-provisioning'
 
@@ -224,13 +223,8 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: false,
     additionalConfig: { scimBaseUrl: '/scim/v2' },
   },
-  'bulk-operations': {
-    executorClass: BulkOperationsExecutor,
-    description: 'Execute multiple SCIM operations in a single request',
-    rfcReference: 'RFC 7644 Section 3.7',
-    requiresUserInteraction: false,
-    additionalConfig: { scimBaseUrl: '/scim/v2' },
-  },
+  // bulk-operations: Disabled - creates multiple users without cleanup
+  // Use the Protocol Reference page for documentation of bulk operations
   'schema-discovery': {
     executorClass: SchemaDiscoveryExecutor,
     description: 'Discover SCIM server capabilities and schema definitions',
@@ -329,7 +323,7 @@ export function createFlowExecutor(
 
   // Handle SCIM flows - require bearer token for real authentication
   if (flowId === 'user-lifecycle' || flowId === 'group-membership' || flowId === 'user-discovery' || 
-      flowId === 'bulk-operations' || flowId === 'schema-discovery') {
+      flowId === 'schema-discovery') {
     (fullConfig as SCIMProvisioningConfig).scimBaseUrl = (flowConfig.additionalConfig?.scimBaseUrl as string) || '/scim/v2'
     if (config.bearerToken) {
       (fullConfig as SCIMProvisioningConfig).bearerToken = config.bearerToken
