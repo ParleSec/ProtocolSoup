@@ -19,6 +19,7 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/scim"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/spiffe"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/ssf"
 )
 
 func main() {
@@ -79,6 +80,12 @@ func main() {
 	scimPlugin := scim.NewPlugin()
 	if err := registry.Register(scimPlugin); err != nil {
 		log.Fatalf("Failed to register SCIM plugin: %v", err)
+	}
+
+	// Register SSF (Shared Signals Framework) plugin
+	ssfPlugin := ssf.NewPlugin()
+	if err := registry.Register(ssfPlugin); err != nil {
+		log.Fatalf("Failed to register SSF plugin: %v", err)
 	}
 
 	// Initialize all plugins

@@ -788,3 +788,6 @@ func QuickFilter(filter string) (attr string, op string, value string, ok bool) 
 	return "", "", "", false
 }
 
+
+
+

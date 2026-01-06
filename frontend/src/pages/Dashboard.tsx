@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { 
   Shield, Eye, Terminal, Fingerprint, 
   ExternalLink, ChevronRight, Key, 
-  Code, FileSearch, Zap, FileKey, Users
+  Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
 
 export function Dashboard() {
@@ -20,7 +20,7 @@ export function Dashboard() {
         </h1>
         <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
           Learn authentication and identity protocols by running them. Execute real OAuth 2.0, OpenID Connect, 
-          SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0 flows against working infrastructure and see exactly what happens at each step.
+          SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against working infrastructure and see exactly what happens at each step.
         </p>
       </header>
 
@@ -48,21 +48,29 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">
           Get Started
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <NavCard
             to="/looking-glass"
             icon={Eye}
             color="cyan"
             title="Looking Glass"
-            description="The main workspace. Select a protocol flow, execute it, and inspect every step of the exchange in real-time."
+            description="Execute protocol flows and inspect every step of the exchange in real-time."
             cta="Open Looking Glass"
+          />
+          <NavCard
+            to="/ssf-sandbox"
+            icon={Radio}
+            color="amber"
+            title="SSF Sandbox"
+            description="Interactive playground for Shared Signals Framework - trigger events and watch real-time security signals."
+            cta="Open Sandbox"
           />
           <NavCard
             to="/protocols"
             icon={Shield}
             color="purple"
             title="Protocol Reference"
-            description="Documentation for each flow with sequence diagrams, parameter explanations, and security considerations."
+            description="Documentation with sequence diagrams, parameters, and security considerations."
             cta="Browse Protocols"
           />
         </div>
@@ -114,6 +122,14 @@ export function Dashboard() {
             flows={['user_lifecycle', 'group_mgmt', 'filters', 'bulk_ops']}
             to="/looking-glass"
           />
+          <ProtocolCard
+            icon={Radio}
+            name="SSF (Shared Signals)"
+            description="Real-time security event sharing framework"
+            color="amber"
+            flows={['caep_events', 'risc_events', 'set_tokens', 'zero_trust']}
+            to="/ssf-sandbox"
+          />
         </div>
       </section>
 
@@ -149,6 +165,12 @@ export function Dashboard() {
           <RFCLink number="7643" title="SCIM Schema" />
           <RFCLink number="7644" title="SCIM Protocol" />
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+          <RFCLink number="8417" title="SET (RFC 8417)" />
+          <SpecLink url="https://openid.net/specs/openid-caep-1_0.html" title="CAEP" label="CAEP 1.0" />
+          <SpecLink url="https://openid.net/specs/openid-risc-profile-1_0.html" title="RISC" label="RISC 1.0" />
+          <SpecLink url="https://openid.net/specs/openid-sse-framework-1_0.html" title="SSF" label="SSF 1.0" />
+        </div>
       </section>
     </div>
   )
@@ -182,7 +204,7 @@ function NavCard({
 }: {
   to: string
   icon: React.ElementType
-  color: 'cyan' | 'purple'
+  color: 'cyan' | 'purple' | 'amber'
   title: string
   description: string
   cta: string
@@ -201,6 +223,13 @@ function NavCard({
       icon: 'bg-purple-500/20',
       iconText: 'text-purple-400',
       cta: 'text-purple-400',
+    },
+    amber: {
+      border: 'border-amber-500/20 hover:border-amber-500/40',
+      bg: 'from-amber-500/10',
+      icon: 'bg-amber-500/20',
+      iconText: 'text-amber-400',
+      cta: 'text-amber-400',
     },
   }
   const c = colors[color]
@@ -236,7 +265,7 @@ function ProtocolCard({
   icon: React.ElementType
   name: string
   description: string
-  color: 'blue' | 'orange' | 'cyan' | 'green' | 'purple'
+  color: 'blue' | 'orange' | 'cyan' | 'green' | 'purple' | 'amber'
   flows: string[]
   to: string
 }) {
@@ -270,6 +299,12 @@ function ProtocolCard({
       bg: 'bg-purple-500/10',
       text: 'text-purple-400',
       tag: 'bg-purple-500/10 text-purple-300',
+    },
+    amber: {
+      border: 'border-amber-500/20 hover:border-amber-500/40',
+      bg: 'bg-amber-500/10',
+      text: 'text-amber-400',
+      tag: 'bg-amber-500/10 text-amber-300',
     },
   }
   const c = colors[color]

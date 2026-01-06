@@ -603,3 +603,6 @@ func ApplyPatchToGroup(group *Group, request *PatchRequest) ([]PatchChange, erro
 	return executor.GetChanges(), nil
 }
 
+
+
+

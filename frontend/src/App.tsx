@@ -5,6 +5,7 @@ import { Protocols } from './pages/Protocols'
 import { ProtocolDemo } from './pages/ProtocolDemo'
 import { FlowDetail } from './pages/FlowDetail'
 import { LookingGlass } from './pages/LookingGlass'
+import { SSFSandbox } from './pages/SSFSandbox'
 import { Callback } from './pages/Callback'
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
         <Route path="/protocol/:protocolId/flow/:flowId" element={<FlowDetail />} />
         <Route path="/looking-glass" element={<LookingGlass />} />
         <Route path="/looking-glass/:sessionId" element={<LookingGlass />} />
+        <Route path="/ssf-sandbox" element={<SSFSandbox />} />
         <Route path="/callback" element={<Callback />} />
       </Routes>
     </Layout>

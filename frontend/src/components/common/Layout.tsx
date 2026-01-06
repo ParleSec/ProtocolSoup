@@ -1,6 +1,6 @@
 import { ReactNode, useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Eye, Home, Github, ExternalLink, BookOpen, Menu, X } from 'lucide-react'
+import { Eye, Home, Github, ExternalLink, BookOpen, Menu, X, Radio } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 
 interface LayoutProps {
@@ -14,6 +14,7 @@ export function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', icon: Home, label: 'Home' },
     { path: '/looking-glass', icon: Eye, label: 'Looking Glass' },
+    { path: '/ssf-sandbox', icon: Radio, label: 'SSF Sandbox' },
     { path: '/protocols', icon: BookOpen, label: 'Protocols' },
   ]
 
@@ -196,7 +197,7 @@ export function Layout({ children }: LayoutProps) {
             <div className="flex flex-col sm:flex-row items-center gap-2 text-xs text-surface-600">
               <p>Protocol Soup - explore authentication protocols</p>
               <span className="hidden sm:inline text-surface-700">·</span>
-              <p className="font-mono">OAuth 2.0 · OIDC · SAML · SPIFFE</p>
+              <p className="font-mono">OAuth 2.0 · OIDC · SAML · SPIFFE · SSF</p>
             </div>
             <div className="flex items-center gap-2 text-xs">
               <span className="text-surface-600">Built by</span>

@@ -3,6 +3,7 @@ package core
 import (
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -53,6 +54,7 @@ type RateLimiter struct {
 	requests map[string][]time.Time
 	limit    int
 	window   time.Duration
+	mu       sync.RWMutex
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -69,6 +71,7 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := r.RemoteAddr
 
+		rl.mu.Lock()
 		// Clean old requests
 		now := time.Now()
 		cutoff := now.Add(-rl.window)
@@ -82,12 +85,14 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 
 		// Check limit
 		if len(rl.requests[ip]) >= rl.limit {
+			rl.mu.Unlock()
 			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
 
 		// Record request
 		rl.requests[ip] = append(rl.requests[ip], now)
+		rl.mu.Unlock()
 
 		next.ServeHTTP(w, r)
 	})

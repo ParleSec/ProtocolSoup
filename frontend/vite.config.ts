@@ -1,12 +1,15 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import path from 'path'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': resolve(__dirname, './src'),
     },
   },
   server: {
@@ -29,6 +32,18 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/saml': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/spiffe': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/scim': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/ssf': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

@@ -45,7 +45,7 @@ coverage/
 __debug_bin
 
 # Database
-*.db
+*.db*
 *.sqlite
 
 # Temporary
