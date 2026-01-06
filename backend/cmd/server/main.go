@@ -35,7 +35,8 @@ func main() {
 
 	// Initialize mock identity provider
 	idp := mockidp.NewMockIdP(keySet)
-	log.Println("Mock Identity Provider initialized")
+	idp.SetIssuer(cfg.BaseURL) // Set issuer from config for production
+	log.Printf("Mock Identity Provider initialized with issuer: %s", cfg.BaseURL)
 
 	// Initialize looking glass engine
 	lgEngine := lookingglass.NewEngine()
@@ -137,4 +138,3 @@ func main() {
 
 	log.Println("Server exited gracefully")
 }
-

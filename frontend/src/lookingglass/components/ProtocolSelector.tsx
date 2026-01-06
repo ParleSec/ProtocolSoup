@@ -94,9 +94,9 @@ export function ProtocolSelector({
     }
   }, [isFlowOpen, updateFlowPosition])
 
-  // Close on click outside
+  // Close on click/touch outside
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node
       if (
         protocolButtonRef.current && 
@@ -115,7 +115,11 @@ export function ProtocolSelector({
     }
 
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
   }, [])
 
   // Close on escape
@@ -160,7 +164,7 @@ export function ProtocolSelector({
             setIsFlowOpen(false)
             setIsProtocolOpen(!isProtocolOpen)
           }}
-          className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-1.5 rounded bg-surface-900 border border-white/10 hover:border-white/20 active:border-white/30 text-xs sm:text-sm font-mono transition-colors flex-1 sm:flex-initial sm:min-w-[140px]"
+          className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-1.5 rounded bg-surface-900 border border-white/10 hover:border-white/20 active:border-white/30 text-xs sm:text-sm font-mono transition-colors flex-1 sm:flex-initial sm:min-w-[140px] touch-manipulation"
         >
           <span className={`truncate ${selectedProtocol ? 'text-white' : 'text-surface-500'}`}>
             {selectedProtocol?.id || 'select'}
@@ -180,7 +184,7 @@ export function ProtocolSelector({
             setIsFlowOpen(!isFlowOpen)
           }}
           disabled={!selectedProtocol}
-          className={`flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-1.5 rounded bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono transition-colors flex-1 sm:flex-initial sm:min-w-[200px] ${
+          className={`flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-1.5 rounded bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono transition-colors flex-1 sm:flex-initial sm:min-w-[200px] touch-manipulation ${
             selectedProtocol 
               ? 'hover:border-white/20 active:border-white/30' 
               : 'opacity-50 cursor-not-allowed'
@@ -216,7 +220,7 @@ export function ProtocolSelector({
                 <button
                   key={protocol.id}
                   onClick={() => handleProtocolSelect(protocol)}
-                  className={`w-full flex items-center justify-between px-3 py-3 sm:py-2 text-sm font-mono transition-colors ${
+                  className={`w-full flex items-center justify-between px-3 py-3 sm:py-2 text-sm font-mono transition-colors touch-manipulation ${
                     selectedProtocol?.id === protocol.id
                       ? 'bg-accent-cyan/10 text-accent-cyan'
                       : 'text-surface-300 hover:bg-white/5 active:bg-white/10 hover:text-white'
@@ -257,7 +261,7 @@ export function ProtocolSelector({
                 <button
                   key={flow.id}
                   onClick={() => handleFlowSelect(flow)}
-                  className={`w-full flex items-center justify-between px-3 py-3 sm:py-2 text-left transition-colors ${
+                  className={`w-full flex items-center justify-between px-3 py-3 sm:py-2 text-left transition-colors touch-manipulation ${
                     selectedFlow?.id === flow.id
                       ? 'bg-accent-cyan/10 text-accent-cyan'
                       : 'text-surface-300 hover:bg-white/5 active:bg-white/10 hover:text-white'
