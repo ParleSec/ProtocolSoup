@@ -190,6 +190,50 @@ export function SSFSandbox({ className = '' }: SSFSandboxProps) {
   const [selectedSet, setSelectedSet] = useState<string | null>(null)
   const [decodedSet, setDecodedSet] = useState<DecodedSET | null>(null)
 
+  // Fetch functions
+  const fetchSubjects = useCallback(async () => {
+    try {
+      const res = await fetch('/ssf/subjects')
+      const data = await res.json()
+      setSubjects(data.subjects || [])
+      if (data.subjects?.length > 0 && !selectedSubject) {
+        setSelectedSubject(data.subjects[0])
+      }
+    } catch (err) {
+      console.error('Failed to fetch subjects:', err)
+    }
+  }, [selectedSubject])
+
+  const fetchStream = useCallback(async () => {
+    try {
+      const res = await fetch('/ssf/stream')
+      const data = await res.json()
+      setStream(data)
+    } catch (err) {
+      console.error('Failed to fetch stream:', err)
+    }
+  }, [])
+
+  const fetchEvents = useCallback(async () => {
+    try {
+      const res = await fetch('/ssf/events')
+      const data = await res.json()
+      setEvents(data.events || [])
+    } catch (err) {
+      console.error('Failed to fetch events:', err)
+    }
+  }, [])
+
+  const fetchResponseActions = useCallback(async () => {
+    try {
+      const res = await fetch('/ssf/responses')
+      const data = await res.json()
+      setResponseActions(data.actions || [])
+    } catch (err) {
+      console.error('Failed to fetch response actions:', err)
+    }
+  }, [])
+
   // Fetch initial data
   useEffect(() => {
     fetchSubjects()
@@ -204,50 +248,7 @@ export function SSFSandbox({ className = '' }: SSFSandboxProps) {
     }, 3000)
 
     return () => clearInterval(interval)
-  }, [])
-
-  const fetchSubjects = async () => {
-    try {
-      const res = await fetch('/ssf/subjects')
-      const data = await res.json()
-      setSubjects(data.subjects || [])
-      if (data.subjects?.length > 0 && !selectedSubject) {
-        setSelectedSubject(data.subjects[0])
-      }
-    } catch (err) {
-      console.error('Failed to fetch subjects:', err)
-    }
-  }
-
-  const fetchStream = async () => {
-    try {
-      const res = await fetch('/ssf/stream')
-      const data = await res.json()
-      setStream(data)
-    } catch (err) {
-      console.error('Failed to fetch stream:', err)
-    }
-  }
-
-  const fetchEvents = async () => {
-    try {
-      const res = await fetch('/ssf/events')
-      const data = await res.json()
-      setEvents(data.events || [])
-    } catch (err) {
-      console.error('Failed to fetch events:', err)
-    }
-  }
-
-  const fetchResponseActions = async () => {
-    try {
-      const res = await fetch('/ssf/responses')
-      const data = await res.json()
-      setResponseActions(data.actions || [])
-    } catch (err) {
-      console.error('Failed to fetch response actions:', err)
-    }
-  }
+  }, [fetchSubjects, fetchStream, fetchEvents, fetchResponseActions])
 
   // Trigger an action
   const triggerAction = useCallback(async (actionId: string) => {
@@ -352,7 +353,7 @@ export function SSFSandbox({ className = '' }: SSFSandboxProps) {
     } finally {
       setIsExecuting(false)
     }
-  }, [selectedSubject, isExecuting])
+  }, [selectedSubject, isExecuting, fetchSubjects, fetchEvents, fetchResponseActions])
 
   // Decode SET for inspection
   const inspectSet = async (token: string) => {

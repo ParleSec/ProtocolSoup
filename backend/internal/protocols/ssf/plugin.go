@@ -52,7 +52,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	// Configure standalone receiver port and token
 	p.receiverPort = 8081
 	if port := os.Getenv("SSF_RECEIVER_PORT"); port != "" {
-		fmt.Sscanf(port, "%d", &p.receiverPort)
+		_, _ = fmt.Sscanf(port, "%d", &p.receiverPort)
 	}
 	p.receiverToken = os.Getenv("SSF_RECEIVER_TOKEN")
 	if p.receiverToken == "" {
@@ -119,7 +119,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if err == nil {
 		stream.DeliveryEndpoint = receiverEndpoint
 		stream.BearerToken = p.receiverToken
-		p.storage.UpdateStream(ctx, *stream)
+		_ = p.storage.UpdateStream(ctx, *stream)
 	}
 
 	log.Printf("[SSF] Plugin initialized with storage at %s", dataDir)

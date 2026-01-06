@@ -21,7 +21,7 @@ type Transmitter struct {
 	encoder    *SETEncoder
 	baseURL    string
 	httpClient *http.Client
-	
+
 	// Event broadcast channels
 	eventListeners []chan<- TransmitterEvent
 	listenerMu     sync.RWMutex
@@ -230,7 +230,7 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 	})
 
 	// Update status to delivering
-	t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivering)
+	_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivering)
 
 	// Prepare request body
 	body := map[string]interface{}{
@@ -249,7 +249,7 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	
+
 	// Add bearer token if configured for authenticated push delivery
 	if stream.BearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+stream.BearerToken)
@@ -266,13 +266,13 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 	respBody, _ := io.ReadAll(resp.Body)
 
 	// Record delivery attempt
-	t.storage.RecordDeliveryAttempt(ctx, event.ID, 1, 
+	_ = t.storage.RecordDeliveryAttempt(ctx, event.ID, 1,
 		fmt.Sprintf("%d", resp.StatusCode), resp.StatusCode, string(respBody), "")
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Success
-		t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
-		
+		_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
+
 		// Broadcast: Delivery Success
 		t.broadcast(TransmitterEvent{
 			Type:      TransmitterEventDeliverySuccess,
@@ -291,8 +291,8 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 
 // handleDeliveryFailure handles a failed delivery attempt
 func (t *Transmitter) handleDeliveryFailure(ctx context.Context, event *StoredEvent, statusCode int, respBody, errorMsg string) {
-	t.storage.UpdateEventStatus(ctx, event.ID, EventStatusFailed)
-	
+	_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusFailed)
+
 	if errorMsg == "" {
 		errorMsg = fmt.Sprintf("HTTP %d: %s", statusCode, respBody)
 	}
@@ -332,7 +332,7 @@ func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID stri
 	for _, event := range events {
 		sets[event.ID] = event.SETToken
 		// Mark as delivered since receiver is polling
-		t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
+		_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
 	}
 
 	// Check if there are more events
@@ -351,16 +351,16 @@ func (t *Transmitter) TriggerSessionRevoked(ctx context.Context, streamID string
 		InitiatingEntity: initiator,
 		ReasonAdmin:      &ReasonInfo{EN: reason},
 	}
-	
+
 	// Update subject's active sessions
 	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
 	if err == nil && subj != nil {
 		if subj.ActiveSessions > 0 {
 			subj.ActiveSessions--
 		}
-		t.storage.UpdateSubject(ctx, *subj)
+		_ = t.storage.UpdateSubject(ctx, *subj)
 	}
-	
+
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
@@ -379,11 +379,11 @@ func (t *Transmitter) TriggerCredentialChange(ctx context.Context, streamID stri
 // TriggerDeviceComplianceChange triggers a device compliance change event
 func (t *Transmitter) TriggerDeviceComplianceChange(ctx context.Context, streamID string, subject SubjectIdentifier, currentStatus, previousStatus string) (*StoredEvent, error) {
 	event := SecurityEvent{
-		EventType:       EventTypeDeviceComplianceChange,
-		Subject:         subject,
-		EventTimestamp:  time.Now(),
-		CurrentStatus:   currentStatus,
-		PreviousStatus:  previousStatus,
+		EventType:        EventTypeDeviceComplianceChange,
+		Subject:          subject,
+		EventTimestamp:   time.Now(),
+		CurrentStatus:    currentStatus,
+		PreviousStatus:   previousStatus,
 		InitiatingEntity: InitiatingEntitySystem,
 	}
 	return t.GenerateEvent(ctx, streamID, event)
@@ -412,15 +412,15 @@ func (t *Transmitter) TriggerAccountDisabled(ctx context.Context, streamID strin
 		InitiatingEntity: initiator,
 		ReasonAdmin:      &ReasonInfo{EN: reason},
 	}
-	
+
 	// Update subject status
 	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
 	if err == nil && subj != nil {
 		subj.Status = SubjectStatusDisabled
 		subj.ActiveSessions = 0
-		t.storage.UpdateSubject(ctx, *subj)
+		_ = t.storage.UpdateSubject(ctx, *subj)
 	}
-	
+
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
@@ -432,14 +432,14 @@ func (t *Transmitter) TriggerAccountEnabled(ctx context.Context, streamID string
 		EventTimestamp:   time.Now(),
 		InitiatingEntity: initiator,
 	}
-	
+
 	// Update subject status
 	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
 	if err == nil && subj != nil {
 		subj.Status = SubjectStatusActive
-		t.storage.UpdateSubject(ctx, *subj)
+		_ = t.storage.UpdateSubject(ctx, *subj)
 	}
-	
+
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
@@ -451,15 +451,15 @@ func (t *Transmitter) TriggerAccountPurged(ctx context.Context, streamID string,
 		EventTimestamp:   time.Now(),
 		InitiatingEntity: initiator,
 	}
-	
+
 	// Update subject status (don't delete, mark as purged for demo)
 	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
 	if err == nil && subj != nil {
 		subj.Status = SubjectStatusPurged
 		subj.ActiveSessions = 0
-		t.storage.UpdateSubject(ctx, *subj)
+		_ = t.storage.UpdateSubject(ctx, *subj)
 	}
-	
+
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
@@ -479,11 +479,11 @@ func (t *Transmitter) TriggerIdentifierChanged(ctx context.Context, streamID str
 // TriggerAssuranceLevelChange triggers an assurance level change event
 func (t *Transmitter) TriggerAssuranceLevelChange(ctx context.Context, streamID string, subject SubjectIdentifier, currentLevel, previousLevel string) (*StoredEvent, error) {
 	event := SecurityEvent{
-		EventType:       EventTypeAssuranceLevelChange,
-		Subject:         subject,
-		EventTimestamp:  time.Now(),
-		CurrentStatus:   currentLevel,
-		PreviousStatus:  previousLevel,
+		EventType:        EventTypeAssuranceLevelChange,
+		Subject:          subject,
+		EventTimestamp:   time.Now(),
+		CurrentStatus:    currentLevel,
+		PreviousStatus:   previousLevel,
 		InitiatingEntity: InitiatingEntitySystem,
 	}
 	return t.GenerateEvent(ctx, streamID, event)
@@ -499,14 +499,13 @@ func (t *Transmitter) TriggerSessionsRevoked(ctx context.Context, streamID strin
 		InitiatingEntity: initiator,
 		ReasonAdmin:      &ReasonInfo{EN: reason},
 	}
-	
+
 	// Update subject's active sessions to 0
 	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
 	if err == nil && subj != nil {
 		subj.ActiveSessions = 0
-		t.storage.UpdateSubject(ctx, *subj)
+		_ = t.storage.UpdateSubject(ctx, *subj)
 	}
-	
+
 	return t.GenerateEvent(ctx, streamID, event)
 }
-

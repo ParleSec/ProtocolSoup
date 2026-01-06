@@ -176,9 +176,9 @@ func (s *Storage) GetStream(ctx context.Context, streamID string) (*Stream, erro
 		return nil, err
 	}
 
-	json.Unmarshal([]byte(audience), &stream.Audience)
-	json.Unmarshal([]byte(supported), &stream.EventsSupported)
-	json.Unmarshal([]byte(requested), &stream.EventsRequested)
+	_ = json.Unmarshal([]byte(audience), &stream.Audience)
+	_ = json.Unmarshal([]byte(supported), &stream.EventsSupported)
+	_ = json.Unmarshal([]byte(requested), &stream.EventsRequested)
 
 	return &stream, nil
 }
@@ -192,14 +192,14 @@ func (s *Storage) GetDefaultStream(ctx context.Context, issuer string) (*Stream,
 
 	// Create default stream
 	defaultStream := Stream{
-		ID:              "default",
-		Issuer:          issuer,
-		Audience:        []string{issuer + "/receiver"},
-		EventsSupported: GetSupportedEventURIs(),
-		EventsRequested: GetSupportedEventURIs(),
-		DeliveryMethod:  DeliveryMethodPush,
+		ID:               "default",
+		Issuer:           issuer,
+		Audience:         []string{issuer + "/receiver"},
+		EventsSupported:  GetSupportedEventURIs(),
+		EventsRequested:  GetSupportedEventURIs(),
+		DeliveryMethod:   DeliveryMethodPush,
 		DeliveryEndpoint: issuer + "/ssf/push",
-		Status:          StreamStatusEnabled,
+		Status:           StreamStatusEnabled,
 	}
 
 	if err := s.CreateStream(ctx, defaultStream); err != nil {
@@ -358,15 +358,15 @@ func (s *Storage) DeleteSubject(ctx context.Context, subjectID string) error {
 
 // StoredEvent represents an event in the database
 type StoredEvent struct {
-	ID            string     `json:"id"`
-	StreamID      string     `json:"stream_id"`
-	SubjectID     *string    `json:"subject_id"`
-	EventType     string     `json:"event_type"`
-	EventData     string     `json:"event_data"`
-	SETToken      string     `json:"set_token"`
-	Status        string     `json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	DeliveredAt   *time.Time `json:"delivered_at"`
+	ID             string     `json:"id"`
+	StreamID       string     `json:"stream_id"`
+	SubjectID      *string    `json:"subject_id"`
+	EventType      string     `json:"event_type"`
+	EventData      string     `json:"event_data"`
+	SETToken       string     `json:"set_token"`
+	Status         string     `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	DeliveredAt    *time.Time `json:"delivered_at"`
 	AcknowledgedAt *time.Time `json:"acknowledged_at"`
 }
 
@@ -441,7 +441,7 @@ func (s *Storage) UpdateEventStatus(ctx context.Context, eventID, status string)
 	var err error
 	switch status {
 	case EventStatusDelivered:
-		_, err = s.db.ExecContext(ctx, 
+		_, err = s.db.ExecContext(ctx,
 			"UPDATE events SET status = ?, delivered_at = CURRENT_TIMESTAMP WHERE id = ?",
 			status, eventID)
 	case EventStatusAcknowledged:
@@ -466,7 +466,7 @@ func (s *Storage) AcknowledgeEvents(ctx context.Context, eventIDs []string) erro
 }
 
 // RecordDeliveryAttempt records a delivery attempt
-func (s *Storage) RecordDeliveryAttempt(ctx context.Context, eventID string, attemptNum int, 
+func (s *Storage) RecordDeliveryAttempt(ctx context.Context, eventID string, attemptNum int,
 	status string, responseCode int, responseBody, errorMsg string) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO delivery_attempts (event_id, attempt_number, status, response_code, response_body, error_message)
@@ -574,4 +574,3 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 
 	return nil
 }
-

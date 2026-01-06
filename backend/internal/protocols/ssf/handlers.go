@@ -38,18 +38,18 @@ func (p *Plugin) handleInfo(w http.ResponseWriter, r *http.Request) {
 // handleSSFConfiguration returns the SSF transmitter metadata
 func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) {
 	config := map[string]interface{}{
-		"issuer":                        p.baseURL,
-		"jwks_uri":                      p.baseURL + "/ssf/jwks",
+		"issuer":   p.baseURL,
+		"jwks_uri": p.baseURL + "/ssf/jwks",
 		"delivery_methods_supported": []string{
 			DeliveryMethodPush,
 			DeliveryMethodPoll,
 		},
-		"configuration_endpoint":        p.baseURL + "/ssf/stream",
-		"add_subject_endpoint":          p.baseURL + "/ssf/subjects",
-		"remove_subject_endpoint":       p.baseURL + "/ssf/subjects",
-		"verification_endpoint":         p.baseURL + "/ssf/verify",
-		"status_endpoint":               p.baseURL + "/ssf/status",
-		"critical_subject_members":      []string{SubjectFormatEmail, SubjectFormatIssuerSub},
+		"configuration_endpoint":   p.baseURL + "/ssf/stream",
+		"add_subject_endpoint":     p.baseURL + "/ssf/subjects",
+		"remove_subject_endpoint":  p.baseURL + "/ssf/subjects",
+		"verification_endpoint":    p.baseURL + "/ssf/verify",
+		"status_endpoint":          p.baseURL + "/ssf/status",
+		"critical_subject_members": []string{SubjectFormatEmail, SubjectFormatIssuerSub},
 	}
 	writeJSON(w, http.StatusOK, config)
 }
@@ -85,7 +85,7 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 		EventsRequested  []string `json:"events_requested,omitempty"`
 		Status           string   `json:"status,omitempty"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
@@ -211,7 +211,7 @@ func (p *Plugin) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 // handleTriggerAction handles all action triggers
 func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	action := chi.URLParam(r, "action")
-	
+
 	var req ActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -292,7 +292,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "new_value is required for identifier-changed")
 			return
 		}
-		event, err = p.transmitter.TriggerIdentifierChanged(r.Context(), stream.ID, subject, 
+		event, err = p.transmitter.TriggerIdentifierChanged(r.Context(), stream.ID, subject,
 			req.SubjectIdentifier, req.NewValue, initiator)
 
 	case "assurance-level-change":
@@ -469,13 +469,13 @@ func (p *Plugin) handleGetReceivedEvents(w http.ResponseWriter, r *http.Request)
 	// Prefer standalone receiver (production-like)
 	events := p.receiverService.GetReceivedEvents()
 	source := "standalone_receiver"
-	
+
 	// If no events from standalone, fall back to legacy
 	if len(events) == 0 {
 		events = p.receiver.GetReceivedEvents()
 		source = "legacy_receiver"
 	}
-	
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"events": events,
 		"total":  len(events),
@@ -488,17 +488,17 @@ func (p *Plugin) handleGetResponseActions(w http.ResponseWriter, r *http.Request
 	// Prefer standalone receiver (production-like)
 	actions := p.receiverService.GetResponseActions()
 	source := "standalone_receiver"
-	
+
 	// If no actions from standalone, fall back to legacy
 	if len(actions) == 0 {
 		actions = p.receiver.GetResponseActions()
 		source = "legacy_receiver"
 	}
-	
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"actions": actions,
 		"total":   len(actions),
-		"source": source,
+		"source":  source,
 	})
 }
 
@@ -632,20 +632,20 @@ func (p *Plugin) handleGetSecurityState(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "email is required")
 		return
 	}
-	
+
 	// URL decode the email parameter
 	decodedEmail, err := decodeURLParam(email)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid email parameter")
 		return
 	}
-	
+
 	state, err := p.actionExecutor.GetUserState(decodedEmail)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	
+
 	writeJSON(w, http.StatusOK, state)
 }
 
@@ -656,25 +656,25 @@ func (p *Plugin) handleResetSecurityState(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "email is required")
 		return
 	}
-	
+
 	// URL decode the email parameter
 	decodedEmail, err := decodeURLParam(email)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid email parameter")
 		return
 	}
-	
+
 	var req struct {
 		Sessions int `json:"sessions"`
 	}
 	req.Sessions = 3 // Default sessions
-	
+
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	
+
 	p.actionExecutor.ResetUserState(decodedEmail, req.Sessions)
-	
+
 	state, _ := p.actionExecutor.GetUserState(decodedEmail)
 	writeJSON(w, http.StatusOK, state)
 }
@@ -718,4 +718,3 @@ func stringIndex(s, substr string) int {
 	}
 	return -1
 }
-
