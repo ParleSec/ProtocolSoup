@@ -149,7 +149,7 @@ func (l *Lexer) skipWhitespace() {
 func (l *Lexer) readString() Token {
 	l.pos++ // Skip opening quote
 	start := l.pos
-	
+
 	for l.pos < len(l.input) && l.input[l.pos] != '"' {
 		if l.input[l.pos] == '\\' && l.pos+1 < len(l.input) {
 			l.pos += 2 // Skip escaped character
@@ -157,12 +157,12 @@ func (l *Lexer) readString() Token {
 			l.pos++
 		}
 	}
-	
+
 	value := l.input[start:l.pos]
 	if l.pos < len(l.input) {
 		l.pos++ // Skip closing quote
 	}
-	
+
 	// Unescape the string
 	value = unescapeString(value)
 	return Token{Type: TokenString, Value: value}
@@ -190,7 +190,7 @@ func (l *Lexer) readIdentifier() Token {
 		}
 	}
 	value := l.input[start:l.pos]
-	
+
 	// Check for keywords
 	lower := strings.ToLower(value)
 	switch lower {
@@ -225,7 +225,7 @@ func (l *Lexer) readIdentifier() Token {
 	case "null":
 		return Token{Type: TokenNull, Value: "null"}
 	}
-	
+
 	return Token{Type: TokenIdent, Value: value}
 }
 
@@ -262,10 +262,10 @@ func (e AttrExpr) String() string {
 
 // AttrPath represents an attribute path (e.g., "name.familyName")
 type AttrPath struct {
-	Schema    string   // Optional schema URN
-	Attribute string   // Root attribute
-	SubAttr   string   // Optional sub-attribute
-	ValuePath *Filter  // Optional value filter for multi-valued attributes
+	Schema    string  // Optional schema URN
+	Attribute string  // Root attribute
+	SubAttr   string  // Optional sub-attribute
+	ValuePath *Filter // Optional value filter for multi-valued attributes
 }
 
 func (p AttrPath) String() string {
@@ -348,12 +348,12 @@ func (p *Parser) Parse() (*Filter, error) {
 	if p.current.Type == TokenEOF {
 		return &Filter{}, nil
 	}
-	
+
 	node, err := p.parseExpression(0)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Filter{Root: node}, nil
 }
 
@@ -409,7 +409,7 @@ func (p *Parser) parseExpression(precedence int) (FilterNode, error) {
 	for {
 		var opPrec int
 		var op string
-		
+
 		switch p.current.Type {
 		case TokenAnd:
 			opPrec = precAnd
@@ -420,17 +420,17 @@ func (p *Parser) parseExpression(precedence int) (FilterNode, error) {
 		default:
 			return left, nil
 		}
-		
+
 		if opPrec <= precedence {
 			return left, nil
 		}
-		
+
 		p.nextToken()
 		right, err := p.parseExpression(opPrec)
 		if err != nil {
 			return nil, err
 		}
-		
+
 		left = &LogExpr{Left: left, Operator: op, Right: right}
 	}
 }
@@ -512,7 +512,7 @@ func (p *Parser) parseAttrPath() (*AttrPath, error) {
 			return nil, fmt.Errorf("expected ']', got %s", p.current)
 		}
 		p.nextToken()
-		
+
 		// Check for sub-attribute after value path
 		if p.current.Type == TokenDot {
 			p.nextToken()
@@ -613,12 +613,12 @@ func (t *SQLTranslator) Translate(filter *Filter) (string, []interface{}, error)
 	if filter == nil || filter.Root == nil {
 		return "", nil, nil
 	}
-	
+
 	sql, err := t.translateNode(filter.Root)
 	if err != nil {
 		return "", nil, err
 	}
-	
+
 	return sql, t.params, nil
 }
 
@@ -637,7 +637,7 @@ func (t *SQLTranslator) translateNode(node FilterNode) (string, error) {
 
 func (t *SQLTranslator) translateAttrExpr(expr *AttrExpr) (string, error) {
 	column := t.attrToColumn(expr.Path)
-	
+
 	// Handle presence check
 	if expr.Operator == "pr" {
 		return fmt.Sprintf("(%s IS NOT NULL AND %s != '')", column, column), nil
@@ -684,12 +684,12 @@ func (t *SQLTranslator) translateLogExpr(expr *LogExpr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	right, err := t.translateNode(expr.Right)
 	if err != nil {
 		return "", err
 	}
-	
+
 	op := strings.ToUpper(expr.Operator)
 	return fmt.Sprintf("(%s %s %s)", left, op, right), nil
 }
@@ -706,7 +706,7 @@ func (t *SQLTranslator) translateNotExpr(expr *NotExpr) (string, error) {
 func (t *SQLTranslator) attrToColumn(path *AttrPath) string {
 	attr := strings.ToLower(path.Attribute)
 	subAttr := strings.ToLower(path.SubAttr)
-	
+
 	// Direct column mappings
 	switch attr {
 	case "id":
@@ -733,7 +733,7 @@ func (t *SQLTranslator) attrToColumn(path *AttrPath) string {
 	if path.SubAttr != "" {
 		jsonPath += "." + path.SubAttr
 	}
-	
+
 	return fmt.Sprintf("json_extract(data, '%s')", jsonPath)
 }
 
@@ -751,18 +751,18 @@ func FilterToSQLWhere(filter string, resourceType string) (string, []interface{}
 	if filter == "" {
 		return "", nil, nil
 	}
-	
+
 	parsed, err := ParseFilter(filter)
 	if err != nil {
 		return "", nil, ErrInvalidFilter(err.Error())
 	}
-	
+
 	translator := NewSQLTranslator(resourceType)
 	sql, params, err := translator.Translate(parsed)
 	if err != nil {
 		return "", nil, ErrInvalidFilter(err.Error())
 	}
-	
+
 	return sql, params, nil
 }
 
@@ -777,17 +777,13 @@ var (
 // QuickFilter provides fast path for simple filter patterns
 func QuickFilter(filter string) (attr string, op string, value string, ok bool) {
 	filter = strings.TrimSpace(filter)
-	
+
 	if matches := simpleEqRegex.FindStringSubmatch(filter); len(matches) == 3 {
 		return matches[1], "eq", matches[2], true
 	}
 	if matches := simpleSwRegex.FindStringSubmatch(filter); len(matches) == 3 {
 		return matches[1], "sw", matches[2], true
 	}
-	
+
 	return "", "", "", false
 }
-
-
-
-

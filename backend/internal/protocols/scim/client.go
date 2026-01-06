@@ -405,7 +405,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 	req.Header.Set("Content-Type", ContentTypeSCIM)
 	req.Header.Set("Accept", ContentTypeSCIM)
-	
+
 	if c.authToken != "" {
 		req.Header.Set("Authorization", "Bearer "+c.authToken)
 	}
@@ -435,11 +435,11 @@ func (c *Client) parseError(resp *http.Response) error {
 
 // SyncResult contains the result of a sync operation
 type SyncResult struct {
-	Created  int                 `json:"created"`
-	Updated  int                 `json:"updated"`
-	Deleted  int                 `json:"deleted"`
-	Errors   int                 `json:"errors"`
-	Mappings map[string]string   `json:"mappings"` // local ID -> remote ID
+	Created  int                   `json:"created"`
+	Updated  int                   `json:"updated"`
+	Deleted  int                   `json:"deleted"`
+	Errors   int                   `json:"errors"`
+	Mappings map[string]string     `json:"mappings"` // local ID -> remote ID
 	Details  []SyncOperationDetail `json:"details,omitempty"`
 }
 
@@ -474,7 +474,7 @@ func (c *Client) SyncUsers(ctx context.Context, localUsers []*User, existingMapp
 			// Update existing user
 			detail.Operation = "update"
 			detail.RemoteID = remoteID
-			
+
 			updated, err := c.UpdateUser(ctx, remoteID, user)
 			if err != nil {
 				detail.Status = "error"
@@ -488,7 +488,7 @@ func (c *Client) SyncUsers(ctx context.Context, localUsers []*User, existingMapp
 		} else {
 			// Create new user
 			detail.Operation = "create"
-			
+
 			created, err := c.CreateUser(ctx, user)
 			if err != nil {
 				detail.Status = "error"
@@ -507,7 +507,3 @@ func (c *Client) SyncUsers(ctx context.Context, localUsers []*User, existingMapp
 
 	return result, nil
 }
-
-
-
-

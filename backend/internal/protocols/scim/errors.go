@@ -24,14 +24,14 @@ func (e *SCIMError) Error() string {
 func WriteError(w http.ResponseWriter, err *SCIMError) {
 	w.Header().Set("Content-Type", ContentTypeSCIM)
 	w.WriteHeader(err.Status)
-	
+
 	resp := ErrorResponse{
 		Schemas:  []string{SchemaURNError},
 		ScimType: err.ScimType,
 		Detail:   err.Detail,
 		Status:   fmt.Sprintf("%d", err.Status),
 	}
-	
+
 	json.NewEncoder(w).Encode(resp)
 }
 
@@ -173,7 +173,3 @@ func ErrPayloadTooLarge(maxSize int) *SCIMError {
 		Detail: fmt.Sprintf("Request payload exceeds maximum size of %d bytes", maxSize),
 	}
 }
-
-
-
-

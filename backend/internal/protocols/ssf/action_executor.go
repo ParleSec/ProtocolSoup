@@ -13,21 +13,21 @@ import (
 type MockIdPActionExecutor struct {
 	idpBaseURL string
 	httpClient *http.Client
-	
+
 	// Local state tracking (mirrors IdP state)
-	userStates    map[string]*UserSecurityState
-	stateMu       sync.RWMutex
+	userStates map[string]*UserSecurityState
+	stateMu    sync.RWMutex
 }
 
 // UserSecurityState tracks the security state of a user
 type UserSecurityState struct {
-	Email              string    `json:"email"`
-	SessionsActive     int       `json:"sessions_active"`
-	AccountEnabled     bool      `json:"account_enabled"`
-	PasswordResetRequired bool   `json:"password_reset_required"`
-	TokensValid        bool      `json:"tokens_valid"`
-	LastModified       time.Time `json:"last_modified"`
-	ModifiedBy         string    `json:"modified_by"`
+	Email                 string    `json:"email"`
+	SessionsActive        int       `json:"sessions_active"`
+	AccountEnabled        bool      `json:"account_enabled"`
+	PasswordResetRequired bool      `json:"password_reset_required"`
+	TokensValid           bool      `json:"tokens_valid"`
+	LastModified          time.Time `json:"last_modified"`
+	ModifiedBy            string    `json:"modified_by"`
 }
 
 // NewMockIdPActionExecutor creates a new action executor
@@ -37,10 +37,10 @@ func NewMockIdPActionExecutor(idpBaseURL string) *MockIdPActionExecutor {
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		userStates: make(map[string]*UserSecurityState),
 	}
-	
+
 	// Initialize default states for demo users
 	executor.initDemoUserStates()
-	
+
 	return executor
 }
 
@@ -55,16 +55,16 @@ func (e *MockIdPActionExecutor) initDemoUserStates() {
 		{"charlie@example.com", 1},
 		{"admin@example.com", 2},
 	}
-	
+
 	for _, u := range demoUsers {
 		e.userStates[u.email] = &UserSecurityState{
-			Email:              u.email,
-			SessionsActive:     u.sessions,
-			AccountEnabled:     true,
+			Email:                 u.email,
+			SessionsActive:        u.sessions,
+			AccountEnabled:        true,
 			PasswordResetRequired: false,
-			TokensValid:        true,
-			LastModified:       time.Now(),
-			ModifiedBy:         "system",
+			TokensValid:           true,
+			LastModified:          time.Now(),
+			ModifiedBy:            "system",
 		}
 	}
 }
@@ -73,7 +73,7 @@ func (e *MockIdPActionExecutor) initDemoUserStates() {
 func (e *MockIdPActionExecutor) RevokeUserSessions(ctx context.Context, email string) error {
 	e.stateMu.Lock()
 	defer e.stateMu.Unlock()
-	
+
 	state, ok := e.userStates[email]
 	if !ok {
 		state = &UserSecurityState{
@@ -84,18 +84,18 @@ func (e *MockIdPActionExecutor) RevokeUserSessions(ctx context.Context, email st
 		}
 		e.userStates[email] = state
 	}
-	
+
 	previousSessions := state.SessionsActive
 	state.SessionsActive = 0
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
-	
+
 	log.Printf("[ActionExecutor] REAL ACTION: Revoked %d sessions for %s", previousSessions, email)
-	
+
 	// Call the IdP to actually revoke sessions (if endpoint exists)
 	// This would be: POST /api/users/{id}/sessions/revoke
 	// For now we track locally and the state is real
-	
+
 	return nil
 }
 
@@ -103,7 +103,7 @@ func (e *MockIdPActionExecutor) RevokeUserSessions(ctx context.Context, email st
 func (e *MockIdPActionExecutor) DisableUser(ctx context.Context, email string) error {
 	e.stateMu.Lock()
 	defer e.stateMu.Unlock()
-	
+
 	state, ok := e.userStates[email]
 	if !ok {
 		state = &UserSecurityState{
@@ -112,16 +112,16 @@ func (e *MockIdPActionExecutor) DisableUser(ctx context.Context, email string) e
 		}
 		e.userStates[email] = state
 	}
-	
+
 	wasEnabled := state.AccountEnabled
 	state.AccountEnabled = false
 	state.SessionsActive = 0 // Disabling also revokes sessions
 	state.TokensValid = false
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
-	
+
 	log.Printf("[ActionExecutor] REAL ACTION: Disabled account for %s (was enabled: %v)", email, wasEnabled)
-	
+
 	return nil
 }
 
@@ -129,7 +129,7 @@ func (e *MockIdPActionExecutor) DisableUser(ctx context.Context, email string) e
 func (e *MockIdPActionExecutor) EnableUser(ctx context.Context, email string) error {
 	e.stateMu.Lock()
 	defer e.stateMu.Unlock()
-	
+
 	state, ok := e.userStates[email]
 	if !ok {
 		state = &UserSecurityState{
@@ -138,15 +138,15 @@ func (e *MockIdPActionExecutor) EnableUser(ctx context.Context, email string) er
 		}
 		e.userStates[email] = state
 	}
-	
+
 	wasEnabled := state.AccountEnabled
 	state.AccountEnabled = true
 	state.TokensValid = true
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
-	
+
 	log.Printf("[ActionExecutor] REAL ACTION: Enabled account for %s (was enabled: %v)", email, wasEnabled)
-	
+
 	return nil
 }
 
@@ -154,7 +154,7 @@ func (e *MockIdPActionExecutor) EnableUser(ctx context.Context, email string) er
 func (e *MockIdPActionExecutor) ForcePasswordReset(ctx context.Context, email string) error {
 	e.stateMu.Lock()
 	defer e.stateMu.Unlock()
-	
+
 	state, ok := e.userStates[email]
 	if !ok {
 		state = &UserSecurityState{
@@ -164,13 +164,13 @@ func (e *MockIdPActionExecutor) ForcePasswordReset(ctx context.Context, email st
 		}
 		e.userStates[email] = state
 	}
-	
+
 	state.PasswordResetRequired = true
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
-	
+
 	log.Printf("[ActionExecutor] REAL ACTION: Forced password reset for %s", email)
-	
+
 	return nil
 }
 
@@ -178,7 +178,7 @@ func (e *MockIdPActionExecutor) ForcePasswordReset(ctx context.Context, email st
 func (e *MockIdPActionExecutor) InvalidateTokens(ctx context.Context, email string) error {
 	e.stateMu.Lock()
 	defer e.stateMu.Unlock()
-	
+
 	state, ok := e.userStates[email]
 	if !ok {
 		state = &UserSecurityState{
@@ -187,14 +187,14 @@ func (e *MockIdPActionExecutor) InvalidateTokens(ctx context.Context, email stri
 		}
 		e.userStates[email] = state
 	}
-	
+
 	wasValid := state.TokensValid
 	state.TokensValid = false
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
-	
+
 	log.Printf("[ActionExecutor] REAL ACTION: Invalidated tokens for %s (were valid: %v)", email, wasValid)
-	
+
 	return nil
 }
 
@@ -202,12 +202,12 @@ func (e *MockIdPActionExecutor) InvalidateTokens(ctx context.Context, email stri
 func (e *MockIdPActionExecutor) GetUserState(email string) (*UserSecurityState, error) {
 	e.stateMu.RLock()
 	defer e.stateMu.RUnlock()
-	
+
 	state, ok := e.userStates[email]
 	if !ok {
 		return nil, fmt.Errorf("user not found: %s", email)
 	}
-	
+
 	// Return a copy
 	stateCopy := *state
 	return &stateCopy, nil
@@ -217,7 +217,7 @@ func (e *MockIdPActionExecutor) GetUserState(email string) (*UserSecurityState, 
 func (e *MockIdPActionExecutor) GetAllUserStates() map[string]*UserSecurityState {
 	e.stateMu.RLock()
 	defer e.stateMu.RUnlock()
-	
+
 	result := make(map[string]*UserSecurityState)
 	for k, v := range e.userStates {
 		stateCopy := *v
@@ -230,7 +230,7 @@ func (e *MockIdPActionExecutor) GetAllUserStates() map[string]*UserSecurityState
 func (e *MockIdPActionExecutor) ResetUserState(email string, sessions int) {
 	e.stateMu.Lock()
 	defer e.stateMu.Unlock()
-	
+
 	e.userStates[email] = &UserSecurityState{
 		Email:                 email,
 		SessionsActive:        sessions,
@@ -241,5 +241,3 @@ func (e *MockIdPActionExecutor) ResetUserState(email string, sessions int) {
 		ModifiedBy:            "system-reset",
 	}
 }
-
-

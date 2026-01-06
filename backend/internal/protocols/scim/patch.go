@@ -47,7 +47,7 @@ func (pe *PatchExecutor) GetChanges() []PatchChange {
 
 func (pe *PatchExecutor) executeOp(op PatchOperation) error {
 	opLower := strings.ToLower(op.Op)
-	
+
 	switch opLower {
 	case "add":
 		return pe.executeAdd(op.Path, op.Value)
@@ -65,7 +65,7 @@ func (pe *PatchExecutor) executeAdd(path string, value interface{}) error {
 		// Add to root - value must be object with attributes to add
 		return pe.addToRoot(value)
 	}
-	
+
 	// Parse path and add value
 	return pe.setValueAtPath(path, value, true)
 }
@@ -74,7 +74,7 @@ func (pe *PatchExecutor) executeRemove(path string) error {
 	if path == "" {
 		return ErrNoTarget("remove operation requires a path")
 	}
-	
+
 	return pe.removeValueAtPath(path)
 }
 
@@ -83,7 +83,7 @@ func (pe *PatchExecutor) executeReplace(path string, value interface{}) error {
 		// Replace root - value must be complete replacement
 		return pe.replaceRoot(value)
 	}
-	
+
 	return pe.setValueAtPath(path, value, false)
 }
 
@@ -93,13 +93,13 @@ func (pe *PatchExecutor) addToRoot(value interface{}) error {
 	if !ok {
 		return ErrInvalidValue("add to root requires an object value")
 	}
-	
+
 	// Convert resource to map, merge, convert back
 	resourceMap, err := pe.resourceToMap()
 	if err != nil {
 		return err
 	}
-	
+
 	for k, v := range valueMap {
 		pe.changes = append(pe.changes, PatchChange{
 			Path:      k,
@@ -109,7 +109,7 @@ func (pe *PatchExecutor) addToRoot(value interface{}) error {
 		})
 		resourceMap[k] = v
 	}
-	
+
 	return pe.mapToResource(resourceMap)
 }
 
@@ -119,9 +119,9 @@ func (pe *PatchExecutor) replaceRoot(value interface{}) error {
 	if !ok {
 		return ErrInvalidValue("replace root requires an object value")
 	}
-	
+
 	oldMap, _ := pe.resourceToMap()
-	
+
 	// Preserve immutable attributes
 	if id, ok := oldMap["id"]; ok {
 		valueMap["id"] = id
@@ -132,14 +132,14 @@ func (pe *PatchExecutor) replaceRoot(value interface{}) error {
 	if schemas, ok := oldMap["schemas"]; ok {
 		valueMap["schemas"] = schemas
 	}
-	
+
 	pe.changes = append(pe.changes, PatchChange{
 		Path:      "",
 		Operation: "replace",
 		OldValue:  oldMap,
 		NewValue:  valueMap,
 	})
-	
+
 	return pe.mapToResource(valueMap)
 }
 
@@ -149,18 +149,18 @@ func (pe *PatchExecutor) setValueAtPath(path string, value interface{}, isAdd bo
 	if err != nil {
 		return err
 	}
-	
+
 	// Parse path components
 	components, valueFilter, err := parsePatchPath(path)
 	if err != nil {
 		return err
 	}
-	
+
 	// Navigate to parent and set value
 	current := resourceMap
 	for i := 0; i < len(components)-1; i++ {
 		comp := components[i]
-		
+
 		if next, ok := current[comp]; ok {
 			switch v := next.(type) {
 			case map[string]interface{}:
@@ -190,11 +190,11 @@ func (pe *PatchExecutor) setValueAtPath(path string, value interface{}, isAdd bo
 			return ErrNoTarget(fmt.Sprintf("path element %s does not exist", comp))
 		}
 	}
-	
+
 	// Set the final value
 	finalKey := components[len(components)-1]
 	oldValue := current[finalKey]
-	
+
 	if isAdd && oldValue != nil {
 		// For add, merge arrays or object properties
 		if oldArr, ok := oldValue.([]interface{}); ok {
@@ -209,7 +209,7 @@ func (pe *PatchExecutor) setValueAtPath(path string, value interface{}, isAdd bo
 	} else {
 		current[finalKey] = value
 	}
-	
+
 	operation := "add"
 	if !isAdd {
 		operation = "replace"
@@ -220,7 +220,7 @@ func (pe *PatchExecutor) setValueAtPath(path string, value interface{}, isAdd bo
 		OldValue:  oldValue,
 		NewValue:  value,
 	})
-	
+
 	return pe.mapToResource(resourceMap)
 }
 
@@ -231,7 +231,7 @@ func (pe *PatchExecutor) setInArray(arr []interface{}, filter, subAttr string, v
 	if err != nil {
 		return ErrInvalidPath(fmt.Sprintf("invalid value filter: %s", filter))
 	}
-	
+
 	// Find matching element(s)
 	matched := false
 	for i, elem := range arr {
@@ -239,13 +239,13 @@ func (pe *PatchExecutor) setInArray(arr []interface{}, filter, subAttr string, v
 		if !ok {
 			continue
 		}
-		
+
 		if matchesFilter(elemMap, filterExpr) {
 			matched = true
 			oldValue := elemMap[subAttr]
 			elemMap[subAttr] = value
 			arr[i] = elemMap
-			
+
 			operation := "add"
 			if !isAdd {
 				operation = "replace"
@@ -258,11 +258,11 @@ func (pe *PatchExecutor) setInArray(arr []interface{}, filter, subAttr string, v
 			})
 		}
 	}
-	
+
 	if !matched && !isAdd {
 		return ErrNoTarget(fmt.Sprintf("no array element matches filter: %s", filter))
 	}
-	
+
 	return nil
 }
 
@@ -272,17 +272,17 @@ func (pe *PatchExecutor) removeValueAtPath(path string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	components, valueFilter, err := parsePatchPath(path)
 	if err != nil {
 		return err
 	}
-	
+
 	// Navigate to parent
 	current := resourceMap
 	for i := 0; i < len(components)-1; i++ {
 		comp := components[i]
-		
+
 		if next, ok := current[comp]; ok {
 			switch v := next.(type) {
 			case map[string]interface{}:
@@ -299,30 +299,30 @@ func (pe *PatchExecutor) removeValueAtPath(path string) error {
 			return ErrNoTarget(fmt.Sprintf("path element %s does not exist", comp))
 		}
 	}
-	
+
 	// Remove the final key
 	finalKey := components[len(components)-1]
-	
+
 	if valueFilter != "" {
 		// Remove from array with filter
 		if arr, ok := current[finalKey].([]interface{}); ok {
 			return pe.removeFromArray(current, finalKey, arr, valueFilter, path)
 		}
 	}
-	
+
 	oldValue := current[finalKey]
 	if oldValue == nil {
 		return ErrNoTarget(fmt.Sprintf("attribute %s does not exist", finalKey))
 	}
-	
+
 	delete(current, finalKey)
-	
+
 	pe.changes = append(pe.changes, PatchChange{
 		Path:      path,
 		Operation: "remove",
 		OldValue:  oldValue,
 	})
-	
+
 	return pe.mapToResource(resourceMap)
 }
 
@@ -332,36 +332,36 @@ func (pe *PatchExecutor) removeFromArray(parent map[string]interface{}, key stri
 	if err != nil {
 		return ErrInvalidPath(fmt.Sprintf("invalid value filter: %s", filter))
 	}
-	
+
 	newArr := make([]interface{}, 0, len(arr))
 	removed := make([]interface{}, 0)
-	
+
 	for _, elem := range arr {
 		elemMap, ok := elem.(map[string]interface{})
 		if !ok {
 			newArr = append(newArr, elem)
 			continue
 		}
-		
+
 		if matchesFilter(elemMap, filterExpr) {
 			removed = append(removed, elem)
 		} else {
 			newArr = append(newArr, elem)
 		}
 	}
-	
+
 	if len(removed) == 0 {
 		return ErrNoTarget(fmt.Sprintf("no array element matches filter: %s", filter))
 	}
-	
+
 	parent[key] = newArr
-	
+
 	pe.changes = append(pe.changes, PatchChange{
 		Path:      fullPath,
 		Operation: "remove",
 		OldValue:  removed,
 	})
-	
+
 	return nil
 }
 
@@ -371,7 +371,7 @@ func parsePatchPath(path string) ([]string, string, error) {
 	if path == "" {
 		return nil, "", nil
 	}
-	
+
 	// Check for value filter: attr[filter].subAttr
 	var valueFilter string
 	if idx := strings.Index(path, "["); idx != -1 {
@@ -382,10 +382,10 @@ func parsePatchPath(path string) ([]string, string, error) {
 		valueFilter = path[idx+1 : endIdx]
 		path = path[:idx] + path[endIdx+1:]
 	}
-	
+
 	// Split by dots
 	components := strings.Split(path, ".")
-	
+
 	// Filter empty components
 	filtered := make([]string, 0, len(components))
 	for _, c := range components {
@@ -393,11 +393,11 @@ func parsePatchPath(path string) ([]string, string, error) {
 			filtered = append(filtered, c)
 		}
 	}
-	
+
 	if len(filtered) == 0 {
 		return nil, "", ErrInvalidPath("empty path")
 	}
-	
+
 	return filtered, valueFilter, nil
 }
 
@@ -429,12 +429,12 @@ func evaluateFilterNode(obj map[string]interface{}, node FilterNode) bool {
 func evaluateAttrExpr(obj map[string]interface{}, expr *AttrExpr) bool {
 	// Get value at path
 	val := getValueAtPath(obj, expr.Path)
-	
+
 	// Handle presence check
 	if expr.Operator == "pr" {
 		return val != nil
 	}
-	
+
 	// Compare values
 	return compareValues(val, expr.Operator, expr.Value)
 }
@@ -448,7 +448,7 @@ func getValueAtPath(obj map[string]interface{}, path *AttrPath) interface{} {
 			return nil
 		}
 	}
-	
+
 	if path.SubAttr != "" {
 		if subObj, ok := val.(map[string]interface{}); ok {
 			val = subObj[path.SubAttr]
@@ -459,7 +459,7 @@ func getValueAtPath(obj map[string]interface{}, path *AttrPath) interface{} {
 			return nil
 		}
 	}
-	
+
 	return val
 }
 
@@ -467,7 +467,7 @@ func compareValues(actual interface{}, op string, expected interface{}) bool {
 	// Convert to strings for comparison
 	actualStr := fmt.Sprintf("%v", actual)
 	expectedStr := fmt.Sprintf("%v", expected)
-	
+
 	switch op {
 	case "eq":
 		return strings.EqualFold(actualStr, expectedStr)
@@ -488,7 +488,7 @@ func compareValues(actual interface{}, op string, expected interface{}) bool {
 func compareNumeric(actual interface{}, op string, expected interface{}) bool {
 	actualNum, err1 := toFloat64(actual)
 	expectedNum, err2 := toFloat64(expected)
-	
+
 	if err1 != nil || err2 != nil {
 		// Fall back to string comparison
 		actualStr := fmt.Sprintf("%v", actual)
@@ -505,7 +505,7 @@ func compareNumeric(actual interface{}, op string, expected interface{}) bool {
 		}
 		return false
 	}
-	
+
 	switch op {
 	case "gt":
 		return actualNum > expectedNum
@@ -541,12 +541,12 @@ func (pe *PatchExecutor) resourceToMap() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, err
 	}
-	
+
 	return result, nil
 }
 
@@ -556,22 +556,22 @@ func (pe *PatchExecutor) mapToResource(m map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Get the underlying value
 	val := reflect.ValueOf(pe.resource)
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()
 	}
-	
+
 	// Create a new instance and unmarshal
 	newVal := reflect.New(val.Type())
 	if err := json.Unmarshal(data, newVal.Interface()); err != nil {
 		return err
 	}
-	
+
 	// Copy the new value to the original
 	val.Set(newVal.Elem())
-	
+
 	return nil
 }
 
@@ -580,12 +580,12 @@ func ApplyPatchToUser(user *User, request *PatchRequest) ([]PatchChange, error) 
 	if len(request.Schemas) > 0 && request.Schemas[0] != SchemaURNPatchOp {
 		return nil, ErrInvalidSyntax(fmt.Sprintf("expected schema %s", SchemaURNPatchOp))
 	}
-	
+
 	executor := NewPatchExecutor(user)
 	if err := executor.Execute(request.Operations); err != nil {
 		return nil, err
 	}
-	
+
 	return executor.GetChanges(), nil
 }
 
@@ -594,15 +594,11 @@ func ApplyPatchToGroup(group *Group, request *PatchRequest) ([]PatchChange, erro
 	if len(request.Schemas) > 0 && request.Schemas[0] != SchemaURNPatchOp {
 		return nil, ErrInvalidSyntax(fmt.Sprintf("expected schema %s", SchemaURNPatchOp))
 	}
-	
+
 	executor := NewPatchExecutor(group)
 	if err := executor.Execute(request.Operations); err != nil {
 		return nil, err
 	}
-	
+
 	return executor.GetChanges(), nil
 }
-
-
-
-

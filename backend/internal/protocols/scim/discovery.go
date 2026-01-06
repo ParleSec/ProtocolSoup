@@ -167,13 +167,13 @@ func getUserSchema(baseURL string) *Schema {
 				Returned:    "default",
 			},
 			{
-				Name:        "profileUrl",
-				Type:        "reference",
-				MultiValued: false,
-				Description: "A fully qualified URL to a page representing the User.",
-				Required:    false,
-				Mutability:  "readWrite",
-				Returned:    "default",
+				Name:           "profileUrl",
+				Type:           "reference",
+				MultiValued:    false,
+				Description:    "A fully qualified URL to a page representing the User.",
+				Required:       false,
+				Mutability:     "readWrite",
+				Returned:       "default",
 				ReferenceTypes: []string{"external"},
 			},
 			{
@@ -483,9 +483,9 @@ func HandleServiceProviderConfig(baseURL string) http.HandlerFunc {
 func HandleResourceTypes(baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ContentTypeSCIM)
-		
+
 		resourceTypes := GetResourceTypes(baseURL)
-		
+
 		// Return as list response
 		response := &ListResponse{
 			Schemas:      []string{SchemaURNListResponse},
@@ -493,12 +493,12 @@ func HandleResourceTypes(baseURL string) http.HandlerFunc {
 			StartIndex:   1,
 			ItemsPerPage: len(resourceTypes),
 		}
-		
+
 		for _, rt := range resourceTypes {
 			data, _ := json.Marshal(rt)
 			response.Resources = append(response.Resources, data)
 		}
-		
+
 		json.NewEncoder(w).Encode(response)
 	}
 }
@@ -514,7 +514,7 @@ func HandleResourceType(baseURL string) http.HandlerFunc {
 			return
 		}
 		id := parts[3]
-		
+
 		resourceTypes := GetResourceTypes(baseURL)
 		for _, rt := range resourceTypes {
 			if rt.ID == id {
@@ -523,7 +523,7 @@ func HandleResourceType(baseURL string) http.HandlerFunc {
 				return
 			}
 		}
-		
+
 		WriteError(w, ErrResourceNotFound("ResourceType", id))
 	}
 }
@@ -532,21 +532,21 @@ func HandleResourceType(baseURL string) http.HandlerFunc {
 func HandleSchemas(baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ContentTypeSCIM)
-		
+
 		schemas := GetSchemas(baseURL)
-		
+
 		response := &ListResponse{
 			Schemas:      []string{SchemaURNListResponse},
 			TotalResults: len(schemas),
 			StartIndex:   1,
 			ItemsPerPage: len(schemas),
 		}
-		
+
 		for _, s := range schemas {
 			data, _ := json.Marshal(s)
 			response.Resources = append(response.Resources, data)
 		}
-		
+
 		json.NewEncoder(w).Encode(response)
 	}
 }
@@ -561,13 +561,13 @@ func HandleSchema(baseURL string) http.HandlerFunc {
 			return
 		}
 		id := parts[3]
-		
+
 		schema := GetSchema(baseURL, id)
 		if schema == nil {
 			WriteError(w, ErrResourceNotFound("Schema", id))
 			return
 		}
-		
+
 		w.Header().Set("Content-Type", ContentTypeSCIM)
 		json.NewEncoder(w).Encode(schema)
 	}
@@ -599,7 +599,3 @@ func splitString(s string, sep rune) []string {
 	}
 	return parts
 }
-
-
-
-

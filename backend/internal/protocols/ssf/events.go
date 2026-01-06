@@ -15,25 +15,25 @@ const (
 // Event URIs for RISC (Risk Incident Sharing and Coordination)
 const (
 	// RISC Event Types - Account Security Events
-	EventTypeCredentialCompromise          = "https://schemas.openid.net/secevent/risc/event-type/credential-compromise"
-	EventTypeAccountPurged                 = "https://schemas.openid.net/secevent/risc/event-type/account-purged"
-	EventTypeAccountDisabled               = "https://schemas.openid.net/secevent/risc/event-type/account-disabled"
-	EventTypeAccountEnabled                = "https://schemas.openid.net/secevent/risc/event-type/account-enabled"
-	EventTypeIdentifierChanged             = "https://schemas.openid.net/secevent/risc/event-type/identifier-changed"
-	EventTypeIdentifierRecycled            = "https://schemas.openid.net/secevent/risc/event-type/identifier-recycled"
+	EventTypeCredentialCompromise            = "https://schemas.openid.net/secevent/risc/event-type/credential-compromise"
+	EventTypeAccountPurged                   = "https://schemas.openid.net/secevent/risc/event-type/account-purged"
+	EventTypeAccountDisabled                 = "https://schemas.openid.net/secevent/risc/event-type/account-disabled"
+	EventTypeAccountEnabled                  = "https://schemas.openid.net/secevent/risc/event-type/account-enabled"
+	EventTypeIdentifierChanged               = "https://schemas.openid.net/secevent/risc/event-type/identifier-changed"
+	EventTypeIdentifierRecycled              = "https://schemas.openid.net/secevent/risc/event-type/identifier-recycled"
 	EventTypeAccountCredentialChangeRequired = "https://schemas.openid.net/secevent/risc/event-type/account-credential-change-required"
-	EventTypeSessionsRevoked               = "https://schemas.openid.net/secevent/risc/event-type/sessions-revoked"
+	EventTypeSessionsRevoked                 = "https://schemas.openid.net/secevent/risc/event-type/sessions-revoked"
 )
 
 // Subject identifier formats per SSF spec
 const (
-	SubjectFormatEmail       = "email"
-	SubjectFormatPhone       = "phone_number"
-	SubjectFormatIssuerSub   = "iss_sub"
-	SubjectFormatOpaque      = "opaque"
-	SubjectFormatDID         = "did"
-	SubjectFormatURI         = "uri"
-	SubjectFormatAliases     = "aliases"
+	SubjectFormatEmail     = "email"
+	SubjectFormatPhone     = "phone_number"
+	SubjectFormatIssuerSub = "iss_sub"
+	SubjectFormatOpaque    = "opaque"
+	SubjectFormatDID       = "did"
+	SubjectFormatURI       = "uri"
+	SubjectFormatAliases   = "aliases"
 )
 
 // SubjectIdentifier represents a subject in SSF events
@@ -62,12 +62,12 @@ const (
 
 // EventMetadata contains metadata about an event type
 type EventMetadata struct {
-	URI              string        `json:"uri"`
-	Name             string        `json:"name"`
-	Description      string        `json:"description"`
-	Category         EventCategory `json:"category"`
-	ResponseActions  []string      `json:"response_actions"`
-	ZeroTrustImpact  string        `json:"zero_trust_impact"`
+	URI             string        `json:"uri"`
+	Name            string        `json:"name"`
+	Description     string        `json:"description"`
+	Category        EventCategory `json:"category"`
+	ResponseActions []string      `json:"response_actions"`
+	ZeroTrustImpact string        `json:"zero_trust_impact"`
 }
 
 // GetEventMetadata returns metadata for a given event type URI
@@ -278,31 +278,31 @@ func GetSupportedEventURIs() []string {
 
 // SecurityEvent represents a complete SSF event
 type SecurityEvent struct {
-	ID              string            `json:"id"`
-	EventType       string            `json:"event_type"`
-	Subject         SubjectIdentifier `json:"subject"`
-	EventTimestamp  time.Time         `json:"event_timestamp"`
-	IssuedAt        time.Time         `json:"issued_at"`
-	Issuer          string            `json:"issuer"`
-	Audience        []string          `json:"audience"`
-	TransactionID   string            `json:"txn,omitempty"`
-	
+	ID             string            `json:"id"`
+	EventType      string            `json:"event_type"`
+	Subject        SubjectIdentifier `json:"subject"`
+	EventTimestamp time.Time         `json:"event_timestamp"`
+	IssuedAt       time.Time         `json:"issued_at"`
+	Issuer         string            `json:"issuer"`
+	Audience       []string          `json:"audience"`
+	TransactionID  string            `json:"txn,omitempty"`
+
 	// Event-specific data
-	Reason          string            `json:"reason,omitempty"`
-	InitiatingEntity string           `json:"initiating_entity,omitempty"`
-	ReasonAdmin     *ReasonInfo       `json:"reason_admin,omitempty"`
-	ReasonUser      *ReasonInfo       `json:"reason_user,omitempty"`
-	
+	Reason           string      `json:"reason,omitempty"`
+	InitiatingEntity string      `json:"initiating_entity,omitempty"`
+	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
+	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
+
 	// For credential events
-	CredentialType  string            `json:"credential_type,omitempty"`
-	
+	CredentialType string `json:"credential_type,omitempty"`
+
 	// For compliance events
-	CurrentStatus   string            `json:"current_status,omitempty"`
-	PreviousStatus  string            `json:"previous_status,omitempty"`
-	
+	CurrentStatus  string `json:"current_status,omitempty"`
+	PreviousStatus string `json:"previous_status,omitempty"`
+
 	// For identifier events
-	NewValue        string            `json:"new_value,omitempty"`
-	OldValue        string            `json:"old_value,omitempty"`
+	NewValue string `json:"new_value,omitempty"`
+	OldValue string `json:"old_value,omitempty"`
 }
 
 // ReasonInfo provides human-readable reason information
@@ -312,20 +312,20 @@ type ReasonInfo struct {
 
 // InitiatingEntity constants
 const (
-	InitiatingEntityAdmin   = "admin"
-	InitiatingEntityUser    = "user"
-	InitiatingEntityPolicy  = "policy"
-	InitiatingEntitySystem  = "system"
+	InitiatingEntityAdmin  = "admin"
+	InitiatingEntityUser   = "user"
+	InitiatingEntityPolicy = "policy"
+	InitiatingEntitySystem = "system"
 )
 
 // CredentialType constants
 const (
-	CredentialTypePassword  = "password"
-	CredentialTypePIN       = "pin"
-	CredentialTypeX509      = "x509"
-	CredentialTypeFIDO2     = "fido2-platform"
-	CredentialTypeOTP       = "otp"
-	CredentialTypeOAuth     = "oauth_token"
+	CredentialTypePassword = "password"
+	CredentialTypePIN      = "pin"
+	CredentialTypeX509     = "x509"
+	CredentialTypeFIDO2    = "fido2-platform"
+	CredentialTypeOTP      = "otp"
+	CredentialTypeOAuth    = "oauth_token"
 )
 
 // ComplianceStatus constants
@@ -333,5 +333,3 @@ const (
 	ComplianceStatusCompliant    = "compliant"
 	ComplianceStatusNonCompliant = "non-compliant"
 )
-
-

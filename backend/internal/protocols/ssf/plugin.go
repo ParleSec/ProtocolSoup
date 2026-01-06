@@ -213,82 +213,9 @@ func (p *Plugin) GetInspectors() []plugin.Inspector {
 }
 
 // GetFlowDefinitions returns SSF flow definitions
+// SSF has its own dedicated sandbox page, so we don't expose flows to Looking Glass
 func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
-	return []plugin.FlowDefinition{
-		{
-			ID:          "ssf-sandbox",
-			Name:        "SSF Interactive Sandbox",
-			Description: "Interactive sandbox for triggering and observing SSF events in real-time",
-			Executable:  true,
-			Category:    "sandbox",
-			Steps: []plugin.FlowStep{
-				{Order: 1, Name: "Configure Stream", Description: "Set up event stream between transmitter and receiver", From: "Admin", To: "Transmitter", Type: "internal"},
-				{Order: 2, Name: "Add Subjects", Description: "Add users/subjects to track in the stream", From: "Admin", To: "Transmitter", Type: "internal"},
-				{Order: 3, Name: "Trigger Action", Description: "Trigger a security action (revoke session, compromise, etc.)", From: "Admin", To: "Transmitter", Type: "request"},
-				{Order: 4, Name: "Generate SET", Description: "Create and sign Security Event Token", From: "Transmitter", To: "Transmitter", Type: "internal"},
-				{Order: 5, Name: "Deliver Event", Description: "Push or Poll delivery to receiver", From: "Transmitter", To: "Receiver", Type: "request"},
-				{Order: 6, Name: "Verify SET", Description: "Validate SET signature and claims", From: "Receiver", To: "Receiver", Type: "internal"},
-				{Order: 7, Name: "Process Event", Description: "Parse event and determine response actions", From: "Receiver", To: "Receiver", Type: "internal"},
-				{Order: 8, Name: "Execute Response", Description: "Execute automated response actions", From: "Receiver", To: "Systems", Type: "response"},
-			},
-		},
-		{
-			ID:          "caep-session-flow",
-			Name:        "CAEP Session Revocation",
-			Description: "Continuous Access Evaluation - Session revocation flow",
-			Executable:  true,
-			Category:    "caep",
-			Steps: []plugin.FlowStep{
-				{Order: 1, Name: "Session Active", Description: "User has active session", From: "User", To: "Application", Type: "internal"},
-				{Order: 2, Name: "Security Event", Description: "Admin revokes session or policy triggers revocation", From: "Admin/Policy", To: "IdP", Type: "request"},
-				{Order: 3, Name: "Generate CAEP Event", Description: "IdP creates session-revoked SET", From: "IdP", To: "IdP", Type: "internal"},
-				{Order: 4, Name: "Transmit SET", Description: "Push SET to all subscribed receivers", From: "IdP", To: "Applications", Type: "request"},
-				{Order: 5, Name: "Terminate Session", Description: "Application immediately terminates user session", From: "Application", To: "User", Type: "response"},
-			},
-		},
-		{
-			ID:          "risc-compromise-flow",
-			Name:        "RISC Credential Compromise",
-			Description: "Risk Incident Sharing - Credential compromise response",
-			Executable:  true,
-			Category:    "risc",
-			Steps: []plugin.FlowStep{
-				{Order: 1, Name: "Compromise Detected", Description: "Credentials found in breach database or suspicious activity detected", From: "Security System", To: "IdP", Type: "request"},
-				{Order: 2, Name: "Generate RISC Event", Description: "IdP creates credential-compromise SET", From: "IdP", To: "IdP", Type: "internal"},
-				{Order: 3, Name: "Broadcast Alert", Description: "Push SET to all connected applications", From: "IdP", To: "All Receivers", Type: "request"},
-				{Order: 4, Name: "Revoke Access", Description: "Applications revoke all tokens and API keys", From: "Applications", To: "Applications", Type: "internal"},
-				{Order: 5, Name: "Force Password Reset", Description: "Require user to change password", From: "IdP", To: "User", Type: "response"},
-				{Order: 6, Name: "Enable Step-up Auth", Description: "Require additional authentication factors", From: "Applications", To: "User", Type: "response"},
-			},
-		},
-		{
-			ID:          "push-delivery-flow",
-			Name:        "Push Delivery Method",
-			Description: "Webhook-based real-time event delivery",
-			Executable:  true,
-			Category:    "delivery",
-			Steps: []plugin.FlowStep{
-				{Order: 1, Name: "Event Generated", Description: "Security event occurs and SET is created", From: "Transmitter", To: "Transmitter", Type: "internal"},
-				{Order: 2, Name: "HTTP POST", Description: "POST SET to receiver's webhook endpoint", From: "Transmitter", To: "Receiver", Type: "request", Parameters: map[string]string{"method": "POST", "content-type": "application/json"}},
-				{Order: 3, Name: "Verify & Process", Description: "Receiver verifies signature and processes event", From: "Receiver", To: "Receiver", Type: "internal"},
-				{Order: 4, Name: "Acknowledge", Description: "Return success status", From: "Receiver", To: "Transmitter", Type: "response"},
-			},
-		},
-		{
-			ID:          "poll-delivery-flow",
-			Name:        "Poll Delivery Method",
-			Description: "Receiver-initiated event retrieval",
-			Executable:  true,
-			Category:    "delivery",
-			Steps: []plugin.FlowStep{
-				{Order: 1, Name: "Events Queued", Description: "Events accumulate in transmitter queue", From: "Transmitter", To: "Transmitter", Type: "internal"},
-				{Order: 2, Name: "Poll Request", Description: "Receiver requests pending events", From: "Receiver", To: "Transmitter", Type: "request", Parameters: map[string]string{"method": "GET/POST", "endpoint": "/poll"}},
-				{Order: 3, Name: "Return SETs", Description: "Transmitter returns batch of SET tokens", From: "Transmitter", To: "Receiver", Type: "response"},
-				{Order: 4, Name: "Process Events", Description: "Receiver processes all events in batch", From: "Receiver", To: "Receiver", Type: "internal"},
-				{Order: 5, Name: "Acknowledge", Description: "Receiver acknowledges processed events", From: "Receiver", To: "Transmitter", Type: "request", Parameters: map[string]string{"endpoint": "/ack"}},
-			},
-		},
-	}
+	return []plugin.FlowDefinition{}
 }
 
 // GetDemoScenarios returns interactive demo scenarios
