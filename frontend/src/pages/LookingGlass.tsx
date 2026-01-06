@@ -161,7 +161,7 @@ export function LookingGlass() {
       {/* Quick Select - when nothing selected */}
       {!selectedFlow && !protocolsLoading && (
         <section>
-          <div className="flex items-center gap-2 text-surface-500 text-sm mb-3">
+          <div className="flex items-center gap-2 text-surface-400 text-sm mb-3">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <span>Quick start - select a flow to begin</span>
           </div>
@@ -218,13 +218,13 @@ export function LookingGlass() {
       <section className="rounded-xl border border-white/10 bg-surface-900/30 p-3 sm:p-5">
         <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
-            <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-surface-500" />
+            <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-surface-400" />
             <span className="text-xs sm:text-sm font-medium text-surface-300">Configuration</span>
           </div>
           {selectedFlow && (
             <button
               onClick={handleReset}
-              className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-surface-500 hover:text-white transition-colors"
+              className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
             >
               <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               Reset
@@ -258,7 +258,7 @@ export function LookingGlass() {
                 </span>
               )}
             </div>
-            <p className="text-[10px] sm:text-xs text-surface-500 mb-2 sm:mb-3 leading-relaxed">
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
               Run Authorization Code flow first, or paste a token below.
             </p>
             <div className="flex gap-2">
@@ -316,7 +316,7 @@ export function LookingGlass() {
             </div>
             {scimAuthEnabled ? (
               <>
-                <p className="text-[10px] sm:text-xs text-surface-500 mb-2 sm:mb-3 leading-relaxed">
+                <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
                   Bearer token for SCIM API authentication. This is the same token configured for external IdPs like Okta.
                 </p>
                 <input
@@ -360,7 +360,7 @@ export function LookingGlass() {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <code className="text-white font-medium text-xs sm:text-base truncate max-w-[160px] sm:max-w-none">{selectedFlow.id}</code>
                     {realExecutor.flowInfo && (
-                      <span className="text-[10px] sm:text-xs text-surface-500 font-mono flex-shrink-0">
+                      <span className="text-[10px] sm:text-xs text-surface-400 font-mono flex-shrink-0">
                         {realExecutor.flowInfo.rfcReference}
                       </span>
                     )}
@@ -470,7 +470,7 @@ export function LookingGlass() {
               {inspectedToken ? (
                 <TokenInspector token={inspectedToken} />
               ) : (
-                <div className="text-center py-6 text-surface-500 text-sm">
+                <div className="text-center py-6 text-surface-400 text-sm">
                   Select a token above to decode
                 </div>
               )}
@@ -557,7 +557,7 @@ function FlowButton({
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-medium text-white text-xs sm:text-base truncate">{label}</div>
-        <div className="text-[10px] sm:text-sm text-surface-500">{sublabel}</div>
+        <div className="text-[10px] sm:text-sm text-surface-400">{sublabel}</div>
       </div>
       <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-surface-600 group-hover:text-surface-400 transition-colors flex-shrink-0" />
     </button>

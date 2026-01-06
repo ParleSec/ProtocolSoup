@@ -90,7 +90,7 @@ export function RealFlowPanel({
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Zap className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">Select a flow to execute</p>
-        <p className="text-surface-500 text-sm mt-1">
+        <p className="text-surface-400 text-sm mt-1">
           Each flow runs the exact protocol per RFC specifications
         </p>
       </div>
@@ -267,7 +267,7 @@ function EventsList({ events }: { events: FlowEvent[] }) {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Info className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No events yet</p>
-        <p className="text-surface-500 text-sm">Execute the flow to see RFC-compliant events</p>
+        <p className="text-surface-400 text-sm">Execute the flow to see RFC-compliant events</p>
       </div>
     )
   }
@@ -306,7 +306,7 @@ function EventsList({ events }: { events: FlowEvent[] }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="font-medium text-white text-sm">{event.title}</h4>
-                  <span className="text-xs text-surface-500 shrink-0">
+                  <span className="text-xs text-surface-400 shrink-0">
                     {event.timestamp.toLocaleTimeString()}
                   </span>
                 </div>
@@ -344,7 +344,7 @@ function ExchangesList({ exchanges }: { exchanges: CapturedExchange[] }) {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Server className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No HTTP exchanges captured</p>
-        <p className="text-surface-500 text-sm">Execute the flow to see real HTTP traffic</p>
+        <p className="text-surface-400 text-sm">Execute the flow to see real HTTP traffic</p>
       </div>
     )
   }
@@ -379,7 +379,7 @@ function ExchangeCard({ exchange }: { exchange: CapturedExchange }) {
               {exchange.request.url}
             </span>
           </div>
-          <p className="text-xs text-surface-500 mt-0.5 truncate">{exchange.step}</p>
+          <p className="text-xs text-surface-400 mt-0.5 truncate">{exchange.step}</p>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           {exchange.response && (
@@ -424,7 +424,7 @@ function ExchangeCard({ exchange }: { exchange: CapturedExchange }) {
                   </div>
                   {Object.entries(exchange.request.headers).map(([k, v]) => (
                     <div key={k} className="text-surface-400">
-                      <span className="text-surface-500">{k}:</span> {v}
+                      <span className="text-surface-400">{k}:</span> {v}
                     </div>
                   ))}
                   {exchange.request.body && (
@@ -475,7 +475,7 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
       <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-center px-4">
         <Key className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600 mb-3" />
         <p className="text-surface-400 text-sm">No tokens captured</p>
-        <p className="text-surface-500 text-xs sm:text-sm">Complete the flow to see decoded tokens</p>
+        <p className="text-surface-400 text-xs sm:text-sm">Complete the flow to see decoded tokens</p>
       </div>
     )
   }
@@ -629,7 +629,7 @@ function ExpandableData({ data }: { data: Record<string, unknown> }) {
     <div className="mt-2">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-1 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+        className="flex items-center gap-1 text-xs text-surface-400 hover:text-surface-300 transition-colors"
       >
         <Code className="w-3 h-3" />
         {isExpanded ? 'Hide' : 'Show'} data
@@ -670,7 +670,7 @@ function CopyButton({ text }: { text: string }) {
       {copied ? (
         <Check className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-green-400" />
       ) : (
-        <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-surface-500" />
+        <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-surface-400" />
       )}
     </button>
   )

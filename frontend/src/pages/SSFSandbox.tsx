@@ -324,7 +324,7 @@ export function SSFSandbox() {
       {/* Quick Select - when nothing selected */}
       {!selectedEvent && (
         <section>
-          <div className="flex items-center gap-2 text-surface-500 text-sm mb-3">
+          <div className="flex items-center gap-2 text-surface-400 text-sm mb-3">
             <Sparkles className="w-4 h-4 text-amber-400" />
             <span>Quick start - select an event to trigger</span>
           </div>
@@ -358,13 +358,13 @@ export function SSFSandbox() {
       <section className="rounded-xl border border-white/10 bg-surface-900/30 p-3 sm:p-5">
         <div className="flex items-center justify-between mb-3 sm:mb-4">
           <div className="flex items-center gap-2">
-            <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-surface-500" />
+            <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-surface-400" />
             <span className="text-xs sm:text-sm font-medium text-surface-300">Configuration</span>
           </div>
           {(selectedEvent || flowEvents.length > 0) && (
             <button
               onClick={() => { setSelectedEvent(null); reset(); resetSecurityState() }}
-              className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-surface-500 hover:text-white transition-colors"
+              className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
             >
               <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               Reset
@@ -375,7 +375,7 @@ export function SSFSandbox() {
         <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
           {/* Subject Selector */}
           <div className="flex-1">
-            <label className="text-xs text-surface-500 mb-1.5 block">subject:</label>
+            <label className="text-xs text-surface-400 mb-1.5 block">subject:</label>
             <div className="relative">
               <select
                 value={selectedSubject?.id || ''}
@@ -395,7 +395,7 @@ export function SSFSandbox() {
 
           {/* Event Selector */}
           <div className="flex-1">
-            <label className="text-xs text-surface-500 mb-1.5 block">event:</label>
+            <label className="text-xs text-surface-400 mb-1.5 block">event:</label>
             <div className="relative">
               <select
                 value={selectedEvent?.id || ''}
@@ -440,7 +440,7 @@ export function SSFSandbox() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <code className="text-white font-medium text-xs sm:text-base truncate max-w-[160px] sm:max-w-none">{selectedEvent.id}</code>
-                    <span className="text-[10px] sm:text-xs text-surface-500 font-mono flex-shrink-0">
+                    <span className="text-[10px] sm:text-xs text-surface-400 font-mono flex-shrink-0">
                       {selectedEvent.rfcReference}
                     </span>
                   </div>
@@ -535,7 +535,7 @@ export function SSFSandbox() {
             href="https://datatracker.ietf.org/doc/html/rfc8417"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-surface-500 hover:text-amber-400 transition-colors group"
+            className="flex items-center gap-1.5 text-surface-400 hover:text-amber-400 transition-colors group"
           >
             <span className="font-mono group-hover:text-amber-400">RFC 8417</span>
             <span className="text-surface-600">SET</span>
@@ -544,7 +544,7 @@ export function SSFSandbox() {
             href="https://openid.net/specs/openid-sse-framework-1_0.html"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-surface-500 hover:text-amber-400 transition-colors group"
+            className="flex items-center gap-1.5 text-surface-400 hover:text-amber-400 transition-colors group"
           >
             <span className="font-mono group-hover:text-amber-400">SSF 1.0</span>
             <span className="text-surface-600">Framework</span>
@@ -553,7 +553,7 @@ export function SSFSandbox() {
             href="https://openid.net/specs/openid-caep-1_0.html"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-surface-500 hover:text-amber-400 transition-colors group"
+            className="flex items-center gap-1.5 text-surface-400 hover:text-amber-400 transition-colors group"
           >
             <span className="font-mono group-hover:text-amber-400">CAEP 1.0</span>
             <span className="text-surface-600">Access Events</span>
@@ -562,7 +562,7 @@ export function SSFSandbox() {
             href="https://openid.net/specs/openid-risc-profile-1_0.html"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-surface-500 hover:text-amber-400 transition-colors group"
+            className="flex items-center gap-1.5 text-surface-400 hover:text-amber-400 transition-colors group"
           >
             <span className="font-mono group-hover:text-amber-400">RISC 1.0</span>
             <span className="text-surface-600">Incident Sharing</span>
@@ -630,7 +630,7 @@ function QuickButton({
       </div>
       <div className="flex-1 min-w-0">
         <div className="font-medium text-white text-xs sm:text-base truncate">{label}</div>
-        <div className="text-[10px] sm:text-sm text-surface-500">{sublabel}</div>
+        <div className="text-[10px] sm:text-sm text-surface-400">{sublabel}</div>
       </div>
       <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-surface-600 group-hover:text-surface-400 transition-colors flex-shrink-0" />
     </button>
@@ -687,7 +687,7 @@ function SSFFlowPanel({
           </div>
         </div>
         
-        <h3 className="font-medium text-white text-xs sm:text-sm leading-relaxed mb-2">{selectedEvent.description}</h3>
+        <h2 className="font-medium text-white text-xs sm:text-sm leading-relaxed mb-2">{selectedEvent.description}</h2>
         
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <div className="flex items-center gap-1">
@@ -781,7 +781,7 @@ function EventsList({ events }: { events: FlowEvent[] }) {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Info className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No events yet</p>
-        <p className="text-surface-500 text-sm">Execute the flow to see SSF protocol events</p>
+        <p className="text-surface-400 text-sm">Execute the flow to see SSF protocol events</p>
       </div>
     )
   }
@@ -818,8 +818,8 @@ function EventsList({ events }: { events: FlowEvent[] }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <h4 className="font-medium text-white text-sm">{event.title}</h4>
-                  <span className="text-xs text-surface-500 shrink-0">
+                  <h3 className="font-medium text-white text-sm">{event.title}</h3>
+                  <span className="text-xs text-surface-400 shrink-0">
                     {event.timestamp.toLocaleTimeString()}
                   </span>
                 </div>
@@ -856,7 +856,7 @@ function SETInspector({ decodedSET }: { decodedSET: DecodedSET | null }) {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Key className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No SET captured</p>
-        <p className="text-surface-500 text-sm">Complete the flow to see the decoded SET</p>
+        <p className="text-surface-400 text-sm">Complete the flow to see the decoded SET</p>
       </div>
     )
   }
@@ -885,7 +885,7 @@ function SETInspector({ decodedSET }: { decodedSET: DecodedSET | null }) {
         <div className="p-2.5 sm:p-3 space-y-2 sm:space-y-3">
           {/* Header */}
           <div>
-            <h4 className="text-[10px] sm:text-xs font-medium text-surface-400 mb-1">Header</h4>
+            <h3 className="text-[10px] sm:text-xs font-medium text-surface-400 mb-1">Header</h3>
             <pre className="p-2 rounded bg-surface-950 text-[10px] sm:text-xs font-mono text-surface-300 overflow-x-auto scrollbar-hide">
               {JSON.stringify(decodedSET.header, null, 2)}
             </pre>
@@ -893,7 +893,7 @@ function SETInspector({ decodedSET }: { decodedSET: DecodedSET | null }) {
 
           {/* Payload */}
           <div>
-            <h4 className="text-[10px] sm:text-xs font-medium text-surface-400 mb-1">Payload</h4>
+            <h3 className="text-[10px] sm:text-xs font-medium text-surface-400 mb-1">Payload</h3>
             <pre className="p-2 rounded bg-surface-950 text-[10px] sm:text-xs font-mono text-surface-300 overflow-x-auto scrollbar-hide">
               {JSON.stringify({
                 jti: decodedSET.jti,
@@ -930,7 +930,7 @@ function SETInspector({ decodedSET }: { decodedSET: DecodedSET | null }) {
           {/* Raw Token */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <h4 className="text-[10px] sm:text-xs font-medium text-surface-400">Raw Token</h4>
+              <h3 className="text-[10px] sm:text-xs font-medium text-surface-400">Raw Token</h3>
               <CopyButton text={decodedSET.raw_token} />
             </div>
             <div className="p-2 rounded bg-surface-950 font-mono text-[10px] break-all">
@@ -957,7 +957,7 @@ function SecurityStatePanel({ state, onReset }: { state: SecurityState | null; o
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <User className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No security state</p>
-        <p className="text-surface-500 text-sm">Execute a flow to see state changes</p>
+        <p className="text-surface-400 text-sm">Execute a flow to see state changes</p>
       </div>
     )
   }
@@ -986,7 +986,7 @@ function SecurityStatePanel({ state, onReset }: { state: SecurityState | null; o
           <StateItem label="Tokens" value={state.tokens_valid ? 'Valid' : 'Invalid'} status={state.tokens_valid ? 'good' : 'bad'} />
           <StateItem label="Password Reset" value={state.password_reset_required ? 'Required' : 'Not Required'} status={state.password_reset_required ? 'warn' : 'good'} />
         </div>
-        <div className="px-3 pb-3 text-xs text-surface-500">
+        <div className="px-3 pb-3 text-xs text-surface-400">
           Last modified: {new Date(state.last_modified).toLocaleString()} by {state.modified_by}
         </div>
       </div>
@@ -1003,7 +1003,7 @@ function StateItem({ label, value, status }: { label: string; value: string; sta
   }
   return (
     <div className="p-2 rounded bg-surface-800/50">
-      <div className="text-[10px] text-surface-500 uppercase tracking-wider">{label}</div>
+      <div className="text-[10px] text-surface-400 uppercase tracking-wider">{label}</div>
       <div className={`text-sm font-medium ${colors[status]}`}>{value}</div>
     </div>
   )
@@ -1022,7 +1022,7 @@ function ExpandableData({ data }: { data: Record<string, unknown> }) {
     <div className="mt-2">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-1 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+        className="flex items-center gap-1 text-xs text-surface-400 hover:text-surface-300 transition-colors"
       >
         <Code className="w-3 h-3" />
         {isExpanded ? 'Hide' : 'Show'} data
@@ -1063,7 +1063,7 @@ function CopyButton({ text }: { text: string }) {
       {copied ? (
         <Check className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-green-400" />
       ) : (
-        <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-surface-500" />
+        <Copy className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-surface-400" />
       )}
     </button>
   )

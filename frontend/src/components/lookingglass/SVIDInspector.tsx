@@ -323,7 +323,7 @@ function X509SVIDInspector({ data }: { data: X509SVIDData }) {
               description="Algorithm used by CA to sign this certificate"
             />
             <div className="p-3 rounded-lg bg-surface-800">
-              <p className="text-xs text-surface-500 mb-1">Signature (truncated)</p>
+              <p className="text-xs text-surface-400 mb-1">Signature (truncated)</p>
               <p className="font-mono text-xs text-green-400 break-all">
                 {data.signature.value}
               </p>
@@ -355,7 +355,7 @@ function X509SVIDInspector({ data }: { data: X509SVIDData }) {
                         </span>
                       )}
                     </div>
-                    <code className="text-xs text-surface-500">{ext.oid}</code>
+                    <code className="text-xs text-surface-400">{ext.oid}</code>
                   </div>
                 </div>
               ))}
@@ -594,7 +594,7 @@ function TrustBundleInspector({ data }: { data: TrustBundleData }) {
               <Award className={`w-5 h-5 ${root.is_ca ? 'text-yellow-400' : 'text-surface-400'}`} />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm text-white truncate">{root.subject}</p>
-                <p className="text-xs text-surface-500">
+                <p className="text-xs text-surface-400">
                   Expires: {new Date(root.not_after).toLocaleDateString()}
                 </p>
               </div>
@@ -693,7 +693,7 @@ function SPIFFEIDInspector({ spiffeId }: { spiffeId: string }) {
         />
         {parsed.pathComponents!.length > 0 && (
           <div className="p-3 rounded-lg bg-surface-900/50">
-            <p className="text-xs text-surface-500 mb-2">Path Components</p>
+            <p className="text-xs text-surface-400 mb-2">Path Components</p>
             <div className="flex flex-wrap gap-2">
               {parsed.pathComponents!.map((component, idx) => (
                 <span key={idx} className="px-2 py-1 rounded bg-purple-500/20 text-xs text-purple-300">
@@ -752,7 +752,7 @@ function SVIDSection({
         </div>
         <div className="flex-1 min-w-0">
           <h3 className={`font-medium ${isExpanded ? 'text-white' : 'text-surface-300'}`}>{title}</h3>
-          <p className="text-xs text-surface-500">{subtitle}</p>
+          <p className="text-xs text-surface-400">{subtitle}</p>
         </div>
         <ChevronDown className={`w-5 h-5 text-surface-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
@@ -797,7 +797,7 @@ function FieldRow({
           {label}
         </p>
         <p className="text-sm text-white break-all mt-0.5">{value}</p>
-        {description && <p className="text-xs text-surface-500 mt-1">{description}</p>}
+        {description && <p className="text-xs text-surface-400 mt-1">{description}</p>}
       </div>
       {onCopy && (
         <button

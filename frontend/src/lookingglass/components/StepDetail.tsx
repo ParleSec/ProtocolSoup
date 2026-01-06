@@ -28,7 +28,7 @@ export function StepDetail({ step, stepNumber }: StepDetailProps) {
           <Eye className="w-8 h-8 text-surface-600" />
         </div>
         <p className="text-surface-400">Select a step to see details</p>
-        <p className="text-surface-500 text-sm mt-1">Click any step in the flow visualization</p>
+        <p className="text-surface-400 text-sm mt-1">Click any step in the flow visualization</p>
       </div>
     )
   }
@@ -64,7 +64,7 @@ export function StepDetail({ step, stepNumber }: StepDetailProps) {
         {/* Flow Direction */}
         <div className="flex items-center gap-2 p-3 rounded-lg bg-surface-800/50">
           <span className="text-sm text-cyan-400">{step.from}</span>
-          <ArrowRight className="w-4 h-4 text-surface-500" />
+          <ArrowRight className="w-4 h-4 text-surface-400" />
           <span className="text-sm text-green-400">{step.to}</span>
           <span className="ml-auto text-xs px-2 py-0.5 rounded bg-surface-700 text-surface-400 uppercase">
             {step.type}
@@ -160,7 +160,7 @@ function ParameterItem({ parameter }: { parameter: LookingGlassParameter }) {
         </div>
         <p className="text-xs text-surface-400 mt-0.5">{parameter.description}</p>
         {parameter.example && (
-          <p className="text-xs text-surface-500 mt-1 font-mono">
+          <p className="text-xs text-surface-400 mt-1 font-mono">
             Example: <span className="text-surface-400">{parameter.example}</span>
           </p>
         )}
@@ -218,7 +218,7 @@ function SecurityNote({ security }: { security: LookingGlassSecurity }) {
           <h5 className={`text-sm font-medium ${config.textColor}`}>{security.title}</h5>
           <p className="text-xs text-surface-400 mt-0.5">{security.description}</p>
           {security.reference && (
-            <p className="text-xs text-surface-500 mt-1">Ref: {security.reference}</p>
+            <p className="text-xs text-surface-400 mt-1">Ref: {security.reference}</p>
           )}
         </div>
       </div>

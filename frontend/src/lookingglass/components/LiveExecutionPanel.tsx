@@ -181,7 +181,7 @@ function EventsList({ events }: { events: ExecutionEvent[] }) {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Info className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No events yet</p>
-        <p className="text-surface-500 text-sm">Execute a real flow to capture events</p>
+        <p className="text-surface-400 text-sm">Execute a real flow to capture events</p>
       </div>
     )
   }
@@ -227,7 +227,7 @@ function EventsList({ events }: { events: ExecutionEvent[] }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <h4 className="font-medium text-white text-sm">{event.title}</h4>
-                  <span className="text-xs text-surface-500">
+                  <span className="text-xs text-surface-400">
                     {event.timestamp.toLocaleTimeString()}
                   </span>
                 </div>
@@ -261,7 +261,7 @@ function RequestsList({
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Send className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No HTTP requests captured</p>
-        <p className="text-surface-500 text-sm">Execute a real flow to capture traffic</p>
+        <p className="text-surface-400 text-sm">Execute a real flow to capture traffic</p>
       </div>
     )
   }
@@ -349,7 +349,7 @@ function RequestResponsePair({
                   </div>
                   {request.headers && Object.entries(request.headers).map(([key, value]) => (
                     <div key={key} className="text-surface-400">
-                      <span className="text-surface-500">{key}:</span> {value}
+                      <span className="text-surface-400">{key}:</span> {value}
                     </div>
                   ))}
                   {request.body && (
@@ -401,7 +401,7 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Key className="w-12 h-12 text-surface-600 mb-3" />
         <p className="text-surface-400">No tokens captured</p>
-        <p className="text-surface-500 text-sm">Complete a flow to see decoded tokens</p>
+        <p className="text-surface-400 text-sm">Complete a flow to see decoded tokens</p>
       </div>
     )
   }
@@ -572,7 +572,7 @@ function ExpandableData({ data }: { data: Record<string, unknown> }) {
     <div className="mt-2">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-1 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+        className="flex items-center gap-1 text-xs text-surface-400 hover:text-surface-300 transition-colors"
       >
         <Code className="w-3 h-3" />
         {isExpanded ? 'Hide' : 'Show'} data
@@ -617,7 +617,7 @@ function CopyButton({ text }: { text: string }) {
       {copied ? (
         <Check className="w-3 h-3 text-green-400" />
       ) : (
-        <Copy className="w-3 h-3 text-surface-500" />
+        <Copy className="w-3 h-3 text-surface-400" />
       )}
     </button>
   )

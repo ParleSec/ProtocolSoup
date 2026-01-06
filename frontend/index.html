@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Protocol Soup - A sandbox for exploring authentication and identity protocols" />
     <meta name="author" content="Mason Parle" />
@@ -13,9 +13,22 @@
     <meta name="apple-mobile-web-app-title" content="Protocol Soup" />
     <link rel="manifest" href="/manifest.json" />
     <title>Protocol Soup</title>
+    <!-- Preconnect to font origins -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Preload fonts with high priority -->
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"></noscript>
+    <!-- Critical CSS for initial render -->
+    <style>
+      /* Critical styles for immediate render */
+      :root { --bg-dark: #020617; }
+      body { margin: 0; background-color: var(--bg-dark); color: #f1f5f9; }
+      #root { min-height: 100vh; }
+      .page-loader { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+      .page-loader::after { content: ''; width: 32px; height: 32px; border: 2px solid #f97316; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
   </head>
   <body>
     <div id="root"></div>

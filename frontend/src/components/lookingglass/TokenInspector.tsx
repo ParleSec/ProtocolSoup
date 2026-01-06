@@ -97,7 +97,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
   if (!decoded) {
     return (
       <div className="p-4 sm:p-6 rounded-xl bg-surface-900/50 border border-white/5 text-center">
-        <Info className="w-6 h-6 sm:w-8 sm:h-8 text-surface-500 mx-auto mb-2" />
+        <Info className="w-6 h-6 sm:w-8 sm:h-8 text-surface-400 mx-auto mb-2" />
         <p className="text-surface-400 text-sm sm:text-base">Paste a valid JWT token to inspect</p>
       </div>
     )
@@ -278,7 +278,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
         >
           <div className="space-y-3">
             <div className="p-2.5 sm:p-3 rounded-lg bg-surface-800">
-              <p className="text-xs text-surface-500 mb-1">Signature (Base64URL)</p>
+              <p className="text-xs text-surface-400 mb-1">Signature (Base64URL)</p>
               <p className="font-mono text-[10px] sm:text-xs text-cyan-400 break-all overflow-x-auto scrollbar-hide">
                 {decoded.signature || 'No signature'}
               </p>
@@ -338,7 +338,7 @@ function TokenSection({
         </div>
         <div className="flex-1 min-w-0">
           <h3 className={`font-medium text-sm sm:text-base ${isExpanded ? 'text-white' : 'text-surface-300'}`}>{title}</h3>
-          <p className="text-xs text-surface-500 truncate">{subtitle}</p>
+          <p className="text-xs text-surface-400 truncate">{subtitle}</p>
         </div>
         <ChevronDown className={`w-5 h-5 text-surface-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
       </button>
@@ -398,13 +398,13 @@ function ClaimRow({
       onMouseLeave={() => setShowTooltip(false)}
       onClick={onCopy}
     >
-      <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${isExpired ? 'text-red-400' : 'text-surface-500'}`} />
+      <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${isExpired ? 'text-red-400' : 'text-surface-400'}`} />
       <div className="flex-1 min-w-0 overflow-hidden">
         <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-0.5">
           <span className={`text-xs sm:text-sm font-medium ${isExpired ? 'text-red-400' : 'text-white'}`}>
             {info?.label || claim}
           </span>
-          <code className="text-[10px] sm:text-xs text-surface-500 font-mono">({claim})</code>
+          <code className="text-[10px] sm:text-xs text-surface-400 font-mono">({claim})</code>
           {isExpired && (
             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-500/20 text-red-400">
               EXPIRED
@@ -415,7 +415,7 @@ function ClaimRow({
           {formatValue(value)}
         </p>
         {info && showTooltip && (
-          <p className="text-xs text-surface-500 mt-1 hidden sm:block">{info.description}</p>
+          <p className="text-xs text-surface-400 mt-1 hidden sm:block">{info.description}</p>
         )}
       </div>
       <button

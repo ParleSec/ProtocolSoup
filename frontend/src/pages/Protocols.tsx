@@ -121,7 +121,7 @@ export function Protocols() {
 
       {/* Coming Soon */}
       <section>
-        <h2 className="text-sm font-medium text-surface-500 uppercase tracking-wider mb-3">
+        <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-3">
           Coming Soon
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
@@ -130,7 +130,7 @@ export function Protocols() {
               key={item.name}
               className="p-3 sm:p-4 rounded-xl border border-dashed border-white/10 text-center"
             >
-              <div className="font-medium text-surface-500 text-sm sm:text-base">{item.name}</div>
+              <div className="font-medium text-surface-400 text-sm sm:text-base">{item.name}</div>
               <div className="text-xs text-surface-600 mt-1">{item.description}</div>
             </div>
           ))}
@@ -190,7 +190,7 @@ function ProtocolCard({ protocol }: { protocol: typeof protocols[0] }) {
                 href={protocol.specUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1 text-xs text-surface-500 hover:text-surface-300 active:text-surface-200 transition-colors"
+                className="flex items-center gap-1 text-xs text-surface-400 hover:text-surface-300 active:text-surface-200 transition-colors"
               >
                 <span className="hidden sm:inline">{protocol.spec}</span>
                 <span className="sm:hidden">Spec</span>
@@ -204,7 +204,7 @@ function ProtocolCard({ protocol }: { protocol: typeof protocols[0] }) {
 
       {/* Flows */}
       <div className="p-4 sm:p-5">
-        <h3 className="text-sm font-medium text-surface-500 mb-3">Available Flows</h3>
+        <h3 className="text-sm font-medium text-surface-400 mb-3">Available Flows</h3>
         <div className="grid grid-cols-1 gap-2">
           {protocol.flows.map((flow) => (
             <Link

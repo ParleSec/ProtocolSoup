@@ -530,7 +530,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
               onClick={() => setSelectedStep(null)}
               className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
             >
-              <X className="w-4 h-4 text-surface-500" />
+              <X className="w-4 h-4 text-surface-400" />
             </button>
 
             <div className="flex items-center gap-3 mb-4">
@@ -542,7 +542,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
               </div>
               <div>
                 <h3 className="font-medium text-white">{selectedStepData.name}</h3>
-                <p className="text-xs text-surface-500">
+                <p className="text-xs text-surface-400">
                   {actorConfig[selectedStepData.from]?.shortLabel || selectedStepData.from}
                   {' → '}
                   {actorConfig[selectedStepData.to]?.shortLabel || selectedStepData.to}
@@ -554,7 +554,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
 
             {selectedStepData.parameters && Object.keys(selectedStepData.parameters).length > 0 && (
               <div className="mb-4">
-                <h4 className="flex items-center gap-2 text-xs font-medium text-surface-500 uppercase tracking-wider mb-2">
+                <h4 className="flex items-center gap-2 text-xs font-medium text-surface-400 uppercase tracking-wider mb-2">
                   <Key className="w-3 h-3" />
                   Parameters
                 </h4>

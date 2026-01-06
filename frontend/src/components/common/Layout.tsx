@@ -83,7 +83,7 @@ export function Layout({ children }: LayoutProps) {
                 href="https://github.com/ParleSec/ProtocolSoup"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-surface-500 hover:text-white hover:bg-white/5 transition-colors text-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-surface-400 hover:text-white hover:bg-white/5 transition-colors text-sm"
               >
                 <Github className="w-4 h-4" />
                 <span>Source</span>

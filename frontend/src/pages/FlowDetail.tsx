@@ -629,7 +629,7 @@ window.location.href = authUrl;`
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Breadcrumb & Title */}
       <header>
-        <div className="flex items-center gap-2 text-sm text-surface-500 mb-2">
+        <div className="flex items-center gap-2 text-sm text-surface-400 mb-2">
           <Link to="/protocols" className="hover:text-white transition-colors">Protocols</Link>
           <ChevronRight className="w-4 h-4" />
           <Link to={`/protocol/${protocolId}`} className="hover:text-white transition-colors">
@@ -680,7 +680,7 @@ window.location.href = authUrl;`
       <section className="rounded-xl border border-white/10 bg-surface-900/30 overflow-hidden">
         <div className="px-5 py-4 border-b border-white/10">
           <h2 className="font-medium text-white">Sequence Diagram</h2>
-          <p className="text-sm text-surface-500 mt-1">Click any step for details</p>
+          <p className="text-sm text-surface-400 mt-1">Click any step for details</p>
         </div>
         <div className="p-5">
           <FlowDiagram 
@@ -839,13 +839,13 @@ function StepRow({ step, index, isActive, isLast, onClick }: {
               <span className="font-medium text-white">{step.name}</span>
               <TypeIcon className={`w-3.5 h-3.5 ${config.color.split(' ')[0]}`} />
             </div>
-            <div className="text-sm text-surface-500">
+            <div className="text-sm text-surface-400">
               {step.from} → {step.to}
             </div>
           </div>
 
           {/* Expand indicator */}
-          <ChevronDown className={`w-4 h-4 text-surface-500 transition-transform mt-2 ${isActive ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-4 h-4 text-surface-400 transition-transform mt-2 ${isActive ? 'rotate-180' : ''}`} />
         </div>
 
         {/* Expanded content */}

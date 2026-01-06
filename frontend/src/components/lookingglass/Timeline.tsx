@@ -94,7 +94,7 @@ export function Timeline({
 
   if (displayEvents.length === 0) {
     return (
-      <div className="text-center py-12 text-surface-500">
+      <div className="text-center py-12 text-surface-400">
         <Clock className="w-12 h-12 mx-auto mb-3 opacity-50" />
         <p>No events yet</p>
         <p className="text-sm mt-1">Start a demo flow to see events appear here</p>
@@ -115,7 +115,7 @@ export function Timeline({
         <div className="flex items-center gap-2 p-2 rounded-lg bg-green-500/10 border border-green-500/20">
           <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs text-green-400 font-medium">Live</span>
-          <span className="text-xs text-surface-500 ml-auto">
+          <span className="text-xs text-surface-400 ml-auto">
             {displayEvents.length} event{displayEvents.length !== 1 ? 's' : ''}
           </span>
         </div>
@@ -169,7 +169,7 @@ export function Timeline({
                 <p className="text-sm text-surface-400 line-clamp-2">{event.description}</p>
               )}
               <div className="flex items-center gap-3 mt-2">
-                <p className="text-xs text-surface-500">
+                <p className="text-xs text-surface-400">
                   {event.timestamp.toLocaleTimeString(undefined, { 
                     hour: '2-digit', 
                     minute: '2-digit', 
@@ -177,7 +177,7 @@ export function Timeline({
                   })}.{event.timestamp.getMilliseconds().toString().padStart(3, '0')}
                 </p>
                 {event.duration && (
-                  <span className="text-xs text-surface-500 flex items-center gap-1">
+                  <span className="text-xs text-surface-400 flex items-center gap-1">
                     <Clock className="w-3 h-3" />
                     {event.duration}ms
                   </span>
@@ -186,7 +186,7 @@ export function Timeline({
             </div>
 
             {/* Expand indicator */}
-            <ChevronRight className={`w-5 h-5 text-surface-500 transition-transform absolute right-4 bottom-4 ${
+            <ChevronRight className={`w-5 h-5 text-surface-400 transition-transform absolute right-4 bottom-4 ${
               selectedEventId === event.id ? 'rotate-90' : ''
             }`} />
           </motion.div>

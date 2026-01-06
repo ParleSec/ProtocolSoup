@@ -216,7 +216,7 @@ export function ProtocolDemo() {
                   )}
 
                   {/* Action hint */}
-                  <div className="flex items-center gap-1 mt-4 text-sm text-surface-500 group-hover:text-accent-orange transition-colors">
+                  <div className="flex items-center gap-1 mt-4 text-sm text-surface-400 group-hover:text-accent-orange transition-colors">
                     <span>View flow diagram</span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </div>

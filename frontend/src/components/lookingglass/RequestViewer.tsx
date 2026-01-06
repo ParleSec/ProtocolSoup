@@ -129,7 +129,7 @@ export function RequestViewer({
         </span>
         <code className="flex-1 text-sm text-surface-300 font-mono truncate">{url}</code>
         {duration && (
-          <span className="flex items-center gap-1 text-xs text-surface-500">
+          <span className="flex items-center gap-1 text-xs text-surface-400">
             <Clock className="w-3.5 h-3.5" />
             {duration}ms
           </span>
@@ -152,10 +152,10 @@ export function RequestViewer({
         {headers && Object.keys(headers).length > 0 && (
           <div className="mb-4">
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">Headers</h4>
+              <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Headers</h4>
               <button
                 onClick={() => copyToClipboard(JSON.stringify(headers, null, 2), 'req-headers')}
-                className="text-xs text-surface-500 hover:text-white transition-colors"
+                className="text-xs text-surface-400 hover:text-white transition-colors"
               >
                 {copied === 'req-headers' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -184,13 +184,13 @@ export function RequestViewer({
         {showCurl && (
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-surface-500 uppercase tracking-wider flex items-center gap-1.5">
+              <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Terminal className="w-3.5 h-3.5" />
                 cURL Equivalent
               </h4>
               <button
                 onClick={() => copyToClipboard(curlCommand, 'curl')}
-                className="text-xs text-surface-500 hover:text-white transition-colors"
+                className="text-xs text-surface-400 hover:text-white transition-colors"
               >
                 {copied === 'curl' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -207,10 +207,10 @@ export function RequestViewer({
         {body && (
           <div>
             <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">Body</h4>
+              <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Body</h4>
               <button
                 onClick={() => copyToClipboard(formatBody(body), 'req-body')}
-                className="text-xs text-surface-500 hover:text-white transition-colors"
+                className="text-xs text-surface-400 hover:text-white transition-colors"
               >
                 {copied === 'req-body' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -248,7 +248,7 @@ export function RequestViewer({
               <span className="text-surface-400 ml-2">{response.statusText}</span>
             </div>
             {duration && (
-              <span className="ml-auto text-xs text-surface-500">
+              <span className="ml-auto text-xs text-surface-400">
                 {duration}ms
               </span>
             )}
@@ -258,10 +258,10 @@ export function RequestViewer({
           {response.headers && Object.keys(response.headers).length > 0 && (
             <div className="mb-4">
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">Headers</h4>
+                <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Headers</h4>
                 <button
                   onClick={() => copyToClipboard(JSON.stringify(response.headers, null, 2), 'res-headers')}
-                  className="text-xs text-surface-500 hover:text-white transition-colors"
+                  className="text-xs text-surface-400 hover:text-white transition-colors"
                 >
                   {copied === 'res-headers' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -290,10 +290,10 @@ export function RequestViewer({
           {response.body && (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h4 className="text-xs font-semibold text-surface-500 uppercase tracking-wider">Body</h4>
+                <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Body</h4>
                 <button
                   onClick={() => copyToClipboard(formatBody(response.body), 'res-body')}
-                  className="text-xs text-surface-500 hover:text-white transition-colors"
+                  className="text-xs text-surface-400 hover:text-white transition-colors"
                 >
                   {copied === 'res-body' ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>

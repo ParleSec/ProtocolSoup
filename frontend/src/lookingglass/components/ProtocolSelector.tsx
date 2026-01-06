@@ -146,7 +146,7 @@ export function ProtocolSelector({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-surface-500 text-xs sm:text-sm">
+      <div className="flex items-center gap-2 text-surface-400 text-xs sm:text-sm">
         <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
         <span className="font-mono">loading...</span>
       </div>
@@ -166,10 +166,10 @@ export function ProtocolSelector({
           }}
           className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 sm:py-1.5 rounded bg-surface-900 border border-white/10 hover:border-white/20 active:border-white/30 text-xs sm:text-sm font-mono transition-colors flex-1 sm:flex-initial sm:min-w-[140px] touch-manipulation"
         >
-          <span className={`truncate ${selectedProtocol ? 'text-white' : 'text-surface-500'}`}>
+          <span className={`truncate ${selectedProtocol ? 'text-white' : 'text-surface-400'}`}>
             {selectedProtocol?.id || 'select'}
           </span>
-          <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-surface-500 ml-auto flex-shrink-0 transition-transform ${isProtocolOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-surface-400 ml-auto flex-shrink-0 transition-transform ${isProtocolOpen ? 'rotate-180' : ''}`} />
         </button>
       </div>
 
@@ -190,10 +190,10 @@ export function ProtocolSelector({
               : 'opacity-50 cursor-not-allowed'
           }`}
         >
-          <span className={`${selectedFlow ? 'text-white' : 'text-surface-500'} truncate`}>
+          <span className={`${selectedFlow ? 'text-white' : 'text-surface-400'} truncate`}>
             {selectedFlow?.id || 'select'}
           </span>
-          <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-surface-500 ml-auto flex-shrink-0 transition-transform ${isFlowOpen ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 text-surface-400 ml-auto flex-shrink-0 transition-transform ${isFlowOpen ? 'rotate-180' : ''}`} />
         </button>
       </div>
 
@@ -269,7 +269,7 @@ export function ProtocolSelector({
                 >
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-mono truncate">{flow.id}</div>
-                    <div className="text-xs text-surface-500 truncate">{flow.name}</div>
+                    <div className="text-xs text-surface-400 truncate">{flow.name}</div>
                   </div>
                   {selectedFlow?.id === flow.id && (
                     <Check className="w-3.5 h-3.5 flex-shrink-0 ml-2" />

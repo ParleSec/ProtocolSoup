@@ -87,7 +87,7 @@ export function FlowVisualizer({
                       ? 'bg-green-500/20 border-green-500 text-green-400'
                       : isCurrent
                       ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 animate-pulse'
-                      : 'bg-surface-800 border-surface-700 text-surface-500 group-hover:border-surface-500'
+                      : 'bg-surface-800 border-surface-700 text-surface-400 group-hover:border-surface-500'
                   }`}
                   animate={isCurrent ? { scale: [1, 1.1, 1] } : {}}
                   transition={{ repeat: Infinity, duration: 1 }}
@@ -193,7 +193,7 @@ export function StepIndicator({
           ? 'bg-green-500/20 text-green-400 border border-green-500/50'
           : isCurrent
           ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/50 animate-pulse'
-          : 'bg-surface-800 text-surface-500 hover:bg-surface-700'
+          : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
       }`}
       title={step.name}
     >
