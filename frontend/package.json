@@ -10,9 +10,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "npm run generate-sitemap && tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
+    "generate-sitemap": "node scripts/generate-sitemap.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",
