@@ -6,6 +6,3 @@ export { FlowVisualizer, FlowProgressBar, StepIndicator } from './FlowVisualizer
 export { StepDetail } from './StepDetail'
 export { ProtocolSelector } from './ProtocolSelector'
 export { RealFlowPanel } from './RealFlowPanel'
-
-// SSF Components
-export { SSFSandbox } from '../../components/lookingglass/SSFSandbox'
