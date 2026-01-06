@@ -405,6 +405,9 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
   // Protocol-specific mappings for OIDC protocol
   if (protocolId === 'oidc') {
     switch (normalizedId) {
+      case 'interactive-code':
+        // Interactive code flow - comprehensive OIDC flow with discovery, PKCE, nonce
+        return 'interactive-code'
       case 'authorization-code':
       case 'authorization-code-pkce':
         return 'oidc-authorization-code'

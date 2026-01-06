@@ -13,6 +13,7 @@ import { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 import { DeviceCodeExecutor } from './device-code'
 import { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 import { OIDCHybridExecutor, type HybridResponseType } from './oidc-hybrid'
+import { InteractiveCodeExecutor, type InteractiveCodeConfig } from './interactive-code'
 import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
 import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
 import { X509SVIDExecutor, JWTSVIDExecutor, MTLSExecutor, CertRotationExecutor, type SPIFFESVIDConfig } from './spiffe-svid'
@@ -55,6 +56,18 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     rfcReference: 'RFC 6749 Section 4.1 + RFC 7636',
     requiresUserInteraction: true,
     additionalConfig: { usePkce: true },
+  },
+  'interactive-code': {
+    executorClass: InteractiveCodeExecutor,
+    description: 'Comprehensive interactive flow with discovery, PKCE, nonce, and UserInfo',
+    rfcReference: 'RFC 6749, RFC 7636, OIDC Core 1.0',
+    requiresUserInteraction: true,
+    additionalConfig: { 
+      usePkce: true, 
+      includeNonce: true, 
+      useDiscovery: true,
+      fetchUserInfo: true,
+    },
   },
   'client-credentials': {
     executorClass: ClientCredentialsExecutor,
@@ -304,6 +317,14 @@ export function createFlowExecutor(
 
   if (flowId === 'client-credentials' && config.clientSecret) {
     (fullConfig as ClientCredentialsConfig).clientSecret = config.clientSecret
+  }
+
+  // Handle Interactive Code flow
+  if (flowId === 'interactive-code') {
+    (fullConfig as InteractiveCodeConfig).usePkce = true;
+    (fullConfig as InteractiveCodeConfig).includeNonce = true;
+    (fullConfig as InteractiveCodeConfig).useDiscovery = true;
+    (fullConfig as InteractiveCodeConfig).fetchUserInfo = true
   }
 
   // Handle SAML flows

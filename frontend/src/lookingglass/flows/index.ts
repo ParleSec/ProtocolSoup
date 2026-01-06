@@ -27,6 +27,7 @@ export { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 export { DeviceCodeExecutor, type DeviceCodeConfig } from './device-code'
 export { OIDCHybridExecutor, type OIDCHybridConfig, type HybridResponseType } from './oidc-hybrid'
 export { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
+export { InteractiveCodeExecutor, type InteractiveCodeConfig } from './interactive-code'
 
 // SAML executors
 export { 
@@ -73,6 +74,21 @@ export {
   type SCIMPatchOperation,
   type SCIMPatchRequest,
 } from './scim-provisioning'
+
+// SSF (Shared Signals Framework) executors
+export {
+  SSFSandboxExecutor,
+  createSSFExecutor,
+  SSF_ACTIONS,
+  type SSFSandboxConfig,
+  type SSFSubject,
+  type SSFStream,
+  type SSFEventMetadata,
+  type SSFStoredEvent,
+  type SSFActionResponse,
+  type SSFActionType,
+  type DecodedSET,
+} from './ssf-sandbox'
 
 // Factory
 export {

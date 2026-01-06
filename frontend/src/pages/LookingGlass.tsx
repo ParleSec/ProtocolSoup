@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Terminal, Square,
   ChevronRight, Fingerprint, Shield, Lock, Sparkles,
-  RefreshCw, FileKey, KeyRound
+  RefreshCw, FileKey, KeyRound, Workflow
 } from 'lucide-react'
 
 import {
@@ -165,7 +165,14 @@ export function LookingGlass() {
             <Sparkles className="w-4 h-4 text-amber-400" />
             <span>Quick start - select a flow to begin</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <FlowButton
+              icon={Workflow}
+              label="Interactive Code Flow"
+              sublabel="Full OAuth 2.0 + OIDC"
+              color="cyan"
+              onClick={() => handleQuickSelect('oidc', 'interactive-code')}
+            />
             <FlowButton
               icon={Shield}
               label="Authorization Code"
@@ -180,6 +187,8 @@ export function LookingGlass() {
               color="green"
               onClick={() => handleQuickSelect('oauth2', 'client_credentials')}
             />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
             <FlowButton
               icon={RefreshCw}
               label="Refresh Token"
@@ -198,7 +207,7 @@ export function LookingGlass() {
               icon={FileKey}
               label="SP-Initiated SSO"
               sublabel="SAML 2.0"
-              color="cyan"
+              color="blue"
               onClick={() => handleQuickSelect('saml', 'sp_initiated_sso')}
             />
           </div>
