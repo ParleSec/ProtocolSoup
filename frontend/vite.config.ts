@@ -5,6 +5,16 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
+/**
+ * SEO Note: This app uses react-helmet-async for dynamic meta tags.
+ * Modern Googlebot renders JavaScript and will see all SEO tags.
+ * 
+ * For additional SEO improvements, consider:
+ * - Using a CDN that supports edge-side rendering (Cloudflare Workers, Vercel Edge)
+ * - Implementing server-side rendering with Vite SSR
+ * - Using prerender.io or similar service for bot-specific rendering
+ */
+
 export default defineConfig({
   plugins: [react()],
   build: {

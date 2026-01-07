@@ -8,6 +8,9 @@ import {
   Key, Fingerprint, FileKey, ChevronRight, 
   ExternalLink, BookOpen, Shield, Users
 } from 'lucide-react'
+import { SEO } from '../components/common/SEO'
+import { generateBreadcrumbSchema, generateFAQSchema } from '../utils/schema'
+import { SITE_CONFIG } from '../config/seo'
 
 const protocols = [
   {
@@ -97,8 +100,45 @@ const comingSoon = [
 ]
 
 export function Protocols() {
+  // Generate structured data for this page
+  const breadcrumbSchema = generateBreadcrumbSchema([
+    { name: 'Home', url: SITE_CONFIG.baseUrl },
+    { name: 'Protocols', url: `${SITE_CONFIG.baseUrl}/protocols` },
+  ])
+
+  const faqSchema = generateFAQSchema([
+    {
+      question: 'What authentication protocols does Protocol Soup support?',
+      answer: 'Protocol Soup supports OAuth 2.0, OpenID Connect (OIDC), SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0. Each protocol includes multiple flows and detailed documentation.',
+    },
+    {
+      question: 'What is the difference between OAuth 2.0 and OpenID Connect?',
+      answer: 'OAuth 2.0 is an authorization framework that grants access to resources without sharing credentials. OpenID Connect is an authentication layer built on top of OAuth 2.0 that adds user identity verification through ID tokens.',
+    },
+    {
+      question: 'What is SAML used for?',
+      answer: 'SAML (Security Assertion Markup Language) is used for enterprise single sign-on (SSO), allowing users to authenticate once and access multiple applications without re-entering credentials.',
+    },
+  ])
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8">
+    <>
+      <SEO
+        title="Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM"
+        description="Comprehensive reference for authentication and identity protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0."
+        canonical="/protocols"
+        ogType="website"
+        keywords={[
+          'identity protocol reference',
+          'authentication protocols',
+          'oauth2 documentation',
+          'oidc specification',
+          'saml documentation',
+          'security protocols',
+        ]}
+        structuredData={[breadcrumbSchema, faqSchema]}
+      />
+      <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8">
       {/* Header */}
       <header className="py-2">
         <div className="flex items-center gap-3 mb-3">
@@ -137,6 +177,7 @@ export function Protocols() {
         </div>
       </section>
     </div>
+    </>
   )
 }
 

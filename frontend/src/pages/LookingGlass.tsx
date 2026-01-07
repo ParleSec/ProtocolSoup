@@ -21,6 +21,7 @@ import {
 } from '../lookingglass'
 
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
+import { LookingGlassSEO } from '../components/common/SEO'
 
 export function LookingGlass() {
   useParams<{ sessionId?: string }>()
@@ -137,7 +138,9 @@ export function LookingGlass() {
   const status = realExecutor.state?.status || 'idle'
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
+    <>
+      <LookingGlassSEO />
+      <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
       {/* Header */}
       <header className="py-2">
         <div className="flex flex-col gap-3">
@@ -504,6 +507,7 @@ export function LookingGlass() {
         </div>
       </section>
     </div>
+    </>
   )
 }
 

@@ -6,6 +6,10 @@ import {
 } from 'lucide-react'
 import { useProtocol, useProtocolFlows } from '../protocols'
 import { protocolMeta } from '../protocols/registry'
+import { SEO } from '../components/common/SEO'
+import { getProtocolSEO } from '../config/seo'
+import { generateProtocolPageSchema } from '../utils/schema'
+import { SITE_CONFIG } from '../config/seo'
 
 // Flow UI metadata (icons, colors) - modular extension point
 const flowMeta: Record<string, { 
@@ -119,8 +123,26 @@ export function ProtocolDemo() {
   // Get first recommended flow for quick action
   const recommendedFlow = flows.find(f => flowMeta[f.id]?.recommended) || flows[0]
 
+  // Generate SEO data
+  const seoData = getProtocolSEO(protocolId || '')
+  const structuredData = generateProtocolPageSchema(
+    protocol.name,
+    protocol.description,
+    `${SITE_CONFIG.baseUrl}/protocol/${protocolId}`,
+    flows.map(f => ({ name: f.name, description: f.description }))
+  )
+
   return (
-    <div className="space-y-8">
+    <>
+      <SEO
+        title={seoData.title}
+        description={seoData.description}
+        canonical={`/protocol/${protocolId}`}
+        ogType="article"
+        keywords={seoData.keywords}
+        structuredData={structuredData}
+      />
+      <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Link
@@ -244,6 +266,7 @@ export function ProtocolDemo() {
         </div>
       </div>
     </div>
+    </>
   )
 }
 

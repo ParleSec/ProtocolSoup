@@ -11,6 +11,10 @@ import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { FlowDiagram } from '../components/lookingglass/FlowDiagram'
 import { useProtocolFlows, FlowStep } from '../protocols'
 import { getFlowWithFallback, flowIdMap } from '../protocols/fallback-data'
+import { SEO } from '../components/common/SEO'
+import { getFlowSEO } from '../config/seo'
+import { generateFlowPageSchema } from '../utils/schema'
+import { SITE_CONFIG } from '../config/seo'
 
 export function FlowDetail() {
   const { protocolId, flowId } = useParams()
@@ -625,8 +629,28 @@ window.location.href = authUrl;`
 
   const badges = getBadges()
 
+  // Generate SEO data
+  const protocolName = getProtocolName(protocolId)
+  const seoData = getFlowSEO(protocolId || '', flowId || '', flow.title)
+  const structuredData = generateFlowPageSchema(
+    protocolName,
+    flow.title,
+    flow.description,
+    `${SITE_CONFIG.baseUrl}/protocol/${protocolId}/flow/${flowId}`,
+    flow.steps.map(s => ({ name: s.name, description: s.description }))
+  )
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <>
+      <SEO
+        title={seoData.title}
+        description={seoData.description}
+        canonical={`/protocol/${protocolId}/flow/${flowId}`}
+        ogType="article"
+        keywords={seoData.keywords}
+        structuredData={structuredData}
+      />
+      <div className="max-w-4xl mx-auto space-y-6">
       {/* Breadcrumb & Title */}
       <header>
         <div className="flex items-center gap-2 text-sm text-surface-400 mb-2">
@@ -788,6 +812,7 @@ window.location.href = authUrl;`
         </Link>
       </div>
     </div>
+    </>
   )
 }
 

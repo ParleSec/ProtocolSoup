@@ -17,6 +17,7 @@ import {
   XCircle
 } from 'lucide-react'
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
+import { SSFSandboxSEO } from '../components/common/SEO'
 
 // ============================================================================
 // Types
@@ -302,7 +303,9 @@ export function SSFSandbox() {
   const selectedState = selectedSubject ? securityStates[selectedSubject.identifier] : null
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
+    <>
+      <SSFSandboxSEO />
+      <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
       {/* Header */}
       <header className="py-2">
         <div className="flex flex-col gap-3">
@@ -570,6 +573,7 @@ export function SSFSandbox() {
         </div>
       </section>
     </div>
+    </>
   )
 }
 

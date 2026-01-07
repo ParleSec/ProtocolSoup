@@ -5,7 +5,12 @@
  * - Static routes from App.tsx
  * - Protocol/flow routes from Protocols.tsx
  * 
- * add protocols to Protocols.tsx and the sitemap updates automatically on build.
+ * Features:
+ * - Image sitemap support (xmlns:image)
+ * - SEO-optimized titles and descriptions per page
+ * - Proper change frequency based on content type
+ * 
+ * Add protocols to Protocols.tsx and the sitemap updates automatically on build.
  */
 
 import { readFileSync, writeFileSync } from 'fs';
@@ -17,6 +22,26 @@ const srcDir = join(__dirname, '..', 'src');
 const publicDir = join(__dirname, '..', 'public');
 
 const SITE_URL = 'https://protocolsoup.com';
+const OG_IMAGE = `${SITE_URL}/og-image.png`;
+
+// =============================================================================
+// SEO Metadata for Pages
+// =============================================================================
+
+const PAGE_TITLES = {
+  '/': 'Protocol Soup - Interactive OAuth 2.0, OIDC & SAML Testing Playground',
+  '/protocols': 'Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM',
+  '/looking-glass': 'Looking Glass - Live Protocol Flow Execution & Traffic Inspector',
+  '/ssf-sandbox': 'SSF Sandbox - Shared Signals Framework Interactive Playground',
+};
+
+const PROTOCOL_TITLES = {
+  oauth2: 'OAuth 2.0 Tutorial - Complete Authorization Framework Guide',
+  oidc: 'OpenID Connect Tutorial - Authentication Layer for OAuth 2.0',
+  saml: 'SAML 2.0 Tutorial - Enterprise SSO & Federation Explained',
+  spiffe: 'SPIFFE/SPIRE Tutorial - Zero Trust Workload Identity',
+  scim: 'SCIM 2.0 Tutorial - Cross-Domain Identity Provisioning',
+};
 
 // =============================================================================
 // Parse Static Routes from App.tsx
@@ -66,24 +91,45 @@ function parseProtocols() {
   
   const protocolsContent = protocolsArrayMatch[1];
   
-  // Extract each protocol block
-  const protocolBlockRegex = /\{\s*id:\s*['"]([^'"]+)['"][^}]*flows:\s*\[([\s\S]*?)\]\s*,?\s*\}/g;
+  // Extract each protocol block with name and description
+  const protocolBlockRegex = /\{\s*id:\s*['"]([^'"]+)['"]\s*,\s*name:\s*['"]([^'"]+)['"]\s*,\s*description:\s*['"]([^'"]+)['"]/g;
+  const flowsRegex = /\{\s*id:\s*['"]([^'"]+)['"][^}]*flows:\s*\[([\s\S]*?)\]\s*,?\s*\}/g;
+  
   let protocolMatch;
   
+  // First pass: get protocol metadata
+  const protocolMeta = {};
   while ((protocolMatch = protocolBlockRegex.exec(protocolsContent)) !== null) {
-    const protocolId = protocolMatch[1];
-    const flowsContent = protocolMatch[2];
+    protocolMeta[protocolMatch[1]] = {
+      name: protocolMatch[2],
+      description: protocolMatch[3],
+    };
+  }
+  
+  // Second pass: get flows
+  let flowsMatch;
+  while ((flowsMatch = flowsRegex.exec(protocolsContent)) !== null) {
+    const protocolId = flowsMatch[1];
+    const flowsContent = flowsMatch[2];
     
-    // Extract flow IDs
+    // Extract flow IDs and names
     const flows = [];
-    const flowIdRegex = /id:\s*['"]([^'"]+)['"]/g;
+    const flowDetailRegex = /\{\s*id:\s*['"]([^'"]+)['"]\s*,\s*name:\s*['"]([^'"]+)['"]/g;
     let flowMatch;
     
-    while ((flowMatch = flowIdRegex.exec(flowsContent)) !== null) {
-      flows.push(flowMatch[1]);
+    while ((flowMatch = flowDetailRegex.exec(flowsContent)) !== null) {
+      flows.push({
+        id: flowMatch[1],
+        name: flowMatch[2],
+      });
     }
     
-    protocols.push({ id: protocolId, flows });
+    protocols.push({
+      id: protocolId,
+      name: protocolMeta[protocolId]?.name || protocolId,
+      description: protocolMeta[protocolId]?.description || '',
+      flows,
+    });
   }
   
   return protocols;
@@ -105,6 +151,8 @@ function generateEntries() {
       lastmod: today,
       changefreq: 'weekly',
       priority: path === '/' ? 1.0 : 0.9,
+      title: PAGE_TITLES[path] || 'Protocol Soup',
+      image: OG_IMAGE,
     });
   }
   
@@ -117,15 +165,19 @@ function generateEntries() {
       lastmod: today,
       changefreq: 'monthly',
       priority: 0.8,
+      title: PROTOCOL_TITLES[protocol.id] || `${protocol.name} Tutorial`,
+      image: OG_IMAGE,
     });
     
     // Flow detail pages
-    for (const flowId of protocol.flows) {
+    for (const flow of protocol.flows) {
       entries.push({
-        url: `${SITE_URL}/protocol/${protocol.id}/flow/${flowId}`,
+        url: `${SITE_URL}/protocol/${protocol.id}/flow/${flow.id}`,
         lastmod: today,
         changefreq: 'monthly',
         priority: 0.7,
+        title: `${flow.name} - ${protocol.name} Flow Guide`,
+        image: OG_IMAGE,
       });
     }
   }
@@ -134,31 +186,58 @@ function generateEntries() {
 }
 
 // =============================================================================
-// Generate XML
+// Generate XML with Image Sitemap Support
 // =============================================================================
 
 function generateXml(entries) {
-  const urlEntries = entries.map(entry => `  <url>
+  const urlEntries = entries.map(entry => {
+    const imageSection = entry.image ? `
+    <image:image>
+      <image:loc>${entry.image}</image:loc>
+      <image:title>${escapeXml(entry.title)}</image:title>
+    </image:image>` : '';
+    
+    return `  <url>
     <loc>${entry.url}</loc>
     <lastmod>${entry.lastmod}</lastmod>
     <changefreq>${entry.changefreq}</changefreq>
-    <priority>${entry.priority.toFixed(1)}</priority>
-  </url>`).join('\n');
+    <priority>${entry.priority.toFixed(1)}</priority>${imageSection}
+  </url>`;
+  }).join('\n');
   
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
-        http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
+        http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd
+        http://www.google.com/schemas/sitemap-image/1.1
+        http://www.google.com/schemas/sitemap-image/1.1/sitemap-image.xsd">
   <!-- 
     Protocol Soup Sitemap
     Auto-generated: ${new Date().toISOString()}
     
     This file is automatically generated from source files.
     Routes parsed from: App.tsx, Protocols.tsx
+    
+    Features:
+    - Image sitemap support for rich results
+    - SEO-optimized page titles
   -->
 ${urlEntries}
 </urlset>`;
+}
+
+/**
+ * Escape special XML characters
+ */
+function escapeXml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 // =============================================================================
@@ -166,7 +245,7 @@ ${urlEntries}
 // =============================================================================
 
 function main() {
-  console.log('Generating sitemap from source files...\n');
+  console.log('Generating enhanced sitemap from source files...\n');
   
   try {
     const { entries, staticCount, protocols } = generateEntries();
@@ -177,24 +256,27 @@ function main() {
     
     const flowCount = protocols.reduce((sum, p) => sum + p.flows.length, 0);
     
-    console.log(' Parsed sources:');
+    console.log('Parsed sources:');
     console.log('   └─ src/App.tsx');
     console.log('   └─ src/pages/Protocols.tsx\n');
     
-    console.log(` Generated sitemap.xml with ${entries.length} URLs:`);
+    console.log(`Generated sitemap.xml with ${entries.length} URLs:`);
     console.log(`   ├─ ${staticCount} static pages`);
     console.log(`   ├─ ${protocols.length} protocol pages`);
     console.log(`   └─ ${flowCount} flow pages\n`);
     
-    console.log(' Discovered protocols:');
+    console.log('Discovered protocols:');
     for (const p of protocols) {
       console.log(`   └─ ${p.id} (${p.flows.length} flows)`);
     }
     
-    console.log(`\n Output: public/sitemap.xml`);
+    console.log('\nImage sitemap: Enabled');
+    console.log('SEO titles: Included');
+    
+    console.log(`\nOutput: public/sitemap.xml`);
     console.log('✨ Done!\n');
   } catch (error) {
-    console.error('Failed to generate sitemap:', error.message);
+    console.error(' Failed to generate sitemap:', error.message);
     console.error(error.stack);
     process.exit(1);
   }

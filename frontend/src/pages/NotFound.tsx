@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Home, Eye, Radio, BookOpen, AlertCircle } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { NotFoundSEO } from '../components/common/SEO'
 
 export function NotFound() {
   const quickLinks = [
@@ -11,7 +12,9 @@ export function NotFound() {
   ]
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center">
+    <>
+      <NotFoundSEO />
+      <div className="min-h-[70vh] flex items-center justify-center">
       <div className="max-w-2xl mx-auto text-center space-y-8">
         {/* Animated 404 */}
         <motion.div
@@ -130,6 +133,7 @@ export function NotFound() {
         </motion.div>
       </div>
     </div>
+    </>
   )
 }
 

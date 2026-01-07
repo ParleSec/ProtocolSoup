@@ -4,10 +4,32 @@ import {
   ExternalLink, ChevronRight, Key, 
   Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
+import { SEO } from '../components/common/SEO'
+import { generateHomepageSchema } from '../utils/schema'
 
 export function Dashboard() {
+  const structuredData = generateHomepageSchema()
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8 sm:space-y-10">
+    <>
+      <SEO
+        title="Interactive OAuth 2.0, OIDC & SAML Testing Playground"
+        description="Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows."
+        canonical="/"
+        ogType="website"
+        keywords={[
+          'oauth2 playground',
+          'oauth testing tool',
+          'oidc testing',
+          'authentication protocol sandbox',
+          'jwt decoder',
+          'token inspector',
+          'oauth2 tutorial',
+          'openid connect tutorial',
+        ]}
+        structuredData={structuredData}
+      />
+      <div className="max-w-4xl mx-auto space-y-8 sm:space-y-10">
       {/* Header */}
       <header className="py-2 sm:py-4">
         <div className="flex items-center gap-2 text-amber-400 font-mono text-sm mb-3">
@@ -173,6 +195,7 @@ export function Dashboard() {
         </div>
       </section>
     </div>
+    </>
   )
 }
 
