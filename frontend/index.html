@@ -50,14 +50,19 @@
         
         // Detect stale assets (MIME type HTML for JS/CSS = 404 returned as SPA fallback)
         // This recovers users stuck with old cached HTML referencing deleted assets
+        // Only trigger for same-origin /assets/ files to avoid loops from third-party script failures
         window.addEventListener('error', (e) => {
           if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
-            console.warn('[Recovery] Asset load failed, clearing caches and reloading...');
-            caches.keys().then((names) => {
-              Promise.all(names.map((name) => caches.delete(name))).then(() => {
-                window.location.reload();
+            const src = e.target.src || e.target.href || '';
+            // Only recover for our own assets, not third-party scripts (Cloudflare, analytics, etc.)
+            if (src.includes(window.location.origin + '/assets/')) {
+              console.warn('[Recovery] App asset load failed, clearing caches and reloading...');
+              caches.keys().then((names) => {
+                Promise.all(names.map((name) => caches.delete(name))).then(() => {
+                  window.location.reload();
+                });
               });
-            });
+            }
           }
         }, true);
       }

@@ -67,6 +67,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Skip cross-origin requests (third-party scripts, analytics, CDNs, etc.)
+  // Let the browser handle these directly to avoid CORS issues and unnecessary caching
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   // Network-first for API calls
   if (url.pathname.startsWith('/api') || 
       url.pathname.startsWith('/oauth2') || 
