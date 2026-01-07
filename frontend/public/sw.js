@@ -1,11 +1,11 @@
 // Protocol Soup Service Worker
-const CACHE_NAME = 'protocol-soup-v1';
-const RUNTIME_CACHE = 'protocol-soup-runtime';
+// Increment version when making breaking changes
+const VERSION = 'v2';
+const CACHE_NAME = `protocol-soup-${VERSION}`;
+const RUNTIME_CACHE = `protocol-soup-runtime-${VERSION}`;
 
-// Assets to cache on install
+// Assets to cache on install (static assets only, NOT HTML)
 const PRECACHE_ASSETS = [
-  '/',
-  '/index.html',
   '/favicon.svg',
   '/manifest.json'
 ];
@@ -15,10 +15,13 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then((cache) => {
-        console.log('[SW] Precaching app shell');
+        console.log('[SW] Precaching static assets');
         return cache.addAll(PRECACHE_ASSETS);
       })
-      .then(() => self.skipWaiting())
+      .then(() => {
+        console.log('[SW] Skip waiting - activating new service worker');
+        return self.skipWaiting();
+      })
   );
 });
 
@@ -36,11 +39,20 @@ self.addEventListener('activate', (event) => {
             })
         );
       })
-      .then(() => self.clients.claim())
+      .then(() => {
+        console.log('[SW] Claiming clients');
+        return self.clients.claim();
+      })
   );
 });
 
-// Fetch event - network-first strategy for API, cache-first for static assets
+// Helper to determine if request is for navigation
+function isNavigationRequest(request) {
+  return request.mode === 'navigate' || 
+         (request.method === 'GET' && request.headers.get('accept').includes('text/html'));
+}
+
+// Fetch event - smart caching strategies
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -60,6 +72,9 @@ self.addEventListener('fetch', (event) => {
       url.pathname.startsWith('/oauth2') || 
       url.pathname.startsWith('/oidc') ||
       url.pathname.startsWith('/saml') ||
+      url.pathname.startsWith('/scim') ||
+      url.pathname.startsWith('/ssf') ||
+      url.pathname.startsWith('/spiffe') ||
       url.pathname.startsWith('/ws')) {
     event.respondWith(
       fetch(request)
@@ -76,22 +91,42 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for static assets, with network fallback
+  // Network-first for HTML navigation requests (fixes blank page issue)
+  if (isNavigationRequest(request)) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          // Cache the HTML for offline access
+          if (response.ok) {
+            const responseClone = response.clone();
+            caches.open(RUNTIME_CACHE)
+              .then((cache) => cache.put(request, responseClone));
+          }
+          return response;
+        })
+        .catch(() => {
+          // Fallback to cache if offline
+          return caches.match(request)
+            .then((cachedResponse) => {
+              if (cachedResponse) {
+                return cachedResponse;
+              }
+              // Return a basic offline page
+              return new Response(
+                '<!DOCTYPE html><html><head><title>Offline</title></head><body><h1>Offline</h1><p>Please check your internet connection.</p></body></html>',
+                { headers: { 'Content-Type': 'text/html' } }
+              );
+            });
+        })
+    );
+    return;
+  }
+
+  // Cache-first for static assets (CSS, JS, images, fonts)
   event.respondWith(
     caches.match(request)
       .then((cachedResponse) => {
         if (cachedResponse) {
-          // Return cached response and update cache in background
-          event.waitUntil(
-            fetch(request)
-              .then((response) => {
-                if (response.ok) {
-                  caches.open(RUNTIME_CACHE)
-                    .then((cache) => cache.put(request, response));
-                }
-              })
-              .catch(() => {})
-          );
           return cachedResponse;
         }
 
@@ -99,7 +134,7 @@ self.addEventListener('fetch', (event) => {
         return fetch(request)
           .then((response) => {
             // Cache successful responses for static assets
-            if (response.ok && !url.pathname.startsWith('/api')) {
+            if (response.ok) {
               const responseClone = response.clone();
               caches.open(RUNTIME_CACHE)
                 .then((cache) => cache.put(request, responseClone));
@@ -110,3 +145,9 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
+// Listen for skip waiting message
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
