@@ -1,7 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { Suspense, lazy } from 'react'
 import { Layout } from './components/common/Layout'
-import { UpdateNotification } from './components/common/UpdateNotification'
 
 // Lazy load pages for code splitting
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })))
@@ -24,24 +23,21 @@ function PageLoader() {
 
 function App() {
   return (
-    <>
-      <Layout>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/protocols" element={<Protocols />} />
-            <Route path="/protocol/:protocolId" element={<ProtocolDemo />} />
-            <Route path="/protocol/:protocolId/flow/:flowId" element={<FlowDetail />} />
-            <Route path="/looking-glass" element={<LookingGlass />} />
-            <Route path="/looking-glass/:sessionId" element={<LookingGlass />} />
-            <Route path="/ssf-sandbox" element={<SSFSandbox />} />
-            <Route path="/callback" element={<Callback />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </Layout>
-      <UpdateNotification />
-    </>
+    <Layout>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/protocols" element={<Protocols />} />
+          <Route path="/protocol/:protocolId" element={<ProtocolDemo />} />
+          <Route path="/protocol/:protocolId/flow/:flowId" element={<FlowDetail />} />
+          <Route path="/looking-glass" element={<LookingGlass />} />
+          <Route path="/looking-glass/:sessionId" element={<LookingGlass />} />
+          <Route path="/ssf-sandbox" element={<SSFSandbox />} />
+          <Route path="/callback" element={<Callback />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </Layout>
   )
 }
 

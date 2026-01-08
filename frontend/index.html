@@ -13,58 +13,22 @@
     <meta name="apple-mobile-web-app-title" content="Protocol Soup" />
     <link rel="manifest" href="/manifest.json" />
     <title>Protocol Soup</title>
-    <!-- Preconnect to font origins -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- Preload fonts with high priority -->
     <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"></noscript>
-    <!-- Critical CSS for initial render -->
     <style>
-      /* Critical styles for immediate render */
       :root { --bg-dark: #020617; }
       body { margin: 0; background-color: var(--bg-dark); color: #f1f5f9; }
       #root { min-height: 100vh; }
-      .page-loader { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-      .page-loader::after { content: ''; width: 32px; height: 32px; border: 2px solid #f97316; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; }
-      @keyframes spin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Register service worker for PWA support
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((registration) => {
-              console.log('SW registered:', registration.scope);
-              // Check for updates immediately
-              registration.update();
-            })
-            .catch((error) => {
-              console.log('SW registration failed:', error);
-            });
-        });
-        
-        // Detect stale assets (MIME type HTML for JS/CSS = 404 returned as SPA fallback)
-        // This recovers users stuck with old cached HTML referencing deleted assets
-        // Only trigger for same-origin /assets/ files to avoid loops from third-party script failures
-        window.addEventListener('error', (e) => {
-          if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
-            const src = e.target.src || e.target.href || '';
-            // Only recover for our own assets, not third-party scripts (Cloudflare, analytics, etc.)
-            if (src.includes(window.location.origin + '/assets/')) {
-              console.warn('[Recovery] App asset load failed, clearing caches and reloading...');
-              caches.keys().then((names) => {
-                Promise.all(names.map((name) => caches.delete(name))).then(() => {
-                  window.location.reload();
-                });
-              });
-            }
-          }
-        }, true);
+        navigator.serviceWorker.register('/sw.js');
       }
     </script>
   </body>
