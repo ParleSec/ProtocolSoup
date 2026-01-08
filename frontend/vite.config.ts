@@ -5,28 +5,39 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 
-/**
- * SEO Note: This app uses react-helmet-async for dynamic meta tags.
- * Modern Googlebot renders JavaScript and will see all SEO tags.
- * 
- * For additional SEO improvements, consider:
- * - Using a CDN that supports edge-side rendering (Cloudflare Workers, Vercel Edge)
- * - Implementing server-side rendering with Vite SSR
- * - Using prerender.io or similar service for bot-specific rendering
- */
-
 export default defineConfig({
   plugins: [react()],
   build: {
-    sourcemap: true,
+    // Disable sourcemaps in production for smaller files
+    sourcemap: false,
+    // Target modern browsers for smaller bundles
+    target: 'es2020',
+    // Inline small assets
+    assetsInlineLimit: 4096,
+    // Better minification
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+      },
+    },
     rollupOptions: {
       output: {
+        // Better chunk splitting for caching
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'animation': ['framer-motion'],
+          'icons': ['lucide-react'],
         },
+        // Smaller chunk names
+        chunkFileNames: 'assets/[name]-[hash:8].js',
+        entryFileNames: 'assets/[name]-[hash:8].js',
+        assetFileNames: 'assets/[name]-[hash:8].[ext]',
       },
     },
+    // Split chunks at 20KB for better parallelization on mobile
+    chunkSizeWarningLimit: 500,
   },
   resolve: {
     alias: {
@@ -36,39 +47,14 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://localhost:8080',
-        ws: true,
-      },
-      '/oauth2': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/oidc': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/saml': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/spiffe': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/scim': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/ssf': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
+      '/api': { target: 'http://localhost:8080', changeOrigin: true },
+      '/ws': { target: 'ws://localhost:8080', ws: true },
+      '/oauth2': { target: 'http://localhost:8080', changeOrigin: true },
+      '/oidc': { target: 'http://localhost:8080', changeOrigin: true },
+      '/saml': { target: 'http://localhost:8080', changeOrigin: true },
+      '/spiffe': { target: 'http://localhost:8080', changeOrigin: true },
+      '/scim': { target: 'http://localhost:8080', changeOrigin: true },
+      '/ssf': { target: 'http://localhost:8080', changeOrigin: true },
     },
   },
 })
-

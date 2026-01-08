@@ -2,29 +2,63 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Protocol Soup</title>
     <meta name="description" content="Protocol Soup - A sandbox for exploring authentication and identity protocols" />
     <meta name="author" content="Mason Parle" />
     <meta name="theme-color" content="#f97316" />
+    
+    <!-- PWA -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="manifest" href="/manifest.json" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Protocol Soup" />
-    <link rel="manifest" href="/manifest.json" />
-    <title>Protocol Soup</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"></noscript>
+    
+    <!-- DNS prefetch for faster font loading -->
+    <link rel="dns-prefetch" href="//fonts.googleapis.com" />
+    <link rel="dns-prefetch" href="//fonts.gstatic.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Fonts: Reduced weights for faster loading, display=swap for no FOIT -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap" media="print" onload="this.media='all'" />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600;700&display=swap" />
+    </noscript>
+    
+    <!-- Critical CSS -->
     <style>
       :root { --bg-dark: #020617; }
-      body { margin: 0; background-color: var(--bg-dark); color: #f1f5f9; }
+      body { 
+        margin: 0; 
+        background-color: var(--bg-dark); 
+        color: #f1f5f9;
+        font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+      }
       #root { min-height: 100vh; }
+      /* Skeleton loader for FCP */
+      .skeleton {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+      .skeleton::after {
+        content: '';
+        width: 40px;
+        height: 40px;
+        border: 3px solid #f97316;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
     </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="skeleton"></div></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
