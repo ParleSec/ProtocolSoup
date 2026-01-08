@@ -24,7 +24,7 @@
     <priority>1.0</priority>
     <image:image>
       <image:loc>https://protocolsoup.com/og-image.png</image:loc>
-      <image:title>Protocol Soup - Interactive OAuth 2.0, OIDC &amp; SAML Testing Playground</image:title>
+      <image:title>Protocol Soup - Interactive Authentication Protocol Playground</image:title>
     </image:image>
   </url>
   <url>

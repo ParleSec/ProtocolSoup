@@ -14,14 +14,8 @@ export default defineConfig({
     target: 'es2020',
     // Inline small assets
     assetsInlineLimit: 4096,
-    // Better minification
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      },
-    },
+    // Use esbuild (default, built-in, fast)
+    minify: 'esbuild',
     rollupOptions: {
       output: {
         // Better chunk splitting for caching
@@ -36,8 +30,11 @@ export default defineConfig({
         assetFileNames: 'assets/[name]-[hash:8].[ext]',
       },
     },
-    // Split chunks at 20KB for better parallelization on mobile
     chunkSizeWarningLimit: 500,
+  },
+  // esbuild options for better minification
+  esbuild: {
+    drop: ['console', 'debugger'],
   },
   resolve: {
     alias: {
