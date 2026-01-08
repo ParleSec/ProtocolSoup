@@ -7,7 +7,7 @@
 
 export const SITE_CONFIG = {
   name: 'Protocol Soup',
-  tagline: 'Interactive Authentication Protocol Playground',
+  tagline: 'An Interactive Protocol Sandbox',
   baseUrl: 'https://protocolsoup.com',
   defaultImage: 'https://protocolsoup.com/og-image.png',
   twitterHandle: '@protocolsoup',
@@ -31,7 +31,7 @@ export interface PageSEO {
 export const PAGE_SEO: Record<string, PageSEO> = {
   // Homepage - Primary landing page
   '/': {
-    title: 'Protocol Soup - Interactive OAuth 2.0, OIDC & SAML Testing Playground',
+    title: 'Protocol Soup - OAuth 2.0, OIDC & SAML Testing Playground',
     description: 'Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows.',
     keywords: [
       'oauth2 playground',

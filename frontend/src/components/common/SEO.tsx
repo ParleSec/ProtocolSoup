@@ -124,7 +124,7 @@ export function SEO({
 export function HomeSEO() {
   return (
     <SEO
-      title="Interactive OAuth 2.0, OIDC & SAML Testing Playground"
+      title="OAuth 2.0, OIDC & SAML Testing Playground"
       description="Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows."
       canonical="/"
       ogType="website"
