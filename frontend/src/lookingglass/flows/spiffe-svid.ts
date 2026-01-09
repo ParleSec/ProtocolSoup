@@ -570,48 +570,91 @@ export class MTLSExecutor extends FlowExecutorBase {
         data: bundle,
       })
 
-      // Step 4: mTLS handshake explanation (per RFC 8446)
+      // Step 4: Perform mTLS call to SPIRE Server
       this.addEvent({
         type: 'crypto',
-        title: 'TLS 1.3 Handshake (mTLS)',
-        description: 'In mTLS, both client and server present X.509-SVIDs during the TLS handshake',
+        title: 'Performing mTLS Call',
+        description: 'Making actual TLS connection to SPIRE Server using X.509-SVID',
         rfcReference: 'RFC 8446 Section 4.4.2',
-        data: {
-          step1: 'ClientHello with supported cipher suites',
-          step2: 'ServerHello + Server Certificate (X.509-SVID)',
-          step3: 'Client Certificate (X.509-SVID) + CertificateVerify',
-          step4: 'Finished - Mutual authentication complete',
-        },
       })
 
-      this.addEvent({
-        type: 'info',
-        title: 'Certificate Verification',
-        description: 'Both parties validate peer certificate against trust bundle and extract SPIFFE ID from SAN URI',
-        rfcReference: 'SPIFFE X.509-SVID Section 4.1',
-        data: {
-          validation: 'Certificate chain validated against trust bundle CA certificates',
-          spiffeIdExtraction: 'SPIFFE ID extracted from Subject Alternative Name (SAN) URI extension',
-          authorization: 'Application performs authorization based on SPIFFE ID',
-        },
+      const mtlsResponse = await this.makeRequest('POST', `${this.config.baseUrl}/demo/mtls/call`, {
+        step: 'Execute mTLS handshake',
+        rfcReference: 'SPIFFE mTLS + TLS 1.3',
       })
 
-      this.addEvent({
-        type: 'security',
-        title: 'mTLS Configuration Ready',
-        description: 'X.509-SVID and trust bundle available for mTLS connections',
-        data: {
-          clientSpiffeId: svid.spiffe_id,
-          trustDomain: status.trust_domain,
-          tlsVersion: 'TLS 1.3',
-          cipherSuites: 'TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256',
-        },
-      })
+      const mtlsResult = mtlsResponse.data as {
+        success: boolean
+        client_spiffe_id: string
+        server_spiffe_id: string
+        tls_version: string
+        cipher_suite: string
+        handshake_time: string
+        peer_cert_subject: string
+        peer_cert_issuer: string
+        peer_cert_expiry: string
+        peer_cert_serial: string
+        trust_chain_length: number
+        steps: string[]
+        error?: string
+        target: string
+      }
 
-      this.updateState({
-        status: 'completed',
-        currentStep: 'mTLS configuration ready',
-      })
+      // Display each real step from the mTLS call
+      for (const step of mtlsResult.steps || []) {
+        this.addEvent({
+          type: step.includes('ERROR') ? 'error' : 'info',
+          title: 'mTLS Handshake Step',
+          description: step,
+          rfcReference: 'RFC 8446',
+        })
+      }
+
+      if (mtlsResult.success) {
+        this.addEvent({
+          type: 'security',
+          title: 'mTLS Connection Established',
+          description: `Successfully authenticated with ${mtlsResult.server_spiffe_id}`,
+          rfcReference: 'SPIFFE X.509-SVID Section 4.1',
+          data: {
+            clientSpiffeId: mtlsResult.client_spiffe_id,
+            serverSpiffeId: mtlsResult.server_spiffe_id,
+            tlsVersion: mtlsResult.tls_version,
+            cipherSuite: mtlsResult.cipher_suite,
+            handshakeTime: mtlsResult.handshake_time,
+            peerCertSubject: mtlsResult.peer_cert_subject,
+            peerCertExpiry: mtlsResult.peer_cert_expiry,
+            trustChainLength: mtlsResult.trust_chain_length,
+            target: mtlsResult.target,
+          },
+        })
+
+        this.updateState({
+          status: 'completed',
+          currentStep: 'mTLS handshake complete',
+        })
+      } else {
+        this.addEvent({
+          type: 'error',
+          title: 'mTLS Connection Failed',
+          description: mtlsResult.error || 'Unknown error during mTLS handshake',
+          rfcReference: 'RFC 8446',
+          data: {
+            clientSpiffeId: mtlsResult.client_spiffe_id,
+            error: mtlsResult.error,
+            target: mtlsResult.target,
+          },
+        })
+
+        this.updateState({
+          status: 'error',
+          currentStep: 'mTLS handshake failed',
+          error: {
+            code: 'MTLS_HANDSHAKE_FAILED',
+            description: mtlsResult.error || 'mTLS connection could not be established',
+          },
+        })
+      }
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
@@ -732,45 +775,111 @@ export class CertRotationExecutor extends FlowExecutorBase {
         },
       })
 
-      // Step 3: Explain SPIRE's automatic rotation mechanism
+      // Step 3: Fetch REAL rotation events from the backend
       this.addEvent({
         type: 'info',
-        title: 'SPIRE Automatic Rotation',
-        description: 'SPIRE Agent automatically rotates SVIDs before expiry (typically at 50% lifetime)',
+        title: 'Fetching Real Rotation Events',
+        description: 'Retrieving actual certificate rotation events captured by the system',
         rfcReference: 'SPIFFE Workload API Specification Section 5',
+      })
+
+      const rotationResponse = await this.makeRequest('GET', `${this.config.baseUrl}/demo/rotation`, {
+        step: 'Get real rotation events',
+        rfcReference: 'SPIFFE Workload API',
+      })
+
+      const rotationData = rotationResponse.data as {
+        description: string
+        enabled: boolean
+        spiffe_id: string
+        current_serial: string
+        current_expiry: string
+        current_issued: string
+        next_rotation: string
+        time_to_rotation: string
+        rotation_info: {
+          strategy: string
+          mechanism: string
+          impact: string
+        }
+        rotation_events: Array<{
+          timestamp: string
+          old_serial_number: string
+          new_serial_number: string
+          old_expiry: string
+          new_expiry: string
+          spiffe_id: string
+          trigger_reason: string
+        }>
+        total_rotations: number
+        last_rotation?: {
+          timestamp: string
+          trigger_reason: string
+          time_since: string
+          new_serial: string
+          certificate_ttl: string
+        }
+      }
+
+      // Display real rotation info
+      this.addEvent({
+        type: 'crypto',
+        title: 'Real Rotation Configuration',
+        description: rotationData.rotation_info.strategy,
+        rfcReference: 'SPIFFE Workload API Specification',
         data: {
-          mechanism: 'X509Source stream watches for SVID updates',
-          trigger: 'Agent requests new SVID when current reaches rotation threshold',
-          threshold: 'Typically 50% of certificate lifetime',
-          process: 'New SVID is fetched and old connections gracefully drained',
+          mechanism: rotationData.rotation_info.mechanism,
+          impact: rotationData.rotation_info.impact,
+          nextRotation: rotationData.next_rotation,
+          timeToRotation: rotationData.time_to_rotation,
         },
       })
 
-      this.addEvent({
-        type: 'crypto',
-        title: 'Zero-Downtime Rotation Process',
-        description: 'Workload API provides streaming updates for seamless certificate rotation',
-        rfcReference: 'SPIFFE Workload API Specification',
-        data: {
-          step1: 'Agent monitors SVID expiration time',
-          step2: 'At rotation threshold, Agent requests new SVID from Server',
-          step3: 'Server issues new X.509-SVID with same SPIFFE ID',
-          step4: 'Agent updates X509Source, workload receives new certificate',
-          step5: 'Existing connections continue with old cert until closed',
-          step6: 'New connections use updated certificate',
-        },
-      })
+      // Display real rotation events
+      if (rotationData.rotation_events && rotationData.rotation_events.length > 0) {
+        this.addEvent({
+          type: 'security',
+          title: 'Real Rotation Events Captured',
+          description: `${rotationData.total_rotations} rotation event(s) recorded`,
+          rfcReference: 'SPIFFE Workload API',
+          data: {
+            totalRotations: rotationData.total_rotations,
+            recentEvents: rotationData.rotation_events.slice(-5).map(e => ({
+              timestamp: e.timestamp,
+              reason: e.trigger_reason,
+              newSerial: e.new_serial_number?.slice(0, 16) + '...',
+            })),
+          },
+        })
+      }
+
+      // Display last rotation details if available
+      if (rotationData.last_rotation) {
+        this.addEvent({
+          type: 'info',
+          title: 'Last Rotation Event',
+          description: `Last rotated ${rotationData.last_rotation.time_since} ago`,
+          rfcReference: 'SPIFFE Workload API',
+          data: {
+            timestamp: rotationData.last_rotation.timestamp,
+            triggerReason: rotationData.last_rotation.trigger_reason,
+            timeSince: rotationData.last_rotation.time_since,
+            certificateTTL: rotationData.last_rotation.certificate_ttl,
+            newSerial: rotationData.last_rotation.new_serial?.slice(0, 16) + '...',
+          },
+        })
+      }
 
       this.addEvent({
         type: 'security',
-        title: 'Rotation Benefits',
-        description: 'Short-lived certificates minimize compromise window',
+        title: 'Rotation Benefits (Observed)',
+        description: 'Real certificate rotation provides these security benefits',
         rfcReference: 'SPIFFE Security Considerations',
         data: {
-          shortLived: 'Typical SVID lifetime: 1 hour (configurable)',
-          automaticRenewal: 'No manual intervention required',
-          noDowntime: 'Streaming API enables seamless rotation',
-          compromiseWindow: 'Shorter lifetime = smaller attack surface',
+          currentSerial: rotationData.current_serial?.slice(0, 16) + '...',
+          currentExpiry: rotationData.current_expiry,
+          observedRotations: rotationData.total_rotations,
+          rotationMechanism: rotationData.rotation_info.mechanism,
         },
       })
 
