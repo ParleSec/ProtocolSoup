@@ -14,6 +14,10 @@ import { DeviceCodeExecutor } from './device-code'
 import { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 import { OIDCHybridExecutor, type HybridResponseType } from './oidc-hybrid'
 import { InteractiveCodeExecutor, type InteractiveCodeConfig } from './interactive-code'
+import { TokenIntrospectionExecutor, type TokenIntrospectionConfig } from './token-introspection'
+import { TokenRevocationExecutor, type TokenRevocationConfig } from './token-revocation'
+import { OIDCUserInfoExecutor, type OIDCUserInfoConfig } from './oidc-userinfo'
+import { OIDCDiscoveryExecutor } from './oidc-discovery'
 import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
 import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
 import { X509SVIDExecutor, JWTSVIDExecutor, MTLSExecutor, CertRotationExecutor, type SPIFFESVIDConfig } from './spiffe-svid'
@@ -88,6 +92,18 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     rfcReference: 'RFC 6749 Section 6',
     requiresUserInteraction: false,
   },
+  'refresh_token': {
+    executorClass: RefreshTokenExecutor,
+    description: 'Obtain new access token using refresh token',
+    rfcReference: 'RFC 6749 Section 6',
+    requiresUserInteraction: false,
+  },
+  'token_refresh': {
+    executorClass: RefreshTokenExecutor,
+    description: 'Obtain new access token using refresh token',
+    rfcReference: 'RFC 6749 Section 6',
+    requiresUserInteraction: false,
+  },
   'device-code': {
     executorClass: DeviceCodeExecutor,
     description: 'For devices with limited input capabilities',
@@ -99,6 +115,30 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     description: 'Legacy flow - direct username/password (NOT recommended)',
     rfcReference: 'RFC 6749 Section 4.3',
     requiresUserInteraction: false, // No browser interaction
+  },
+  'token-introspection': {
+    executorClass: TokenIntrospectionExecutor,
+    description: 'Query Authorization Server about token state (RFC 7662)',
+    rfcReference: 'RFC 7662',
+    requiresUserInteraction: false,
+  },
+  'token_introspection': {
+    executorClass: TokenIntrospectionExecutor,
+    description: 'Query Authorization Server about token state (RFC 7662)',
+    rfcReference: 'RFC 7662',
+    requiresUserInteraction: false,
+  },
+  'token-revocation': {
+    executorClass: TokenRevocationExecutor,
+    description: 'Invalidate access or refresh tokens (RFC 7009)',
+    rfcReference: 'RFC 7009',
+    requiresUserInteraction: false,
+  },
+  'token_revocation': {
+    executorClass: TokenRevocationExecutor,
+    description: 'Invalidate access or refresh tokens (RFC 7009)',
+    rfcReference: 'RFC 7009',
+    requiresUserInteraction: false,
   },
   
   // OIDC Flows
@@ -122,6 +162,30 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     rfcReference: 'OIDC Core 1.0 Section 3.3',
     requiresUserInteraction: true,
     additionalConfig: { responseType: 'code id_token' as HybridResponseType },
+  },
+  'oidc-userinfo': {
+    executorClass: OIDCUserInfoExecutor,
+    description: 'Fetch user claims from UserInfo endpoint',
+    rfcReference: 'OIDC Core 1.0 Section 5.3',
+    requiresUserInteraction: false,
+  },
+  'oidc_userinfo': {
+    executorClass: OIDCUserInfoExecutor,
+    description: 'Fetch user claims from UserInfo endpoint',
+    rfcReference: 'OIDC Core 1.0 Section 5.3',
+    requiresUserInteraction: false,
+  },
+  'oidc-discovery': {
+    executorClass: OIDCDiscoveryExecutor,
+    description: 'Discover OpenID Provider configuration and keys',
+    rfcReference: 'OIDC Discovery 1.0',
+    requiresUserInteraction: false,
+  },
+  'oidc_discovery': {
+    executorClass: OIDCDiscoveryExecutor,
+    description: 'Discover OpenID Provider configuration and keys',
+    rfcReference: 'OIDC Discovery 1.0',
+    requiresUserInteraction: false,
   },
 
   // SAML 2.0 Flows
@@ -270,6 +334,12 @@ export interface ExecutorFactoryConfig {
   password?: string
   /** Bearer token (for SCIM flows) */
   bearerToken?: string
+  /** Access token (for introspection, revocation, userinfo) */
+  accessToken?: string
+  /** Token to introspect or revoke */
+  token?: string
+  /** Token type hint (access_token or refresh_token) */
+  tokenTypeHint?: 'access_token' | 'refresh_token'
 }
 
 /**
@@ -306,7 +376,7 @@ export function createFlowExecutor(
   }
 
   // Add flow-specific config
-  if (flowId === 'refresh-token' && config.refreshToken) {
+  if ((flowId === 'refresh-token' || flowId === 'refresh_token' || flowId === 'token_refresh') && config.refreshToken) {
     (fullConfig as RefreshTokenConfig).refreshToken = config.refreshToken
   }
 
@@ -349,6 +419,33 @@ export function createFlowExecutor(
     if (config.bearerToken) {
       (fullConfig as SCIMProvisioningConfig).bearerToken = config.bearerToken
     }
+  }
+
+  // Handle Token Introspection flow
+  if ((flowId === 'token-introspection' || flowId === 'token_introspection') && config.token) {
+    (fullConfig as TokenIntrospectionConfig).token = config.token
+    if (config.tokenTypeHint) {
+      (fullConfig as TokenIntrospectionConfig).tokenTypeHint = config.tokenTypeHint
+    }
+    if (config.clientSecret) {
+      (fullConfig as TokenIntrospectionConfig).clientSecret = config.clientSecret
+    }
+  }
+
+  // Handle Token Revocation flow
+  if ((flowId === 'token-revocation' || flowId === 'token_revocation') && config.token) {
+    (fullConfig as TokenRevocationConfig).token = config.token
+    if (config.tokenTypeHint) {
+      (fullConfig as TokenRevocationConfig).tokenTypeHint = config.tokenTypeHint
+    }
+    if (config.clientSecret) {
+      (fullConfig as TokenRevocationConfig).clientSecret = config.clientSecret
+    }
+  }
+
+  // Handle OIDC UserInfo flow
+  if ((flowId === 'oidc-userinfo' || flowId === 'oidc_userinfo') && config.accessToken) {
+    (fullConfig as OIDCUserInfoConfig).accessToken = config.accessToken
   }
 
   try {
@@ -400,17 +497,29 @@ export function getFlowRequirements(flowId: string): {
   requiresRefreshToken: boolean
   requiresCredentials: boolean
   requiresSessionInfo?: boolean
+  requiresToken?: boolean
+  requiresAccessToken?: boolean
 } {
   switch (flowId) {
     case 'client-credentials':
       return { requiresClientSecret: true, requiresRefreshToken: false, requiresCredentials: false }
     case 'refresh-token':
+    case 'refresh_token':
+    case 'token_refresh':
       return { requiresClientSecret: false, requiresRefreshToken: true, requiresCredentials: false }
     case 'password':
       return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: true }
     case 'saml-logout':
     case 'saml-logout-redirect':
       return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresSessionInfo: true }
+    case 'token-introspection':
+    case 'token_introspection':
+    case 'token-revocation':
+    case 'token_revocation':
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresToken: true }
+    case 'oidc-userinfo':
+    case 'oidc_userinfo':
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresAccessToken: true }
     default:
       return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false }
   }

@@ -143,7 +143,117 @@ console.log('User:', userInfo.name, userInfo.email);`
 const config = await fetch('/.well-known/openid-configuration')
   .then(r => r.json());
 
-const jwks = await fetch(config.jwks_uri).then(r => r.json());`
+const jwks = await fetch(config.jwks_uri).then(r => r.json());
+
+// Use discovered endpoints
+console.log('Authorization:', config.authorization_endpoint);
+console.log('Token:', config.token_endpoint);
+console.log('UserInfo:', config.userinfo_endpoint);
+console.log('Supported scopes:', config.scopes_supported);`
+    }
+
+    if (mappedFlowId === 'oidc_authorization_code') {
+      return `// OIDC Authorization Code Flow
+// Step 1: Generate nonce for replay protection
+const nonce = base64URLEncode(crypto.getRandomValues(new Uint8Array(32)));
+sessionStorage.setItem('oidc_nonce', nonce);
+
+// Step 2: Redirect to authorization
+const authUrl = new URL('/oidc/authorize', origin);
+authUrl.searchParams.set('response_type', 'code');
+authUrl.searchParams.set('client_id', 'your-client-id');
+authUrl.searchParams.set('redirect_uri', window.location.origin + '/callback');
+authUrl.searchParams.set('scope', 'openid profile email');
+authUrl.searchParams.set('state', crypto.randomUUID());
+authUrl.searchParams.set('nonce', nonce);
+window.location.href = authUrl;
+
+// Step 3: In callback - exchange code for tokens
+const tokens = await fetch('/oidc/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: authorizationCode,
+    redirect_uri: window.location.origin + '/callback',
+  }),
+}).then(r => r.json());
+
+// Step 4: Validate ID Token (server-side recommended)
+// - Verify signature against JWKS
+// - Check iss matches expected issuer
+// - Check aud contains client_id  
+// - Check nonce matches stored value
+// - Check exp is in the future`
+    }
+
+    if (mappedFlowId === 'oidc_implicit') {
+      return `// OIDC Implicit Flow (Legacy - use PKCE instead)
+// ⚠️ NOT RECOMMENDED for new applications
+
+// Step 1: Generate nonce (REQUIRED for id_token)
+const nonce = base64URLEncode(crypto.getRandomValues(new Uint8Array(32)));
+sessionStorage.setItem('oidc_nonce', nonce);
+
+// Step 2: Redirect with response_type=id_token token
+const authUrl = new URL('/oidc/authorize', origin);
+authUrl.searchParams.set('response_type', 'id_token token');
+authUrl.searchParams.set('client_id', 'your-client-id');
+authUrl.searchParams.set('redirect_uri', window.location.origin + '/callback');
+authUrl.searchParams.set('scope', 'openid profile');
+authUrl.searchParams.set('state', crypto.randomUUID());
+authUrl.searchParams.set('nonce', nonce); // REQUIRED
+window.location.href = authUrl;
+
+// Step 3: Parse tokens from URL fragment
+const fragment = new URLSearchParams(window.location.hash.substring(1));
+const idToken = fragment.get('id_token');
+const accessToken = fragment.get('access_token');
+
+// Step 4: Validate ID Token
+// - MUST verify nonce matches to prevent replay attacks
+// - MUST verify at_hash matches access_token (if present)
+// - Tokens in browser history = security risk`
+    }
+
+    if (mappedFlowId === 'oidc_hybrid') {
+      return `// OIDC Hybrid Flow (code id_token)
+// Combines immediate ID token with secure code exchange
+
+// Step 1: Generate nonce (REQUIRED when id_token in response_type)
+const nonce = base64URLEncode(crypto.getRandomValues(new Uint8Array(32)));
+sessionStorage.setItem('oidc_nonce', nonce);
+
+// Step 2: Redirect with hybrid response_type
+const authUrl = new URL('/oidc/authorize', origin);
+authUrl.searchParams.set('response_type', 'code id_token');
+authUrl.searchParams.set('client_id', 'your-client-id');
+authUrl.searchParams.set('redirect_uri', window.location.origin + '/callback');
+authUrl.searchParams.set('scope', 'openid profile email');
+authUrl.searchParams.set('state', crypto.randomUUID());
+authUrl.searchParams.set('nonce', nonce);
+window.location.href = authUrl;
+
+// Step 3: Parse response - code in query, id_token in fragment
+const urlParams = new URLSearchParams(window.location.search);
+const code = urlParams.get('code');
+const fragment = new URLSearchParams(window.location.hash.substring(1));
+const idToken = fragment.get('id_token');
+
+// Step 4: Validate ID Token including c_hash
+// c_hash = BASE64URL(left-half(SHA256(code)))
+const cHash = await computeHash(code);
+// Compare cHash with c_hash claim in ID Token
+
+// Step 5: Exchange code for tokens (back-channel)
+const tokens = await fetch('/oidc/token', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: new URLSearchParams({
+    grant_type: 'authorization_code',
+    code: code,
+  }),
+}).then(r => r.json());`
     }
 
     // SAML flows

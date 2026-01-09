@@ -29,6 +29,14 @@ export { OIDCHybridExecutor, type OIDCHybridConfig, type HybridResponseType } fr
 export { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 export { InteractiveCodeExecutor, type InteractiveCodeConfig } from './interactive-code'
 
+// Token management executors
+export { TokenIntrospectionExecutor, type TokenIntrospectionConfig } from './token-introspection'
+export { TokenRevocationExecutor, type TokenRevocationConfig } from './token-revocation'
+
+// OIDC utility executors
+export { OIDCUserInfoExecutor, type OIDCUserInfoConfig } from './oidc-userinfo'
+export { OIDCDiscoveryExecutor } from './oidc-discovery'
+
 // SAML executors
 export { 
   SAMLSSOExecutor, 

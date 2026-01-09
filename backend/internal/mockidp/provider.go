@@ -18,6 +18,7 @@ type MockIdP struct {
 	authCodes     map[string]*models.AuthorizationCode
 	sessions      map[string]*models.Session
 	refreshTokens map[string]*models.RefreshToken
+	revokedTokens map[string]time.Time // RFC 7009: Track revoked access tokens by JTI
 	keySet        *crypto.KeySet
 	jwtService    *crypto.JWTService
 	issuer        string
@@ -32,6 +33,7 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		authCodes:     make(map[string]*models.AuthorizationCode),
 		sessions:      make(map[string]*models.Session),
 		refreshTokens: make(map[string]*models.RefreshToken),
+		revokedTokens: make(map[string]time.Time), // RFC 7009: Revoked token tracking
 		keySet:        keySet,
 		issuer:        "http://localhost:8080",
 	}
@@ -213,10 +215,18 @@ func (idp *MockIdP) ValidateRedirectURI(clientID, redirectURI string) bool {
 }
 
 // CreateAuthorizationCode creates and stores an authorization code
+// Validates PKCE code_challenge per RFC 7636 Section 4.2 if provided
 func (idp *MockIdP) CreateAuthorizationCode(
 	clientID, userID, redirectURI, scope, state, nonce string,
 	codeChallenge, codeChallengeMethod string,
 ) (*models.AuthorizationCode, error) {
+	// Validate PKCE code_challenge if provided (RFC 7636 Section 4.2)
+	if codeChallenge != "" {
+		if err := ValidatePKCEChallenge(codeChallenge, codeChallengeMethod); err != nil {
+			return nil, err
+		}
+	}
+
 	code := generateRandomString(32)
 
 	authCode := &models.AuthorizationCode{
@@ -265,10 +275,11 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 		return nil, errors.New("redirect URI mismatch")
 	}
 
-	// Validate PKCE if code challenge was provided
+	// Validate PKCE if code challenge was provided (RFC 7636)
 	if authCode.CodeChallenge != "" {
-		if !validatePKCE(codeVerifier, authCode.CodeChallenge, authCode.CodeChallengeMethod) {
-			return nil, errors.New("PKCE validation failed")
+		if err := ValidatePKCEWithError(codeVerifier, authCode.CodeChallenge, authCode.CodeChallengeMethod); err != nil {
+			// Return specific PKCE error for RFC 7636 compliance
+			return nil, err
 		}
 	}
 
@@ -347,6 +358,87 @@ func (idp *MockIdP) RevokeRefreshToken(token string) {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 	delete(idp.refreshTokens, token)
+}
+
+// RevokeAccessToken revokes an access token by its JTI claim per RFC 7009
+// The token string can be either the JTI directly or the full JWT token
+func (idp *MockIdP) RevokeAccessToken(token string) error {
+	// Try to extract JTI from JWT token
+	jti := token
+	claims, err := idp.jwtService.ValidateToken(token)
+	if err == nil {
+		// Token is a valid JWT, extract JTI
+		if jtiClaim, ok := claims["jti"].(string); ok {
+			jti = jtiClaim
+		}
+	}
+	// If not a valid JWT, treat the token string as the JTI itself
+
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	idp.revokedTokens[jti] = time.Now()
+	return nil
+}
+
+// IsTokenRevoked checks if an access token has been revoked per RFC 7009
+func (idp *MockIdP) IsTokenRevoked(token string) bool {
+	// Try to extract JTI from JWT token
+	jti := token
+	claims, err := idp.jwtService.ValidateToken(token)
+	if err == nil {
+		if jtiClaim, ok := claims["jti"].(string); ok {
+			jti = jtiClaim
+		}
+	}
+
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	_, revoked := idp.revokedTokens[jti]
+	return revoked
+}
+
+// RevokeToken revokes a token regardless of type per RFC 7009 Section 2.1
+// This is the preferred method - token_type_hint is advisory only
+func (idp *MockIdP) RevokeToken(token, tokenTypeHint string) {
+	// RFC 7009 Section 2.1: The authorization server first validates the client credentials
+	// (if provided) and then verifies whether the token was issued to the client making the request.
+	// Per RFC 7009 Section 2.1, the server SHOULD attempt to determine the type
+	// even if the hint is incorrect or not provided.
+
+	// Try refresh token first if hinted or no hint provided
+	if tokenTypeHint == "refresh_token" || tokenTypeHint == "" {
+		idp.mu.Lock()
+		if _, exists := idp.refreshTokens[token]; exists {
+			delete(idp.refreshTokens, token)
+			idp.mu.Unlock()
+			return
+		}
+		idp.mu.Unlock()
+	}
+
+	// Try access token (always attempt per RFC 7009)
+	idp.RevokeAccessToken(token)
+
+	// Also try refresh token if hint was access_token (hint may be wrong)
+	if tokenTypeHint == "access_token" {
+		idp.mu.Lock()
+		delete(idp.refreshTokens, token)
+		idp.mu.Unlock()
+	}
+}
+
+// CleanupRevokedTokens removes expired entries from the revoked tokens list
+// This should be called periodically to prevent memory growth
+func (idp *MockIdP) CleanupRevokedTokens(maxAge time.Duration) {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	for jti, revokedAt := range idp.revokedTokens {
+		if revokedAt.Before(cutoff) {
+			delete(idp.revokedTokens, jti)
+		}
+	}
 }
 
 // JWTService returns the JWT service

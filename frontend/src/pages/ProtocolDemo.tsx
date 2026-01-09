@@ -275,21 +275,29 @@ function getFeatureDescription(feature: string): string {
   const descriptions: Record<string, string> = {
     // OAuth 2.0 features
     'Authorization Code Flow': 'Standard flow for server-side applications',
-    'PKCE for Public Clients': 'Enhanced security for SPAs and mobile apps',
+    'PKCE for Public Clients': 'Enhanced security for SPAs and mobile apps (RFC 7636)',
     'Client Credentials': 'Machine-to-machine authentication',
     'Refresh Token Rotation': 'Secure token refresh with rotation',
-    'Token Introspection': 'Verify token validity and metadata',
-    'Token Revocation': 'Invalidate tokens before expiration',
+    'Token Introspection': 'Verify token validity and metadata (RFC 7662)',
+    'Token Revocation': 'Invalidate access/refresh tokens (RFC 7009)',
+    // OAuth 2.0 standards compliance
+    'RFC 6749 Compliant': 'Full OAuth 2.0 Authorization Framework compliance',
+    'RFC 7636 PKCE Validation': 'Strict 43-128 char verifier with character validation',
+    'RFC 7009 Token Revocation': 'Both access and refresh token revocation support',
     // OIDC features
     'ID Token (JWT)': 'JWT containing verified identity claims (sub, name, email)',
     'UserInfo Endpoint': 'API endpoint returning additional user claims',
     'Discovery Document': 'Auto-configuration via /.well-known/openid-configuration',
     'Standard Claims': 'Standardized user attributes (sub, name, email, picture)',
-    'Nonce Protection': 'Prevents ID token replay attacks',
+    'Nonce Protection': 'Required for id_token response types (OIDC Core §3.2.2.1)',
     'Signature Verification': 'Validate tokens using JWKS public keys',
     'Claims & Scopes': 'Request specific user data with standard scopes',
     'Hybrid Flows': 'Combined response types for flexibility',
     'Session Management': 'Track and manage user sessions',
+    // OIDC Core 1.0 compliance
+    'at_hash / c_hash Claims': 'Hash claims for hybrid/implicit flow integrity (§3.3.2.11)',
+    'Hybrid Flow Support': 'Full support for code+id_token response types',
+    'azp Claim for Multi-Audience': 'Authorized party claim per OIDC Core §2',
   }
   return descriptions[feature] || feature
 }

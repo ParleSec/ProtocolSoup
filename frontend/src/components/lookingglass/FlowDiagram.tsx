@@ -34,9 +34,51 @@ const actorConfig: Record<string, {
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
+  'Client Application': { 
+    icon: Globe, 
+    label: 'Client Application',
+    shortLabel: 'Client',
+    color: '#60a5fa', // blue
+  },
+  'Client Backend': { 
+    icon: Globe, 
+    label: 'Client Backend',
+    shortLabel: 'Client',
+    color: '#60a5fa', // blue
+  },
+  'Client (Backend Service)': { 
+    icon: Globe, 
+    label: 'Client Backend',
+    shortLabel: 'Client',
+    color: '#60a5fa', // blue
+  },
+  'Relying Party (Client)': { 
+    icon: Globe, 
+    label: 'Relying Party',
+    shortLabel: 'Client',
+    color: '#60a5fa', // blue
+  },
+  'Relying Party Backend': { 
+    icon: Globe, 
+    label: 'Relying Party Backend',
+    shortLabel: 'Client',
+    color: '#60a5fa', // blue
+  },
   'User': { 
     icon: User, 
     label: 'Resource Owner',
+    shortLabel: 'User',
+    color: '#4ade80', // green
+  },
+  'Resource Owner (User)': { 
+    icon: User, 
+    label: 'Resource Owner',
+    shortLabel: 'User',
+    color: '#4ade80', // green
+  },
+  'End-User': { 
+    icon: User, 
+    label: 'End-User',
     shortLabel: 'User',
     color: '#4ade80', // green
   },
@@ -54,6 +96,12 @@ const actorConfig: Record<string, {
     color: '#c084fc', // purple
   },
   'Resource Server': { 
+    icon: Database, 
+    label: 'Resource Server',
+    shortLabel: 'API',
+    color: '#fb923c', // orange
+  },
+  'Resource Server (API)': { 
     icon: Database, 
     label: 'Resource Server',
     shortLabel: 'API',
@@ -293,8 +341,8 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
   const totalWidth = leftPadding + rightPadding + actorWidth + (actors.length - 1) * actorSpacing
   const diagramHeight = headerHeight + steps.length * rowHeight + 40
   
-  // Constrain max dimensions for better display
-  const maxHeight = Math.min(diagramHeight, 600)
+  // Allow full height for flows with many steps (8+ steps need ~700px)
+  const maxHeight = Math.max(diagramHeight, 400)
 
   const selectedStepData = selectedStep !== null ? steps.find(s => s.order === selectedStep) : null
 
@@ -305,7 +353,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
         <svg 
           viewBox={`0 0 ${totalWidth} ${diagramHeight}`}
           className="w-full"
-          style={{ minWidth: 500, maxWidth: 800, height: maxHeight, margin: '0 auto', display: 'block' }}
+          style={{ minWidth: 500, maxWidth: Math.max(totalWidth + 40, 800), height: maxHeight, margin: '0 auto', display: 'block' }}
           preserveAspectRatio="xMidYMin meet"
         >
           <defs>

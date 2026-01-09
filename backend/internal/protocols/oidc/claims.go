@@ -378,14 +378,57 @@ func GetClaimsForScopes(scopes []string) []string {
 	return claims
 }
 
-// Helper function for OIDC errors
+// OIDC/OAuth2 error URIs - links to relevant OIDC documentation
+var oidcErrorURIs = map[string]string{
+	"invalid_request":          "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"invalid_client":           "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
+	"invalid_grant":            "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
+	"unauthorized_client":      "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"unsupported_grant_type":   "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
+	"invalid_scope":            "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"unsupported_response_type": "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"access_denied":            "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"server_error":             "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"invalid_token":            "https://openid.net/specs/openid-connect-core-1_0.html#UserInfoError",
+	"login_required":           "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"consent_required":         "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"interaction_required":     "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+}
+
+// Helper function for OIDC errors - includes error_uri per RFC 6749 Section 5.2 and OIDC Core
 func writeOIDCError(w http.ResponseWriter, status int, errorCode, description string) {
+	writeOIDCErrorWithURI(w, status, errorCode, description, "")
+}
+
+// writeOIDCErrorWithURI writes an OIDC-compliant error response with optional error_uri
+func writeOIDCErrorWithURI(w http.ResponseWriter, status int, errorCode, description, errorURI string) {
+	// Determine error_uri
+	uri := errorURI
+	if uri == "" {
+		if defaultURI, exists := oidcErrorURIs[errorCode]; exists {
+			uri = defaultURI
+		}
+	}
+	
+	// Build WWW-Authenticate header
+	authHeader := `Bearer error="` + errorCode + `", error_description="` + description + `"`
+	if uri != "" {
+		authHeader += `, error_uri="` + uri + `"`
+	}
+	
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("WWW-Authenticate", `Bearer error="`+errorCode+`", error_description="`+description+`"`)
+	w.Header().Set("WWW-Authenticate", authHeader)
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{
+	
+	// Build response body
+	response := map[string]string{
 		"error":             errorCode,
 		"error_description": description,
-	})
+	}
+	if uri != "" {
+		response["error_uri"] = uri
+	}
+	
+	json.NewEncoder(w).Encode(response)
 }
 

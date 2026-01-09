@@ -273,8 +273,29 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 // Token endpoint
+// Per RFC 6749 Section 4.1.3: The client MUST send the request body with Content-Type
+// of "application/x-www-form-urlencoded"
 func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
+	
+	// RFC 6749 Section 4.1.3: Content-Type MUST be application/x-www-form-urlencoded
+	contentType := r.Header.Get("Content-Type")
+	if contentType != "" && !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Content-Type", map[string]interface{}{
+			"content_type": contentType,
+			"expected":     "application/x-www-form-urlencoded",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "RFC 6749 Section 4.1.3 Compliance",
+			Description: "Token endpoint requires Content-Type: application/x-www-form-urlencoded",
+			Reference:   "RFC 6749 Section 4.1.3",
+		})
+		writeOAuth2ErrorWithURI(w, "invalid_request", 
+			"Content-Type must be application/x-www-form-urlencoded (RFC 6749 Section 4.1.3)", 
+			"", 
+			"https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3")
+		return
+	}
 	
 	if err := r.ParseForm(); err != nil {
 		writeOAuth2Error(w, "invalid_request", "Invalid form data", "")
@@ -636,10 +657,20 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	jwtService := p.mockIdP.JWTService()
 	claims, err := jwtService.ValidateToken(token)
 	if err != nil {
-		// Token is not active
+		// Token is not active (invalid or expired)
 		p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Token Inactive", map[string]interface{}{
 			"active": false,
 			"reason": err.Error(),
+		})
+		writeJSON(w, http.StatusOK, models.IntrospectionResponse{Active: false})
+		return
+	}
+
+	// Check if token has been revoked per RFC 7009
+	if p.mockIdP.IsTokenRevoked(token) {
+		p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Token Revoked", map[string]interface{}{
+			"active": false,
+			"reason": "Token has been revoked per RFC 7009",
 		})
 		writeJSON(w, http.StatusOK, models.IntrospectionResponse{Active: false})
 		return
@@ -739,23 +770,27 @@ func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Revoke the token
-	if tokenTypeHint == "refresh_token" || tokenTypeHint == "" {
-		p.mockIdP.RevokeRefreshToken(token)
-	}
+	// Revoke the token per RFC 7009 Section 2.1
+	// The server MUST attempt to revoke the token regardless of token_type_hint
+	// token_type_hint is advisory only - server should determine token type if hint is wrong
+	p.mockIdP.RevokeToken(token, tokenTypeHint)
 
 	// Emit revocation success
 	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Token Revoked", map[string]interface{}{
-		"token_type_hint": tokenTypeHint,
-		"revoked":         true,
+		"token_type_hint":    tokenTypeHint,
+		"revoked":            true,
+		"rfc_compliance":     "RFC 7009 Section 2.1",
+		"hint_is_advisory":   true,
+		"attempted_all_types": true,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeBestPractice,
-		Title:       "Token Revocation Complete",
-		Description: "The token has been revoked and can no longer be used. Always revoke tokens when they are no longer needed.",
+		Title:       "Token Revocation Complete (RFC 7009 Compliant)",
+		Description: "Per RFC 7009 Section 2.1, the server attempts to revoke the token regardless of token_type_hint. The hint is advisory only.",
 		Reference:   "RFC 7009 Section 2.1",
 	})
 
-	// Per RFC 7009, always return 200 OK regardless of whether token was valid
+	// Per RFC 7009 Section 2.2, always return 200 OK regardless of whether token was valid
+	// This prevents attackers from determining if a token was valid
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -830,11 +865,42 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// RFC 6749 Section 5.2 error URIs - links to relevant documentation
+var oauth2ErrorURIs = map[string]string{
+	"invalid_request":          "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_client":           "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_grant":            "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"unauthorized_client":      "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"unsupported_grant_type":   "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_scope":            "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"unsupported_response_type": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"access_denied":            "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"server_error":             "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"temporarily_unavailable":  "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+}
+
+// writeOAuth2Error writes an OAuth2-compliant error response per RFC 6749 Section 5.2
+// Includes optional error_uri pointing to relevant RFC documentation
 func writeOAuth2Error(w http.ResponseWriter, errorCode, description, state string) {
+	writeOAuth2ErrorWithURI(w, errorCode, description, state, "")
+}
+
+// writeOAuth2ErrorWithURI writes an OAuth2-compliant error response with optional error_uri
+// Per RFC 6749 Section 5.2: error, error_description, and error_uri
+func writeOAuth2ErrorWithURI(w http.ResponseWriter, errorCode, description, state, errorURI string) {
 	response := map[string]string{
 		"error":             errorCode,
 		"error_description": description,
 	}
+	
+	// Add error_uri per RFC 6749 Section 5.2 (OPTIONAL)
+	// If not provided, use default RFC documentation URI
+	if errorURI != "" {
+		response["error_uri"] = errorURI
+	} else if defaultURI, exists := oauth2ErrorURIs[errorCode]; exists {
+		response["error_uri"] = defaultURI
+	}
+	
 	if state != "" {
 		response["state"] = state
 	}

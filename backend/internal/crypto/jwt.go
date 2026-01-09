@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -62,21 +63,66 @@ func (s *JWTService) CreateAccessToken(subject string, audience string, scope st
 	return token.SignedString(s.keySet.RSAPrivateKey())
 }
 
+// IDTokenOptions contains optional parameters for ID token creation per OIDC Core 1.0
+type IDTokenOptions struct {
+	// AccessToken is used to compute at_hash (OIDC Core 1.0 Section 3.3.2.11)
+	// Required for implicit/hybrid flows that return access_token
+	AccessToken string
+
+	// AuthorizationCode is used to compute c_hash (OIDC Core 1.0 Section 3.3.2.11)
+	// Required for hybrid flow when code is returned
+	AuthorizationCode string
+
+	// AdditionalAudiences for multi-audience scenarios (triggers azp claim)
+	AdditionalAudiences []string
+}
+
 // CreateIDToken creates an OIDC ID token
 func (s *JWTService) CreateIDToken(subject string, audience string, nonce string, authTime time.Time, duration time.Duration, userClaims map[string]interface{}) (string, error) {
+	return s.CreateIDTokenWithOptions(subject, audience, nonce, authTime, duration, userClaims, nil)
+}
+
+// CreateIDTokenWithOptions creates an OIDC ID token with additional options per OIDC Core 1.0
+// Supports at_hash, c_hash, and azp claims for hybrid/implicit flows
+func (s *JWTService) CreateIDTokenWithOptions(subject string, audience string, nonce string, authTime time.Time, duration time.Duration, userClaims map[string]interface{}, options *IDTokenOptions) (string, error) {
 	now := time.Now()
 
 	claims := jwt.MapClaims{
 		"iss":       s.issuer,
 		"sub":       subject,
-		"aud":       audience,
 		"exp":       now.Add(duration).Unix(),
 		"iat":       now.Unix(),
 		"auth_time": authTime.Unix(),
 	}
 
+	// Handle audience and azp per OIDC Core 1.0 Section 2
+	// "azp" SHOULD be present when the ID Token has a single audience value and that audience
+	// is different from the authorized party, or when the ID Token has multiple audience values
+	if options != nil && len(options.AdditionalAudiences) > 0 {
+		// Multiple audiences - set aud as array and azp as the primary client
+		allAudiences := append([]string{audience}, options.AdditionalAudiences...)
+		claims["aud"] = allAudiences
+		claims["azp"] = audience // Per OIDC Core 1.0 Section 2: azp is the party the token was issued to
+	} else {
+		claims["aud"] = audience
+	}
+
 	if nonce != "" {
 		claims["nonce"] = nonce
+	}
+
+	// Add at_hash if access token is provided (OIDC Core 1.0 Section 3.3.2.11)
+	// Required when access_token is returned from authorization endpoint
+	if options != nil && options.AccessToken != "" {
+		atHash := computeHashClaim(options.AccessToken, "RS256")
+		claims["at_hash"] = atHash
+	}
+
+	// Add c_hash if authorization code is provided (OIDC Core 1.0 Section 3.3.2.11)
+	// Required for hybrid flow when code is returned with id_token
+	if options != nil && options.AuthorizationCode != "" {
+		cHash := computeHashClaim(options.AuthorizationCode, "RS256")
+		claims["c_hash"] = cHash
 	}
 
 	// Add user claims
@@ -88,6 +134,48 @@ func (s *JWTService) CreateIDToken(subject string, audience string, nonce string
 	token.Header["kid"] = s.keySet.RSAKeyID()
 
 	return token.SignedString(s.keySet.RSAPrivateKey())
+}
+
+// computeHashClaim computes at_hash or c_hash per OIDC Core 1.0 Section 3.3.2.11
+// The hash is computed as: base64url(left-half(hash(value)))
+// For RS256 (SHA-256): take left 128 bits (16 bytes) of SHA-256 hash
+func computeHashClaim(value string, alg string) string {
+	// Determine hash algorithm based on signing algorithm
+	// RS256/ES256 -> SHA-256 -> left 128 bits
+	// RS384/ES384 -> SHA-384 -> left 192 bits
+	// RS512/ES512 -> SHA-512 -> left 256 bits
+	var hashBytes []byte
+	var leftBits int
+
+	switch alg {
+	case "RS256", "ES256":
+		hash := sha256.Sum256([]byte(value))
+		hashBytes = hash[:]
+		leftBits = 16 // 128 bits = 16 bytes
+	case "RS384", "ES384":
+		// For SHA-384, we'd need crypto/sha512.Sum384
+		// For now, fall back to SHA-256 approach
+		hash := sha256.Sum256([]byte(value))
+		hashBytes = hash[:]
+		leftBits = 16
+	case "RS512", "ES512":
+		// For SHA-512, we'd need crypto/sha512.Sum512
+		// For now, fall back to SHA-256 approach
+		hash := sha256.Sum256([]byte(value))
+		hashBytes = hash[:]
+		leftBits = 16
+	default:
+		// Default to SHA-256
+		hash := sha256.Sum256([]byte(value))
+		hashBytes = hash[:]
+		leftBits = 16
+	}
+
+	// Take left half of hash
+	leftHalf := hashBytes[:leftBits]
+
+	// Base64url encode without padding
+	return base64.RawURLEncoding.EncodeToString(leftHalf)
 }
 
 // CreateRefreshToken creates a refresh token (can be opaque or JWT)

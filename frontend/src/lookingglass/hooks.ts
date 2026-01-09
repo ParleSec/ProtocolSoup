@@ -348,6 +348,10 @@ export interface UseRealFlowExecutorOptions {
   password?: string
   /** Bearer token (for SCIM flows) */
   bearerToken?: string
+  /** Token to introspect or revoke */
+  token?: string
+  /** Access token (for UserInfo endpoint) */
+  accessToken?: string
 }
 
 export interface RealFlowExecutorResult {
@@ -600,6 +604,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       username: options.username,
       password: options.password,
       bearerToken: options.bearerToken,
+      token: options.token,
+      accessToken: options.accessToken,
     }
 
     console.log('[useRealFlowExecutor] Creating executor for:', executorFlowId, 'with config:', config)
@@ -641,6 +647,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.password,
     options.bearerToken,
     options.flowId,
+    options.token,
+    options.accessToken,
   ])
 
   const execute = useCallback(async () => {

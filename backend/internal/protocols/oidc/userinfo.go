@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
@@ -104,17 +105,23 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Nonce is required for implicit flows that return id_token
+	// OIDC Core 1.0 Section 3.1.2.1: Nonce is REQUIRED for implicit flows that return id_token
+	// Section 3.2.2.1: "REQUIRED. String value used to associate a Client session with an ID Token"
 	if strings.Contains(responseType, "id_token") && nonce == "" {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Missing Nonce for Implicit Flow", map[string]interface{}{
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Missing Required Nonce", map[string]interface{}{
 			"response_type": responseType,
+			"rfc_violation": true,
 		}, lookingglass.Annotation{
 			Type:        lookingglass.AnnotationTypeSecurityHint,
-			Title:       "Nonce Required",
-			Description: "When requesting id_token in response_type, nonce is required to prevent replay attacks",
-			Severity:    "warning",
+			Title:       "Nonce Required (OIDC Core 1.0 Compliance)",
+			Description: "Per OIDC Core 1.0 Section 3.2.2.1, nonce is REQUIRED when response_type includes id_token",
+			Severity:    "error",
+			Reference:   "https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest",
 		})
-		// Continue anyway for demo purposes, but log warning
+		writeOIDCErrorWithURI(w, http.StatusBadRequest, "invalid_request",
+			"nonce is REQUIRED when response_type includes id_token (OIDC Core 1.0 Section 3.2.2.1)",
+			"https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest")
+		return
 	}
 
 	if clientID == "" {
@@ -212,9 +219,25 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle based on response_type
-	if responseType == "code" {
-		// Authorization Code Flow
+	// Handle based on response_type per OIDC Core 1.0
+	// - "code": Authorization Code Flow (Section 3.1)
+	// - "id_token", "id_token token": Implicit Flow (Section 3.2)
+	// - "code id_token", "code token", "code id_token token": Hybrid Flow (Section 3.3)
+	
+	hasCode := strings.Contains(responseType, "code")
+	hasToken := strings.Contains(responseType, "token") && !strings.HasPrefix(responseType, "id_token token") || strings.Contains(responseType, " token")
+	hasIDToken := strings.Contains(responseType, "id_token")
+	
+	// Proper token detection
+	hasToken = responseType == "token" || strings.Contains(responseType, " token") || strings.HasPrefix(responseType, "token ")
+	hasIDToken = strings.Contains(responseType, "id_token")
+	
+	jwtService := p.mockIdP.JWTService()
+	var authorizationCode string
+	var accessToken string
+	
+	// Generate authorization code if "code" in response_type
+	if hasCode {
 		authCode, err := p.mockIdP.CreateAuthorizationCode(
 			clientID, user.ID, redirectURI, scope, state, nonce,
 			codeChallenge, codeChallengeMethod,
@@ -223,58 +246,107 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create authorization code")
 			return
 		}
+		authorizationCode = authCode.Code
+	}
+	
+	// Generate access token if "token" in response_type
+	if hasToken {
+		var err error
+		accessToken, err = jwtService.CreateAccessToken(
+			user.ID,
+			clientID,
+			scope,
+			time.Hour,
+			nil,
+		)
+		if err != nil {
+			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create access token")
+			return
+		}
+	}
+	
+	// Generate ID token if "id_token" in response_type
+	var idToken string
+	if hasIDToken {
+		scopes := strings.Split(scope, " ")
+		userClaims := p.mockIdP.UserClaims(user.ID, scopes)
+		
+		// Build ID token options for OIDC Core 1.0 compliance
+		// Per Section 3.3.2.11: Include hash claims based on what's returned
+		idTokenOptions := &crypto.IDTokenOptions{}
+		
+		// Include at_hash if access_token is being returned (OIDC Core 1.0 Section 3.3.2.11)
+		if accessToken != "" {
+			idTokenOptions.AccessToken = accessToken
+		}
+		
+		// Include c_hash if authorization code is being returned (OIDC Core 1.0 Section 3.3.2.11)
+		// This is for Hybrid Flow
+		if authorizationCode != "" {
+			idTokenOptions.AuthorizationCode = authorizationCode
+		}
+		
+		var err error
+		idToken, err = jwtService.CreateIDTokenWithOptions(
+			user.ID,
+			clientID,
+			nonce,
+			time.Now(),
+			time.Hour,
+			userClaims,
+			idTokenOptions,
+		)
+		if err != nil {
+			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create ID token")
+			return
+		}
+	}
+	
+	// Build response based on flow type
+	if responseType == "code" {
+		// Pure Authorization Code Flow - code in query string
 		q := redirectURL.Query()
-		q.Set("code", authCode.Code)
+		q.Set("code", authorizationCode)
 		if state != "" {
 			q.Set("state", state)
 		}
 		redirectURL.RawQuery = q.Encode()
-	} else {
-		// Implicit Flow - return tokens in fragment
-		fragment := url.Values{}
-		jwtService := p.mockIdP.JWTService()
+	} else if hasCode {
+		// Hybrid Flow - code in query string, tokens in fragment (per OIDC Core 1.0 Section 3.3)
+		q := redirectURL.Query()
+		q.Set("code", authorizationCode)
+		if state != "" {
+			q.Set("state", state)
+		}
+		redirectURL.RawQuery = q.Encode()
 		
-		// Generate access token if requested
-		if strings.Contains(responseType, "token") {
-			accessToken, err := jwtService.CreateAccessToken(
-				user.ID,
-				clientID,
-				scope,
-				time.Hour,
-				nil,
-			)
-			if err != nil {
-				writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create access token")
-				return
-			}
+		// Tokens go in fragment for hybrid flow
+		fragment := url.Values{}
+		if accessToken != "" {
 			fragment.Set("access_token", accessToken)
 			fragment.Set("token_type", "Bearer")
 			fragment.Set("expires_in", "3600")
 		}
-		
-		// Generate ID token if requested
-		if strings.Contains(responseType, "id_token") {
-			scopes := strings.Split(scope, " ")
-			userClaims := p.mockIdP.UserClaims(user.ID, scopes)
-			idToken, err := jwtService.CreateIDToken(
-				user.ID,
-				clientID,
-				nonce,
-				time.Now(),
-				time.Hour,
-				userClaims,
-			)
-			if err != nil {
-				writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create ID token")
-				return
-			}
+		if idToken != "" {
 			fragment.Set("id_token", idToken)
 		}
-		
+		if len(fragment) > 0 {
+			redirectURL.Fragment = fragment.Encode()
+		}
+	} else {
+		// Implicit Flow - everything in fragment (per OIDC Core 1.0 Section 3.2)
+		fragment := url.Values{}
+		if accessToken != "" {
+			fragment.Set("access_token", accessToken)
+			fragment.Set("token_type", "Bearer")
+			fragment.Set("expires_in", "3600")
+		}
+		if idToken != "" {
+			fragment.Set("id_token", idToken)
+		}
 		if state != "" {
 			fragment.Set("state", state)
 		}
-		
 		redirectURL.Fragment = fragment.Encode()
 	}
 
@@ -283,8 +355,22 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleToken handles OIDC token requests
+// Per RFC 6749 Section 4.1.3 and OIDC Core 1.0: Content-Type MUST be application/x-www-form-urlencoded
 func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
+	
+	// RFC 6749 Section 4.1.3 / OIDC Core 1.0: Content-Type validation
+	contentType := r.Header.Get("Content-Type")
+	if contentType != "" && !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Content-Type", map[string]interface{}{
+			"content_type": contentType,
+			"expected":     "application/x-www-form-urlencoded",
+		})
+		writeOIDCErrorWithURI(w, http.StatusBadRequest, "invalid_request",
+			"Content-Type must be application/x-www-form-urlencoded (RFC 6749 Section 4.1.3)",
+			"https://openid.net/specs/openid-connect-core-1_0.html#TokenRequest")
+		return
+	}
 	
 	if err := r.ParseForm(); err != nil {
 		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid form data")

@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Terminal, Square,
   ChevronRight, Fingerprint, Shield, Lock, Sparkles,
-  RefreshCw, FileKey, KeyRound, Workflow
+  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User
 } from 'lucide-react'
 
 import {
@@ -31,6 +31,9 @@ export function LookingGlass() {
   const [inspectedToken, setInspectedToken] = useState('')
   const [refreshTokenInput, setRefreshTokenInput] = useState('')
   const [storedRefreshToken, setStoredRefreshToken] = useState<string | null>(null)
+  const [storedAccessToken, setStoredAccessToken] = useState<string | null>(null)
+  // Token input for introspection/revocation/userinfo flows
+  const [tokenInput, setTokenInput] = useState('')
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
@@ -71,7 +74,14 @@ export function LookingGlass() {
   )
 
   const isRefreshTokenFlow = flowId === 'refresh-token'
+  const isTokenIntrospectionFlow = flowId === 'token-introspection'
+  const isTokenRevocationFlow = flowId === 'token-revocation'
+  const isUserInfoFlow = flowId === 'oidc-userinfo'
+  const isTokenBasedFlow = isTokenIntrospectionFlow || isTokenRevocationFlow || isUserInfoFlow
   const isSCIMFlow = selectedProtocol?.id === 'scim'
+  
+  // Use stored token or user input for flows that need a token
+  const activeToken = tokenInput || storedAccessToken || ''
 
   const clientConfig = useMemo(() => {
     if (flowId === 'client-credentials') {
@@ -93,15 +103,22 @@ export function LookingGlass() {
     redirectUri: `${window.location.origin}/callback`,
     scopes,
     refreshToken: isRefreshTokenFlow ? activeRefreshToken : undefined,
+    token: (isTokenIntrospectionFlow || isTokenRevocationFlow) ? activeToken : undefined,
+    accessToken: isUserInfoFlow ? activeToken : undefined,
     bearerToken: isSCIMFlow ? scimBearerToken : undefined,
   })
 
-  // Store refresh token from completed flows
+  // Store tokens from completed flows
   useEffect(() => {
-    if (realExecutor.state?.status === 'completed' && realExecutor.state?.tokens.refreshToken) {
-      setStoredRefreshToken(realExecutor.state.tokens.refreshToken)
+    if (realExecutor.state?.status === 'completed') {
+      if (realExecutor.state.tokens.refreshToken) {
+        setStoredRefreshToken(realExecutor.state.tokens.refreshToken)
+      }
+      if (realExecutor.state.tokens.accessToken) {
+        setStoredAccessToken(realExecutor.state.tokens.accessToken)
+      }
     }
-  }, [realExecutor.state?.status, realExecutor.state?.tokens.refreshToken])
+  }, [realExecutor.state?.status, realExecutor.state?.tokens.refreshToken, realExecutor.state?.tokens.accessToken])
 
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
     setSelectedProtocol(protocol)
@@ -283,6 +300,68 @@ export function LookingGlass() {
               )}
             </div>
             {!activeRefreshToken && (
+              <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
+                ⚠️ No token available. Run Auth Code flow first.
+              </p>
+            )}
+          </motion.div>
+        )}
+
+        {/* Access Token Input - shown for introspection, revocation, userinfo flows */}
+        {isTokenBasedFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              {isTokenIntrospectionFlow && <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />}
+              {isTokenRevocationFlow && <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-400" />}
+              {isUserInfoFlow && <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-400" />}
+              <span className="text-xs sm:text-sm font-medium text-surface-300">
+                {isTokenIntrospectionFlow && 'Token to Introspect'}
+                {isTokenRevocationFlow && 'Token to Revoke'}
+                {isUserInfoFlow && 'Access Token'}
+              </span>
+              {storedAccessToken && !tokenInput && (
+                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-green-500/10 text-green-400">
+                  Captured ✓
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+              {isTokenIntrospectionFlow && 'Run Authorization Code or Client Credentials flow first, or paste a token below.'}
+              {isTokenRevocationFlow && 'Run an authorization flow first to get a token, or paste one below.'}
+              {isUserInfoFlow && 'Run OIDC Authorization Code flow first (with openid scope), or paste a token below.'}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder={storedAccessToken ? "Using captured (or paste new)" : "Paste token here..."}
+                className={`flex-1 min-w-0 px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none transition-all ${
+                  isTokenIntrospectionFlow ? 'focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20' :
+                  isTokenRevocationFlow ? 'focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20' :
+                  'focus:border-green-500/50 focus:ring-1 focus:ring-green-500/20'
+                }`}
+              />
+              {storedAccessToken && (
+                <button
+                  onClick={() => setTokenInput(storedAccessToken)}
+                  className={`px-2.5 sm:px-3 py-2 rounded-lg text-xs sm:text-sm transition-colors flex-shrink-0 ${
+                    isTokenIntrospectionFlow ? 'bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20' :
+                    isTokenRevocationFlow ? 'bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20' :
+                    'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'
+                  }`}
+                  title="Use captured access token"
+                >
+                  <Key className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                </button>
+              )}
+            </div>
+            {!activeToken && (
               <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
                 ⚠️ No token available. Run Auth Code flow first.
               </p>

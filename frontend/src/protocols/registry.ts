@@ -157,6 +157,10 @@ export const protocolMeta: Record<string, {
       'Refresh Token Rotation',
       'Token Introspection',
       'Token Revocation',
+      // Standards compliance features
+      'RFC 6749 Compliant',
+      'RFC 7636 PKCE Validation',
+      'RFC 7009 Token Revocation',
     ],
   },
   oidc: {
@@ -170,6 +174,10 @@ export const protocolMeta: Record<string, {
       'Standard Claims',
       'Nonce Protection',
       'Signature Verification',
+      // OIDC Core 1.0 compliance features
+      'at_hash / c_hash Claims',
+      'Hybrid Flow Support',
+      'azp Claim for Multi-Audience',
     ],
   },
   saml: {
