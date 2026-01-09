@@ -16,6 +16,9 @@ type Receiver struct {
 	issuer    string
 	audience  string
 
+	// Action executor for real state changes
+	actionExecutor ActionExecutor
+
 	// Received events log (in-memory for demo)
 	receivedEvents   []ReceivedEvent
 	receivedEventsMu sync.RWMutex
@@ -79,12 +82,13 @@ const (
 )
 
 // NewReceiver creates a new SSF receiver
-func NewReceiver(publicKey *rsa.PublicKey, issuer, audience string) *Receiver {
+func NewReceiver(publicKey *rsa.PublicKey, issuer, audience string, executor ActionExecutor) *Receiver {
 	return &Receiver{
 		decoder:         NewSETDecoder(publicKey, issuer, audience),
 		publicKey:       publicKey,
 		issuer:          issuer,
 		audience:        audience,
+		actionExecutor:  executor,
 		receivedEvents:  make([]ReceivedEvent, 0),
 		responseActions: make([]ResponseAction, 0),
 	}
@@ -229,9 +233,17 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 		},
 	})
 
+	// Extract session ID from decoded SET for state isolation
+	sessionID := decoded.SessionID
+
+	// Initialize session states if needed
+	if sessionID != "" && r.actionExecutor != nil {
+		r.actionExecutor.InitSessionUserStates(sessionID)
+	}
+
 	// Execute response actions for each event
 	for _, event := range decoded.Events {
-		r.executeResponseActions(ctx, jti, event)
+		r.executeResponseActions(ctx, jti, event, decoded.Subject.Email, sessionID)
 	}
 
 	processedAt := time.Now()
@@ -256,19 +268,43 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 	}
 }
 
-// executeResponseActions simulates the automated response actions
-func (r *Receiver) executeResponseActions(_ context.Context, eventID string, event DecodedEvent) {
+// executeResponseActions executes real response actions with session isolation
+func (r *Receiver) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string) {
 	metadata := event.Metadata
 
 	for i, actionDesc := range metadata.ResponseActions {
+		status := ResponseStatusExecuted
+
+		// Execute real actions if we have an executor
+		if r.actionExecutor != nil && subjectEmail != "" {
+			ctx := context.Background()
+			var err error
+			switch {
+			case containsAnyLegacy(actionDesc, "terminate", "revoke", "session"):
+				err = r.actionExecutor.RevokeUserSessionsForSession(ctx, sessionID, subjectEmail)
+			case containsAnyLegacy(actionDesc, "disable", "suspend"):
+				err = r.actionExecutor.DisableUserForSession(ctx, sessionID, subjectEmail)
+			case containsAnyLegacy(actionDesc, "enable", "reactivate"):
+				err = r.actionExecutor.EnableUserForSession(ctx, sessionID, subjectEmail)
+			case containsAnyLegacy(actionDesc, "password", "reset"):
+				err = r.actionExecutor.ForcePasswordResetForSession(ctx, sessionID, subjectEmail)
+			case containsAnyLegacy(actionDesc, "invalidate", "token"):
+				err = r.actionExecutor.InvalidateTokensForSession(ctx, sessionID, subjectEmail)
+			}
+			if err != nil {
+				status = ResponseStatusFailed
+			}
+		}
+
 		action := ResponseAction{
 			ID:          fmt.Sprintf("%s-action-%d", eventID, i),
 			EventID:     eventID,
 			EventType:   event.Type,
 			Action:      actionDesc,
-			Description: fmt.Sprintf("Automated response: %s", actionDesc),
-			Status:      ResponseStatusExecuted,
+			Description: fmt.Sprintf("Automated response: %s (session: %s)", actionDesc, sessionID),
+			Status:      status,
 			ExecutedAt:  time.Now(),
+			SessionID:   sessionID,
 		}
 
 		r.addResponseAction(action)
@@ -283,12 +319,45 @@ func (r *Receiver) executeResponseActions(_ context.Context, eventID string, eve
 				"event_type": metadata.Name,
 				"category":   metadata.Category,
 				"zero_trust": metadata.ZeroTrustImpact,
+				"session_id": sessionID,
 			},
 		})
 
 		// Small delay for visualization
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+// containsAnyLegacy checks if s contains any of the substrings (case insensitive)
+func containsAnyLegacy(s string, substrs ...string) bool {
+	sLower := toLowerLegacy(s)
+	for _, sub := range substrs {
+		if containsLegacy(sLower, toLowerLegacy(sub)) {
+			return true
+		}
+	}
+	return false
+}
+
+func toLowerLegacy(s string) string {
+	b := make([]byte, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		b[i] = c
+	}
+	return string(b)
+}
+
+func containsLegacy(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // addReceivedEvent adds an event to the received log

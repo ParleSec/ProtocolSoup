@@ -88,19 +88,22 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	}
 	p.transmitter = NewTransmitter(storage, privateKey, keyID, p.baseURL)
 
-	// Initialize legacy receiver (for backward compat on same port)
+	// Initialize action executor for real state changes (shared by both receivers)
+	p.actionExecutor = NewMockIdPActionExecutor(p.baseURL)
+
+	// Initialize legacy receiver (main port - used in production)
 	var publicKey *rsa.PublicKey
 	if p.keySet != nil {
 		publicKey = &p.keySet.RSAPrivateKey().PublicKey
 	}
-	p.receiver = NewReceiver(publicKey, p.baseURL, p.baseURL+"/receiver")
+	p.receiver = NewReceiver(publicKey, p.baseURL, p.baseURL+"/receiver", p.actionExecutor)
 
-	// Initialize action executor for real state changes
-	p.actionExecutor = NewMockIdPActionExecutor(p.baseURL)
-
-	// Initialize standalone receiver service on separate port
-	receiverEndpoint := fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort)
+	// Initialize standalone receiver service on separate port (for local dev)
 	p.receiverService = NewReceiverService(p.receiverPort, p.baseURL, p.receiverToken, p.actionExecutor)
+
+	// Use internal endpoint for push delivery (works in both local and production)
+	// In production, localhost:8081 isn't accessible, so use the main server's push endpoint
+	receiverEndpoint := p.baseURL + "/ssf/push"
 
 	// Start the standalone receiver in a goroutine
 	go func() {
@@ -131,11 +134,11 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		log.Printf("Warning: failed to seed SSF demo data: %v", err)
 	}
 
-	// Update default stream to use standalone receiver endpoint with token
+	// Update default stream to use internal receiver endpoint
 	stream, err := p.storage.GetDefaultStream(ctx, p.baseURL)
 	if err == nil {
 		stream.DeliveryEndpoint = receiverEndpoint
-		stream.BearerToken = p.receiverToken
+		stream.BearerToken = "" // Internal endpoint doesn't need auth
 		_ = p.storage.UpdateStream(ctx, *stream)
 	}
 

@@ -268,6 +268,7 @@ func DecodeWithoutValidation(tokenString string) (*DecodedSET, error) {
 		Audience:      claims.Audience,
 		Subject:       claims.SubjectID,
 		TransactionID: claims.TransactionID,
+		SessionID:     claims.SessionID, // Extract session ID for sandbox isolation
 		Events:        []DecodedEvent{},
 		RawToken:      tokenString,
 		Header:        token.Header,
@@ -309,6 +310,7 @@ type DecodedSET struct {
 	IssuedAt      time.Time              `json:"iat"`
 	Subject       *SETSubject            `json:"sub_id"`
 	TransactionID string                 `json:"txn,omitempty"`
+	SessionID     string                 `json:"ssf_session_id,omitempty"` // For sandbox session isolation
 	Events        []DecodedEvent         `json:"events"`
 	RawToken      string                 `json:"raw_token"`
 	Header        map[string]interface{} `json:"header"`

@@ -190,20 +190,35 @@ export function SSFSandbox() {
     }
   }, [selectedSubject])
 
-  // Initial fetch only - no continuous polling to avoid rate limits
+  // Gentle background polling - 30 seconds when idle to avoid rate limits
+  // This enables live state updates without overwhelming the server
   useEffect(() => {
-    fetchAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Only run once on mount
+    fetchAll() // Initial fetch
+    
+    // Only poll when idle - 30 second interval is gentle enough
+    if (status === 'idle') {
+      const interval = setInterval(fetchAll, 30000) // 30 seconds
+      return () => clearInterval(interval)
+    }
+  }, [status, fetchAll])
 
-  // Fetch state after execution completes (one-time, not polling)
+  // After execution completes, poll more frequently for a short period to capture state updates
   useEffect(() => {
     if (status === 'completed') {
-      // Give the receiver time to process, then fetch updated state once
-      const timer = setTimeout(() => {
-        fetchAll()
-      }, 1500)
-      return () => clearTimeout(timer)
+      // Fetch immediately after a delay for receiver processing
+      const timer1 = setTimeout(fetchAll, 1000)
+      const timer2 = setTimeout(fetchAll, 3000)
+      const timer3 = setTimeout(fetchAll, 6000)
+      
+      // After 10 seconds, switch back to idle to resume gentle polling
+      const resetTimer = setTimeout(() => setStatus('idle'), 10000)
+      
+      return () => {
+        clearTimeout(timer1)
+        clearTimeout(timer2)
+        clearTimeout(timer3)
+        clearTimeout(resetTimer)
+      }
     }
   }, [status, fetchAll])
 
