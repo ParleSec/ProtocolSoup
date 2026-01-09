@@ -18,4 +18,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 // Signal to pre-renderer that the page is ready for capture
 // This is used by vite-plugin-prerender to know when to snapshot
 document.dispatchEvent(new Event('render-ready'))
-

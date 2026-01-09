@@ -220,6 +220,7 @@ func (d *SETDecoder) Decode(tokenString string) (*DecodedSET, error) {
 		IssuedAt:      claims.IssuedAt.Time,
 		Subject:       claims.SubjectID,
 		TransactionID: claims.TransactionID,
+		SessionID:     claims.SessionID, // Extract session ID for sandbox isolation
 		Events:        []DecodedEvent{},
 		RawToken:      tokenString,
 		Header:        token.Header,
