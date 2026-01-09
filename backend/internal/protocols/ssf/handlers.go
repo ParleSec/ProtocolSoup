@@ -513,7 +513,16 @@ func (p *Plugin) handleAcknowledge(w http.ResponseWriter, r *http.Request) {
 
 // handleGetEvents returns the event history
 func (p *Plugin) handleGetEvents(w http.ResponseWriter, r *http.Request) {
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
@@ -527,8 +536,9 @@ func (p *Plugin) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"events": events,
-		"total":  len(events),
+		"events":     events,
+		"total":      len(events),
+		"session_id": sessionID,
 	})
 }
 

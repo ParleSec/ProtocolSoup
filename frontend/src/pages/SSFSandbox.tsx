@@ -310,26 +310,43 @@ export function SSFSandbox() {
         })
       }
 
-      // Decode the SET token
-      const latestEvents = await ssfFetch('/ssf/events').then(r => r.json())
-      const latestEvent = latestEvents.events?.[0]
-      if (latestEvent?.set_token) {
-        const decoded = await ssfFetch('/ssf/decode', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: latestEvent.set_token }),
-        }).then(r => r.json())
-        setDecodedSET(decoded)
-      }
-
       setStatus('completed')
+
+      // Wait for async push delivery and receiver processing
+      await delay(1500)
       
-      // Wait for receiver to process the event before fetching updated state
-      await delay(500)
-      await fetchAll()
+      // Decode the SET token - retry a few times in case delivery is slow
+      let decoded = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const latestEvents = await ssfFetch('/ssf/events').then(r => r.json())
+        const latestEvent = latestEvents.events?.[0]
+        
+        if (latestEvent?.set_token) {
+          try {
+            decoded = await ssfFetch('/ssf/decode', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: latestEvent.set_token }),
+            }).then(r => r.json())
+            setDecodedSET(decoded)
+            
+            addFlowEvent({
+              type: 'token',
+              title: 'SET Token Captured',
+              description: `Event ${latestEvent.id} - Status: ${latestEvent.status}`,
+              rfcReference: 'RFC 8417',
+              data: { jti: decoded.jti, status: latestEvent.status }
+            })
+            break
+          } catch (e) {
+            console.warn('Failed to decode SET:', e)
+          }
+        }
+        
+        if (attempt < 2) await delay(1000)
+      }
       
-      // Fetch again after a short delay to catch any async updates
-      await delay(1000)
+      // Fetch updated security state
       await fetchAll()
       
       // Auto-switch to State tab to show the changes
