@@ -26,7 +26,7 @@ func (p *Plugin) emitEvent(sessionID string, eventType lookingglass.EventType, t
 	if p.lookingGlass == nil || sessionID == "" {
 		return
 	}
-	
+
 	broadcaster := p.lookingGlass.NewEventBroadcaster(sessionID)
 	broadcaster.Emit(eventType, title, data, annotations...)
 }
@@ -149,7 +149,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 // Authorization endpoint - POST (login form submission)
 func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	
+
 	if err := r.ParseForm(); err != nil {
 		writeOAuth2Error(w, "invalid_request", "Invalid form data", "")
 		return
@@ -231,15 +231,15 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Emit authorization code issued event
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Authorization Code Issued", map[string]interface{}{
-		"step":           3,
-		"from":           "Authorization Server",
-		"to":             "Client",
-		"code_length":    len(authCode.Code),
-		"code_preview":   authCode.Code[:8] + "...",
-		"has_pkce":       codeChallenge != "",
-		"has_state":      state != "",
-		"scopes":         strings.Split(scope, " "),
-		"expires_in":     "10 minutes",
+		"step":         3,
+		"from":         "Authorization Server",
+		"to":           "Client",
+		"code_length":  len(authCode.Code),
+		"code_preview": authCode.Code[:8] + "...",
+		"has_pkce":     codeChallenge != "",
+		"has_state":    state != "",
+		"scopes":       strings.Split(scope, " "),
+		"expires_in":   "10 minutes",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Authorization Code",
@@ -258,9 +258,9 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Emit redirect event
 	p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Redirecting to Client", map[string]interface{}{
-		"redirect_uri":  redirectURI,
-		"has_code":      true,
-		"has_state":     state != "",
+		"redirect_uri": redirectURI,
+		"has_code":     true,
+		"has_state":    state != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeSecurityHint,
 		Title:       "State Parameter Echo",
@@ -277,7 +277,7 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 // of "application/x-www-form-urlencoded"
 func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	
+
 	// RFC 6749 Section 4.1.3: Content-Type MUST be application/x-www-form-urlencoded
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "" && !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
@@ -290,13 +290,13 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 			Description: "Token endpoint requires Content-Type: application/x-www-form-urlencoded",
 			Reference:   "RFC 6749 Section 4.1.3",
 		})
-		writeOAuth2ErrorWithURI(w, "invalid_request", 
-			"Content-Type must be application/x-www-form-urlencoded (RFC 6749 Section 4.1.3)", 
-			"", 
+		writeOAuth2ErrorWithURI(w, "invalid_request",
+			"Content-Type must be application/x-www-form-urlencoded (RFC 6749 Section 4.1.3)",
+			"",
 			"https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.3")
 		return
 	}
-	
+
 	if err := r.ParseForm(); err != nil {
 		writeOAuth2Error(w, "invalid_request", "Invalid form data", "")
 		return
@@ -339,13 +339,13 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 
 	// Emit token exchange step
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Token Exchange Request", map[string]interface{}{
-		"step":          4,
-		"from":          "Client",
-		"to":            "Authorization Server",
-		"grant_type":    "authorization_code",
-		"client_id":     clientID,
-		"has_verifier":  codeVerifier != "",
-		"code_preview":  code[:min(8, len(code))] + "...",
+		"step":         4,
+		"from":         "Client",
+		"to":           "Authorization Server",
+		"grant_type":   "authorization_code",
+		"client_id":    clientID,
+		"has_verifier": codeVerifier != "",
+		"code_preview": code[:min(8, len(code))] + "...",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Authorization Code Exchange",
@@ -444,8 +444,8 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 
 	// Emit refresh token request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Refresh Token Request", map[string]interface{}{
-		"grant_type":    "refresh_token",
-		"client_id":     clientID,
+		"grant_type":      "refresh_token",
+		"client_id":       clientID,
 		"requested_scope": scope,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
@@ -618,7 +618,7 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 // Token introspection endpoint (RFC 7662)
 func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	
+
 	if err := r.ParseForm(); err != nil {
 		writeOAuth2Error(w, "invalid_request", "Invalid form data", "")
 		return
@@ -724,7 +724,7 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 // Token revocation endpoint (RFC 7009)
 func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	
+
 	if err := r.ParseForm(); err != nil {
 		writeOAuth2Error(w, "invalid_request", "Invalid form data", "")
 		return
@@ -777,10 +777,10 @@ func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 
 	// Emit revocation success
 	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Token Revoked", map[string]interface{}{
-		"token_type_hint":    tokenTypeHint,
-		"revoked":            true,
-		"rfc_compliance":     "RFC 7009 Section 2.1",
-		"hint_is_advisory":   true,
+		"token_type_hint":     tokenTypeHint,
+		"revoked":             true,
+		"rfc_compliance":      "RFC 7009 Section 2.1",
+		"hint_is_advisory":    true,
 		"attempted_all_types": true,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeBestPractice,
@@ -867,16 +867,16 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 // RFC 6749 Section 5.2 error URIs - links to relevant documentation
 var oauth2ErrorURIs = map[string]string{
-	"invalid_request":          "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
-	"invalid_client":           "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
-	"invalid_grant":            "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
-	"unauthorized_client":      "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
-	"unsupported_grant_type":   "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
-	"invalid_scope":            "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_request":           "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_client":            "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_grant":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"unauthorized_client":       "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"unsupported_grant_type":    "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_scope":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"unsupported_response_type": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
-	"access_denied":            "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
-	"server_error":             "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
-	"temporarily_unavailable":  "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"server_error":              "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"temporarily_unavailable":   "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 }
 
 // writeOAuth2Error writes an OAuth2-compliant error response per RFC 6749 Section 5.2
@@ -892,7 +892,7 @@ func writeOAuth2ErrorWithURI(w http.ResponseWriter, errorCode, description, stat
 		"error":             errorCode,
 		"error_description": description,
 	}
-	
+
 	// Add error_uri per RFC 6749 Section 5.2 (OPTIONAL)
 	// If not provided, use default RFC documentation URI
 	if errorURI != "" {
@@ -900,7 +900,7 @@ func writeOAuth2ErrorWithURI(w http.ResponseWriter, errorCode, description, stat
 	} else if defaultURI, exists := oauth2ErrorURIs[errorCode]; exists {
 		response["error_uri"] = defaultURI
 	}
-	
+
 	if state != "" {
 		response["state"] = state
 	}
@@ -1150,4 +1150,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-

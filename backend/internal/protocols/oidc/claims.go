@@ -11,7 +11,7 @@ import (
 // handleUserInfo handles the UserInfo endpoint
 func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	
+
 	// Emit UserInfo request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "UserInfo Request", map[string]interface{}{
 		"step":     9,
@@ -380,19 +380,19 @@ func GetClaimsForScopes(scopes []string) []string {
 
 // OIDC/OAuth2 error URIs - links to relevant OIDC documentation
 var oidcErrorURIs = map[string]string{
-	"invalid_request":          "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"invalid_client":           "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
-	"invalid_grant":            "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
-	"unauthorized_client":      "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"unsupported_grant_type":   "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
-	"invalid_scope":            "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"invalid_request":           "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"invalid_client":            "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
+	"invalid_grant":             "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
+	"unauthorized_client":       "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"unsupported_grant_type":    "https://openid.net/specs/openid-connect-core-1_0.html#TokenErrorResponse",
+	"invalid_scope":             "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
 	"unsupported_response_type": "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"access_denied":            "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"server_error":             "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"invalid_token":            "https://openid.net/specs/openid-connect-core-1_0.html#UserInfoError",
-	"login_required":           "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"consent_required":         "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
-	"interaction_required":     "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"access_denied":             "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"server_error":              "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"invalid_token":             "https://openid.net/specs/openid-connect-core-1_0.html#UserInfoError",
+	"login_required":            "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"consent_required":          "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"interaction_required":      "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
 }
 
 // Helper function for OIDC errors - includes error_uri per RFC 6749 Section 5.2 and OIDC Core
@@ -409,17 +409,17 @@ func writeOIDCErrorWithURI(w http.ResponseWriter, status int, errorCode, descrip
 			uri = defaultURI
 		}
 	}
-	
+
 	// Build WWW-Authenticate header
 	authHeader := `Bearer error="` + errorCode + `", error_description="` + description + `"`
 	if uri != "" {
 		authHeader += `, error_uri="` + uri + `"`
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("WWW-Authenticate", authHeader)
 	w.WriteHeader(status)
-	
+
 	// Build response body
 	response := map[string]string{
 		"error":             errorCode,
@@ -428,7 +428,6 @@ func writeOIDCErrorWithURI(w http.ResponseWriter, status int, errorCode, descrip
 	if uri != "" {
 		response["error_uri"] = uri
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
-
