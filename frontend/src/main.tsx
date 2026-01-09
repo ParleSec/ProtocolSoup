@@ -68,6 +68,9 @@ try {
   const rootElement = document.getElementById('root')
   if (!rootElement) throw new Error('Root element not found')
   
+  // Mark as mounted before render attempt
+  rootElement.setAttribute('data-react-mounted', 'true')
+  
   const root = ReactDOM.createRoot(rootElement)
   
   root.render(
@@ -75,9 +78,7 @@ try {
       <ErrorBoundary>
         <HelmetProvider>
           <BrowserRouter>
-            <div data-react-mounted="true">
-              <App />
-            </div>
+            <App />
           </BrowserRouter>
         </HelmetProvider>
       </ErrorBoundary>
