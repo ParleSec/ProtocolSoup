@@ -574,3 +574,111 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 
 	return nil
 }
+
+// GetSessionStream gets or creates a stream for a specific session
+func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer string) (*Stream, error) {
+	streamID := "session-" + sessionID
+
+	stream, err := s.GetStream(ctx, streamID)
+	if err == nil {
+		return stream, nil
+	}
+
+	// Create session-specific stream
+	sessionStream := Stream{
+		ID:              streamID,
+		Issuer:          issuer,
+		Audience:        []string{issuer + "/receiver"},
+		EventsSupported: GetSupportedEventURIs(),
+		EventsRequested: GetSupportedEventURIs(),
+		DeliveryMethod:  DeliveryMethodPush,
+		DeliveryEndpoint: issuer + "/ssf/push",
+		Status:          StreamStatusEnabled,
+	}
+
+	if err := s.CreateStream(ctx, sessionStream); err != nil {
+		return nil, err
+	}
+
+	return &sessionStream, nil
+}
+
+// SeedSessionDemoData seeds demo subjects for a specific session
+func (s *Storage) SeedSessionDemoData(ctx context.Context, sessionID, baseURL string) error {
+	stream, err := s.GetSessionStream(ctx, sessionID, baseURL)
+	if err != nil {
+		return err
+	}
+
+	// Check if we already have subjects
+	subjects, err := s.ListSubjects(ctx, stream.ID)
+	if err != nil {
+		return err
+	}
+	if len(subjects) > 0 {
+		return nil // Already seeded
+	}
+
+	// Add demo subjects with session-specific IDs
+	demoSubjects := []Subject{
+		{
+			ID:             sessionID + "-alice",
+			StreamID:       stream.ID,
+			Format:         SubjectFormatEmail,
+			Identifier:     "alice@example.com",
+			DisplayName:    "Alice Johnson",
+			Status:         SubjectStatusActive,
+			ActiveSessions: 3,
+		},
+		{
+			ID:             sessionID + "-bob",
+			StreamID:       stream.ID,
+			Format:         SubjectFormatEmail,
+			Identifier:     "bob@example.com",
+			DisplayName:    "Bob Smith",
+			Status:         SubjectStatusActive,
+			ActiveSessions: 1,
+		},
+		{
+			ID:             sessionID + "-charlie",
+			StreamID:       stream.ID,
+			Format:         SubjectFormatEmail,
+			Identifier:     "charlie@example.com",
+			DisplayName:    "Charlie Brown",
+			Status:         SubjectStatusActive,
+			ActiveSessions: 2,
+		},
+	}
+
+	for _, subject := range demoSubjects {
+		if err := s.AddSubject(ctx, subject); err != nil {
+			continue
+		}
+	}
+
+	return nil
+}
+
+// CleanupOldSessions removes streams and data older than maxAge
+func (s *Storage) CleanupOldSessions(ctx context.Context, maxAge time.Duration) (int, error) {
+	cutoff := time.Now().Add(-maxAge)
+
+	// First get count of old session streams
+	var count int
+	row := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM streams 
+		WHERE id LIKE 'session-%' AND updated_at < ?`, cutoff)
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+
+	// Delete old session streams (cascades to subjects and events)
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM streams 
+		WHERE id LIKE 'session-%' AND updated_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}

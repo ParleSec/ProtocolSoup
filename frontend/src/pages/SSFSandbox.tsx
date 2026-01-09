@@ -3,9 +3,11 @@
  * 
  * Matches the Looking Glass pattern for consistency.
  * Execute SSF flows and inspect the traffic.
+ * 
+ * Each browser session gets isolated data via session ID.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Radio, ChevronRight, Shield, AlertTriangle, 
@@ -18,6 +20,37 @@ import {
 } from 'lucide-react'
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { SSFSandboxSEO } from '../components/common/SEO'
+
+// ============================================================================
+// Session Management - Isolates each user's sandbox
+// ============================================================================
+
+function getOrCreateSessionId(): string {
+  const STORAGE_KEY = 'ssf_session_id'
+  let sessionId = localStorage.getItem(STORAGE_KEY)
+  
+  if (!sessionId) {
+    // Generate a random session ID
+    sessionId = 'sess_' + Math.random().toString(36).substring(2, 15) + 
+                Math.random().toString(36).substring(2, 15)
+    localStorage.setItem(STORAGE_KEY, sessionId)
+  }
+  
+  return sessionId
+}
+
+// Create fetch wrapper that includes session ID
+function ssfFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const sessionId = getOrCreateSessionId()
+  
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'X-SSF-Session': sessionId,
+    },
+  })
+}
 
 // ============================================================================
 // Types
@@ -125,12 +158,15 @@ export function SSFSandbox() {
   // Manual SET decoder (uses TokenInspector component)
   const [manualSET, setManualSET] = useState('')
 
+  // Session ID for this browser tab
+  const sessionId = useMemo(() => getOrCreateSessionId(), [])
+
   // Fetch data function
   const fetchAll = useCallback(async () => {
     try {
       const [subjectsRes, statesRes] = await Promise.all([
-        fetch('/ssf/subjects'),
-        fetch('/ssf/security-state'),
+        ssfFetch('/ssf/subjects'),
+        ssfFetch('/ssf/security-state'),
       ])
       
       const [subjectsData, statesData] = await Promise.all([
@@ -195,7 +231,7 @@ export function SSFSandbox() {
         data: { subject_identifier: selectedSubject.identifier, event_type: selectedEvent.id }
       })
 
-      const res = await fetch(`/ssf/actions/${selectedEvent.id}`, {
+      const res = await ssfFetch(`/ssf/actions/${selectedEvent.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject_identifier: selectedSubject.identifier }),
@@ -246,10 +282,10 @@ export function SSFSandbox() {
       }
 
       // Decode the SET token
-      const latestEvents = await fetch('/ssf/events').then(r => r.json())
+      const latestEvents = await ssfFetch('/ssf/events').then(r => r.json())
       const latestEvent = latestEvents.events?.[0]
       if (latestEvent?.set_token) {
-        const decoded = await fetch('/ssf/decode', {
+        const decoded = await ssfFetch('/ssf/decode', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: latestEvent.set_token }),
@@ -290,7 +326,7 @@ export function SSFSandbox() {
   const resetSecurityState = useCallback(async () => {
     if (!selectedSubject) return
     try {
-      await fetch(`/ssf/security-state/${encodeURIComponent(selectedSubject.identifier)}/reset`, {
+      await ssfFetch(`/ssf/security-state/${encodeURIComponent(selectedSubject.identifier)}/reset`, {
         method: 'POST',
       })
       await fetchAll()
@@ -316,10 +352,15 @@ export function SSFSandbox() {
               </div>
               <span className="truncate">SSF Sandbox</span>
             </h1>
-            {status !== 'idle' && <StatusBadge status={status} />}
+            <div className="flex items-center gap-2">
+              {status !== 'idle' && <StatusBadge status={status} />}
+              <span className="text-xs text-surface-500 font-mono hidden sm:block" title={`Session: ${sessionId}`}>
+                🔒 private session
+              </span>
+            </div>
           </div>
           <p className="text-surface-400 text-xs sm:text-base ml-10 sm:ml-[52px] leading-relaxed">
-            Execute SSF flows and inspect the traffic
+            Execute SSF flows and inspect the traffic — your sandbox is isolated from other users
           </p>
         </div>
       </header>

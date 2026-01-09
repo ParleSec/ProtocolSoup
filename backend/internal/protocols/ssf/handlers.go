@@ -11,6 +11,24 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// getSessionID extracts or generates a session ID from the request
+func getSessionID(r *http.Request) string {
+	// Check header first (frontend will send this)
+	sessionID := r.Header.Get("X-SSF-Session")
+	if sessionID != "" {
+		return sessionID
+	}
+
+	// Check cookie as fallback
+	cookie, err := r.Cookie("ssf_session")
+	if err == nil && cookie.Value != "" {
+		return cookie.Value
+	}
+
+	// Return empty for legacy behavior (though frontend should always send session)
+	return ""
+}
+
 // handleInfo returns SSF plugin information
 func (p *Plugin) handleInfo(w http.ResponseWriter, r *http.Request) {
 	info := map[string]interface{}{
@@ -69,7 +87,16 @@ func (p *Plugin) handleJWKS(w http.ResponseWriter, r *http.Request) {
 
 // handleGetStream returns the current stream configuration
 func (p *Plugin) handleGetStream(w http.ResponseWriter, r *http.Request) {
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
@@ -125,10 +152,26 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 
 // handleListSubjects returns all subjects
 func (p *Plugin) handleListSubjects(w http.ResponseWriter, r *http.Request) {
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get stream")
-		return
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to get stream")
+			return
+		}
+		// Ensure demo data exists for this session
+		_ = p.storage.SeedSessionDemoData(r.Context(), sessionID, p.baseURL)
+		// Initialize user states for this session
+		p.actionExecutor.InitSessionUserStates(sessionID)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to get stream")
+			return
+		}
 	}
 
 	subjects, err := p.storage.ListSubjects(r.Context(), stream.ID)
@@ -138,13 +181,16 @@ func (p *Plugin) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"subjects": subjects,
-		"total":    len(subjects),
+		"subjects":   subjects,
+		"total":      len(subjects),
+		"session_id": sessionID,
 	})
 }
 
 // handleAddSubject adds a new subject
 func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+
 	var req struct {
 		Format      string `json:"format"`
 		Identifier  string `json:"identifier"`
@@ -164,14 +210,27 @@ func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
 	}
 
+	subjectID := generateID()
+	if sessionID != "" {
+		subjectID = sessionID + "-" + subjectID
+	}
+
 	subject := Subject{
-		ID:             "subject-" + generateID(),
+		ID:             subjectID,
 		StreamID:       stream.ID,
 		Format:         req.Format,
 		Identifier:     req.Identifier,
@@ -211,6 +270,7 @@ func (p *Plugin) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 // handleTriggerAction handles all action triggers
 func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	action := chi.URLParam(r, "action")
+	sessionID := getSessionID(r)
 
 	var req ActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -223,7 +283,15 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
@@ -618,15 +686,24 @@ func (p *Plugin) handleReceiverActions(w http.ResponseWriter, r *http.Request) {
 
 // handleGetSecurityStates returns all user security states
 func (p *Plugin) handleGetSecurityStates(w http.ResponseWriter, r *http.Request) {
-	states := p.actionExecutor.GetAllUserStates()
+	sessionID := getSessionID(r)
+
+	// Initialize session states if needed
+	if sessionID != "" {
+		p.actionExecutor.InitSessionUserStates(sessionID)
+	}
+
+	states := p.actionExecutor.GetAllUserStatesForSession(sessionID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"states": states,
-		"total":  len(states),
+		"states":     states,
+		"total":      len(states),
+		"session_id": sessionID,
 	})
 }
 
 // handleGetSecurityState returns security state for a specific user
 func (p *Plugin) handleGetSecurityState(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
 	email := chi.URLParam(r, "email")
 	if email == "" {
 		writeError(w, http.StatusBadRequest, "email is required")
@@ -640,7 +717,12 @@ func (p *Plugin) handleGetSecurityState(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	state, err := p.actionExecutor.GetUserState(decodedEmail)
+	// Initialize session states if needed
+	if sessionID != "" {
+		p.actionExecutor.InitSessionUserStates(sessionID)
+	}
+
+	state, err := p.actionExecutor.GetUserStateForSession(sessionID, decodedEmail)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -651,6 +733,7 @@ func (p *Plugin) handleGetSecurityState(w http.ResponseWriter, r *http.Request) 
 
 // handleResetSecurityState resets security state for a user
 func (p *Plugin) handleResetSecurityState(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
 	email := chi.URLParam(r, "email")
 	if email == "" {
 		writeError(w, http.StatusBadRequest, "email is required")
@@ -673,9 +756,9 @@ func (p *Plugin) handleResetSecurityState(w http.ResponseWriter, r *http.Request
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	p.actionExecutor.ResetUserState(decodedEmail, req.Sessions)
+	p.actionExecutor.ResetUserStateForSession(sessionID, decodedEmail, req.Sessions)
 
-	state, _ := p.actionExecutor.GetUserState(decodedEmail)
+	state, _ := p.actionExecutor.GetUserStateForSession(sessionID, decodedEmail)
 	writeJSON(w, http.StatusOK, state)
 }
 

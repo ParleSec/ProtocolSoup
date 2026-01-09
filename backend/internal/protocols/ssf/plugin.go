@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
@@ -106,6 +107,22 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		log.Printf("[SSF] Starting standalone receiver service on port %d", p.receiverPort)
 		if err := p.receiverService.Start(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[SSF] Receiver service error: %v", err)
+		}
+	}()
+
+	// Start session cleanup goroutine (runs every hour, removes sessions older than 24h)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			maxAge := 24 * time.Hour
+			dbCount, err := p.storage.CleanupOldSessions(context.Background(), maxAge)
+			memCount := p.actionExecutor.CleanupOldSessions(maxAge)
+			if err != nil {
+				log.Printf("[SSF] Session cleanup error: %v", err)
+			} else if dbCount > 0 || memCount > 0 {
+				log.Printf("[SSF] Cleaned up %d old database sessions and %d memory states", dbCount, memCount)
+			}
 		}
 	}()
 
