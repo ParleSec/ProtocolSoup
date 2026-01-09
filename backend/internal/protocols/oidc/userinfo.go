@@ -223,19 +223,16 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	// - "code": Authorization Code Flow (Section 3.1)
 	// - "id_token", "id_token token": Implicit Flow (Section 3.2)
 	// - "code id_token", "code token", "code id_token token": Hybrid Flow (Section 3.3)
-	
+
 	hasCode := strings.Contains(responseType, "code")
-	hasToken := strings.Contains(responseType, "token") && !strings.HasPrefix(responseType, "id_token token") || strings.Contains(responseType, " token")
+	// Proper token detection per OIDC Core Section 3
+	hasToken := responseType == "token" || strings.Contains(responseType, " token") || strings.HasPrefix(responseType, "token ")
 	hasIDToken := strings.Contains(responseType, "id_token")
-	
-	// Proper token detection
-	hasToken = responseType == "token" || strings.Contains(responseType, " token") || strings.HasPrefix(responseType, "token ")
-	hasIDToken = strings.Contains(responseType, "id_token")
-	
+
 	jwtService := p.mockIdP.JWTService()
 	var authorizationCode string
 	var accessToken string
-	
+
 	// Generate authorization code if "code" in response_type
 	if hasCode {
 		authCode, err := p.mockIdP.CreateAuthorizationCode(
@@ -248,7 +245,7 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		authorizationCode = authCode.Code
 	}
-	
+
 	// Generate access token if "token" in response_type
 	if hasToken {
 		var err error
@@ -264,28 +261,28 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	
+
 	// Generate ID token if "id_token" in response_type
 	var idToken string
 	if hasIDToken {
 		scopes := strings.Split(scope, " ")
 		userClaims := p.mockIdP.UserClaims(user.ID, scopes)
-		
+
 		// Build ID token options for OIDC Core 1.0 compliance
 		// Per Section 3.3.2.11: Include hash claims based on what's returned
 		idTokenOptions := &crypto.IDTokenOptions{}
-		
+
 		// Include at_hash if access_token is being returned (OIDC Core 1.0 Section 3.3.2.11)
 		if accessToken != "" {
 			idTokenOptions.AccessToken = accessToken
 		}
-		
+
 		// Include c_hash if authorization code is being returned (OIDC Core 1.0 Section 3.3.2.11)
 		// This is for Hybrid Flow
 		if authorizationCode != "" {
 			idTokenOptions.AuthorizationCode = authorizationCode
 		}
-		
+
 		var err error
 		idToken, err = jwtService.CreateIDTokenWithOptions(
 			user.ID,
@@ -301,7 +298,7 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	
+
 	// Build response based on flow type
 	if responseType == "code" {
 		// Pure Authorization Code Flow - code in query string
@@ -319,7 +316,7 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			q.Set("state", state)
 		}
 		redirectURL.RawQuery = q.Encode()
-		
+
 		// Tokens go in fragment for hybrid flow
 		fragment := url.Values{}
 		if accessToken != "" {
@@ -358,7 +355,7 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 // Per RFC 6749 Section 4.1.3 and OIDC Core 1.0: Content-Type MUST be application/x-www-form-urlencoded
 func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	
+
 	// RFC 6749 Section 4.1.3 / OIDC Core 1.0: Content-Type validation
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "" && !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
@@ -371,7 +368,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 			"https://openid.net/specs/openid-connect-core-1_0.html#TokenRequest")
 		return
 	}
-	
+
 	if err := r.ParseForm(); err != nil {
 		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid form data")
 		return
@@ -480,10 +477,10 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	// Emit ID token validation reminder
 	if tokenResponse.IDToken != "" {
 		p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "ID Token Validation Required", map[string]interface{}{
-			"step":              8,
-			"from":              "Client",
-			"to":                "Client",
-			"validation_steps":  []string{"Verify signature", "Check iss", "Check aud", "Check exp", "Verify nonce"},
+			"step":             8,
+			"from":             "Client",
+			"to":               "Client",
+			"validation_steps": []string{"Verify signature", "Check iss", "Check aud", "Check exp", "Verify nonce"},
 		}, lookingglass.Annotation{
 			Type:        lookingglass.AnnotationTypeBestPractice,
 			Title:       "ID Token Validation Steps",
@@ -934,4 +931,3 @@ func formatOIDCScopes(scope string) string {
 	}
 	return result
 }
-

@@ -417,7 +417,8 @@ func (idp *MockIdP) RevokeToken(token, tokenTypeHint string) {
 	}
 
 	// Try access token (always attempt per RFC 7009)
-	idp.RevokeAccessToken(token)
+	// Ignore error - revocation is best-effort per RFC 7009 Section 2.2
+	_ = idp.RevokeAccessToken(token)
 
 	// Also try refresh token if hint was access_token (hint may be wrong)
 	if tokenTypeHint == "access_token" {

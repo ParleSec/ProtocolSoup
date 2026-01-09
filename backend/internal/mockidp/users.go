@@ -141,35 +141,6 @@ func ValidatePKCEChallenge(challenge, method string) error {
 	return nil
 }
 
-// validatePKCE validates the code verifier against the code challenge per RFC 7636
-func validatePKCE(verifier, challenge, method string) bool {
-	if verifier == "" {
-		return false
-	}
-
-	// Validate verifier format per RFC 7636 Section 4.1
-	if err := ValidatePKCEVerifier(verifier); err != nil {
-		return false
-	}
-
-	switch method {
-	case "S256":
-		// RFC 7636 Section 4.6: SHA256 hash of verifier, base64url encoded (no padding)
-		hash := sha256.Sum256([]byte(verifier))
-		computed := base64.RawURLEncoding.EncodeToString(hash[:])
-		return computed == challenge
-	case "plain":
-		// RFC 7636 Section 4.2: plain method - direct comparison
-		// Note: plain is NOT RECOMMENDED per RFC 7636 Section 4.2
-		return verifier == challenge
-	default:
-		// Default to S256 per RFC 7636 recommendation
-		hash := sha256.Sum256([]byte(verifier))
-		computed := base64.RawURLEncoding.EncodeToString(hash[:])
-		return computed == challenge
-	}
-}
-
 // ValidatePKCEWithError validates PKCE and returns detailed error for RFC compliance
 func ValidatePKCEWithError(verifier, challenge, method string) error {
 	if verifier == "" {
@@ -223,11 +194,11 @@ func GeneratePKCE() (verifier, challenge string) {
 
 // DemoUserPreset represents a preset demo user configuration
 type DemoUserPreset struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Credentials DemoCredentials   `json:"credentials"`
-	Scopes      []string          `json:"suggested_scopes"`
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Credentials DemoCredentials `json:"credentials"`
+	Scopes      []string        `json:"suggested_scopes"`
 }
 
 // DemoCredentials contains login credentials for demo
@@ -319,13 +290,13 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 
 // TokenMetadata provides metadata about issued tokens for inspection
 type TokenMetadata struct {
-	TokenType   string    `json:"token_type"`
-	Subject     string    `json:"subject"`
-	ClientID    string    `json:"client_id"`
-	Scope       string    `json:"scope"`
-	IssuedAt    time.Time `json:"issued_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	TokenID     string    `json:"token_id,omitempty"`
+	TokenType string    `json:"token_type"`
+	Subject   string    `json:"subject"`
+	ClientID  string    `json:"client_id"`
+	Scope     string    `json:"scope"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	TokenID   string    `json:"token_id,omitempty"`
 }
 
 // CreateTokenMetadata creates metadata for a token (for looking glass)
@@ -339,4 +310,3 @@ func CreateTokenMetadata(tokenType, subject, clientID, scope string, issuedAt, e
 		ExpiresAt: expiresAt,
 	}
 }
-
