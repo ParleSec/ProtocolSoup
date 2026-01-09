@@ -29,8 +29,8 @@ const OG_IMAGE = `${SITE_URL}/og-image.png`;
 // =============================================================================
 
 const PAGE_TITLES = {
-  '/': 'Protocol Soup - Interactive OAuth 2.0, OIDC & SAML Testing Playground',
-  '/protocols': 'Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM',
+  '/': 'Protocol Soup - Interactive Authentication Protocol Playground',
+  '/protocols': 'Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM, SSF',
   '/looking-glass': 'Looking Glass - Live Protocol Flow Execution & Traffic Inspector',
   '/ssf-sandbox': 'SSF Sandbox - Shared Signals Framework Interactive Playground',
 };

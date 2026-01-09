@@ -161,13 +161,18 @@ export function SSFSandbox() {
   // Session ID for this browser tab
   const sessionId = useMemo(() => getOrCreateSessionId(), [])
 
-  // Fetch data function
+  // Fetch data function - only fetches, no polling logic here
   const fetchAll = useCallback(async () => {
     try {
       const [subjectsRes, statesRes] = await Promise.all([
         ssfFetch('/ssf/subjects'),
         ssfFetch('/ssf/security-state'),
       ])
+      
+      if (!subjectsRes.ok || !statesRes.ok) {
+        console.warn('SSF fetch returned non-OK status')
+        return
+      }
       
       const [subjectsData, statesData] = await Promise.all([
         subjectsRes.json(),
@@ -185,12 +190,21 @@ export function SSFSandbox() {
     }
   }, [selectedSubject])
 
-  // Poll faster during/after execution
+  // Initial fetch only - no continuous polling to avoid rate limits
   useEffect(() => {
     fetchAll()
-    const pollInterval = status === 'executing' || status === 'completed' ? 1000 : 5000
-    const interval = setInterval(fetchAll, pollInterval)
-    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Only run once on mount
+
+  // Fetch state after execution completes (one-time, not polling)
+  useEffect(() => {
+    if (status === 'completed') {
+      // Give the receiver time to process, then fetch updated state once
+      const timer = setTimeout(() => {
+        fetchAll()
+      }, 1500)
+      return () => clearTimeout(timer)
+    }
   }, [status, fetchAll])
 
   const addFlowEvent = useCallback((event: Omit<FlowEvent, 'id' | 'timestamp'>) => {

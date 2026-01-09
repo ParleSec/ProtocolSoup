@@ -315,14 +315,14 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if reason == "" {
 			reason = "Session revoked by administrator"
 		}
-		event, err = p.transmitter.TriggerSessionRevoked(r.Context(), stream.ID, subject, reason, initiator)
+		event, err = p.transmitter.TriggerSessionRevokedWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
 
 	case "credential-change":
 		credType := req.CredentialType
 		if credType == "" {
 			credType = CredentialTypePassword
 		}
-		event, err = p.transmitter.TriggerCredentialChange(r.Context(), stream.ID, subject, credType, initiator)
+		event, err = p.transmitter.TriggerCredentialChangeWithSession(r.Context(), stream.ID, sessionID, subject, credType, initiator)
 
 	case "device-compliance-change":
 		current := req.CurrentStatus
@@ -333,34 +333,34 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if previous == "" {
 			previous = ComplianceStatusCompliant
 		}
-		event, err = p.transmitter.TriggerDeviceComplianceChange(r.Context(), stream.ID, subject, current, previous)
+		event, err = p.transmitter.TriggerDeviceComplianceChangeWithSession(r.Context(), stream.ID, sessionID, subject, current, previous)
 
 	case "credential-compromise":
 		reason := req.Reason
 		if reason == "" {
 			reason = "Credentials potentially exposed in data breach"
 		}
-		event, err = p.transmitter.TriggerCredentialCompromise(r.Context(), stream.ID, subject, reason)
+		event, err = p.transmitter.TriggerCredentialCompromiseWithSession(r.Context(), stream.ID, sessionID, subject, reason)
 
 	case "account-disabled":
 		reason := req.Reason
 		if reason == "" {
 			reason = "Account disabled by administrator"
 		}
-		event, err = p.transmitter.TriggerAccountDisabled(r.Context(), stream.ID, subject, reason, initiator)
+		event, err = p.transmitter.TriggerAccountDisabledWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
 
 	case "account-enabled":
-		event, err = p.transmitter.TriggerAccountEnabled(r.Context(), stream.ID, subject, initiator)
+		event, err = p.transmitter.TriggerAccountEnabledWithSession(r.Context(), stream.ID, sessionID, subject, initiator)
 
 	case "account-purged":
-		event, err = p.transmitter.TriggerAccountPurged(r.Context(), stream.ID, subject, initiator)
+		event, err = p.transmitter.TriggerAccountPurgedWithSession(r.Context(), stream.ID, sessionID, subject, initiator)
 
 	case "identifier-changed":
 		if req.NewValue == "" {
 			writeError(w, http.StatusBadRequest, "new_value is required for identifier-changed")
 			return
 		}
-		event, err = p.transmitter.TriggerIdentifierChanged(r.Context(), stream.ID, subject,
+		event, err = p.transmitter.TriggerIdentifierChangedWithSession(r.Context(), stream.ID, sessionID, subject,
 			req.SubjectIdentifier, req.NewValue, initiator)
 
 	case "assurance-level-change":
@@ -372,14 +372,14 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if previous == "" {
 			previous = "aal2"
 		}
-		event, err = p.transmitter.TriggerAssuranceLevelChange(r.Context(), stream.ID, subject, current, previous)
+		event, err = p.transmitter.TriggerAssuranceLevelChangeWithSession(r.Context(), stream.ID, sessionID, subject, current, previous)
 
 	case "sessions-revoked":
 		reason := req.Reason
 		if reason == "" {
 			reason = "All sessions revoked due to security incident"
 		}
-		event, err = p.transmitter.TriggerSessionsRevoked(r.Context(), stream.ID, subject, reason, initiator)
+		event, err = p.transmitter.TriggerSessionsRevokedWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
 
 	default:
 		writeError(w, http.StatusBadRequest, "Unknown action: "+action)

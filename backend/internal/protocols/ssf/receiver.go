@@ -50,6 +50,7 @@ type ResponseAction struct {
 	Description string    `json:"description"`
 	Status      string    `json:"status"`
 	ExecutedAt  time.Time `json:"executed_at"`
+	SessionID   string    `json:"session_id,omitempty"`
 }
 
 // Response action status

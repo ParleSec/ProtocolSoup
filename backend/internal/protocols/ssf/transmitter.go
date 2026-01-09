@@ -343,9 +343,15 @@ func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID stri
 
 // TriggerSessionRevoked triggers a session revoked event
 func (t *Transmitter) TriggerSessionRevoked(ctx context.Context, streamID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
+	return t.TriggerSessionRevokedWithSession(ctx, streamID, "", subject, reason, initiator)
+}
+
+// TriggerSessionRevokedWithSession triggers a session revoked event with session context
+func (t *Transmitter) TriggerSessionRevokedWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeSessionRevoked,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		Reason:           reason,
 		InitiatingEntity: initiator,
@@ -366,9 +372,15 @@ func (t *Transmitter) TriggerSessionRevoked(ctx context.Context, streamID string
 
 // TriggerCredentialChange triggers a credential change event
 func (t *Transmitter) TriggerCredentialChange(ctx context.Context, streamID string, subject SubjectIdentifier, credentialType string, initiator string) (*StoredEvent, error) {
+	return t.TriggerCredentialChangeWithSession(ctx, streamID, "", subject, credentialType, initiator)
+}
+
+// TriggerCredentialChangeWithSession triggers a credential change event with session context
+func (t *Transmitter) TriggerCredentialChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, credentialType string, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeCredentialChange,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		CredentialType:   credentialType,
 		InitiatingEntity: initiator,
@@ -378,9 +390,15 @@ func (t *Transmitter) TriggerCredentialChange(ctx context.Context, streamID stri
 
 // TriggerDeviceComplianceChange triggers a device compliance change event
 func (t *Transmitter) TriggerDeviceComplianceChange(ctx context.Context, streamID string, subject SubjectIdentifier, currentStatus, previousStatus string) (*StoredEvent, error) {
+	return t.TriggerDeviceComplianceChangeWithSession(ctx, streamID, "", subject, currentStatus, previousStatus)
+}
+
+// TriggerDeviceComplianceChangeWithSession triggers a device compliance change event with session context
+func (t *Transmitter) TriggerDeviceComplianceChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, currentStatus, previousStatus string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeDeviceComplianceChange,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		CurrentStatus:    currentStatus,
 		PreviousStatus:   previousStatus,
@@ -391,9 +409,15 @@ func (t *Transmitter) TriggerDeviceComplianceChange(ctx context.Context, streamI
 
 // TriggerCredentialCompromise triggers a credential compromise event
 func (t *Transmitter) TriggerCredentialCompromise(ctx context.Context, streamID string, subject SubjectIdentifier, reason string) (*StoredEvent, error) {
+	return t.TriggerCredentialCompromiseWithSession(ctx, streamID, "", subject, reason)
+}
+
+// TriggerCredentialCompromiseWithSession triggers a credential compromise event with session context
+func (t *Transmitter) TriggerCredentialCompromiseWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeCredentialCompromise,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		Reason:           reason,
 		InitiatingEntity: InitiatingEntitySystem,
@@ -404,9 +428,15 @@ func (t *Transmitter) TriggerCredentialCompromise(ctx context.Context, streamID 
 
 // TriggerAccountDisabled triggers an account disabled event
 func (t *Transmitter) TriggerAccountDisabled(ctx context.Context, streamID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
+	return t.TriggerAccountDisabledWithSession(ctx, streamID, "", subject, reason, initiator)
+}
+
+// TriggerAccountDisabledWithSession triggers an account disabled event with session context
+func (t *Transmitter) TriggerAccountDisabledWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeAccountDisabled,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		Reason:           reason,
 		InitiatingEntity: initiator,
@@ -426,9 +456,15 @@ func (t *Transmitter) TriggerAccountDisabled(ctx context.Context, streamID strin
 
 // TriggerAccountEnabled triggers an account enabled event
 func (t *Transmitter) TriggerAccountEnabled(ctx context.Context, streamID string, subject SubjectIdentifier, initiator string) (*StoredEvent, error) {
+	return t.TriggerAccountEnabledWithSession(ctx, streamID, "", subject, initiator)
+}
+
+// TriggerAccountEnabledWithSession triggers an account enabled event with session context
+func (t *Transmitter) TriggerAccountEnabledWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeAccountEnabled,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		InitiatingEntity: initiator,
 	}
@@ -445,9 +481,15 @@ func (t *Transmitter) TriggerAccountEnabled(ctx context.Context, streamID string
 
 // TriggerAccountPurged triggers an account purged event
 func (t *Transmitter) TriggerAccountPurged(ctx context.Context, streamID string, subject SubjectIdentifier, initiator string) (*StoredEvent, error) {
+	return t.TriggerAccountPurgedWithSession(ctx, streamID, "", subject, initiator)
+}
+
+// TriggerAccountPurgedWithSession triggers an account purged event with session context
+func (t *Transmitter) TriggerAccountPurgedWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeAccountPurged,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		InitiatingEntity: initiator,
 	}
@@ -465,9 +507,15 @@ func (t *Transmitter) TriggerAccountPurged(ctx context.Context, streamID string,
 
 // TriggerIdentifierChanged triggers an identifier changed event
 func (t *Transmitter) TriggerIdentifierChanged(ctx context.Context, streamID string, subject SubjectIdentifier, oldValue, newValue string, initiator string) (*StoredEvent, error) {
+	return t.TriggerIdentifierChangedWithSession(ctx, streamID, "", subject, oldValue, newValue, initiator)
+}
+
+// TriggerIdentifierChangedWithSession triggers an identifier changed event with session context
+func (t *Transmitter) TriggerIdentifierChangedWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, oldValue, newValue string, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeIdentifierChanged,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		OldValue:         oldValue,
 		NewValue:         newValue,
@@ -478,9 +526,15 @@ func (t *Transmitter) TriggerIdentifierChanged(ctx context.Context, streamID str
 
 // TriggerAssuranceLevelChange triggers an assurance level change event
 func (t *Transmitter) TriggerAssuranceLevelChange(ctx context.Context, streamID string, subject SubjectIdentifier, currentLevel, previousLevel string) (*StoredEvent, error) {
+	return t.TriggerAssuranceLevelChangeWithSession(ctx, streamID, "", subject, currentLevel, previousLevel)
+}
+
+// TriggerAssuranceLevelChangeWithSession triggers an assurance level change event with session context
+func (t *Transmitter) TriggerAssuranceLevelChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, currentLevel, previousLevel string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeAssuranceLevelChange,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		CurrentStatus:    currentLevel,
 		PreviousStatus:   previousLevel,
@@ -491,9 +545,15 @@ func (t *Transmitter) TriggerAssuranceLevelChange(ctx context.Context, streamID 
 
 // TriggerSessionsRevoked triggers a sessions revoked event (all sessions)
 func (t *Transmitter) TriggerSessionsRevoked(ctx context.Context, streamID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
+	return t.TriggerSessionsRevokedWithSession(ctx, streamID, "", subject, reason, initiator)
+}
+
+// TriggerSessionsRevokedWithSession triggers a sessions revoked event with session context
+func (t *Transmitter) TriggerSessionsRevokedWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeSessionsRevoked,
 		Subject:          subject,
+		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		Reason:           reason,
 		InitiatingEntity: initiator,

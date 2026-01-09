@@ -41,6 +41,7 @@ type SETClaims struct {
 	Events        map[string]interface{} `json:"events"`
 	SubjectID     *SETSubject            `json:"sub_id,omitempty"`
 	TransactionID string                 `json:"txn,omitempty"`
+	SessionID     string                 `json:"ssf_session_id,omitempty"` // For sandbox session isolation
 }
 
 // EventPayload represents the payload within an event
@@ -142,6 +143,7 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string) (string, err
 		},
 		SubjectID:     subject,
 		TransactionID: event.TransactionID,
+		SessionID:     event.SessionID, // Include session ID for sandbox isolation
 	}
 
 	// Create and sign token

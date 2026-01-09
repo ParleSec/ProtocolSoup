@@ -47,6 +47,13 @@ type ActionExecutor interface {
 	EnableUser(ctx context.Context, email string) error
 	ForcePasswordReset(ctx context.Context, email string) error
 	InvalidateTokens(ctx context.Context, email string) error
+	// Session-aware methods for isolated sandbox
+	RevokeUserSessionsForSession(ctx context.Context, sessionID, email string) error
+	DisableUserForSession(ctx context.Context, sessionID, email string) error
+	EnableUserForSession(ctx context.Context, sessionID, email string) error
+	ForcePasswordResetForSession(ctx context.Context, sessionID, email string) error
+	InvalidateTokensForSession(ctx context.Context, sessionID, email string) error
+	InitSessionUserStates(sessionID string)
 }
 
 // JWKSCache caches public keys fetched from the transmitter
@@ -354,11 +361,23 @@ func (rs *ReceiverService) processSET(ctx context.Context, jti, setToken string)
 			subjectEmail = email
 		}
 	}
-	
+
+	// Extract session ID from the SET (custom claim for sandbox isolation)
+	sessionID := ""
+	if sid, ok := claims["ssf_session_id"].(string); ok {
+		sessionID = sid
+		log.Printf("[SSF Receiver] Session ID extracted: %s", sessionID)
+	}
+
+	// Initialize session states if this is a session-scoped event
+	if sessionID != "" && rs.actionExecutor != nil {
+		rs.actionExecutor.InitSessionUserStates(sessionID)
+	}
+
 	// Process events and execute response actions
 	for _, event := range decoded.Events {
-		log.Printf("[SSF Receiver] Processing event: %s for subject: %s", event.Type, subjectEmail)
-		rs.executeResponseActions(ctx, jti, event, subjectEmail)
+		log.Printf("[SSF Receiver] Processing event: %s for subject: %s (session: %s)", event.Type, subjectEmail, sessionID)
+		rs.executeResponseActions(ctx, jti, event, subjectEmail, sessionID)
 	}
 	
 	log.Printf("[SSF Receiver] SET processed successfully: %s", jti)
@@ -366,7 +385,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, jti, setToken string)
 }
 
 // executeResponseActions executes real response actions
-func (rs *ReceiverService) executeResponseActions(ctx context.Context, eventID string, event DecodedEvent, subjectEmail string) {
+func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string) {
 	metadata := event.Metadata
 	
 	for i, actionDesc := range metadata.ResponseActions {
@@ -375,24 +394,26 @@ func (rs *ReceiverService) executeResponseActions(ctx context.Context, eventID s
 		status := ResponseStatusExecuted
 		
 		// Execute real actions based on event type and action description
+		// Use session-aware methods to ensure state changes are isolated per user session
 		var err error
 		if rs.actionExecutor != nil && subjectEmail != "" {
+			ctx := context.Background()
 			switch {
 			case containsAny(actionDesc, "terminate", "revoke", "session"):
-				log.Printf("[SSF Receiver] Executing: Revoke sessions for %s", subjectEmail)
-				err = rs.actionExecutor.RevokeUserSessions(ctx, subjectEmail)
+				log.Printf("[SSF Receiver] Executing: Revoke sessions for %s (session: %s)", subjectEmail, sessionID)
+				err = rs.actionExecutor.RevokeUserSessionsForSession(ctx, sessionID, subjectEmail)
 			case containsAny(actionDesc, "disable", "suspend"):
-				log.Printf("[SSF Receiver] Executing: Disable user %s", subjectEmail)
-				err = rs.actionExecutor.DisableUser(ctx, subjectEmail)
+				log.Printf("[SSF Receiver] Executing: Disable user %s (session: %s)", subjectEmail, sessionID)
+				err = rs.actionExecutor.DisableUserForSession(ctx, sessionID, subjectEmail)
 			case containsAny(actionDesc, "enable", "reactivate"):
-				log.Printf("[SSF Receiver] Executing: Enable user %s", subjectEmail)
-				err = rs.actionExecutor.EnableUser(ctx, subjectEmail)
+				log.Printf("[SSF Receiver] Executing: Enable user %s (session: %s)", subjectEmail, sessionID)
+				err = rs.actionExecutor.EnableUserForSession(ctx, sessionID, subjectEmail)
 			case containsAny(actionDesc, "password", "reset"):
-				log.Printf("[SSF Receiver] Executing: Force password reset for %s", subjectEmail)
-				err = rs.actionExecutor.ForcePasswordReset(ctx, subjectEmail)
+				log.Printf("[SSF Receiver] Executing: Force password reset for %s (session: %s)", subjectEmail, sessionID)
+				err = rs.actionExecutor.ForcePasswordResetForSession(ctx, sessionID, subjectEmail)
 			case containsAny(actionDesc, "invalidate", "token"):
-				log.Printf("[SSF Receiver] Executing: Invalidate tokens for %s", subjectEmail)
-				err = rs.actionExecutor.InvalidateTokens(ctx, subjectEmail)
+				log.Printf("[SSF Receiver] Executing: Invalidate tokens for %s (session: %s)", subjectEmail, sessionID)
+				err = rs.actionExecutor.InvalidateTokensForSession(ctx, sessionID, subjectEmail)
 			default:
 				log.Printf("[SSF Receiver] Executing: %s (generic action)", actionDesc)
 			}
@@ -408,13 +429,14 @@ func (rs *ReceiverService) executeResponseActions(ctx context.Context, eventID s
 			EventID:     eventID,
 			EventType:   event.Type,
 			Action:      actionDesc,
-			Description: fmt.Sprintf("Real execution: %s", actionDesc),
+			Description: fmt.Sprintf("Real execution: %s (session: %s)", actionDesc, sessionID),
 			Status:      status,
 			ExecutedAt:  executedAt,
+			SessionID:   sessionID,
 		}
 		
 		rs.addResponseAction(action)
-		log.Printf("[SSF Receiver] Action recorded: %s - %s", actionDesc, status)
+		log.Printf("[SSF Receiver] Action recorded: %s - %s (session: %s)", actionDesc, status, sessionID)
 	}
 }
 
