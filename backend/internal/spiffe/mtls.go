@@ -298,3 +298,134 @@ func PeerSPIFFEID(state tls.ConnectionState, trustDomain spiffeid.TrustDomain) (
 	return VerifyCertificate(state.PeerCertificates[0], trustDomain)
 }
 
+// MTLSCallResult contains the results of a real mTLS call
+type MTLSCallResult struct {
+	Success          bool      `json:"success"`
+	ClientSPIFFEID   string    `json:"client_spiffe_id"`
+	ServerSPIFFEID   string    `json:"server_spiffe_id"`
+	TLSVersion       string    `json:"tls_version"`
+	CipherSuite      string    `json:"cipher_suite"`
+	ServerName       string    `json:"server_name"`
+	HandshakeTime    string    `json:"handshake_time"`
+	PeerCertSubject  string    `json:"peer_cert_subject"`
+	PeerCertIssuer   string    `json:"peer_cert_issuer"`
+	PeerCertExpiry   time.Time `json:"peer_cert_expiry"`
+	PeerCertSerial   string    `json:"peer_cert_serial"`
+	TrustChainLength int       `json:"trust_chain_length"`
+	Error            string    `json:"error,omitempty"`
+	Steps            []string  `json:"steps"`
+}
+
+// PerformMTLSCall makes a real mTLS connection to a target endpoint
+// This demonstrates actual mutual TLS authentication using X.509-SVIDs
+func (c *WorkloadClient) PerformMTLSCall(ctx context.Context, targetAddr string) (*MTLSCallResult, error) {
+	result := &MTLSCallResult{
+		Steps: make([]string, 0),
+	}
+
+	if !c.IsEnabled() {
+		return nil, fmt.Errorf("SPIFFE client not enabled")
+	}
+
+	// Step 1: Get our X.509-SVID
+	startTime := time.Now()
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Fetching X.509-SVID from SPIRE Agent Workload API", time.Now().Format("15:04:05.000")))
+
+	svid, err := c.GetX509SVID()
+	if err != nil {
+		result.Error = fmt.Sprintf("Failed to get X.509-SVID: %v", err)
+		return result, err
+	}
+	result.ClientSPIFFEID = svid.ID.String()
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Obtained X.509-SVID: %s", time.Now().Format("15:04:05.000"), svid.ID.String()))
+
+	// Step 2: Get trust bundle for server verification
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Fetching trust bundle for peer verification", time.Now().Format("15:04:05.000")))
+
+	bundle, err := c.GetTrustBundle()
+	if err != nil {
+		result.Error = fmt.Sprintf("Failed to get trust bundle: %v", err)
+		return result, err
+	}
+	result.TrustChainLength = len(bundle)
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Trust bundle loaded with %d CA certificate(s)", time.Now().Format("15:04:05.000"), len(bundle)))
+
+	// Step 3: Create mTLS config
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Configuring TLS with X.509-SVID and trust bundle", time.Now().Format("15:04:05.000")))
+
+	x509Source := c.X509Source()
+	if x509Source == nil {
+		result.Error = "X509Source not available"
+		return result, fmt.Errorf("X509Source not available")
+	}
+
+	// Create TLS config that accepts any member of our trust domain
+	tlsConfig := tlsconfig.MTLSClientConfig(x509Source, x509Source, tlsconfig.AuthorizeMemberOf(c.trustDomain))
+
+	// Step 4: Dial the target with mTLS
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Initiating TLS handshake to %s", time.Now().Format("15:04:05.000"), targetAddr))
+
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", targetAddr, tlsConfig)
+	if err != nil {
+		result.Error = fmt.Sprintf("TLS dial failed: %v", err)
+		result.Steps = append(result.Steps, fmt.Sprintf("[%s] ERROR: TLS handshake failed: %v", time.Now().Format("15:04:05.000"), err))
+		return result, err
+	}
+	defer conn.Close()
+
+	handshakeTime := time.Since(startTime)
+	result.HandshakeTime = handshakeTime.String()
+	result.Success = true
+
+	// Step 5: Extract connection details
+	state := conn.ConnectionState()
+	result.TLSVersion = tlsVersionString(state.Version)
+	result.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
+	result.ServerName = state.ServerName
+
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] TLS handshake completed in %s", time.Now().Format("15:04:05.000"), handshakeTime))
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Negotiated TLS version: %s", time.Now().Format("15:04:05.000"), result.TLSVersion))
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Negotiated cipher suite: %s", time.Now().Format("15:04:05.000"), result.CipherSuite))
+
+	// Step 6: Extract peer certificate info
+	if len(state.PeerCertificates) > 0 {
+		peerCert := state.PeerCertificates[0]
+		result.PeerCertSubject = peerCert.Subject.String()
+		result.PeerCertIssuer = peerCert.Issuer.String()
+		result.PeerCertExpiry = peerCert.NotAfter
+		result.PeerCertSerial = peerCert.SerialNumber.String()
+
+		// Extract SPIFFE ID from peer certificate
+		for _, uri := range peerCert.URIs {
+			if uri.Scheme == "spiffe" {
+				result.ServerSPIFFEID = uri.String()
+				break
+			}
+		}
+
+		result.Steps = append(result.Steps, fmt.Sprintf("[%s] Server presented certificate for: %s", time.Now().Format("15:04:05.000"), result.ServerSPIFFEID))
+		result.Steps = append(result.Steps, fmt.Sprintf("[%s] Certificate verified against trust bundle", time.Now().Format("15:04:05.000")))
+		result.Steps = append(result.Steps, fmt.Sprintf("[%s] SPIFFE ID validated in trust domain: %s", time.Now().Format("15:04:05.000"), c.trustDomain.String()))
+	}
+
+	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Mutual TLS authentication successful!", time.Now().Format("15:04:05.000")))
+
+	return result, nil
+}
+
+// tlsVersionString returns a human-readable TLS version string
+func tlsVersionString(version uint16) string {
+	switch version {
+	case tls.VersionTLS10:
+		return "TLS 1.0"
+	case tls.VersionTLS11:
+		return "TLS 1.1"
+	case tls.VersionTLS12:
+		return "TLS 1.2"
+	case tls.VersionTLS13:
+		return "TLS 1.3"
+	default:
+		return fmt.Sprintf("Unknown (0x%04x)", version)
+	}
+}

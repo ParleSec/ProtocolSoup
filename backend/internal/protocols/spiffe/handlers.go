@@ -741,7 +741,7 @@ func (p *Plugin) handleMTLSDemo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleMTLSCall demonstrates an mTLS call
+// handleMTLSCall performs a REAL mTLS call demonstrating mutual TLS authentication
 func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
 		writeJSON(w, http.StatusOK, MTLSDemoResponse{
@@ -763,26 +763,54 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Real mTLS demonstration would go here
-	// This would involve making an actual mTLS call to another service
+	// Get target address from query param, or use self-connection to SPIRE server
+	targetAddr := r.URL.Query().Get("target")
+	if targetAddr == "" {
+		// Default: connect to SPIRE Server for mTLS demonstration
+		// This proves we can establish mTLS with our SVID
+		targetAddr = "protocolsoup-spire.internal:8081"
+	}
 
-	svid, _ := p.workloadClient.GetSVIDInfo()
-	
-	writeJSON(w, http.StatusOK, MTLSDemoResponse{
-		Success:      true,
-		ClientSPIFFE: svid.SPIFFEID,
-		ServerSPIFFE: svid.SPIFFEID,
-		TLSVersion:   "TLS 1.3",
-		CipherSuite:  "TLS_AES_256_GCM_SHA384",
-		Steps: []string{
-			"Client X.509-SVID obtained from Workload API",
-			"TLS handshake with server",
-			"Server certificate verified against trust bundle",
-			"Client certificate presented and verified",
-			"SPIFFE IDs extracted from certificates",
-			"Authorization check passed",
-			"Encrypted channel established",
-		},
+	// Perform REAL mTLS call
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	result, err := p.workloadClient.PerformMTLSCall(ctx, targetAddr)
+	if err != nil {
+		// Even on error, we return the partial result with steps showing what happened
+		if result != nil {
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"success":          false,
+				"client_spiffe_id": result.ClientSPIFFEID,
+				"server_spiffe_id": result.ServerSPIFFEID,
+				"tls_version":      result.TLSVersion,
+				"cipher_suite":     result.CipherSuite,
+				"error":            result.Error,
+				"steps":            result.Steps,
+				"target":           targetAddr,
+			})
+			return
+		}
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("mTLS call failed: %v", err))
+		return
+	}
+
+	// Return the full real mTLS result
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":            result.Success,
+		"client_spiffe_id":   result.ClientSPIFFEID,
+		"server_spiffe_id":   result.ServerSPIFFEID,
+		"tls_version":        result.TLSVersion,
+		"cipher_suite":       result.CipherSuite,
+		"server_name":        result.ServerName,
+		"handshake_time":     result.HandshakeTime,
+		"peer_cert_subject":  result.PeerCertSubject,
+		"peer_cert_issuer":   result.PeerCertIssuer,
+		"peer_cert_expiry":   result.PeerCertExpiry,
+		"peer_cert_serial":   result.PeerCertSerial,
+		"trust_chain_length": result.TrustChainLength,
+		"steps":              result.Steps,
+		"target":             targetAddr,
 	})
 }
 
@@ -861,7 +889,7 @@ func (p *Plugin) handleJWTAuthCall(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleRotationDemo demonstrates certificate rotation
+// handleRotationDemo shows REAL certificate rotation events captured from the SPIRE Agent
 func (p *Plugin) handleRotationDemo(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -888,19 +916,54 @@ func (p *Plugin) handleRotationDemo(w http.ResponseWriter, r *http.Request) {
 	lifetime := info.NotAfter.Sub(info.NotBefore)
 	rotationTime := info.NotBefore.Add(lifetime / 2)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"description":     "Automatic X.509-SVID rotation demonstration",
-		"enabled":         true,
-		"spiffe_id":       info.SPIFFEID,
-		"current_expiry":  info.NotAfter,
-		"next_rotation":   rotationTime,
+	// Get REAL rotation events captured by the workload client
+	rotationEvents := p.workloadClient.GetRotationEvents()
+	lastRotation := p.workloadClient.GetLastRotation()
+
+	// Convert events to a format suitable for JSON response
+	eventList := make([]map[string]interface{}, len(rotationEvents))
+	for i, event := range rotationEvents {
+		eventList[i] = map[string]interface{}{
+			"timestamp":         event.Timestamp,
+			"old_serial_number": event.OldSerialNumber,
+			"new_serial_number": event.NewSerialNumber,
+			"old_expiry":        event.OldExpiry,
+			"new_expiry":        event.NewExpiry,
+			"spiffe_id":         event.SPIFFEID,
+			"trigger_reason":    event.TriggerReason,
+		}
+	}
+
+	response := map[string]interface{}{
+		"description":      "REAL X.509-SVID rotation events captured from SPIRE Agent",
+		"enabled":          true,
+		"spiffe_id":        info.SPIFFEID,
+		"current_serial":   info.SerialNumber,
+		"current_expiry":   info.NotAfter,
+		"current_issued":   info.NotBefore,
+		"next_rotation":    rotationTime,
 		"time_to_rotation": time.Until(rotationTime).String(),
 		"rotation_info": map[string]string{
-			"strategy":  "Rotate at 50% of TTL",
-			"mechanism": "Streaming Workload API (FetchX509SVID)",
-			"impact":    "Zero downtime - new connections use new cert",
+			"strategy":  "Rotate at ~50% of TTL (12 hours for 24h TTL)",
+			"mechanism": "SPIRE Agent streaming Workload API (FetchX509SVID)",
+			"impact":    "Zero downtime - X509Source automatically updates certificate",
 		},
-	})
+		"rotation_events": eventList,
+		"total_rotations": len(rotationEvents),
+	}
+
+	// Add last rotation details if available
+	if lastRotation != nil {
+		response["last_rotation"] = map[string]interface{}{
+			"timestamp":       lastRotation.Timestamp,
+			"trigger_reason":  lastRotation.TriggerReason,
+			"time_since":      time.Since(lastRotation.Timestamp).String(),
+			"new_serial":      lastRotation.NewSerialNumber,
+			"certificate_ttl": lastRotation.NewExpiry.Sub(lastRotation.Timestamp).String(),
+		}
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 // Helper functions

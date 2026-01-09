@@ -77,17 +77,32 @@ func getEnvBool(key string, defaultVal bool) bool {
 	return val == "true" || val == "1" || val == "yes"
 }
 
+// RotationEvent records a certificate rotation event
+type RotationEvent struct {
+	Timestamp       time.Time `json:"timestamp"`
+	OldSerialNumber string    `json:"old_serial_number"`
+	NewSerialNumber string    `json:"new_serial_number"`
+	OldExpiry       time.Time `json:"old_expiry"`
+	NewExpiry       time.Time `json:"new_expiry"`
+	SPIFFEID        string    `json:"spiffe_id"`
+	TriggerReason   string    `json:"trigger_reason"` // "ttl_threshold", "manual", "initial"
+}
+
 // WorkloadClient provides access to SPIFFE SVIDs via the Workload API
 type WorkloadClient struct {
-	config      *Config
-	x509Source  *workloadapi.X509Source
-	jwtSource   *workloadapi.JWTSource
-	bundleSet   *workloadapi.BundleSource
-	trustDomain spiffeid.TrustDomain
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	started     bool
+	config         *Config
+	x509Source     *workloadapi.X509Source
+	jwtSource      *workloadapi.JWTSource
+	bundleSet      *workloadapi.BundleSource
+	trustDomain    spiffeid.TrustDomain
+	mu             sync.RWMutex
+	ctx            context.Context
+	cancel         context.CancelFunc
+	started        bool
+	rotationEvents []RotationEvent
+	rotationMu     sync.RWMutex
+	lastSerial     string
+	lastExpiry     time.Time
 }
 
 // NewWorkloadClient creates a new SPIFFE Workload API client
@@ -180,12 +195,28 @@ func (c *WorkloadClient) Start() error {
 	return nil
 }
 
-// monitorSVIDUpdates logs SVID rotation events
+// monitorSVIDUpdates logs and records SVID rotation events
 func (c *WorkloadClient) monitorSVIDUpdates() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(10 * time.Second) // Check every 10 seconds for responsiveness
 	defer ticker.Stop()
 
-	var lastSerial string
+	// Initialize with current SVID
+	if svid, err := c.GetX509SVID(); err == nil {
+		c.rotationMu.Lock()
+		c.lastSerial = svid.Certificates[0].SerialNumber.String()
+		c.lastExpiry = svid.Certificates[0].NotAfter
+		// Record initial SVID as first "rotation" event
+		c.rotationEvents = append(c.rotationEvents, RotationEvent{
+			Timestamp:       time.Now(),
+			OldSerialNumber: "",
+			NewSerialNumber: c.lastSerial,
+			OldExpiry:       time.Time{},
+			NewExpiry:       c.lastExpiry,
+			SPIFFEID:        svid.ID.String(),
+			TriggerReason:   "initial",
+		})
+		c.rotationMu.Unlock()
+	}
 
 	for {
 		select {
@@ -198,16 +229,61 @@ func (c *WorkloadClient) monitorSVIDUpdates() {
 				continue
 			}
 
-			// Check if certificate was rotated
 			currentSerial := svid.Certificates[0].SerialNumber.String()
-			if lastSerial != "" && lastSerial != currentSerial {
-				log.Printf("X509-SVID rotated - New serial: %s, Expires: %s",
-					currentSerial[:16]+"...",
-					svid.Certificates[0].NotAfter.Format(time.RFC3339))
+			currentExpiry := svid.Certificates[0].NotAfter
+
+			c.rotationMu.Lock()
+			if c.lastSerial != "" && c.lastSerial != currentSerial {
+				// Rotation detected!
+				event := RotationEvent{
+					Timestamp:       time.Now(),
+					OldSerialNumber: c.lastSerial,
+					NewSerialNumber: currentSerial,
+					OldExpiry:       c.lastExpiry,
+					NewExpiry:       currentExpiry,
+					SPIFFEID:        svid.ID.String(),
+					TriggerReason:   "ttl_threshold",
+				}
+				c.rotationEvents = append(c.rotationEvents, event)
+
+				// Keep only last 100 events
+				if len(c.rotationEvents) > 100 {
+					c.rotationEvents = c.rotationEvents[len(c.rotationEvents)-100:]
+				}
+
+				log.Printf("X509-SVID rotated - Old serial: %s..., New serial: %s..., New expiry: %s",
+					c.lastSerial[:min(16, len(c.lastSerial))],
+					currentSerial[:min(16, len(currentSerial))],
+					currentExpiry.Format(time.RFC3339))
 			}
-			lastSerial = currentSerial
+			c.lastSerial = currentSerial
+			c.lastExpiry = currentExpiry
+			c.rotationMu.Unlock()
 		}
 	}
+}
+
+// GetRotationEvents returns the recorded rotation events
+func (c *WorkloadClient) GetRotationEvents() []RotationEvent {
+	c.rotationMu.RLock()
+	defer c.rotationMu.RUnlock()
+
+	// Return a copy to avoid race conditions
+	events := make([]RotationEvent, len(c.rotationEvents))
+	copy(events, c.rotationEvents)
+	return events
+}
+
+// GetLastRotation returns the most recent rotation event
+func (c *WorkloadClient) GetLastRotation() *RotationEvent {
+	c.rotationMu.RLock()
+	defer c.rotationMu.RUnlock()
+
+	if len(c.rotationEvents) == 0 {
+		return nil
+	}
+	event := c.rotationEvents[len(c.rotationEvents)-1]
+	return &event
 }
 
 // Close releases all resources
