@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -123,16 +124,20 @@ func (s *Server) setupStaticFileServing(r chi.Router) {
 	// Serve static files with SPA fallback
 	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 		// Get the requested path
-		path := r.URL.Path
+		urlPath := r.URL.Path
 
 		// Try to serve the exact file
-		fullPath := filepath.Join(staticDir, path)
+		// IMPORTANT: r.URL.Path is rooted (starts with "/"). If we Join it directly, it becomes an absolute path
+		// and ignores staticDir on Unix-like systems, which breaks the existence check and forces SPA fallback.
+		cleanURLPath := path.Clean(urlPath)
+		rel := strings.TrimPrefix(cleanURLPath, "/")
+		fullPath := filepath.Join(staticDir, filepath.FromSlash(rel))
 		
 		// Check if file exists (not a directory)
 		info, err := os.Stat(fullPath)
 		if err == nil && !info.IsDir() {
 			// Set appropriate cache headers for assets
-			if isStaticAsset(path) {
+			if isStaticAsset(urlPath) {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			}
 			fileServer.ServeHTTP(w, r)
