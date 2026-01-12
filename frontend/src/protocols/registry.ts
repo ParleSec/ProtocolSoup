@@ -227,5 +227,21 @@ export const protocolMeta: Record<string, {
       'IdP Integration',
     ],
   },
+  // SSF - Shared Signals Framework
+  ssf: {
+    icon: 'Radio',
+    color: 'amber',
+    gradient: 'from-amber-500 to-orange-500',
+    features: [
+      'Security Event Tokens (SET)',
+      'CAEP Events',
+      'RISC Events',
+      'Push Delivery',
+      'Poll Delivery',
+      'Stream Management',
+      'Real-time Signals',
+      'Zero Trust Ready',
+    ],
+  },
 }
 

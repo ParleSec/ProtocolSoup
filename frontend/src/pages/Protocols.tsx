@@ -6,7 +6,7 @@
 import { Link } from 'react-router-dom'
 import { 
   Key, Fingerprint, FileKey, ChevronRight, 
-  ExternalLink, BookOpen, Shield, Users
+  ExternalLink, BookOpen, Shield, Users, Radio
 } from 'lucide-react'
 import { SEO } from '../components/common/SEO'
 import { generateBreadcrumbSchema, generateFAQSchema } from '../utils/schema'
@@ -92,6 +92,24 @@ const protocols = [
       { id: 'bulk-operations', name: 'Bulk Operations', rfc: 'RFC 7644 §3.7' },
     ],
   },
+  {
+    id: 'ssf',
+    name: 'Shared Signals (SSF)',
+    description: 'OpenID Shared Signals Framework for real-time security event sharing. Enables continuous access evaluation (CAEP) and risk incident coordination (RISC) between identity providers and relying parties.',
+    icon: Radio,
+    color: 'amber',
+    spec: 'SSF 1.0, CAEP 1.0, RISC 1.0, RFC 8417',
+    specUrl: 'https://openid.net/specs/openid-sse-framework-1_0.html',
+    flows: [
+      { id: 'ssf-stream-configuration', name: 'Stream Configuration', rfc: 'SSF §4' },
+      { id: 'ssf-push-delivery', name: 'Push Delivery', rfc: 'SSF §5.2.1' },
+      { id: 'ssf-poll-delivery', name: 'Poll Delivery', rfc: 'SSF §5.2.2' },
+      { id: 'caep-session-revoked', name: 'Session Revoked (CAEP)', rfc: 'CAEP §3.1' },
+      { id: 'caep-credential-change', name: 'Credential Change (CAEP)', rfc: 'CAEP §3.2' },
+      { id: 'risc-account-disabled', name: 'Account Disabled (RISC)', rfc: 'RISC §2.2' },
+      { id: 'risc-credential-compromise', name: 'Credential Compromise (RISC)', rfc: 'RISC §2.1' },
+    ],
+  },
 ]
 
 const comingSoon = [
@@ -109,7 +127,7 @@ export function Protocols() {
   const faqSchema = generateFAQSchema([
     {
       question: 'What authentication protocols does Protocol Soup support?',
-      answer: 'Protocol Soup supports OAuth 2.0, OpenID Connect (OIDC), SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0. Each protocol includes multiple flows and detailed documentation.',
+      answer: 'Protocol Soup supports OAuth 2.0, OpenID Connect (OIDC), SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF (Shared Signals Framework). Each protocol includes multiple flows and detailed documentation.',
     },
     {
       question: 'What is the difference between OAuth 2.0 and OpenID Connect?',
@@ -119,13 +137,17 @@ export function Protocols() {
       question: 'What is SAML used for?',
       answer: 'SAML (Security Assertion Markup Language) is used for enterprise single sign-on (SSO), allowing users to authenticate once and access multiple applications without re-entering credentials.',
     },
+    {
+      question: 'What is the Shared Signals Framework (SSF)?',
+      answer: 'SSF is an OpenID standard for real-time security event sharing between identity providers and applications. It includes CAEP (Continuous Access Evaluation Profile) for session management and RISC (Risk Incident Sharing and Coordination) for security incident response.',
+    },
   ])
 
   return (
     <>
       <SEO
-        title="Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM"
-        description="Comprehensive reference for authentication and identity protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0."
+        title="Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM, SSF"
+        description="Comprehensive reference for authentication and identity protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and Shared Signals Framework (SSF)."
         canonical="/protocols"
         ogType="website"
         keywords={[
@@ -135,6 +157,10 @@ export function Protocols() {
           'oidc specification',
           'saml documentation',
           'security protocols',
+          'shared signals framework',
+          'ssf caep risc',
+          'security event tokens',
+          'continuous access evaluation',
         ]}
         structuredData={[breadcrumbSchema, faqSchema]}
       />
@@ -212,6 +238,12 @@ function ProtocolCard({ protocol }: { protocol: typeof protocols[0] }) {
       bg: 'bg-purple-500/10',
       text: 'text-purple-400',
       tag: 'bg-purple-500/10 text-purple-300 border-purple-500/20',
+    },
+    amber: {
+      border: 'border-amber-500/20',
+      bg: 'bg-amber-500/10',
+      text: 'text-amber-400',
+      tag: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
     },
   }
   const c = colors[protocol.color as keyof typeof colors]

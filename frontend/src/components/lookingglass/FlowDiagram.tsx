@@ -287,6 +287,67 @@ const actorConfig: Record<string, {
     shortLabel: 'DB',
     color: '#9ca3af', // gray
   },
+  // SSF (Shared Signals Framework) actors
+  'Transmitter': {
+    icon: Shield,
+    label: 'Transmitter',
+    shortLabel: 'Transmitter',
+    color: '#f59e0b', // amber
+  },
+  'Receiver': {
+    icon: Globe,
+    label: 'Receiver',
+    shortLabel: 'Receiver',
+    color: '#60a5fa', // blue
+  },
+  'Receiver (RP)': {
+    icon: Globe,
+    label: 'Receiver (Relying Party)',
+    shortLabel: 'Receiver',
+    color: '#60a5fa', // blue
+  },
+  'All Subscribed Receivers': {
+    icon: Users,
+    label: 'All Subscribed Receivers',
+    shortLabel: 'Receivers',
+    color: '#60a5fa', // blue
+  },
+  'Session Store': {
+    icon: Database,
+    label: 'Session Store',
+    shortLabel: 'Sessions',
+    color: '#fb923c', // orange
+  },
+  'Token Store': {
+    icon: Database,
+    label: 'Token Store',
+    shortLabel: 'Tokens',
+    color: '#fb923c', // orange
+  },
+  'User Store': {
+    icon: Database,
+    label: 'User Store',
+    shortLabel: 'Users',
+    color: '#a855f7', // purple
+  },
+  'Access Control': {
+    icon: Shield,
+    label: 'Access Control',
+    shortLabel: 'Access',
+    color: '#ef4444', // red
+  },
+  'Credential Cache': {
+    icon: Database,
+    label: 'Credential Cache',
+    shortLabel: 'Creds',
+    color: '#fb923c', // orange
+  },
+  'Security Operations': {
+    icon: Shield,
+    label: 'Security Operations',
+    shortLabel: 'SecOps',
+    color: '#ef4444', // red
+  },
 }
 
 // Message type colors - more muted

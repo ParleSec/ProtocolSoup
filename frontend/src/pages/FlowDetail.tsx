@@ -5,7 +5,7 @@ import {
   ArrowLeft, Eye, ChevronDown, ChevronRight,
   Lock, Key, AlertTriangle, Copy, Check,
   Code, ExternalLink, Loader2, ArrowRight,
-  Fingerprint, Server, Globe, FileKey, Shield, Users
+  Fingerprint, Server, Globe, FileKey, Shield, Users, Radio
 } from 'lucide-react'
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { FlowDiagram } from '../components/lookingglass/FlowDiagram'
@@ -642,6 +642,415 @@ bulkResponse.Operations.forEach(op => {
 });`
     }
 
+    // SSF (Shared Signals Framework) flows
+    if (mappedFlowId === 'ssf_stream_configuration') {
+      return `// SSF Stream Configuration (SSF §4)
+const SSF_BASE = 'https://idp.example.com';
+
+// 1. Discover SSF configuration
+const config = await fetch(\`\${SSF_BASE}/.well-known/ssf-configuration\`)
+  .then(r => r.json());
+
+console.log('Issuer:', config.issuer);
+console.log('Delivery methods:', config.delivery_methods_supported);
+console.log('Configuration endpoint:', config.configuration_endpoint);
+
+// 2. Create a stream
+const stream = await fetch(config.configuration_endpoint, {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer ' + managementToken,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    delivery: {
+      method: 'urn:ietf:rfc:8935', // Push delivery
+      endpoint_url: 'https://myapp.example.com/ssf/push',
+    },
+    events_requested: [
+      'https://schemas.openid.net/secevent/caep/event-type/session-revoked',
+      'https://schemas.openid.net/secevent/risc/event-type/account-disabled',
+    ],
+    format: 'email', // Subject identifier format
+  }),
+}).then(r => r.json());
+
+console.log('Stream ID:', stream.stream_id);
+console.log('Events delivered:', stream.events_delivered);
+
+// 3. Fetch JWKS for SET verification
+const jwks = await fetch(config.jwks_uri).then(r => r.json());
+console.log('Verification keys:', jwks.keys.length);`
+    }
+
+    if (mappedFlowId === 'ssf_push_delivery') {
+      return `// SSF Push Delivery - Receiver Implementation (RFC 8935)
+import * as jose from 'jose';
+
+// Store for replay detection
+const processedJTIs = new Set();
+let jwks = null;
+
+// Fetch and cache JWKS
+async function getJWKS() {
+  if (!jwks) {
+    const res = await fetch('https://idp.example.com/ssf/jwks');
+    jwks = jose.createRemoteJWKSet(new URL('https://idp.example.com/ssf/jwks'));
+  }
+  return jwks;
+}
+
+// Push endpoint handler
+app.post('/ssf/push', async (req, res) => {
+  const setToken = req.body; // Raw JWT string
+  
+  try {
+    // 1. Verify SET signature
+    const keySet = await getJWKS();
+    const { payload, protectedHeader } = await jose.jwtVerify(setToken, keySet, {
+      issuer: 'https://idp.example.com',
+      audience: 'https://myapp.example.com',
+    });
+    
+    // 2. Replay detection
+    if (processedJTIs.has(payload.jti)) {
+      return res.status(400).json({ err: 'invalid_request', description: 'Duplicate event' });
+    }
+    processedJTIs.add(payload.jti);
+    
+    // 3. Process events
+    for (const [eventType, eventData] of Object.entries(payload.events)) {
+      await handleSecurityEvent(eventType, payload.sub_id, eventData);
+    }
+    
+    // 4. Acknowledge receipt
+    res.status(202).send();
+    
+  } catch (error) {
+    console.error('SET validation failed:', error);
+    res.status(400).json({ err: 'invalid_request', description: error.message });
+  }
+});
+
+async function handleSecurityEvent(eventType, subject, eventData) {
+  switch (eventType) {
+    case 'https://schemas.openid.net/secevent/caep/event-type/session-revoked':
+      await revokeUserSessions(subject.email);
+      break;
+    case 'https://schemas.openid.net/secevent/risc/event-type/account-disabled':
+      await disableUserAccount(subject.email);
+      break;
+  }
+}`
+    }
+
+    if (mappedFlowId === 'ssf_poll_delivery') {
+      return `// SSF Poll Delivery - Receiver Implementation (RFC 8936)
+import * as jose from 'jose';
+
+const POLL_ENDPOINT = 'https://idp.example.com/ssf/poll';
+const acknowledgedJTIs = [];
+
+async function pollForEvents() {
+  const response = await fetch(POLL_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      maxEvents: 10,
+      returnImmediately: false, // Long-polling
+      acks: acknowledgedJTIs.splice(0), // Acknowledge previously processed
+    }),
+  });
+  
+  const data = await response.json();
+  
+  // Process each SET
+  for (const [jti, setToken] of Object.entries(data.sets)) {
+    try {
+      // Verify and process SET
+      const payload = await verifyAndProcessSET(setToken);
+      acknowledgedJTIs.push(jti);
+    } catch (error) {
+      console.error(\`Failed to process SET \${jti}:\`, error);
+    }
+  }
+  
+  // Continue polling if more events available
+  if (data.moreAvailable) {
+    setImmediate(pollForEvents);
+  } else {
+    setTimeout(pollForEvents, 30000); // Poll every 30 seconds
+  }
+}
+
+async function verifyAndProcessSET(setToken) {
+  const jwks = jose.createRemoteJWKSet(new URL('https://idp.example.com/ssf/jwks'));
+  const { payload } = await jose.jwtVerify(setToken, jwks, {
+    issuer: 'https://idp.example.com',
+    audience: 'https://myapp.example.com',
+  });
+  
+  // Process event
+  for (const [eventType, eventData] of Object.entries(payload.events)) {
+    await handleSecurityEvent(eventType, payload.sub_id, eventData);
+  }
+  
+  return payload;
+}
+
+// Start polling
+pollForEvents();`
+    }
+
+    if (mappedFlowId === 'caep_session_revoked') {
+      return `// CAEP Session Revoked - Transmitter & Receiver (CAEP §3.1)
+import * as jose from 'jose';
+
+// === TRANSMITTER: Generate Session Revoked SET ===
+async function emitSessionRevokedEvent(subject, reason, initiator) {
+  const privateKey = await jose.importPKCS8(SIGNING_KEY, 'RS256');
+  
+  const set = await new jose.SignJWT({
+    iss: 'https://idp.example.com',
+    aud: ['https://app1.example.com', 'https://app2.example.com'],
+    iat: Math.floor(Date.now() / 1000),
+    jti: crypto.randomUUID(),
+    sub_id: {
+      format: 'email',
+      email: subject.email,
+    },
+    events: {
+      'https://schemas.openid.net/secevent/caep/event-type/session-revoked': {
+        event_timestamp: Math.floor(Date.now() / 1000),
+        initiating_entity: initiator, // 'admin' | 'user' | 'policy' | 'system'
+        reason_admin: { en: reason },
+        reason_user: { en: 'Your session has been terminated for security reasons.' },
+      },
+    },
+  })
+  .setProtectedHeader({ alg: 'RS256', kid: 'key-2024' })
+  .sign(privateKey);
+  
+  // Push to all subscribed receivers
+  for (const receiver of getStreamReceivers(subject)) {
+    await fetch(receiver.pushEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/secevent+jwt' },
+      body: set,
+    });
+  }
+}
+
+// === RECEIVER: Handle Session Revoked Event ===
+async function handleSessionRevoked(eventData, subject) {
+  const email = subject.email;
+  
+  // 1. Terminate all user sessions
+  await sessionStore.deleteAllForUser(email);
+  
+  // 2. Revoke access tokens
+  await tokenStore.revokeAllForUser(email);
+  
+  // 3. Log the event
+  console.log(\`Sessions revoked for \${email} - Reason: \${eventData.reason_admin?.en}\`);
+  
+  // 4. Optionally notify user
+  if (eventData.reason_user) {
+    await notifyUser(email, eventData.reason_user.en);
+  }
+}`
+    }
+
+    if (mappedFlowId === 'caep_credential_change') {
+      return `// CAEP Credential Change Event (CAEP §3.2)
+import * as jose from 'jose';
+
+// === TRANSMITTER: Emit Credential Change Event ===
+async function emitCredentialChangeEvent(subject, credentialType, changeType) {
+  const set = await new jose.SignJWT({
+    iss: 'https://idp.example.com',
+    aud: ['https://app.example.com'],
+    iat: Math.floor(Date.now() / 1000),
+    jti: crypto.randomUUID(),
+    sub_id: { format: 'email', email: subject.email },
+    events: {
+      'https://schemas.openid.net/secevent/caep/event-type/credential-change': {
+        event_timestamp: Math.floor(Date.now() / 1000),
+        credential_type: credentialType, // 'password' | 'fido2-platform' | 'x509'
+        change_type: changeType, // 'create' | 'update' | 'revoke'
+        initiating_entity: 'user',
+      },
+    },
+  })
+  .setProtectedHeader({ alg: 'RS256', kid: 'key-2024' })
+  .sign(privateKey);
+  
+  await deliverSET(set, subject);
+}
+
+// === RECEIVER: Handle Credential Change ===
+async function handleCredentialChange(eventData, subject) {
+  const email = subject.email;
+  const { credential_type, change_type } = eventData;
+  
+  console.log(\`Credential change: \${credential_type} \${change_type} for \${email}\`);
+  
+  // 1. Invalidate cached tokens/credentials
+  await tokenCache.invalidateForUser(email);
+  
+  // 2. Clear any cached identity claims
+  await claimsCache.invalidateForUser(email);
+  
+  // 3. For password changes, force re-authentication
+  if (credential_type === 'password') {
+    await sessionStore.deleteAllForUser(email);
+  }
+  
+  // 4. For MFA changes, consider additional verification
+  if (credential_type === 'fido2-platform' && change_type === 'revoke') {
+    await flagForMFAReenrollment(email);
+  }
+}`
+    }
+
+    if (mappedFlowId === 'risc_account_disabled') {
+      return `// RISC Account Disabled Event (RISC §2.2)
+import * as jose from 'jose';
+
+// === TRANSMITTER: Emit Account Disabled Event ===
+async function emitAccountDisabledEvent(subject, reason, admin) {
+  const set = await new jose.SignJWT({
+    iss: 'https://idp.example.com',
+    aud: ['https://app.example.com'],
+    iat: Math.floor(Date.now() / 1000),
+    jti: crypto.randomUUID(),
+    sub_id: { format: 'email', email: subject.email },
+    events: {
+      'https://schemas.openid.net/secevent/risc/event-type/account-disabled': {
+        event_timestamp: Math.floor(Date.now() / 1000),
+        initiating_entity: 'admin',
+        reason_admin: { en: reason },
+        reason_user: { en: 'Your account has been suspended. Contact support.' },
+      },
+    },
+  })
+  .setProtectedHeader({ alg: 'RS256', kid: 'key-2024' })
+  .sign(privateKey);
+  
+  // RISC events are high priority - ensure delivery
+  await deliverWithRetry(set, subject, { maxRetries: 5, priority: 'high' });
+}
+
+// === RECEIVER: Handle Account Disabled ===
+async function handleAccountDisabled(eventData, subject) {
+  const email = subject.email;
+  
+  // CRITICAL: Block all access immediately
+  
+  // 1. Terminate ALL sessions
+  await sessionStore.deleteAllForUser(email);
+  
+  // 2. Revoke ALL tokens
+  await tokenStore.revokeAllForUser(email);
+  
+  // 3. Block new authentication attempts
+  await userStore.setStatus(email, 'disabled');
+  
+  // 4. Block API access
+  await apiKeyStore.disableAllForUser(email);
+  
+  // 5. Log for compliance/audit
+  await auditLog.record({
+    event: 'ACCOUNT_DISABLED_VIA_SSF',
+    subject: email,
+    reason: eventData.reason_admin?.en,
+    timestamp: new Date(),
+  });
+  
+  // 6. Consider data access restrictions
+  // await dataAccessControl.restrictForUser(email);
+}`
+    }
+
+    if (mappedFlowId === 'risc_credential_compromise') {
+      return `// RISC Credential Compromise Event (RISC §2.1) - CRITICAL
+import * as jose from 'jose';
+
+// === TRANSMITTER: Emit Credential Compromise Event ===
+async function emitCredentialCompromiseEvent(subject, detectionSource) {
+  // CRITICAL: This is the highest severity RISC event
+  const set = await new jose.SignJWT({
+    iss: 'https://idp.example.com',
+    aud: ['https://app.example.com'],
+    iat: Math.floor(Date.now() / 1000),
+    jti: crypto.randomUUID(),
+    sub_id: { format: 'email', email: subject.email },
+    events: {
+      'https://schemas.openid.net/secevent/risc/event-type/credential-compromise': {
+        event_timestamp: Math.floor(Date.now() / 1000),
+        initiating_entity: 'system',
+        reason_admin: { 
+          en: \`Credential compromise detected via \${detectionSource}\` 
+        },
+      },
+    },
+  })
+  .setProtectedHeader({ alg: 'RS256', kid: 'key-2024' })
+  .sign(privateKey);
+  
+  // EMERGENCY: Aggressive delivery with monitoring
+  await deliverWithRetry(set, subject, { 
+    maxRetries: 10, 
+    priority: 'critical',
+    alertOnFailure: true,
+  });
+}
+
+// === RECEIVER: Handle Credential Compromise (EMERGENCY) ===
+async function handleCredentialCompromise(eventData, subject) {
+  const email = subject.email;
+  
+  // CRITICAL: This is an emergency security event
+  console.error(\`🚨 CREDENTIAL COMPROMISE DETECTED: \${email}\`);
+  
+  // 1. IMMEDIATELY terminate ALL sessions
+  await sessionStore.deleteAllForUser(email);
+  
+  // 2. Revoke ALL tokens globally
+  await tokenStore.revokeAllForUser(email);
+  
+  // 3. Revoke all API keys and certificates
+  await apiKeyStore.revokeAllForUser(email);
+  
+  // 4. Force password reset on next login
+  await userStore.setPasswordResetRequired(email, true);
+  
+  // 5. Consider requiring MFA re-enrollment
+  await userStore.setMFAReenrollmentRequired(email, true);
+  
+  // 6. Block account until password reset
+  await userStore.setStatus(email, 'pending_credential_reset');
+  
+  // 7. Alert security team
+  await securityAlert.critical({
+    type: 'CREDENTIAL_COMPROMISE',
+    subject: email,
+    source: eventData.reason_admin?.en,
+    timestamp: new Date(),
+  });
+  
+  // 8. Preserve evidence for investigation
+  await incidentResponse.createIncident({
+    type: 'credential_compromise',
+    subject: email,
+    evidence: { eventData, timestamp: new Date() },
+  });
+}`
+    }
+
     return `// Authorization Code Flow
 const authUrl = new URL('/oauth2/authorize', origin);
 authUrl.searchParams.set('response_type', 'code');
@@ -712,6 +1121,32 @@ window.location.href = authUrl;`
     if (mappedFlowId === 'scim_bulk_operations') {
       badges.push({ label: 'Batch Processing', color: 'blue', icon: Server })
     }
+    // SSF badges
+    if (mappedFlowId.includes('ssf') || mappedFlowId.includes('caep') || mappedFlowId.includes('risc')) {
+      badges.push({ label: 'Security Events', color: 'amber', icon: Radio })
+    }
+    if (mappedFlowId === 'ssf_stream_configuration') {
+      badges.push({ label: 'Stream Setup', color: 'blue', icon: Server })
+    }
+    if (mappedFlowId === 'ssf_push_delivery') {
+      badges.push({ label: 'Real-time Push', color: 'green', icon: Server })
+      badges.push({ label: 'RFC 8935', color: 'cyan', icon: Code })
+    }
+    if (mappedFlowId === 'ssf_poll_delivery') {
+      badges.push({ label: 'Poll-based', color: 'purple', icon: Server })
+      badges.push({ label: 'RFC 8936', color: 'cyan', icon: Code })
+    }
+    if (mappedFlowId.includes('caep')) {
+      badges.push({ label: 'CAEP', color: 'blue', icon: Shield })
+      badges.push({ label: 'Continuous Eval', color: 'green', icon: Lock })
+    }
+    if (mappedFlowId.includes('risc')) {
+      badges.push({ label: 'RISC', color: 'amber', icon: AlertTriangle })
+      badges.push({ label: 'High Severity', color: 'purple', icon: Shield })
+    }
+    if (mappedFlowId === 'risc_credential_compromise') {
+      badges.push({ label: 'CRITICAL', color: 'purple', icon: AlertTriangle })
+    }
     return badges
   }
 
@@ -722,6 +1157,7 @@ window.location.href = authUrl;`
       case 'saml': return 'SAML 2.0'
       case 'spiffe': return 'SPIFFE/SPIRE'
       case 'scim': return 'SCIM 2.0'
+      case 'ssf': return 'Shared Signals (SSF)'
       default: return id || 'Protocol'
     }
   }
@@ -780,11 +1216,15 @@ window.location.href = authUrl;`
           </div>
           
           <Link
-            to="/looking-glass"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/30 text-cyan-400 text-sm font-medium hover:from-cyan-500/30 hover:to-purple-500/30 transition-all flex-shrink-0"
+            to={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r ${
+              protocolId === 'ssf' 
+                ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
+                : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
+            } border text-sm font-medium transition-all flex-shrink-0`}
           >
-            <Eye className="w-4 h-4" />
-            Try in Looking Glass
+            {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
           </Link>
         </div>
 
@@ -800,6 +1240,7 @@ window.location.href = authUrl;`
                   ${badge.color === 'blue' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : ''}
                   ${badge.color === 'purple' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : ''}
                   ${badge.color === 'cyan' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' : ''}
+                  ${badge.color === 'amber' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : ''}
                 `}
               >
                 <badge.icon className="w-3 h-3" />
@@ -914,10 +1355,10 @@ window.location.href = authUrl;`
           All Protocols
         </Link>
         <Link
-          to="/looking-glass"
+          to={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
           className="flex items-center gap-2 text-sm text-surface-400 hover:text-white transition-colors"
         >
-          Open Looking Glass
+          {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
           <ExternalLink className="w-4 h-4" />
         </Link>
       </div>

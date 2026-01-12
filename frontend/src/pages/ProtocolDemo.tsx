@@ -2,7 +2,8 @@ import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   ArrowLeft, ArrowRight, Shield, Lock, Key, 
-  Unlock, Fingerprint, Zap, Eye, Loader2
+  Unlock, Fingerprint, Zap, Eye, Loader2, Radio, 
+  Users, AlertTriangle, Send
 } from 'lucide-react'
 import { useProtocol, useProtocolFlows } from '../protocols'
 import { protocolMeta } from '../protocols/registry'
@@ -74,6 +75,70 @@ const flowMeta: Record<string, {
     color: 'from-lime-500 to-green-600',
     features: ['Auto-Rotation', 'Zero Downtime', 'Streaming API'],
   },
+  // SSF (Shared Signals Framework) flows
+  'ssf_stream_configuration': {
+    icon: Radio,
+    color: 'from-amber-500 to-orange-600',
+    features: ['Stream Setup', 'Discovery', 'JWKS'],
+    recommended: true,
+  },
+  'ssf_push_delivery': {
+    icon: Send,
+    color: 'from-green-500 to-emerald-600',
+    features: ['Real-time', 'RFC 8935', 'Immediate'],
+  },
+  'ssf_poll_delivery': {
+    icon: Zap,
+    color: 'from-blue-500 to-indigo-600',
+    features: ['Receiver-initiated', 'RFC 8936', 'Firewall-friendly'],
+  },
+  'caep_session_revoked': {
+    icon: Lock,
+    color: 'from-blue-500 to-cyan-600',
+    features: ['CAEP', 'Session Mgmt', 'Zero Trust'],
+  },
+  'caep_credential_change': {
+    icon: Key,
+    color: 'from-purple-500 to-indigo-600',
+    features: ['CAEP', 'Credential Events', 'Re-auth'],
+  },
+  'risc_account_disabled': {
+    icon: Shield,
+    color: 'from-amber-500 to-red-600',
+    features: ['RISC', 'High Severity', 'Block Access'],
+  },
+  'risc_credential_compromise': {
+    icon: AlertTriangle,
+    color: 'from-red-500 to-rose-600',
+    features: ['RISC', 'CRITICAL', 'Emergency'],
+  },
+  // SCIM 2.0 flows
+  'scim_user_lifecycle': {
+    icon: Users,
+    color: 'from-purple-500 to-violet-600',
+    features: ['User CRUD', 'Provisioning', 'IdP Sync'],
+    recommended: true,
+  },
+  'scim_group_management': {
+    icon: Users,
+    color: 'from-blue-500 to-indigo-600',
+    features: ['Group Sync', 'Membership', 'Access Control'],
+  },
+  'scim_filter_queries': {
+    icon: Zap,
+    color: 'from-cyan-500 to-blue-600',
+    features: ['RFC 7644', 'Filter Syntax', 'Pagination'],
+  },
+  'scim_schema_discovery': {
+    icon: Eye,
+    color: 'from-teal-500 to-cyan-600',
+    features: ['Auto-Config', 'Capabilities', 'Schemas'],
+  },
+  'scim_bulk_operations': {
+    icon: Zap,
+    color: 'from-orange-500 to-amber-600',
+    features: ['Batch Processing', 'Atomic', 'Efficient'],
+  },
 }
 
 // Map flow IDs to URL slugs
@@ -115,6 +180,8 @@ export function ProtocolDemo() {
       case 'oidc': return Fingerprint
       case 'spiffe': return Shield
       case 'saml': return Key
+      case 'scim': return Users
+      case 'ssf': return Radio
       default: return Shield
     }
   }
@@ -172,11 +239,11 @@ export function ProtocolDemo() {
           </Link>
         )}
         <Link
-          to="/looking-glass"
+          to={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
           className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-medium hover:bg-white/10 transition-colors"
         >
-          <Eye className="w-4 h-4" />
-          Open Looking Glass
+          {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
         </Link>
       </div>
 
@@ -298,6 +365,24 @@ function getFeatureDescription(feature: string): string {
     'at_hash / c_hash Claims': 'Hash claims for hybrid/implicit flow integrity (§3.3.2.11)',
     'Hybrid Flow Support': 'Full support for code+id_token response types',
     'azp Claim for Multi-Audience': 'Authorized party claim per OIDC Core §2',
+    // SCIM 2.0 features
+    'User Provisioning': 'Automated user account creation and management',
+    'Group Management': 'Sync groups and memberships between IdP and SP',
+    'Filter Queries': 'RFC 7644 compliant filter syntax for queries',
+    'PATCH Operations': 'Partial updates with SCIM PATCH operations',
+    'Bulk Operations': 'Batch multiple operations in single request',
+    'Schema Discovery': 'Auto-discover server capabilities and schemas',
+    'ETag Support': 'Optimistic locking with entity tags',
+    'IdP Integration': 'Connect to identity providers like Okta, Azure AD',
+    // SSF (Shared Signals Framework) features
+    'Security Event Tokens (SET)': 'RFC 8417 signed JWTs for security events',
+    'CAEP Events': 'Continuous Access Evaluation Profile events',
+    'RISC Events': 'Risk Incident Sharing and Coordination events',
+    'Push Delivery': 'Real-time event delivery via HTTP POST (RFC 8935)',
+    'Poll Delivery': 'Receiver-initiated polling for events (RFC 8936)',
+    'Stream Management': 'Configure and manage event streams',
+    'Real-time Signals': 'Immediate notification of security events',
+    'Zero Trust Ready': 'Enable continuous access evaluation',
   }
   return descriptions[feature] || feature
 }
