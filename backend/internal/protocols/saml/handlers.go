@@ -159,7 +159,7 @@ func (p *Plugin) processSSORequest(w http.ResponseWriter, r *http.Request, xmlDa
 }
 
 // showLoginPage displays the IdP login page
-func (p *Plugin) showLoginPage(w http.ResponseWriter, r *http.Request, requestInfo map[string]string) {
+func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestInfo map[string]string) {
 	users := p.mockIdP.ListUsers()
 
 	tmpl := `<!DOCTYPE html>

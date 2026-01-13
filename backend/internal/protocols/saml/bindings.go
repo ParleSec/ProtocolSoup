@@ -46,7 +46,7 @@ func (b *RedirectBinding) Encode(message interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal XML: %w", err)
 	}
-	
+
 	// DEFLATE compress (raw deflate, no zlib header)
 	var compressed bytes.Buffer
 	writer, err := flate.NewWriter(&compressed, flate.BestCompression)
@@ -58,10 +58,10 @@ func (b *RedirectBinding) Encode(message interface{}) (string, error) {
 		return "", fmt.Errorf("failed to write compressed data: %w", err)
 	}
 	writer.Close()
-	
+
 	// Base64 encode
 	encoded := base64.StdEncoding.EncodeToString(compressed.Bytes())
-	
+
 	return encoded, nil
 }
 
@@ -72,16 +72,16 @@ func (b *RedirectBinding) Decode(encoded string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to base64 decode: %w", err)
 	}
-	
+
 	// DEFLATE decompress
 	reader := flate.NewReader(bytes.NewReader(compressed))
 	defer reader.Close()
-	
+
 	decompressed, err := io.ReadAll(reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decompress: %w", err)
 	}
-	
+
 	return decompressed, nil
 }
 
@@ -94,63 +94,63 @@ func (b *RedirectBinding) BuildRedirectURL(destination string, message interface
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Build query parameters
 	paramName := "SAMLResponse"
 	if isRequest {
 		paramName = "SAMLRequest"
 	}
-	
+
 	// Per SAML 2.0 Bindings 3.4.4.1, signature must be over the ordered concatenation
 	var signatureInput strings.Builder
 	signatureInput.WriteString(paramName)
 	signatureInput.WriteString("=")
 	signatureInput.WriteString(url.QueryEscape(encoded))
-	
+
 	// Build final params
 	params := url.Values{}
 	params.Set(paramName, encoded)
-	
+
 	if relayState != "" {
 		signatureInput.WriteString("&RelayState=")
 		signatureInput.WriteString(url.QueryEscape(relayState))
 		params.Set("RelayState", relayState)
 	}
-	
+
 	// Sign if we have a private key
 	if b.privateKey != nil {
 		sigAlg := "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"
 		signatureInput.WriteString("&SigAlg=")
 		signatureInput.WriteString(url.QueryEscape(sigAlg))
-		
+
 		// Hash and sign per SAML 2.0 Bindings Section 3.4.4.1
 		hash := sha256.Sum256([]byte(signatureInput.String()))
 		signature, err := rsa.SignPKCS1v15(rand.Reader, b.privateKey, crypto.SHA256, hash[:])
 		if err != nil {
 			return "", fmt.Errorf("failed to sign: %w", err)
 		}
-		
+
 		params.Set("SigAlg", sigAlg)
 		params.Set("Signature", base64.StdEncoding.EncodeToString(signature))
 	}
-	
+
 	// Build final URL
 	parsedURL, err := url.Parse(destination)
 	if err != nil {
 		return "", fmt.Errorf("invalid destination URL: %w", err)
 	}
 	parsedURL.RawQuery = params.Encode()
-	
+
 	return parsedURL.String(), nil
 }
 
 // ParseRedirectRequest parses a redirect binding request
 func (b *RedirectBinding) ParseRedirectRequest(r *http.Request) ([]byte, string, error) {
 	query := r.URL.Query()
-	
+
 	var encoded string
 	var isRequest bool
-	
+
 	if samlRequest := query.Get("SAMLRequest"); samlRequest != "" {
 		encoded = samlRequest
 		isRequest = true
@@ -161,15 +161,15 @@ func (b *RedirectBinding) ParseRedirectRequest(r *http.Request) ([]byte, string,
 		return nil, "", fmt.Errorf("no SAMLRequest or SAMLResponse in query")
 	}
 	_ = isRequest // May be used for signature verification in future
-	
+
 	relayState := query.Get("RelayState")
-	
+
 	// Decode the message
 	xmlData, err := b.Decode(encoded)
 	if err != nil {
 		return nil, "", err
 	}
-	
+
 	return xmlData, relayState, nil
 }
 
@@ -239,13 +239,13 @@ func (b *PostBinding) Encode(message interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal XML: %w", err)
 	}
-	
+
 	// Add XML declaration
 	xmlWithDecl := []byte(xml.Header + string(xmlData))
-	
+
 	// Base64 encode
 	encoded := base64.StdEncoding.EncodeToString(xmlWithDecl)
-	
+
 	return encoded, nil
 }
 
@@ -253,13 +253,13 @@ func (b *PostBinding) Encode(message interface{}) (string, error) {
 func (b *PostBinding) Decode(encoded string) ([]byte, error) {
 	// Handle potential URL encoding
 	decoded := strings.ReplaceAll(encoded, " ", "+")
-	
+
 	// Base64 decode
 	xmlData, err := base64.StdEncoding.DecodeString(decoded)
 	if err != nil {
 		return nil, fmt.Errorf("failed to base64 decode: %w", err)
 	}
-	
+
 	return xmlData, nil
 }
 
@@ -302,23 +302,23 @@ func (b *PostBinding) GeneratePostForm(destination string, message interface{}, 
 	if err != nil {
 		return "", err
 	}
-	
+
 	paramName := "SAMLResponse"
 	if isRequest {
 		paramName = "SAMLRequest"
 	}
-	
+
 	// Validate destination URL to prevent XSS and open redirect
 	// Per security best practices, validate before use
 	if err := validateDestinationURL(destination); err != nil {
 		return "", fmt.Errorf("invalid destination URL: %w", err)
 	}
-	
+
 	// Sanitize relayState - limit length (template handles escaping)
 	if len(relayState) > 1024 {
 		relayState = relayState[:1024]
 	}
-	
+
 	// Use html/template for automatic context-aware escaping
 	// This prevents XSS by escaping based on HTML context (attribute, content, etc.)
 	data := postFormData{
@@ -327,12 +327,12 @@ func (b *PostBinding) GeneratePostForm(destination string, message interface{}, 
 		SAMLMessage: encoded,
 		RelayState:  relayState,
 	}
-	
+
 	var buf bytes.Buffer
 	if err := postFormTemplate.Execute(&buf, data); err != nil {
 		return "", fmt.Errorf("failed to render POST form: %w", err)
 	}
-	
+
 	return buf.String(), nil
 }
 
@@ -341,9 +341,9 @@ func (b *PostBinding) ParsePostRequest(r *http.Request) ([]byte, string, error) 
 	if err := r.ParseForm(); err != nil {
 		return nil, "", fmt.Errorf("failed to parse form: %w", err)
 	}
-	
+
 	var encoded string
-	
+
 	if samlRequest := r.FormValue("SAMLRequest"); samlRequest != "" {
 		encoded = samlRequest
 	} else if samlResponse := r.FormValue("SAMLResponse"); samlResponse != "" {
@@ -351,15 +351,15 @@ func (b *PostBinding) ParsePostRequest(r *http.Request) ([]byte, string, error) 
 	} else {
 		return nil, "", fmt.Errorf("no SAMLRequest or SAMLResponse in form")
 	}
-	
+
 	relayState := r.FormValue("RelayState")
-	
+
 	// Decode the message
 	xmlData, err := b.Decode(encoded)
 	if err != nil {
 		return nil, "", err
 	}
-	
+
 	return xmlData, relayState, nil
 }
 
@@ -368,38 +368,29 @@ func (b *PostBinding) ParsePostRequest(r *http.Request) ([]byte, string, error) 
 // ============================================================================
 
 // escapeHTML escapes HTML special characters
-func escapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, "\"", "&quot;")
-	s = strings.ReplaceAll(s, "'", "&#39;")
-	return s
-}
-
 // validateDestinationURL validates a URL is safe for use as a form action or redirect
 func validateDestinationURL(dest string) error {
 	if dest == "" {
 		return fmt.Errorf("empty URL")
 	}
-	
+
 	// Parse the URL
 	parsed, err := url.Parse(dest)
 	if err != nil {
 		return fmt.Errorf("malformed URL: %w", err)
 	}
-	
+
 	// Block dangerous schemes (javascript:, data:, vbscript:, etc.)
 	scheme := strings.ToLower(parsed.Scheme)
 	if scheme != "" && scheme != "http" && scheme != "https" {
 		return fmt.Errorf("invalid URL scheme: %s", scheme)
 	}
-	
+
 	// For absolute URLs, ensure scheme is present
 	if parsed.Host != "" && scheme == "" {
 		return fmt.Errorf("absolute URL missing scheme")
 	}
-	
+
 	return nil
 }
 
@@ -422,11 +413,11 @@ func DetectBinding(r *http.Request) BindingType {
 // ParseRequest parses a SAML request from any binding type
 func ParseRequest(r *http.Request, privateKey *rsa.PrivateKey) ([]byte, string, BindingType, error) {
 	bindingType := DetectBinding(r)
-	
+
 	var xmlData []byte
 	var relayState string
 	var err error
-	
+
 	switch bindingType {
 	case BindingTypePost:
 		binding := NewPostBinding(privateKey)
@@ -435,11 +426,11 @@ func ParseRequest(r *http.Request, privateKey *rsa.PrivateKey) ([]byte, string, 
 		binding := NewRedirectBinding(privateKey)
 		xmlData, relayState, err = binding.ParseRedirectRequest(r)
 	}
-	
+
 	if err != nil {
 		return nil, "", bindingType, err
 	}
-	
+
 	return xmlData, relayState, bindingType, nil
 }
 
@@ -454,7 +445,7 @@ func SendResponse(w http.ResponseWriter, bindingType BindingType, destination st
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(html))
-		
+
 	case BindingTypeRedirect:
 		binding := NewRedirectBinding(privateKey)
 		redirectURL, err := binding.BuildRedirectURL(destination, message, relayState, false)
@@ -463,7 +454,7 @@ func SendResponse(w http.ResponseWriter, bindingType BindingType, destination st
 		}
 		http.Redirect(w, nil, redirectURL, http.StatusFound)
 	}
-	
+
 	return nil
 }
 
@@ -478,7 +469,7 @@ func SendRequest(w http.ResponseWriter, r *http.Request, bindingType BindingType
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(html))
-		
+
 	case BindingTypeRedirect:
 		binding := NewRedirectBinding(privateKey)
 		redirectURL, err := binding.BuildRedirectURL(destination, message, relayState, true)
@@ -487,7 +478,6 @@ func SendRequest(w http.ResponseWriter, r *http.Request, bindingType BindingType
 		}
 		http.Redirect(w, r, redirectURL, http.StatusFound)
 	}
-	
+
 	return nil
 }
-
