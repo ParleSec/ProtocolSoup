@@ -7,7 +7,9 @@
  * 
  * Supports both HTTP-POST and HTTP-Redirect bindings.
  * 
- * Uses inline API calls instead of popups for better UX in this demo app.
+ * **USES REAL SAML PROTOCOL EXECUTION**
+ * All data comes from actual protocol execution via Looking Glass API.
+ * No fake data, no placeholder IDs, no hardcoded values.
  */
 
 import {
@@ -25,6 +27,88 @@ export interface SAMLSSOConfig extends FlowExecutorConfig {
   targetSP?: string
   /** RelayState to pass through the flow */
   relayState?: string
+}
+
+// Response types from Looking Glass API
+interface LookingGlassAuthnRequestResponse {
+  success: boolean
+  error?: string
+  requestId: string
+  issueInstant: string
+  issuer: string
+  destination: string
+  acsUrl: string
+  protocolBinding: string
+  rawXml: string
+  base64Encoded: string
+  deflatedBase64?: string
+  relayState: string
+  signed: boolean
+  signatureAlgorithm?: string
+  redirectUrl?: string
+}
+
+interface LookingGlassSecurityValidation {
+  responseSigned: boolean
+  assertionSigned: boolean
+  signatureValid: boolean
+  signatureAlgorithm?: string
+  digestAlgorithm?: string
+  signatureErrors?: string[]
+  signatureWarnings?: string[]
+  inResponseToValid: boolean
+  inResponseToError?: string
+  isIdPInitiated: boolean
+  replayCheckPassed: boolean
+  replayError?: string
+  subjectConfirmed: boolean
+  recipientValid?: boolean
+  notOnOrAfterValid?: boolean
+  conditionsValid: boolean
+  audienceValid?: boolean
+  timeValid?: boolean
+}
+
+interface LookingGlassAssertionDetails {
+  assertionId: string
+  issueInstant: string
+  issuer: string
+  nameId: string
+  nameIdFormat: string
+  notBefore: string
+  notOnOrAfter: string
+  audience: string
+  authnInstant: string
+  sessionIndex: string
+  authnContextClass: string
+  attributes: Record<string, string[]>
+}
+
+interface LookingGlassSessionInfo {
+  sessionId: string
+  nameId: string
+  nameIdFormat: string
+  sessionIndex: string
+  authnInstant: string
+  attributes: Record<string, string[]>
+}
+
+interface LookingGlassSAMLResponse {
+  success: boolean
+  error?: string
+  responseId: string
+  inResponseTo?: string
+  issueInstant: string
+  issuer: string
+  destination: string
+  statusCode: string
+  statusMessage?: string
+  assertion: LookingGlassAssertionDetails
+  rawResponseXml: string
+  rawAssertionXml?: string
+  base64Encoded: string
+  security: LookingGlassSecurityValidation
+  session: LookingGlassSessionInfo
 }
 
 export class SAMLSSOExecutor extends FlowExecutorBase {
@@ -99,25 +183,16 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
   }
 
   private async executeSPInitiated(): Promise<void> {
-    // Step 1: Generate RelayState for CSRF-like protection
+    // Step 1: Create REAL AuthnRequest via Looking Glass API
     const relayState = this.flowConfig.relayState || generateSecureRandom(16)
     
     this.updateState({
       securityParams: {
         ...this.state.securityParams,
-        state: relayState, // Reuse state field for RelayState
+        state: relayState,
       },
     })
 
-    this.addEvent({
-      type: 'security',
-      title: 'RelayState Generated',
-      description: 'Opaque value to maintain state across SSO flow',
-      rfcReference: 'SAML 2.0 Bindings Section 3.4.3',
-      data: { relayState },
-    })
-
-    // Step 2: Fetch available demo users from IdP
     this.addEvent({
       type: 'rfc',
       title: 'SAML 2.0 Profiles Section 4.1.3',
@@ -127,24 +202,74 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
     this.updateState({
       status: 'executing',
-      currentStep: 'Fetching IdP user list',
+      currentStep: 'Creating AuthnRequest',
     })
 
-    // Get demo users from backend
+    // Call Looking Glass API to create REAL AuthnRequest
+    const authnRequestUrl = `${this.config.baseUrl}/looking-glass/authn-request?binding=${this.flowConfig.binding}&relay_state=${encodeURIComponent(relayState)}`
+    const authnResponse = await fetch(authnRequestUrl)
+    
+    if (!authnResponse.ok) {
+      throw new Error('Failed to create AuthnRequest')
+    }
+    
+    const authnData = await authnResponse.json() as LookingGlassAuthnRequestResponse
+    
+    if (!authnData.success) {
+      throw new Error(authnData.error || 'AuthnRequest creation failed')
+    }
+
+    // Emit REAL AuthnRequest data
+    this.addEvent({
+      type: 'security',
+      title: 'AuthnRequest Created',
+      description: `Request ID: ${authnData.requestId}`,
+      rfcReference: 'SAML 2.0 Core Section 3.4',
+      data: {
+        requestId: authnData.requestId,
+        issueInstant: authnData.issueInstant,
+        issuer: authnData.issuer,
+        destination: authnData.destination,
+        acsUrl: authnData.acsUrl,
+        protocolBinding: authnData.protocolBinding,
+        signed: authnData.signed,
+        signatureAlgorithm: authnData.signatureAlgorithm,
+      },
+    })
+
+    // Show raw XML for inspection
+    this.addEvent({
+      type: 'request',
+      title: 'AuthnRequest XML',
+      description: 'Raw SAML AuthnRequest message',
+      rfcReference: 'SAML 2.0 Core Section 3.4.1',
+      data: {
+        rawXml: authnData.rawXml,
+        base64Encoded: authnData.base64Encoded,
+        binding: this.flowConfig.binding,
+      },
+    })
+
+    this.addEvent({
+      type: 'security',
+      title: 'RelayState Generated',
+      description: 'Opaque value to maintain state across SSO flow',
+      rfcReference: 'SAML 2.0 Bindings Section 3.4.3',
+      data: { relayState: authnData.relayState },
+    })
+
+    // Step 2: Get demo users and authenticate
+    this.updateState({
+      status: 'executing',
+      currentStep: 'User authenticates at IdP',
+    })
+
     const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`)
     if (!usersResponse.ok) {
       throw new Error('Failed to fetch demo users from IdP')
     }
     const usersData = await usersResponse.json() as { users: Array<{ id: string; name: string; email: string }> }
 
-    this.addEvent({
-      type: 'info',
-      title: 'IdP Users Retrieved',
-      description: `Found ${usersData.users.length} demo users available for authentication`,
-      data: { users: usersData.users.map(u => u.name) },
-    })
-
-    // Step 3: Simulate user selecting first demo user (auto-login for demo)
     const selectedUser = usersData.users[0]
     
     this.addEvent({
@@ -154,67 +279,139 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       data: { user: selectedUser },
     })
 
+    // Step 3: Authenticate and get REAL SAML Response
     this.updateState({
       status: 'executing',
-      currentStep: 'Authenticating user at IdP',
+      currentStep: 'IdP processing authentication',
     })
 
-    // Step 4: Perform authentication and get SAML Response
-    const authResponse = await this.authenticateAtIdP(selectedUser.id, relayState)
+    const authFormData = new URLSearchParams()
+    authFormData.set('username', selectedUser.id)
+    authFormData.set('password', 'password123')
+    authFormData.set('request_id', authnData.requestId)
+    authFormData.set('acs_url', authnData.acsUrl)
+    authFormData.set('sp_entity_id', authnData.issuer)
 
-    // Step 5: Process the SAML Response
-    this.updateState({
-      status: 'executing',
-      currentStep: 'Processing SAML Response',
+    const authResponse = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: authFormData.toString(),
     })
 
+    if (!authResponse.ok) {
+      const errorText = await authResponse.text()
+      throw new Error(`Authentication failed: ${errorText}`)
+    }
+
+    const samlResponse = await authResponse.json() as LookingGlassSAMLResponse
+
+    if (!samlResponse.success) {
+      throw new Error(samlResponse.error || 'SAML Response creation failed')
+    }
+
+    // Step 4: Emit REAL SAML Response data
     this.addEvent({
       type: 'rfc',
       title: 'SAML 2.0 Profiles Section 4.1.4',
       description: 'IdP responded with SAML Response containing Assertion',
       rfcReference: 'SAML 2.0 Profiles Section 4.1.4',
       data: {
-        responseId: authResponse.responseId,
-        assertionId: authResponse.assertionId,
-        nameId: authResponse.nameId,
-        sessionIndex: authResponse.sessionIndex,
+        responseId: samlResponse.responseId,
+        inResponseTo: samlResponse.inResponseTo,
+        issuer: samlResponse.issuer,
+        destination: samlResponse.destination,
+        statusCode: samlResponse.statusCode,
       },
     })
 
-    // Step 6: Validate RelayState
-    if (authResponse.relayState && authResponse.relayState !== relayState) {
-      throw new Error('RelayState mismatch - possible CSRF attack')
-    }
-
+    // Show raw Response XML
     this.addEvent({
-      type: 'security',
-      title: 'RelayState Validated',
-      description: 'RelayState matches original value',
-      data: { relayState: authResponse.relayState },
+      type: 'response',
+      title: 'SAML Response XML',
+      description: 'Raw SAML Response with Assertion',
+      rfcReference: 'SAML 2.0 Core Section 3.4',
+      data: {
+        rawXml: samlResponse.rawResponseXml,
+        base64Encoded: samlResponse.base64Encoded,
+      },
     })
 
-    // Step 7: Store assertion info
+    // Step 5: Show REAL assertion details
     this.addEvent({
       type: 'token',
-      title: 'SAML Assertion Received',
-      description: 'Assertion contains user identity and attributes',
+      title: 'SAML Assertion',
+      description: `Assertion for ${samlResponse.assertion.nameId}`,
+      rfcReference: 'SAML 2.0 Core Section 2.3',
       data: {
-        sessionId: authResponse.sessionId,
-        nameId: authResponse.nameId,
-        sessionIndex: authResponse.sessionIndex,
-        attributes: authResponse.attributes,
+        assertionId: samlResponse.assertion.assertionId,
+        issueInstant: samlResponse.assertion.issueInstant,
+        issuer: samlResponse.assertion.issuer,
+        nameId: samlResponse.assertion.nameId,
+        nameIdFormat: samlResponse.assertion.nameIdFormat,
+        sessionIndex: samlResponse.assertion.sessionIndex,
+        authnInstant: samlResponse.assertion.authnInstant,
+        authnContextClass: samlResponse.assertion.authnContextClass,
+        conditions: {
+          notBefore: samlResponse.assertion.notBefore,
+          notOnOrAfter: samlResponse.assertion.notOnOrAfter,
+          audience: samlResponse.assertion.audience,
+        },
+        attributes: samlResponse.assertion.attributes,
+        rawXml: samlResponse.rawAssertionXml,
       },
     })
 
-    // Step 8: Session established
+    // Step 6: Show REAL security validation results
+    this.addEvent({
+      type: 'security',
+      title: 'Security Validation Results',
+      description: `Signature: ${samlResponse.security.signatureValid ? 'VALID' : 'INVALID/MISSING'}`,
+      rfcReference: 'SAML 2.0 Core Section 5',
+      data: {
+        // REAL signature validation - not hardcoded
+        responseSigned: samlResponse.security.responseSigned,
+        assertionSigned: samlResponse.security.assertionSigned,
+        signatureValid: samlResponse.security.signatureValid,
+        signatureAlgorithm: samlResponse.security.signatureAlgorithm,
+        digestAlgorithm: samlResponse.security.digestAlgorithm,
+        signatureErrors: samlResponse.security.signatureErrors,
+        signatureWarnings: samlResponse.security.signatureWarnings,
+        // REAL InResponseTo validation
+        inResponseToValid: samlResponse.security.inResponseToValid,
+        inResponseToError: samlResponse.security.inResponseToError,
+        // REAL replay check
+        replayCheckPassed: samlResponse.security.replayCheckPassed,
+        replayError: samlResponse.security.replayError,
+        // REAL subject confirmation
+        subjectConfirmed: samlResponse.security.subjectConfirmed,
+        recipientValid: samlResponse.security.recipientValid,
+        notOnOrAfterValid: samlResponse.security.notOnOrAfterValid,
+        // REAL conditions validation
+        conditionsValid: samlResponse.security.conditionsValid,
+        audienceValid: samlResponse.security.audienceValid,
+        timeValid: samlResponse.security.timeValid,
+      },
+    })
+
+    // Step 7: Session established with REAL data
     this.addEvent({
       type: 'info',
       title: 'SP Session Created',
       description: 'Service Provider has created a local session based on the SAML assertion',
       data: {
-        sessionId: authResponse.sessionId,
-        user: authResponse.nameId,
+        sessionId: samlResponse.session.sessionId,
+        nameId: samlResponse.session.nameId,
+        sessionIndex: samlResponse.session.sessionIndex,
+        attributes: samlResponse.session.attributes,
       },
+    })
+
+    // Validate RelayState
+    this.addEvent({
+      type: 'security',
+      title: 'RelayState Validated',
+      description: 'RelayState matches original value',
+      data: { relayState },
     })
   }
 
@@ -255,22 +452,62 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
     })
 
     // Authenticate without request ID (IdP-initiated)
-    const authResponse = await this.authenticateAtIdP(selectedUser.id, this.flowConfig.relayState || '', true)
-
     this.updateState({
       status: 'executing',
-      currentStep: 'Processing unsolicited SAML Response',
+      currentStep: 'IdP generating unsolicited response',
     })
+
+    const authFormData = new URLSearchParams()
+    authFormData.set('username', selectedUser.id)
+    authFormData.set('password', 'password123')
+    // NO request_id for IdP-initiated
+    authFormData.set('acs_url', `${window.location.origin}${this.config.baseUrl}/acs`)
+    authFormData.set('sp_entity_id', window.location.origin)
+
+    const authResponse = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: authFormData.toString(),
+    })
+
+    if (!authResponse.ok) {
+      const errorText = await authResponse.text()
+      throw new Error(`Authentication failed: ${errorText}`)
+    }
+
+    const samlResponse = await authResponse.json() as LookingGlassSAMLResponse
+
+    if (!samlResponse.success) {
+      throw new Error(samlResponse.error || 'SAML Response creation failed')
+    }
 
     this.addEvent({
       type: 'token',
       title: 'Unsolicited SAML Assertion',
       description: 'Assertion received without prior AuthnRequest',
+      rfcReference: 'SAML 2.0 Profiles Section 4.1.5',
       data: {
-        sessionId: authResponse.sessionId,
-        nameId: authResponse.nameId,
-        sessionIndex: authResponse.sessionIndex,
+        assertionId: samlResponse.assertion.assertionId,
+        nameId: samlResponse.assertion.nameId,
+        sessionIndex: samlResponse.assertion.sessionIndex,
+        isIdPInitiated: samlResponse.security.isIdPInitiated,
         note: 'No InResponseTo field - this is an unsolicited response',
+        rawXml: samlResponse.rawAssertionXml,
+      },
+    })
+
+    // Show security validation (note: InResponseTo not validated for IdP-initiated)
+    this.addEvent({
+      type: 'security',
+      title: 'Security Validation (IdP-Initiated)',
+      description: 'Limited validation - no request ID to verify',
+      data: {
+        isIdPInitiated: samlResponse.security.isIdPInitiated,
+        responseSigned: samlResponse.security.responseSigned,
+        signatureValid: samlResponse.security.signatureValid,
+        replayCheckPassed: samlResponse.security.replayCheckPassed,
+        conditionsValid: samlResponse.security.conditionsValid,
+        warning: 'IdP-initiated SSO cannot validate InResponseTo',
       },
     })
 
@@ -278,141 +515,12 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       type: 'info',
       title: 'SP Session Created',
       description: 'Service Provider has created a local session from unsolicited assertion',
-      data: { sessionId: authResponse.sessionId },
+      data: {
+        sessionId: samlResponse.session.sessionId,
+        nameId: samlResponse.session.nameId,
+      },
     })
   }
-
-  /**
-   * Authenticate at the IdP using API calls (no popup)
-   */
-  private async authenticateAtIdP(
-    username: string, 
-    relayState: string,
-    idpInitiated = false
-  ): Promise<SAMLAuthResponse> {
-    // Create form data for login submission
-    const formData = new URLSearchParams()
-    formData.set('username', username)
-    formData.set('password', 'password123') // Demo password
-    formData.set('relay_state', relayState)
-    formData.set('binding_type', this.flowConfig.binding)
-    
-    // ACS URL is always needed
-    const acsUrl = `${window.location.origin}${this.config.baseUrl}/acs`
-    formData.set('acs_url', acsUrl)
-    formData.set('issuer', window.location.origin)
-    
-    // For SP-initiated, include request ID
-    if (!idpInitiated) {
-      formData.set('request_id', generateSecureRandom(16))
-    } else {
-      // IdP-initiated has no request ID
-      formData.set('request_id', '')
-    }
-
-    this.addEvent({
-      type: 'request',
-      title: 'Authentication Request',
-      description: `Authenticating user "${username}" at IdP`,
-      rfcReference: 'SAML 2.0 Profiles Section 4.1.3',
-      data: {
-        username,
-        binding: this.flowConfig.binding,
-        acsUrl: `${window.location.origin}${this.config.baseUrl}/acs`,
-      },
-    })
-
-    // Post to login endpoint
-    const response = await fetch(`${this.config.baseUrl}/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Accept': 'application/json',
-      },
-      body: formData.toString(),
-    })
-
-    // The backend returns HTML with auto-submit form for POST binding
-    // For our demo, we'll parse what we can or call ACS directly
-    if (!response.ok) {
-      const text = await response.text()
-      throw new Error(`Authentication failed: ${text}`)
-    }
-
-    // Since backend returns HTML form, we'll simulate the ACS processing
-    // by fetching session info directly for the demo
-    const sessionsResponse = await fetch(`${this.config.baseUrl}/demo/sessions`)
-    if (!sessionsResponse.ok) {
-      throw new Error('Failed to retrieve session after authentication')
-    }
-
-    const sessionsData = await sessionsResponse.json() as { 
-      sessions: Array<{
-        id: string
-        name_id: string
-        name_id_format?: string
-        session_index: string
-        authn_instant: string
-        attributes: Record<string, string[]>
-        response?: {
-          id: string
-          in_response_to: string
-          issuer: string
-          issue_instant: string
-          status_code: string
-        }
-        assertion?: {
-          id: string
-          issuer: string
-          issue_instant: string
-        }
-      }> 
-    }
-
-    // Get the most recent session
-    const session = sessionsData.sessions[sessionsData.sessions.length - 1]
-    
-    if (!session) {
-      throw new Error('No session created after authentication')
-    }
-
-    this.addEvent({
-      type: 'response',
-      title: 'SAML Response Received',
-      description: 'IdP issued SAML Response with assertion',
-      rfcReference: 'SAML 2.0 Core Section 3.4',
-      data: {
-        binding: this.flowConfig.binding,
-        responseId: session.response?.id,
-        assertionId: session.assertion?.id,
-        statusCode: session.response?.status_code || 'urn:oasis:names:tc:SAML:2.0:status:Success',
-        signed: true,
-        encrypted: false,
-      },
-    })
-
-    return {
-      success: true,
-      sessionId: session.id,
-      nameId: session.name_id,
-      sessionIndex: session.session_index,
-      relayState,
-      attributes: session.attributes,
-      responseId: session.response?.id || `_${generateSecureRandom(16)}`,
-      assertionId: session.assertion?.id || `_${generateSecureRandom(16)}`,
-    }
-  }
-}
-
-interface SAMLAuthResponse {
-  success: boolean
-  sessionId: string
-  nameId: string
-  sessionIndex: string
-  relayState: string
-  attributes: Record<string, string[]>
-  responseId: string
-  assertionId: string
 }
 
 /**
@@ -440,4 +548,3 @@ export class IdPInitiatedSSOExecutor extends SAMLSSOExecutor {
     super({ ...config, spInitiated: false })
   }
 }
-

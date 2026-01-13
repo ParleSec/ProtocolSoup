@@ -2,12 +2,13 @@ package saml
 
 import (
 	"context"
+	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/go-chi/chi/v5"
 )
 
 // Plugin implements the SAML 2.0 protocol plugin
@@ -25,6 +26,11 @@ type Plugin struct {
 	ssoServiceURL    string
 	sessions         map[string]*SAMLSession // sessionID -> session
 	nameIDToSessions map[string][]string     // nameID -> list of sessionIDs (for SLO)
+
+	// Security validation components (SAML 2.0 Core Section 5)
+	signatureValidator *SignatureValidator // XML digital signature validator
+	assertionCache     *AssertionCache     // Replay prevention (Profiles Section 4.1.4.5)
+	requestIDCache     *RequestIDCache     // InResponseTo validation (Profiles Section 4.1.4.3)
 }
 
 // SAMLSession represents an active SAML session
@@ -51,8 +57,13 @@ func NewPlugin() *Plugin {
 			Tags:        []string{"federation", "sso", "xml", "assertions", "identity"},
 			RFCs:        []string{"SAML 2.0 Core", "SAML 2.0 Bindings", "SAML 2.0 Profiles"},
 		}),
-		sessions:         make(map[string]*SAMLSession),
-		nameIDToSessions: make(map[string][]string),
+		sessions:           make(map[string]*SAMLSession),
+		nameIDToSessions:   make(map[string][]string),
+		signatureValidator: NewSignatureValidator(),
+		// Assertion cache TTL matches typical assertion validity (5 minutes + clock skew)
+		assertionCache: NewAssertionCache(10 * time.Minute),
+		// Request ID cache TTL for pending requests (5 minutes is typical)
+		requestIDCache: NewRequestIDCache(5 * time.Minute),
 	}
 }
 
@@ -97,16 +108,16 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/metadata", p.handleMetadata)
 
 	// SSO Service endpoints (IdP role)
-	router.Get("/sso", p.handleSSOService)           // HTTP-Redirect binding
-	router.Post("/sso", p.handleSSOServicePost)      // HTTP-POST binding
+	router.Get("/sso", p.handleSSOService)      // HTTP-Redirect binding
+	router.Post("/sso", p.handleSSOServicePost) // HTTP-POST binding
 
 	// Assertion Consumer Service endpoints (SP role)
-	router.Get("/acs", p.handleACS)                  // HTTP-Redirect binding (artifact)
-	router.Post("/acs", p.handleACSPost)             // HTTP-POST binding
+	router.Get("/acs", p.handleACS)      // HTTP-Redirect binding (artifact)
+	router.Post("/acs", p.handleACSPost) // HTTP-POST binding
 
 	// Single Logout Service endpoints
-	router.Get("/slo", p.handleSLO)                  // HTTP-Redirect binding
-	router.Post("/slo", p.handleSLOPost)             // HTTP-POST binding
+	router.Get("/slo", p.handleSLO)      // HTTP-Redirect binding
+	router.Post("/slo", p.handleSLOPost) // HTTP-POST binding
 
 	// SP-initiated login trigger
 	router.Get("/login", p.handleSPInitiatedLogin)
@@ -120,6 +131,13 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/demo/sessions", p.handleListSessions)
 	router.Get("/demo/logout", p.handleDemoLogout)
 	router.Post("/demo/logout", p.handleDemoLogout)
+
+	// Looking Glass API endpoints - return raw SAML protocol data as JSON
+	// These execute REAL protocol operations for frontend visualization
+	router.Get("/looking-glass/authn-request", p.handleLookingGlassCreateAuthnRequest)
+	router.Post("/looking-glass/authenticate", p.handleLookingGlassAuthenticate)
+	router.Get("/looking-glass/logout-request", p.handleLookingGlassCreateLogoutRequest)
+	router.Post("/looking-glass/logout", p.handleLookingGlassProcessLogout)
 }
 
 // GetInspectors returns the protocol's inspectors
@@ -178,11 +196,11 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Service Provider",
 					Type:        "internal",
 					Parameters: map[string]string{
-						"ID":                   "unique request identifier",
-						"IssueInstant":         "timestamp of request creation",
-						"Issuer":               "SP entity ID",
+						"ID":                          "unique request identifier",
+						"IssueInstant":                "timestamp of request creation",
+						"Issuer":                      "SP entity ID",
 						"AssertionConsumerServiceURL": "where to send the response",
-						"ProtocolBinding":      "HTTP-POST or HTTP-Redirect",
+						"ProtocolBinding":             "HTTP-POST or HTTP-Redirect",
 					},
 					Security: []string{"AuthnRequest should be signed for integrity"},
 				},
@@ -216,11 +234,11 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Identity Provider",
 					Type:        "internal",
 					Parameters: map[string]string{
-						"Status":        "success or error code",
-						"Assertion":     "signed assertion with user identity",
-						"NameID":        "user identifier",
-						"Attributes":    "user attributes (optional)",
-						"Conditions":    "validity constraints",
+						"Status":         "success or error code",
+						"Assertion":      "signed assertion with user identity",
+						"NameID":         "user identifier",
+						"Attributes":     "user attributes (optional)",
+						"Conditions":     "validity constraints",
 						"AuthnStatement": "authentication context",
 					},
 					Security: []string{
@@ -365,7 +383,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					From:        "Identity Provider",
 					To:          "Other Service Providers",
 					Type:        "request",
-					Security: []string{"Each SP must validate and terminate session"},
+					Security:    []string{"Each SP must validate and terminate session"},
 				},
 				{
 					Order:       5,
@@ -552,3 +570,17 @@ func (p *Plugin) SLOURL() string {
 	return p.sloURL
 }
 
+// SignatureValidator returns the XML signature validator
+func (p *Plugin) SignatureValidator() *SignatureValidator {
+	return p.signatureValidator
+}
+
+// AssertionCache returns the assertion replay prevention cache
+func (p *Plugin) AssertionCache() *AssertionCache {
+	return p.assertionCache
+}
+
+// RequestIDCache returns the request ID cache for InResponseTo validation
+func (p *Plugin) RequestIDCache() *RequestIDCache {
+	return p.requestIDCache
+}

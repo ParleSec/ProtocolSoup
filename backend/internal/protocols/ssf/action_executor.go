@@ -334,6 +334,5 @@ func (e *MockIdPActionExecutor) CleanupOldSessions(maxAge time.Duration) int {
 			count++
 		}
 	}
-
 	return count
 }
