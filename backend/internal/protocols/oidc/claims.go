@@ -3,6 +3,7 @@ package oidc
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
@@ -14,10 +15,12 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	// Emit UserInfo request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "UserInfo Request", map[string]interface{}{
-		"step":     9,
-		"from":     "Client",
-		"to":       "OpenID Provider",
-		"endpoint": "/oidc/userinfo",
+		"step":              9,
+		"from":              "Client",
+		"to":                "OpenID Provider",
+		"endpoint":          "/oidc/userinfo",
+		"method":            r.Method,
+		"has_authorization": r.Header.Get("Authorization") != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "UserInfo Endpoint",
@@ -29,7 +32,8 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Missing Authorization", map[string]interface{}{
-			"error": "invalid_token",
+			"error":    "invalid_token",
+			"endpoint": "/oidc/userinfo",
 		})
 		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Missing Authorization header")
 		return
@@ -38,7 +42,9 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Authorization Format", map[string]interface{}{
-			"error": "expected_bearer",
+			"error":           "expected_bearer",
+			"authorization":   authHeader,
+			"expected_scheme": "Bearer",
 		})
 		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Invalid Authorization header format")
 		return
@@ -51,7 +57,8 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	claims, err := jwtService.ValidateToken(accessToken)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Validation Failed", map[string]interface{}{
-			"error": err.Error(),
+			"error":        err.Error(),
+			"token_length": len(accessToken),
 		})
 		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Token validation failed")
 		return
@@ -79,6 +86,8 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "UserInfo Response", map[string]interface{}{
 		"user_id":      userID,
 		"scopes":       scopes,
+		"scope":        scopeStr,
+		"claims":       keysFromMap(userClaims),
 		"claims_count": len(userClaims),
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
@@ -89,6 +98,15 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userClaims)
+}
+
+func keysFromMap(input map[string]interface{}) []string {
+	keys := make([]string, 0, len(input))
+	for key := range input {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // StandardClaims defines the standard OIDC claims and their descriptions

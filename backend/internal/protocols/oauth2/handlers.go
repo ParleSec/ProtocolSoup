@@ -46,16 +46,19 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Emit authorization request event
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Authorization Request Received", map[string]interface{}{
-		"step":                  1,
-		"from":                  "Client",
-		"to":                    "Authorization Server",
-		"response_type":         responseType,
-		"client_id":             clientID,
-		"redirect_uri":          redirectURI,
-		"scope":                 scope,
-		"state":                 state != "",
-		"code_challenge":        codeChallenge != "",
-		"code_challenge_method": codeChallengeMethod,
+		"step":                   1,
+		"from":                   "Client",
+		"to":                     "Authorization Server",
+		"response_type":          responseType,
+		"client_id":              clientID,
+		"redirect_uri":           redirectURI,
+		"scope":                  scope,
+		"scopes":                 strings.Fields(scope),
+		"state":                  state,
+		"state_present":          state != "",
+		"code_challenge":         codeChallenge,
+		"code_challenge_present": codeChallenge != "",
+		"code_challenge_method":  codeChallengeMethod,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "OAuth 2.0 Authorization Request",
@@ -133,15 +136,24 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Emit user authentication step
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "User Authentication Required", map[string]interface{}{
-		"step":        2,
-		"from":        "User",
-		"to":          "Authorization Server",
-		"client_name": client.Name,
-		"scopes":      strings.Split(scope, " "),
+		"step":          2,
+		"from":          "User",
+		"to":            "Authorization Server",
+		"client_id":     clientID,
+		"client_name":   client.Name,
+		"redirect_uri":  redirectURI,
+		"response_type": responseType,
+		"scope":         scope,
+		"scopes":        strings.Fields(scope),
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "Authorization Endpoint User Authentication",
+		Description: "The authorization server authenticates the user before granting access",
+		Reference:   "RFC 6749 Section 3.1",
 	})
 
 	// For demo purposes, return a login page
-	loginPage := p.generateLoginPage(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod, client.Name)
+	loginPage := p.generateLoginPage(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod, sessionID, client.Name)
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(loginPage))
 }
@@ -183,8 +195,14 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Emit credential submission event (without password!)
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "User Credentials Submitted", map[string]interface{}{
-		"email":     email,
+		"username":  email,
 		"client_id": clientID,
+		"endpoint":  "/oauth2/authorize",
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "User Authentication Submission",
+		Description: "Credentials are submitted to the authorization server for authentication",
+		Reference:   "RFC 6749 Section 3.1",
 	})
 
 	// Validate user credentials
@@ -195,7 +213,7 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			"reason": "Invalid credentials",
 		})
 		// Return to login page with error
-		loginPage := p.generateLoginPage(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod, "")
+		loginPage := p.generateLoginPage(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod, sessionID, "")
 		loginPage = strings.Replace(loginPage, "<!-- ERROR -->", `<div class="error">Invalid email or password</div>`, 1)
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(loginPage))
@@ -204,16 +222,20 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Emit successful authentication
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "User Authenticated Successfully", map[string]interface{}{
-		"step":    2,
-		"from":    "User",
-		"to":      "Authorization Server",
-		"user_id": user.ID,
-		"name":    user.Name,
-		"email":   user.Email,
+		"step":      2,
+		"from":      "User",
+		"to":        "Authorization Server",
+		"user_id":   user.ID,
+		"name":      user.Name,
+		"email":     user.Email,
+		"client_id": clientID,
+		"scope":     scope,
+		"scopes":    strings.Fields(scope),
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "User Authentication Complete",
 		Description: "The user has successfully authenticated. An authorization code will now be issued.",
+		Reference:   "RFC 6749 Section 3.1",
 	})
 
 	// Create authorization code
@@ -223,23 +245,38 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Authorization Code Creation Failed", map[string]interface{}{
-			"error": err.Error(),
+			"error":        err.Error(),
+			"client_id":    clientID,
+			"redirect_uri": redirectURI,
+			"scope":        scope,
 		})
 		writeOAuth2Error(w, "server_error", "Failed to create authorization code", state)
 		return
 	}
 
 	// Emit authorization code issued event
+	expiresInSeconds := int(time.Until(authCode.ExpiresAt).Seconds())
+	if expiresInSeconds < 0 {
+		expiresInSeconds = 0
+	}
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Authorization Code Issued", map[string]interface{}{
-		"step":         3,
-		"from":         "Authorization Server",
-		"to":           "Client",
-		"code_length":  len(authCode.Code),
-		"code_preview": authCode.Code[:8] + "...",
-		"has_pkce":     codeChallenge != "",
-		"has_state":    state != "",
-		"scopes":       strings.Split(scope, " "),
-		"expires_in":   "10 minutes",
+		"step":                   3,
+		"from":                   "Authorization Server",
+		"to":                     "Client",
+		"client_id":              clientID,
+		"redirect_uri":           redirectURI,
+		"code":                   authCode.Code,
+		"code_length":            len(authCode.Code),
+		"code_preview":           authCode.Code[:min(8, len(authCode.Code))] + "...",
+		"state":                  authCode.State,
+		"state_present":          authCode.State != "",
+		"code_challenge":         authCode.CodeChallenge,
+		"code_challenge_present": authCode.CodeChallenge != "",
+		"code_challenge_method":  authCode.CodeChallengeMethod,
+		"scope":                  authCode.Scope,
+		"scopes":                 strings.Fields(authCode.Scope),
+		"expires_at":             authCode.ExpiresAt.Format(time.RFC3339),
+		"expires_in_seconds":     expiresInSeconds,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Authorization Code",
@@ -258,14 +295,18 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Emit redirect event
 	p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Redirecting to Client", map[string]interface{}{
-		"redirect_uri": redirectURI,
-		"has_code":     true,
-		"has_state":    state != "",
+		"redirect_uri":  redirectURI,
+		"response_type": "code",
+		"response_mode": "query",
+		"code":          authCode.Code,
+		"state":         state,
+		"has_code":      true,
+		"has_state":     state != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeSecurityHint,
 		Title:       "State Parameter Echo",
 		Description: "The state parameter is echoed back to the client for CSRF validation",
-		Reference:   "RFC 6749 Section 10.12",
+		Reference:   "RFC 6749 Section 4.1.2",
 	})
 
 	// Redirect to client
@@ -284,6 +325,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Content-Type", map[string]interface{}{
 			"content_type": contentType,
 			"expected":     "application/x-www-form-urlencoded",
+			"endpoint":     "/oauth2/token",
 		}, lookingglass.Annotation{
 			Type:        lookingglass.AnnotationTypeSecurityHint,
 			Title:       "RFC 6749 Section 4.1.3 Compliance",
@@ -303,11 +345,41 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	grantType := r.FormValue("grant_type")
+	clientID := r.FormValue("client_id")
+	scope := r.FormValue("scope")
+	code := r.FormValue("code")
+	refreshToken := r.FormValue("refresh_token")
+	tokenTypeHint := r.FormValue("token_type_hint")
+	if clientID == "" {
+		if basicClientID, _, ok := r.BasicAuth(); ok {
+			clientID = basicClientID
+		}
+	}
+	clientAuthMethod := "none"
+	if _, _, ok := r.BasicAuth(); ok {
+		clientAuthMethod = "basic"
+	} else if clientID != "" {
+		clientAuthMethod = "post"
+	}
 
 	// Emit token request event
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Request Received", map[string]interface{}{
-		"grant_type": grantType,
-		"endpoint":   "/oauth2/token",
+		"grant_type":            grantType,
+		"endpoint":              "/oauth2/token",
+		"client_id":             clientID,
+		"client_auth_method":    clientAuthMethod,
+		"scope":                 scope,
+		"scopes":                strings.Fields(scope),
+		"code":                  code,
+		"code_present":          code != "",
+		"refresh_token":         refreshToken,
+		"refresh_token_present": refreshToken != "",
+		"token_type_hint":       tokenTypeHint,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "Token Endpoint Request",
+		Description: "Token requests are sent to the token endpoint with form-encoded parameters",
+		Reference:   "RFC 6749 Section 3.2",
 	})
 
 	switch grantType {
@@ -320,6 +392,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	default:
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported Grant Type", map[string]interface{}{
 			"grant_type": grantType,
+			"endpoint":   "/oauth2/token",
 		})
 		writeOAuth2Error(w, "unsupported_grant_type", "Grant type not supported", "")
 	}
@@ -336,16 +409,27 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	if clientID == "" {
 		clientID, clientSecret, _ = r.BasicAuth()
 	}
+	clientAuthMethod := "none"
+	if _, _, ok := r.BasicAuth(); ok {
+		clientAuthMethod = "basic"
+	} else if clientSecret != "" {
+		clientAuthMethod = "post"
+	}
 
 	// Emit token exchange step
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Token Exchange Request", map[string]interface{}{
-		"step":         4,
-		"from":         "Client",
-		"to":           "Authorization Server",
-		"grant_type":   "authorization_code",
-		"client_id":    clientID,
-		"has_verifier": codeVerifier != "",
-		"code_preview": code[:min(8, len(code))] + "...",
+		"step":                  4,
+		"from":                  "Client",
+		"to":                    "Authorization Server",
+		"grant_type":            "authorization_code",
+		"client_id":             clientID,
+		"redirect_uri":          redirectURI,
+		"code":                  code,
+		"code_preview":          code[:min(8, len(code))] + "...",
+		"code_verifier":         codeVerifier,
+		"code_verifier_present": codeVerifier != "",
+		"client_auth_method":    clientAuthMethod,
+		"client_secret_present": clientSecret != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Authorization Code Exchange",
@@ -366,15 +450,17 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	if !client.Public {
 		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
 			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Authentication Failed", map[string]interface{}{
-				"client_id": clientID,
-				"reason":    "invalid_credentials",
+				"client_id":          clientID,
+				"reason":             "invalid_credentials",
+				"client_auth_method": clientAuthMethod,
 			})
 			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
 			return
 		}
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Client Authenticated", map[string]interface{}{
-			"client_id":   clientID,
-			"client_type": "confidential",
+			"client_id":          clientID,
+			"client_type":        "confidential",
+			"client_auth_method": clientAuthMethod,
 		})
 	}
 
@@ -382,8 +468,12 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	authCode, err := p.mockIdP.ValidateAuthorizationCode(code, clientID, redirectURI, codeVerifier)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Authorization Code Validation Failed", map[string]interface{}{
-			"error":  err.Error(),
-			"reason": "invalid_grant",
+			"error":                 err.Error(),
+			"reason":                "invalid_grant",
+			"client_id":             clientID,
+			"redirect_uri":          redirectURI,
+			"code":                  code,
+			"code_verifier_present": codeVerifier != "",
 		})
 		writeOAuth2Error(w, "invalid_grant", err.Error(), "")
 		return
@@ -392,8 +482,10 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	// Emit PKCE validation if applicable
 	if codeVerifier != "" {
 		p.emitEvent(sessionID, lookingglass.EventTypeCryptoOperation, "PKCE Verification Successful", map[string]interface{}{
-			"method":          authCode.CodeChallengeMethod,
-			"verifier_length": len(codeVerifier),
+			"code_challenge":        authCode.CodeChallenge,
+			"code_challenge_method": authCode.CodeChallengeMethod,
+			"code_verifier":         codeVerifier,
+			"verifier_length":       len(codeVerifier),
 		}, lookingglass.Annotation{
 			Type:        lookingglass.AnnotationTypeBestPractice,
 			Title:       "PKCE Verification",
@@ -403,7 +495,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	}
 
 	// Generate tokens
-	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope, authCode.Nonce)
+	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
 			"error": err.Error(),
@@ -417,9 +509,12 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		"step":              5,
 		"from":              "Authorization Server",
 		"to":                "Client",
+		"access_token":      tokenResponse.AccessToken,
+		"refresh_token":     tokenResponse.RefreshToken,
 		"token_type":        tokenResponse.TokenType,
 		"expires_in":        tokenResponse.ExpiresIn,
 		"scope":             tokenResponse.Scope,
+		"scopes":            strings.Fields(tokenResponse.Scope),
 		"has_refresh_token": tokenResponse.RefreshToken != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
@@ -441,12 +536,23 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	if clientID == "" {
 		clientID, clientSecret, _ = r.BasicAuth()
 	}
+	clientAuthMethod := "none"
+	if _, _, ok := r.BasicAuth(); ok {
+		clientAuthMethod = "basic"
+	} else if clientSecret != "" {
+		clientAuthMethod = "post"
+	}
 
 	// Emit refresh token request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Refresh Token Request", map[string]interface{}{
-		"grant_type":      "refresh_token",
-		"client_id":       clientID,
-		"requested_scope": scope,
+		"grant_type":            "refresh_token",
+		"client_id":             clientID,
+		"client_auth_method":    clientAuthMethod,
+		"refresh_token":         refreshToken,
+		"refresh_token_length":  len(refreshToken),
+		"requested_scope":       scope,
+		"requested_scopes":      strings.Fields(scope),
+		"refresh_token_present": refreshToken != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Token Refresh",
@@ -467,7 +573,8 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	if !client.Public {
 		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
 			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Authentication Failed", map[string]interface{}{
-				"client_id": clientID,
+				"client_id":          clientID,
+				"client_auth_method": clientAuthMethod,
 			})
 			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
 			return
@@ -478,7 +585,9 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	rt, err := p.mockIdP.ValidateRefreshToken(refreshToken, clientID)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Refresh Token Invalid", map[string]interface{}{
-			"error": err.Error(),
+			"error":                err.Error(),
+			"refresh_token":        refreshToken,
+			"refresh_token_length": len(refreshToken),
 		})
 		writeOAuth2Error(w, "invalid_grant", err.Error(), "")
 		return
@@ -490,7 +599,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	}
 
 	// Generate new tokens
-	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope, "")
+	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope)
 	if err != nil {
 		writeOAuth2Error(w, "server_error", "Failed to issue tokens", "")
 		return
@@ -498,8 +607,12 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 
 	// Emit token rotation event
 	p.emitEvent(sessionID, lookingglass.EventTypeTokenIssued, "Tokens Refreshed", map[string]interface{}{
+		"access_token":         tokenResponse.AccessToken,
+		"refresh_token":        tokenResponse.RefreshToken,
 		"token_type":           tokenResponse.TokenType,
 		"expires_in":           tokenResponse.ExpiresIn,
+		"scope":                tokenResponse.Scope,
+		"scopes":               strings.Fields(tokenResponse.Scope),
 		"new_refresh_token":    tokenResponse.RefreshToken != "",
 		"rotation_implemented": true,
 	}, lookingglass.Annotation{
@@ -521,15 +634,23 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 	if clientID == "" {
 		clientID, clientSecret, _ = r.BasicAuth()
 	}
+	clientAuthMethod := "none"
+	if _, _, ok := r.BasicAuth(); ok {
+		clientAuthMethod = "basic"
+	} else if clientSecret != "" {
+		clientAuthMethod = "post"
+	}
 
 	// Emit client credentials request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Client Credentials Request", map[string]interface{}{
-		"step":            1,
-		"from":            "Client",
-		"to":              "Authorization Server",
-		"grant_type":      "client_credentials",
-		"client_id":       clientID,
-		"requested_scope": scope,
+		"step":               1,
+		"from":               "Client",
+		"to":                 "Authorization Server",
+		"grant_type":         "client_credentials",
+		"client_id":          clientID,
+		"client_auth_method": clientAuthMethod,
+		"requested_scope":    scope,
+		"requested_scopes":   strings.Fields(scope),
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Client Credentials Flow",
@@ -541,16 +662,18 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 	client, err := p.mockIdP.ValidateClient(clientID, clientSecret)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Authentication Failed", map[string]interface{}{
-			"client_id": clientID,
-			"error":     "invalid_credentials",
+			"client_id":          clientID,
+			"error":              "invalid_credentials",
+			"client_auth_method": clientAuthMethod,
 		})
 		writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
 		return
 	}
 
 	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Client Authenticated", map[string]interface{}{
-		"client_id":   clientID,
-		"client_name": client.Name,
+		"client_id":          clientID,
+		"client_name":        client.Name,
+		"client_auth_method": clientAuthMethod,
 	})
 
 	// Check if client is authorized for this grant type
@@ -601,9 +724,11 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		"step":              2,
 		"from":              "Authorization Server",
 		"to":                "Client",
+		"access_token":      tokenResponse.AccessToken,
 		"token_type":        "Bearer",
 		"expires_in":        3600,
 		"scope":             scope,
+		"scopes":            strings.Fields(scope),
 		"has_refresh_token": false,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeSecurityHint,
@@ -626,11 +751,26 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 
 	token := r.FormValue("token")
 	tokenTypeHint := r.FormValue("token_type_hint")
+	clientID, clientSecret, _ := r.BasicAuth()
+	if clientID == "" {
+		clientID = r.FormValue("client_id")
+		clientSecret = r.FormValue("client_secret")
+	}
+	clientAuthMethod := "none"
+	if _, _, ok := r.BasicAuth(); ok {
+		clientAuthMethod = "basic"
+	} else if clientSecret != "" {
+		clientAuthMethod = "post"
+	}
 
 	// Emit introspection request
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Introspection Request", map[string]interface{}{
-		"token_type_hint": tokenTypeHint,
-		"token_length":    len(token),
+		"endpoint":           "/oauth2/introspect",
+		"client_id":          clientID,
+		"client_auth_method": clientAuthMethod,
+		"token":              token,
+		"token_type_hint":    tokenTypeHint,
+		"token_length":       len(token),
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Token Introspection",
@@ -638,16 +778,10 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		Reference:   "RFC 7662",
 	})
 
-	// Authenticate the client making the introspection request
-	clientID, clientSecret, _ := r.BasicAuth()
-	if clientID == "" {
-		clientID = r.FormValue("client_id")
-		clientSecret = r.FormValue("client_secret")
-	}
-
 	if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Client Auth Failed", map[string]interface{}{
-			"client_id": clientID,
+			"client_id":          clientID,
+			"client_auth_method": clientAuthMethod,
 		})
 		writeOAuth2Error(w, "invalid_client", "Client authentication required", "")
 		return
@@ -659,8 +793,11 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Token is not active (invalid or expired)
 		p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Token Inactive", map[string]interface{}{
-			"active": false,
-			"reason": err.Error(),
+			"active":          false,
+			"reason":          err.Error(),
+			"token":           token,
+			"token_type_hint": tokenTypeHint,
+			"token_length":    len(token),
 		})
 		writeJSON(w, http.StatusOK, models.IntrospectionResponse{Active: false})
 		return
@@ -669,8 +806,11 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	// Check if token has been revoked per RFC 7009
 	if p.mockIdP.IsTokenRevoked(token) {
 		p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Token Revoked", map[string]interface{}{
-			"active": false,
-			"reason": "Token has been revoked per RFC 7009",
+			"active":          false,
+			"reason":          "Token has been revoked per RFC 7009",
+			"token":           token,
+			"token_type_hint": tokenTypeHint,
+			"token_length":    len(token),
 		})
 		writeJSON(w, http.StatusOK, models.IntrospectionResponse{Active: false})
 		return
@@ -708,14 +848,23 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	// Emit introspection response
 	p.emitEvent(sessionID, lookingglass.EventTypeTokenValidated, "Token Introspection Result", map[string]interface{}{
 		"active":     true,
-		"token_type": "Bearer",
+		"token_type": response.TokenType,
 		"sub":        response.Sub,
+		"username":   response.Username,
+		"client_id":  response.ClientID,
 		"scope":      response.Scope,
+		"scopes":     strings.Fields(response.Scope),
 		"exp":        response.Exp,
+		"iat":        response.Iat,
+		"nbf":        response.Nbf,
+		"aud":        response.Aud,
+		"iss":        response.Iss,
+		"jti":        response.Jti,
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeSecurityHint,
 		Title:       "Token Active",
 		Description: "The token has been validated and is currently active",
+		Reference:   "RFC 7662 Section 2.2",
 	})
 
 	writeJSON(w, http.StatusOK, response)
@@ -732,24 +881,32 @@ func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 
 	token := r.FormValue("token")
 	tokenTypeHint := r.FormValue("token_type_hint")
+	clientID, clientSecret, _ := r.BasicAuth()
+	if clientID == "" {
+		clientID = r.FormValue("client_id")
+		clientSecret = r.FormValue("client_secret")
+	}
+	clientAuthMethod := "none"
+	if _, _, ok := r.BasicAuth(); ok {
+		clientAuthMethod = "basic"
+	} else if clientSecret != "" {
+		clientAuthMethod = "post"
+	}
 
 	// Emit revocation request
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Revocation Request", map[string]interface{}{
-		"token_type_hint": tokenTypeHint,
-		"token_length":    len(token),
+		"endpoint":           "/oauth2/revoke",
+		"client_id":          clientID,
+		"client_auth_method": clientAuthMethod,
+		"token":              token,
+		"token_type_hint":    tokenTypeHint,
+		"token_length":       len(token),
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Token Revocation",
 		Description: "Allows clients to notify the authorization server that a previously issued token is no longer needed",
 		Reference:   "RFC 7009",
 	})
-
-	// Authenticate the client
-	clientID, clientSecret, _ := r.BasicAuth()
-	if clientID == "" {
-		clientID = r.FormValue("client_id")
-		clientSecret = r.FormValue("client_secret")
-	}
 
 	client, exists := p.mockIdP.GetClient(clientID)
 	if !exists {
@@ -763,7 +920,8 @@ func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	if !client.Public {
 		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
 			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Auth Failed", map[string]interface{}{
-				"client_id": clientID,
+				"client_id":          clientID,
+				"client_auth_method": clientAuthMethod,
 			})
 			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
 			return
@@ -777,7 +935,10 @@ func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 
 	// Emit revocation success
 	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Token Revoked", map[string]interface{}{
+		"token":               token,
 		"token_type_hint":     tokenTypeHint,
+		"client_id":           clientID,
+		"client_auth_method":  clientAuthMethod,
 		"revoked":             true,
 		"rfc_compliance":      "RFC 7009 Section 2.1",
 		"hint_is_advisory":    true,
@@ -811,7 +972,7 @@ func (p *Plugin) handleListClients(w http.ResponseWriter, r *http.Request) {
 }
 
 // issueTokens creates access token and refresh token
-func (p *Plugin) issueTokens(userID, clientID, scope, nonce string) (*models.TokenResponse, error) {
+func (p *Plugin) issueTokens(userID, clientID, scope string) (*models.TokenResponse, error) {
 	jwtService := p.mockIdP.JWTService()
 
 	// Get user claims
@@ -907,13 +1068,17 @@ func writeOAuth2ErrorWithURI(w http.ResponseWriter, errorCode, description, stat
 	writeJSON(w, http.StatusBadRequest, response)
 }
 
-func (p *Plugin) generateLoginPage(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod, clientName string) string {
+func (p *Plugin) generateLoginPage(clientID, redirectURI, scope, state, codeChallenge, codeChallengeMethod, sessionID, clientName string) string {
 	if clientName == "" {
 		if client, exists := p.mockIdP.GetClient(clientID); exists {
 			clientName = client.Name
 		} else {
 			clientName = clientID
 		}
+	}
+	formAction := "/oauth2/authorize"
+	if sessionID != "" {
+		formAction += "?lg_session=" + url.QueryEscape(sessionID)
 	}
 
 	return `<!DOCTYPE html>
@@ -1079,7 +1244,7 @@ func (p *Plugin) generateLoginPage(clientID, redirectURI, scope, state, codeChal
 
         <!-- ERROR -->
 
-        <form method="POST" action="/oauth2/authorize">
+        <form method="POST" action="` + formAction + `">
             <input type="hidden" name="client_id" value="` + clientID + `">
             <input type="hidden" name="redirect_uri" value="` + redirectURI + `">
             <input type="hidden" name="scope" value="` + scope + `">
