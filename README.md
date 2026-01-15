@@ -4,7 +4,7 @@ An interactive sandbox for exploring authentication and identity protocols. Exec
 
 > Real flows against real infrastructure
 
-**Protocols:** OAuth 2.0 • OpenID Connect • SAML 2.0 • SPIFFE/SPIRE
+**Protocols:** OAuth 2.0 • OpenID Connect • SAML 2.0 • SPIFFE/SPIRE • SCIM 2.0 • Shared Signals (SSF)
 
 ## Live Website
 
@@ -22,20 +22,20 @@ docker compose up -d
 ```
 
 This starts:
-- **SPIRE Server** — Certificate authority and identity registry
-- **SPIRE Agent** — Workload attestation and SVID issuance
-- **Backend** — Go API with embedded agent for real X.509/JWT SVIDs
-- **Frontend** — React UI at `http://localhost:3000`
-- **Backend API** — Available at `http://localhost:8080`
+- **SPIRE Server** - Certificate authority and identity registry
+- **SPIRE Agent** - Workload attestation and SVID issuance
+- **Backend** - Go API with embedded agent for real X.509/JWT SVIDs
+- **Frontend** - React UI at `http://localhost:3000`
+- **Backend API** - Available at `http://localhost:8080`
 
 ### Lightweight Stack (without SPIFFE)
 
 ```bash
-cd ProtocolLens/docker
+cd ProtocolSoup/docker
 docker compose -f docker-compose.simple.yml up -d
 ```
 
-Use this for OAuth 2.0, OIDC, and SAML demos without the SPIFFE/SPIRE infrastructure.
+Use this for OAuth 2.0, OIDC, SAML, SCIM, and SSF demos without the SPIFFE/SPIRE infrastructure.
 
 ---
 
@@ -48,6 +48,7 @@ Use this for OAuth 2.0, OIDC, and SAML demos without the SPIFFE/SPIRE infrastruc
 | **Mock IdP** | Self-contained identity provider with preconfigured test users and clients |
 | **Flow Visualizer** | Step-by-step animated protocol flow diagrams |
 | **Plugin Architecture** | Add new protocols without modifying core infrastructure |
+| **SSF Sandbox** | Interactive Shared Signals Framework testing with real-time event delivery |
 
 ---
 
@@ -63,6 +64,8 @@ Use this for OAuth 2.0, OIDC, and SAML demos without the SPIFFE/SPIRE infrastruc
 | Device Code | RFC 8628 | Input-constrained device flow |
 | Resource Owner Password | RFC 6749 | Direct username/password (legacy) |
 | Refresh Token | RFC 6749 | Token renewal flow |
+| Token Introspection | RFC 7662 | Active token metadata inspection |
+| Token Revocation | RFC 7009 | Token invalidation |
 
 ### OpenID Connect
 
@@ -70,6 +73,8 @@ Use this for OAuth 2.0, OIDC, and SAML demos without the SPIFFE/SPIRE infrastruc
 |------|------|-------------|
 | Authorization Code | OIDC Core | OAuth 2.0 + ID token for identity |
 | Hybrid Flow | OIDC Core | Immediate ID token + code exchange |
+| Discovery | OIDC Discovery | OpenID Provider metadata endpoint |
+| UserInfo | OIDC Core | User claims endpoint |
 
 ### SAML 2.0
 
@@ -88,7 +93,25 @@ Use this for OAuth 2.0, OIDC, and SAML demos without the SPIFFE/SPIRE infrastruc
 | mTLS Configuration | Automatic certificate rotation |
 | Trust Bundle | CA certificate distribution |
 
-> SPIFFE flows execute against real SPIRE infrastructure both locally and on [protocolsoup.com](https://protocolsoup.com).
+> SPIFFE flows execute against real SPIRE infrastructure on [protocolsoup.com](https://protocolsoup.com).
+
+### SCIM 2.0
+
+| Flow | RFC | Description |
+|------|-----|-------------|
+| User Lifecycle | RFC 7643/7644 | Create, read, update, delete users |
+| Group Management | RFC 7643/7644 | Group membership provisioning |
+| Filter Queries | RFC 7644 | SCIM filter syntax for searches |
+| Schema Discovery | RFC 7643 | Resource type and schema introspection |
+
+### Shared Signals Framework (SSF)
+
+| Flow | Spec | Description |
+|------|------|-------------|
+| Stream Management | OpenID SSF | Create and configure event streams |
+| CAEP Events | CAEP | Session revocation, token revocation, credential change |
+| RISC Events | RISC | Account compromise, credential compromise indicators |
+| SET Delivery | RFC 8935 | Security Event Token push delivery |
 
 ---
 
@@ -106,7 +129,7 @@ Use this for OAuth 2.0, OIDC, and SAML demos without the SPIFFE/SPIRE infrastruc
 
 | client_id | Type | Secret |
 |-----------|------|--------|
-| `public-app` | Public | — |
+| `public-app` | Public | - |
 | `demo-app` | Confidential | `demo-secret` |
 | `machine-client` | Confidential | `machine-secret` |
 
@@ -159,6 +182,42 @@ POST /spiffe/validate/jwt                      Validate JWT-SVID
 POST /spiffe/validate/x509                     Validate X.509-SVID
 ```
 
+### SCIM 2.0
+
+```
+GET    /scim/v2/ServiceProviderConfig          Service provider configuration
+GET    /scim/v2/ResourceTypes                  Available resource types
+GET    /scim/v2/Schemas                        Schema definitions
+GET    /scim/v2/Users                          List users (supports filtering)
+POST   /scim/v2/Users                          Create user
+GET    /scim/v2/Users/{id}                     Get user by ID
+PUT    /scim/v2/Users/{id}                     Replace user
+PATCH  /scim/v2/Users/{id}                     Partial update user
+DELETE /scim/v2/Users/{id}                     Delete user
+GET    /scim/v2/Groups                         List groups
+POST   /scim/v2/Groups                         Create group
+GET    /scim/v2/Groups/{id}                    Get group by ID
+PATCH  /scim/v2/Groups/{id}                    Update group membership
+DELETE /scim/v2/Groups/{id}                    Delete group
+```
+
+### Shared Signals Framework (SSF)
+
+```
+GET  /ssf/.well-known/ssf-configuration        Transmitter configuration
+POST /ssf/stream                               Create event stream
+GET  /ssf/stream/{id}                          Get stream configuration
+PUT  /ssf/stream/{id}                          Update stream
+DELETE /ssf/stream/{id}                        Delete stream
+POST /ssf/stream/{id}/subjects                 Add subject to stream
+DELETE /ssf/stream/{id}/subjects/{subject}     Remove subject
+POST /ssf/stream/{id}/events                   Emit event to stream
+GET  /ssf/stream/{id}/events                   List stream events
+POST /ssf/receiver/push                        SET push delivery endpoint
+GET  /ssf/receiver/events                      List received events
+POST /ssf/receiver/events/{id}/ack             Acknowledge event
+```
+
 ### Internal API
 
 ```
@@ -173,7 +232,7 @@ GET  /health                                   Health check
 ## Project Structure
 
 ```
-ProtocolLens/
+ProtocolSoup/
 ├── backend/
 │   ├── cmd/server/main.go         # Application entry point
 │   └── internal/
@@ -187,7 +246,9 @@ ProtocolLens/
 │           ├── oauth2/             # OAuth 2.0 implementation
 │           ├── oidc/               # OpenID Connect (extends OAuth 2.0)
 │           ├── saml/               # SAML 2.0 SSO & SLO
-│           └── spiffe/             # SPIFFE/SPIRE handlers
+│           ├── scim/               # SCIM 2.0 user/group provisioning
+│           ├── spiffe/             # SPIFFE/SPIRE handlers
+│           └── ssf/                # Shared Signals Framework
 ├── frontend/
 │   └── src/
 │       ├── components/             # Shared UI components
@@ -226,6 +287,7 @@ ProtocolLens/
 | golang-jwt | 5.2 | JWT creation/validation |
 | gorilla/websocket | 1.5 | Real-time communication |
 | go-spiffe | 2.2 | SPIFFE Workload API client |
+| modernc/sqlite | 1.29 | Embedded database for SCIM/SSF |
 
 ### Frontend
 
@@ -233,7 +295,7 @@ ProtocolLens/
 |------------|---------|---------|
 | React | 18.3 | UI framework |
 | TypeScript | 5.6 | Type safety |
-| Vite | 5.4 | Build tool |
+| Vite | 7.3 | Build tool |
 | Tailwind CSS | 3.4 | Styling |
 | Framer Motion | 11.5 | Animations |
 | Zustand | 4.5 | State management |
@@ -251,9 +313,9 @@ ProtocolLens/
 
 ## Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md) — System design and data flow
-- [Adding Protocols](docs/ADDING_PROTOCOLS.md) — Plugin development guide
-- [SPIFFE/SPIRE Integration](docs/SPIFFE.md) — Workload identity setup
+- [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
+- [Adding Protocols](docs/ADDING_PROTOCOLS.md) - Plugin development guide
+- [SPIFFE/SPIRE Integration](docs/SPIFFE.md) - Workload identity setup
 
 ---
 
@@ -300,16 +362,8 @@ This is an **educational tool** designed for learning and demonstration. The Moc
 
 ---
 
-## Author
 
-**[Mason Parle](https://www.linkedin.com/in/mason-parle/)** - Security engineer passionate about authentication protocols and identity systems.
-
-More projects on [GitHub](https://github.com/ParleSec).
-
----
 
 ## License
-
-MIT © 2024 Mason Parle
 
 See [LICENSE](LICENSE) for details.

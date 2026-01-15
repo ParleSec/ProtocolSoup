@@ -316,4 +316,4 @@ curl -H "X-SSF-Session: $SESSION_ID" \
 
 ## License
 
-Part of the ProtocolLens/Protocol Soup project.
+Part of the ProtocolSoup project.

@@ -553,4 +553,4 @@ This implementation follows these SPIFFE specifications:
 
 ## License
 
-Part of the ProtocolLens/Protocol Soup project.
+Part of the ProtocolSoup project.

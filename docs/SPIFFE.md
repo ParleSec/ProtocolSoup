@@ -1,10 +1,10 @@
 # SPIFFE/SPIRE Integration
 
-This document describes the real, production-ready SPIFFE/SPIRE implementation in ProtocolLens.
+This document describes the real, production-ready SPIFFE/SPIRE implementation in ProtocolSoup.
 
 ## Overview
 
-ProtocolLens includes a fully functional SPIFFE/SPIRE infrastructure:
+ProtocolSoup includes a fully functional SPIFFE/SPIRE infrastructure:
 - **SPIRE Server** - Issues X.509-SVIDs and JWT-SVIDs for the `spiffe://protocolsoup.com` trust domain
 - **SPIRE Agent** - Performs workload attestation and delivers SVIDs
 - **Workload Registration** - Automatically registers workloads with the server
