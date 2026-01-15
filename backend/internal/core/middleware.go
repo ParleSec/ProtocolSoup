@@ -396,7 +396,9 @@ func buildRawRequest(r *http.Request, headers map[string][]string, capture *body
 	buf.WriteString(" ")
 	buf.WriteString(r.Proto)
 	buf.WriteString("\r\n")
-	http.Header(headers).Write(&buf)
+	if err := http.Header(headers).Write(&buf); err != nil {
+		return buf.Bytes()
+	}
 	buf.WriteString("\r\n")
 	body, _, _ := capture.snapshot()
 	buf.Write(body)
@@ -414,7 +416,9 @@ func buildRawResponse(proto string, status int, statusText string, headers map[s
 	buf.WriteString(" ")
 	buf.WriteString(statusText)
 	buf.WriteString("\r\n")
-	http.Header(headers).Write(&buf)
+	if err := http.Header(headers).Write(&buf); err != nil {
+		return buf.Bytes()
+	}
 	buf.WriteString("\r\n")
 	body, _, _ := capture.snapshot()
 	buf.Write(body)
