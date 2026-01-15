@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/google/uuid"
 )
 
 // Engine is the main looking glass inspection engine
@@ -60,22 +60,82 @@ type Event struct {
 type EventType string
 
 const (
-	EventTypeFlowStep       EventType = "flow.step"
-	EventTypeTokenIssued    EventType = "token.issued"
-	EventTypeTokenValidated EventType = "token.validated"
-	EventTypeRequestSent    EventType = "request.sent"
+	EventTypeFlowStep         EventType = "flow.step"
+	EventTypeTokenIssued      EventType = "token.issued"
+	EventTypeTokenValidated   EventType = "token.validated"
+	EventTypeRequestSent      EventType = "request.sent"
 	EventTypeResponseReceived EventType = "response.received"
-	EventTypeSecurityWarning EventType = "security.warning"
-	EventTypeSecurityInfo    EventType = "security.info"
-	EventTypeCryptoOperation EventType = "crypto.operation"
+	EventTypeHTTPExchange     EventType = "http.exchange"
+	EventTypeSecurityWarning  EventType = "security.warning"
+	EventTypeSecurityInfo     EventType = "security.info"
+	EventTypeCryptoOperation  EventType = "crypto.operation"
 )
+
+// CapturedExchange represents a complete HTTP request/response capture
+type CapturedExchange struct {
+	ID        string          `json:"id"`
+	SessionID string          `json:"session_id,omitempty"`
+	Request   CapturedMessage `json:"request"`
+	Response  CapturedMessage `json:"response"`
+	Timing    ExchangeTiming  `json:"timing"`
+	TLS       *TLSInfo        `json:"tls,omitempty"`
+	Meta      CaptureMeta     `json:"meta"`
+}
+
+// CapturedMessage represents one side of an HTTP exchange
+type CapturedMessage struct {
+	Method     string              `json:"method,omitempty"`
+	URL        string              `json:"url,omitempty"`
+	Host       string              `json:"host,omitempty"`
+	Proto      string              `json:"proto,omitempty"`
+	Headers    map[string][]string `json:"headers,omitempty"`
+	Body       *CapturedPayload    `json:"body,omitempty"`
+	Raw        *CapturedPayload    `json:"raw,omitempty"`
+	Status     int                 `json:"status,omitempty"`
+	StatusText string              `json:"status_text,omitempty"`
+}
+
+// CapturedPayload holds raw or parsed payload data
+type CapturedPayload struct {
+	Encoding    string `json:"encoding"`
+	Data        string `json:"data,omitempty"`
+	Size        int64  `json:"size"`
+	Truncated   bool   `json:"truncated"`
+	ContentType string `json:"content_type,omitempty"`
+}
+
+// ExchangeTiming captures high-resolution timing for an exchange
+type ExchangeTiming struct {
+	StartUnixMicro int64 `json:"start_unix_micro"`
+	EndUnixMicro   int64 `json:"end_unix_micro"`
+	DurationMicro  int64 `json:"duration_micro"`
+}
+
+// TLSInfo captures TLS negotiation details when available
+type TLSInfo struct {
+	Version            string   `json:"version,omitempty"`
+	CipherSuite        string   `json:"cipher_suite,omitempty"`
+	ServerName         string   `json:"server_name,omitempty"`
+	NegotiatedProtocol string   `json:"negotiated_protocol,omitempty"`
+	PeerCertificates   []string `json:"peer_cert_subjects,omitempty"`
+}
+
+// CaptureMeta describes capture characteristics
+type CaptureMeta struct {
+	CaptureSource            string `json:"capture_source"`
+	HeaderOrderPreserved     bool   `json:"header_order_preserved"`
+	BodyLimitBytes           int64  `json:"body_limit_bytes"`
+	RequestBodyReadBytes     int64  `json:"request_body_read_bytes"`
+	ResponseBodyWrittenBytes int64  `json:"response_body_written_bytes"`
+	RawReconstructed         bool   `json:"raw_reconstructed"`
+}
 
 // Annotation provides security context for events
 type Annotation struct {
 	Type        AnnotationType `json:"type"`
 	Title       string         `json:"title"`
 	Description string         `json:"description"`
-	Severity    string         `json:"severity,omitempty"` // info, warning, error
+	Severity    string         `json:"severity,omitempty"`  // info, warning, error
 	Reference   string         `json:"reference,omitempty"` // RFC or spec reference
 }
 
@@ -83,11 +143,11 @@ type Annotation struct {
 type AnnotationType string
 
 const (
-	AnnotationTypeSecurityHint   AnnotationType = "security_hint"
-	AnnotationTypeBestPractice   AnnotationType = "best_practice"
-	AnnotationTypeRFCReference   AnnotationType = "rfc_reference"
-	AnnotationTypeVulnerability  AnnotationType = "vulnerability"
-	AnnotationTypeExplanation    AnnotationType = "explanation"
+	AnnotationTypeSecurityHint  AnnotationType = "security_hint"
+	AnnotationTypeBestPractice  AnnotationType = "best_practice"
+	AnnotationTypeRFCReference  AnnotationType = "rfc_reference"
+	AnnotationTypeVulnerability AnnotationType = "vulnerability"
+	AnnotationTypeExplanation   AnnotationType = "explanation"
 )
 
 // CreateSession creates a new looking glass session
@@ -249,14 +309,15 @@ func (ti *TokenInspection) addTokenAnnotations() {
 
 	// Check algorithm
 	if alg, ok := ti.Header["alg"].(string); ok {
-		if alg == "none" {
+		switch alg {
+		case "none":
 			ti.Annotations = append(ti.Annotations, Annotation{
 				Type:        AnnotationTypeVulnerability,
 				Title:       "Insecure Algorithm",
 				Description: "The 'none' algorithm provides no signature verification - critical security risk!",
 				Severity:    "error",
 			})
-		} else if alg == "HS256" || alg == "HS384" || alg == "HS512" {
+		case "HS256", "HS384", "HS512":
 			ti.Annotations = append(ti.Annotations, Annotation{
 				Type:        AnnotationTypeBestPractice,
 				Title:       "Symmetric Algorithm",
@@ -311,4 +372,3 @@ func parseUnixTime(v interface{}) time.Time {
 		return time.Time{}
 	}
 }
-

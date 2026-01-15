@@ -286,3 +286,9 @@ func (b *EventBroadcaster) EmitResponse(status int, headers map[string]string, b
 	})
 }
 
+// EmitHTTPExchange emits a captured HTTP request/response pair
+func (b *EventBroadcaster) EmitHTTPExchange(title string, exchange CapturedExchange) {
+	b.Emit(EventTypeHTTPExchange, title, map[string]interface{}{
+		"exchange": exchange,
+	})
+}
