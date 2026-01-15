@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 )
 
 // Server is the main HTTP server for the protocol showcase
@@ -47,6 +47,7 @@ func (s *Server) setupRouter() {
 	r := chi.NewRouter()
 
 	// Global middleware
+	r.Use(CaptureMiddleware(s.lookingGlass))
 	r.Use(Recovery)
 	r.Use(RequestLogger)
 	r.Use(SecurityHeaders)
@@ -112,7 +113,7 @@ func (s *Server) setupRouter() {
 // setupStaticFileServing configures static file serving with SPA fallback
 func (s *Server) setupStaticFileServing(r chi.Router) {
 	staticDir := s.config.StaticDir
-	
+
 	// Check if static directory exists
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
 		return
@@ -132,7 +133,7 @@ func (s *Server) setupStaticFileServing(r chi.Router) {
 		cleanURLPath := path.Clean(urlPath)
 		rel := strings.TrimPrefix(cleanURLPath, "/")
 		fullPath := filepath.Join(staticDir, filepath.FromSlash(rel))
-		
+
 		// Check if file exists (not a directory)
 		info, err := os.Stat(fullPath)
 		if err == nil && !info.IsDir() {
@@ -279,7 +280,27 @@ func (s *Server) handleStartDemo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeError(w, http.StatusNotFound, "Flow not found")
+	// If not a demo scenario, allow direct flow sessions
+	flowFound := false
+	for _, flow := range p.GetFlowDefinitions() {
+		if flow.ID == flowID {
+			flowFound = true
+			break
+		}
+	}
+	if !flowFound {
+		writeError(w, http.StatusNotFound, "Flow not found")
+		return
+	}
+
+	session := s.lookingGlass.CreateSession(protocolID, flowID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"session_id":  session.ID,
+		"protocol":    protocolID,
+		"flow":        flowID,
+		"ws_endpoint": "/ws/lookingglass/" + session.ID,
+		"scenario":    nil,
+	})
 }
 
 type DecodeRequest struct {
@@ -339,4 +360,3 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
-
