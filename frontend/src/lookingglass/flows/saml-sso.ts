@@ -207,7 +207,9 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
     // Call Looking Glass API to create REAL AuthnRequest
     const authnRequestUrl = `${this.config.baseUrl}/looking-glass/authn-request?binding=${this.flowConfig.binding}&relay_state=${encodeURIComponent(relayState)}`
-    const authnResponse = await fetch(authnRequestUrl)
+    const authnResponse = await fetch(this.withCaptureQuery(authnRequestUrl), {
+      headers: this.withCaptureHeaders(),
+    })
     
     if (!authnResponse.ok) {
       throw new Error('Failed to create AuthnRequest')
@@ -264,7 +266,9 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       currentStep: 'User authenticates at IdP',
     })
 
-    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`)
+    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`, {
+      headers: this.withCaptureHeaders(),
+    })
     if (!usersResponse.ok) {
       throw new Error('Failed to fetch demo users from IdP')
     }
@@ -294,7 +298,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
     const authResponse = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
       body: authFormData.toString(),
     })
 
@@ -437,7 +441,9 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       currentStep: 'User authenticates at IdP',
     })
 
-    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`)
+    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`, {
+      headers: this.withCaptureHeaders(),
+    })
     if (!usersResponse.ok) {
       throw new Error('Failed to fetch demo users from IdP')
     }
@@ -466,7 +472,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
     const authResponse = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
       body: authFormData.toString(),
     })
 

@@ -14,6 +14,7 @@ import {
 import {
   useProtocols,
   useRealFlowExecutor,
+  useLookingGlassSession,
   ProtocolSelector,
   RealFlowPanel,
   type LookingGlassProtocol,
@@ -37,8 +38,16 @@ export function LookingGlass() {
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
+  const [wireSessionId, setWireSessionId] = useState<string | null>(null)
+  const [wireSessionError, setWireSessionError] = useState<string | null>(null)
+  const [pendingExecute, setPendingExecute] = useState(false)
 
   const { protocols, loading: protocolsLoading } = useProtocols()
+  const {
+    wireExchanges,
+    connected: wireConnected,
+    clearEvents: clearWireEvents,
+  } = useLookingGlassSession(wireSessionId)
 
   // Fetch SCIM token when SCIM protocol is selected
   useEffect(() => {
@@ -106,6 +115,7 @@ export function LookingGlass() {
     token: (isTokenIntrospectionFlow || isTokenRevocationFlow) ? activeToken : undefined,
     accessToken: isUserInfoFlow ? activeToken : undefined,
     bearerToken: isSCIMFlow ? scimBearerToken : undefined,
+    lookingGlassSessionId: wireSessionId || undefined,
   })
 
   // Store tokens from completed flows
@@ -124,19 +134,77 @@ export function LookingGlass() {
     setSelectedProtocol(protocol)
     setSelectedFlow(null)
     realExecutor.reset()
+    setWireSessionId(null)
+    clearWireEvents()
+    setWireSessionError(null)
+    setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor])
+  }, [realExecutor, clearWireEvents])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
     setSelectedFlow(flow)
     realExecutor.reset()
+    setWireSessionId(null)
+    clearWireEvents()
+    setWireSessionError(null)
+    setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor])
+  }, [realExecutor, clearWireEvents])
 
   const handleReset = useCallback(() => {
     realExecutor.reset()
+    setWireSessionId(null)
+    clearWireEvents()
+    setWireSessionError(null)
+    setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor])
+  }, [realExecutor, clearWireEvents])
+
+  const startWireSession = useCallback(async () => {
+    if (!selectedProtocol || !selectedFlow) {
+      return null
+    }
+    setWireSessionError(null)
+    try {
+      clearWireEvents()
+      const response = await fetch(`/api/protocols/${selectedProtocol.id}/demo/${selectedFlow.id}`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(errorData?.error || 'Failed to start wire capture session')
+      }
+      const data = await response.json() as { session_id?: string }
+      if (!data.session_id) {
+        throw new Error('No session ID returned for wire capture')
+      }
+      setWireSessionId(data.session_id)
+      return data.session_id
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to start wire capture session'
+      setWireSessionError(message)
+      return null
+    }
+  }, [selectedProtocol, selectedFlow, clearWireEvents])
+
+  const handleExecute = useCallback(async () => {
+    if (!wireSessionId) {
+      setPendingExecute(true)
+      const created = await startWireSession()
+      if (!created) {
+        setPendingExecute(false)
+      }
+      return
+    }
+    realExecutor.execute()
+  }, [wireSessionId, startWireSession, realExecutor])
+
+  useEffect(() => {
+    if (pendingExecute && wireSessionId) {
+      realExecutor.execute()
+      setPendingExecute(false)
+    }
+  }, [pendingExecute, wireSessionId, realExecutor])
 
   const handleQuickSelect = useCallback((protocolId: string, flowId: string) => {
     const protocol = protocols.find(p => p.id === protocolId)
@@ -146,10 +214,14 @@ export function LookingGlass() {
       if (flow) {
         setSelectedFlow(flow)
         realExecutor.reset()
+        setWireSessionId(null)
+        clearWireEvents()
+        setWireSessionError(null)
+        setPendingExecute(false)
         setInspectedToken('')
       }
     }
-  }, [protocols, realExecutor])
+  }, [protocols, realExecutor, clearWireEvents])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
   const status = realExecutor.state?.status || 'idle'
@@ -453,7 +525,7 @@ export function LookingGlass() {
               <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
                 {status === 'idle' && (
                   <button
-                    onClick={realExecutor.execute}
+                  onClick={handleExecute}
                     className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/30 text-green-400 text-xs sm:text-sm font-medium hover:from-green-500/30 hover:to-emerald-500/30 transition-all"
                   >
                     <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -487,13 +559,16 @@ export function LookingGlass() {
           <div className="p-4 sm:p-5">
             <RealFlowPanel
               state={realExecutor.state}
-              onExecute={realExecutor.execute}
+              onExecute={handleExecute}
               onAbort={realExecutor.abort}
-              onReset={realExecutor.reset}
+              onReset={handleReset}
               isExecuting={realExecutor.isExecuting}
               flowInfo={realExecutor.flowInfo}
               requirements={realExecutor.requirements}
               error={realExecutor.error}
+              wireExchanges={wireExchanges}
+              wireConnected={wireConnected}
+              wireSessionError={wireSessionError}
             />
           </div>
         </motion.section>

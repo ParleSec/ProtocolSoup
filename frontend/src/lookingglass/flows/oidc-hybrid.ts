@@ -231,7 +231,7 @@ export class OIDCHybridExecutor extends FlowExecutorBase {
       params.set('code_challenge_method', 'S256')
     }
 
-    return `${this.config.baseUrl}/authorize?${params.toString()}`
+    return this.withCaptureQuery(`${this.config.baseUrl}/authorize?${params.toString()}`)
   }
 
   private openAuthorizationPopup(authUrl: string): Promise<{

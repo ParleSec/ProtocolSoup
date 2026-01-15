@@ -482,7 +482,7 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
       }
     }
 
-    return `${endpoint}?${params.toString()}`
+    return this.withCaptureQuery(`${endpoint}?${params.toString()}`)
   }
 
   /**

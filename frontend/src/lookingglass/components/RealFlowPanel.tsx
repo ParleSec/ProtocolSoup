@@ -20,6 +20,7 @@ import type {
   CapturedExchange,
   DecodedToken 
 } from '../flows'
+import type { WireCapturedExchange } from '../types'
 
 // ============================================================================
 // Main Panel Component
@@ -43,6 +44,9 @@ interface RealFlowPanelProps {
     requiresCredentials: boolean
   }
   error: string | null
+  wireExchanges?: WireCapturedExchange[]
+  wireConnected?: boolean
+  wireSessionError?: string | null
 }
 
 export function RealFlowPanel({
@@ -54,8 +58,11 @@ export function RealFlowPanel({
   flowInfo,
   requirements,
   error,
+  wireExchanges = [],
+  wireConnected = false,
+  wireSessionError = null,
 }: RealFlowPanelProps) {
-  const [activeTab, setActiveTab] = useState<'events' | 'http' | 'tokens'>('events')
+  const [activeTab, setActiveTab] = useState<'events' | 'http' | 'wire' | 'tokens'>('events')
 
   const statusConfig = {
     idle: { icon: Play, color: 'text-surface-400', bg: 'bg-surface-800', label: 'Ready to Execute' },
@@ -189,7 +196,8 @@ export function RealFlowPanel({
       <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50 overflow-x-auto scrollbar-hide">
         {[
           { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
-          { id: 'http', label: 'HTTP', count: state?.exchanges.length || 0, icon: Server },
+          { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
+          { id: 'http', label: 'Client', count: state?.exchanges.length || 0, icon: ArrowDownLeft },
           { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
         ].map(tab => (
           <button
@@ -204,6 +212,9 @@ export function RealFlowPanel({
             <tab.icon className="w-4 h-4 flex-shrink-0" />
             <span className="hidden sm:inline">{tab.label}</span>
             <span className="sm:hidden">{tab.label.slice(0, 3)}</span>
+            {tab.id === 'wire' && (
+              <span className={`w-2 h-2 rounded-full ${wireConnected ? 'bg-green-400' : 'bg-surface-600'}`} />
+            )}
             {tab.count > 0 && (
               <span className="px-1.5 py-0.5 rounded text-xs bg-surface-700 flex-shrink-0">
                 {tab.count}
@@ -234,6 +245,20 @@ export function RealFlowPanel({
               exit={{ opacity: 0, y: -10 }}
             >
               <ExchangesList exchanges={state?.exchanges || []} />
+            </motion.div>
+          )}
+          {activeTab === 'wire' && (
+            <motion.div
+              key="wire"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <WireExchangesList
+                exchanges={wireExchanges}
+                connected={wireConnected}
+                error={wireSessionError}
+              />
             </motion.div>
           )}
           {activeTab === 'tokens' && (
@@ -461,6 +486,207 @@ function ExchangeCard({ exchange }: { exchange: CapturedExchange }) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  )
+}
+
+// ============================================================================
+// Wire Capture Exchanges List
+// ============================================================================
+
+function WireExchangesList({
+  exchanges,
+  connected,
+  error,
+}: {
+  exchanges: WireCapturedExchange[]
+  connected: boolean
+  error: string | null
+}) {
+  if (error) {
+    return (
+      <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20 text-red-300 text-sm">
+        Wire capture error: {error}
+      </div>
+    )
+  }
+
+  if (exchanges.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <Server className="w-12 h-12 text-surface-600 mb-3" />
+        <p className="text-surface-400">
+          {connected ? 'Waiting for wire capture...' : 'Wire capture not connected'}
+        </p>
+        <p className="text-surface-400 text-sm">
+          Execute the flow to see real server-side HTTP exchanges
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {exchanges.map(exchange => (
+        <WireExchangeCard key={exchange.id} exchange={exchange} />
+      ))}
+    </div>
+  )
+}
+
+function WireExchangeCard({ exchange }: { exchange: WireCapturedExchange }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const durationMs = Math.round((exchange.timing.durationMicro || 0) / 1000)
+  const method = exchange.request.method || 'REQUEST'
+  const url = exchange.request.url || exchange.request.host || 'unknown'
+
+  return (
+    <div className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full p-3 flex items-center gap-2 sm:gap-3 hover:bg-white/5 active:bg-white/10 transition-colors text-left"
+      >
+        <div className="p-1.5 rounded bg-cyan-500/10 flex-shrink-0">
+          <Send className="w-4 h-4 text-cyan-400" />
+        </div>
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <span className="font-mono text-xs sm:text-sm font-medium text-cyan-400 flex-shrink-0">
+              {method}
+            </span>
+            <span className="text-xs sm:text-sm text-surface-300 truncate max-w-full">
+              {url}
+            </span>
+          </div>
+          <p className="text-xs text-surface-400 mt-0.5 truncate">
+            {durationMs}ms · {exchange.meta.captureSource}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          {exchange.response.status !== undefined && (
+            <span className={`px-1.5 sm:px-2 py-0.5 rounded text-xs font-medium ${
+              exchange.response.status < 300 
+                ? 'bg-green-500/10 text-green-400' 
+                : exchange.response.status < 400 
+                ? 'bg-yellow-500/10 text-yellow-400'
+                : 'bg-red-500/10 text-red-400'
+            }`}>
+              {exchange.response.status}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronDown className="w-4 h-4 text-surface-400" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-surface-400" />
+          )}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/5"
+          >
+            <div className="p-3 space-y-4">
+              <WireRequestSection exchange={exchange} />
+              <WireResponseSection exchange={exchange} />
+              <WireMetaSection exchange={exchange} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function WireRequestSection({ exchange }: { exchange: WireCapturedExchange }) {
+  return (
+    <div>
+      <h4 className="text-xs font-medium text-surface-400 mb-2">Request (Wire)</h4>
+      <WireHeaderBlock headers={exchange.request.headers} />
+      <WirePayloadBlock title="Raw Request" payload={exchange.request.raw} />
+      <WirePayloadBlock title="Parsed Body" payload={exchange.request.body} />
+    </div>
+  )
+}
+
+function WireResponseSection({ exchange }: { exchange: WireCapturedExchange }) {
+  return (
+    <div>
+      <h4 className="text-xs font-medium text-surface-400 mb-2">Response (Wire)</h4>
+      {exchange.response.status !== undefined && (
+        <div className="text-xs text-surface-400 mb-2">
+          Status: <span className="text-surface-300">{exchange.response.status}</span>{' '}
+          {exchange.response.statusText && (
+            <span className="text-surface-500">({exchange.response.statusText})</span>
+          )}
+        </div>
+      )}
+      <WireHeaderBlock headers={exchange.response.headers} />
+      <WirePayloadBlock title="Raw Response" payload={exchange.response.raw} />
+      <WirePayloadBlock title="Parsed Body" payload={exchange.response.body} />
+    </div>
+  )
+}
+
+function WireHeaderBlock({ headers }: { headers?: Record<string, string[]> }) {
+  if (!headers || Object.keys(headers).length === 0) {
+    return null
+  }
+  return (
+    <pre className="p-2 rounded bg-surface-950 text-xs font-mono overflow-x-auto mb-2">
+      {Object.entries(headers).map(([key, values]) => (
+        <div key={key} className="text-surface-400">
+          <span className="text-surface-400">{key}:</span> {values.join(', ')}
+        </div>
+      ))}
+    </pre>
+  )
+}
+
+function WirePayloadBlock({
+  title,
+  payload,
+}: {
+  title: string
+  payload?: WireCapturedExchange['request']['raw']
+}) {
+  if (!payload || !payload.data) {
+    return null
+  }
+
+  return (
+    <div className="mb-2">
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-surface-500 mb-1">
+        <span>{title}</span>
+        <span>· {payload.encoding}</span>
+        <span>· {payload.size} bytes</span>
+        {payload.truncated && <span className="text-amber-400">truncated</span>}
+        {payload.contentType && <span>· {payload.contentType}</span>}
+      </div>
+      <pre className="p-2 rounded bg-surface-950 text-xs font-mono overflow-x-auto text-surface-300">
+        {payload.data}
+      </pre>
+    </div>
+  )
+}
+
+function WireMetaSection({ exchange }: { exchange: WireCapturedExchange }) {
+  return (
+    <div className="rounded-lg bg-surface-950 p-2 text-xs text-surface-400 space-y-1">
+      <div>Capture source: {exchange.meta.captureSource}</div>
+      <div>Header order preserved: {exchange.meta.headerOrderPreserved ? 'yes' : 'no'}</div>
+      <div>Body cap: {exchange.meta.bodyLimitBytes} bytes</div>
+      <div>Request bytes: {exchange.meta.requestBodyReadBytes}</div>
+      <div>Response bytes: {exchange.meta.responseBodyWrittenBytes}</div>
+      {exchange.tls && (
+        <div>
+          TLS: {exchange.tls.version || 'unknown'} · {exchange.tls.cipherSuite || 'unknown'}
+        </div>
+      )}
     </div>
   )
 }

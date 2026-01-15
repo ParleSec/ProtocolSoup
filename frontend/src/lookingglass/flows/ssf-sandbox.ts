@@ -344,9 +344,9 @@ export class SSFSandboxExecutor extends FlowExecutorBase {
     }
   ): Promise<{ response: Response; data: T }> {
     const url = `${this.ssfBaseUrl}${path}`
-    const headers: Record<string, string> = {
+    const headers: Record<string, string> = this.withCaptureHeaders({
       'Accept': 'application/json',
-    }
+    })
 
     if (options.body) {
       headers['Content-Type'] = 'application/json'

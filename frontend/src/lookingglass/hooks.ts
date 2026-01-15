@@ -16,6 +16,7 @@ import {
   type LookingGlassEventType,
   type LookingGlassConfig,
   type LookingGlassActor,
+  type WireCapturedExchange,
 } from './types'
 
 /**
@@ -125,46 +126,95 @@ export function useLookingGlassSession(
 ) {
   const mergedConfig = useMemo(() => ({ ...DEFAULT_CONFIG, ...config }), [config])
   
-  const [session] = useState<LookingGlassSession | null>(null)
+  const [session, setSession] = useState<LookingGlassSession | null>(null)
   const [events, setEvents] = useState<LookingGlassEvent[]>([])
+  const [wireExchanges, setWireExchanges] = useState<WireCapturedExchange[]>([])
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const eventsRef = useRef<LookingGlassEvent[]>([])
+  const eventIdsRef = useRef<Set<string>>(new Set())
+  const wireExchangeIdsRef = useRef<Set<string>>(new Set())
 
   // WebSocket URL for the session
   const wsUrl = sessionId ? `/ws/lookingglass/${sessionId}` : null
 
+  useEffect(() => {
+    setEvents([])
+    setWireExchanges([])
+    setCurrentStepIndex(0)
+    eventsRef.current = []
+    eventIdsRef.current = new Set()
+    wireExchangeIdsRef.current = new Set()
+  }, [sessionId])
+
   // Handle incoming WebSocket messages
   const handleMessage = useCallback((message: string) => {
-    try {
-      const parsed = JSON.parse(message)
-      
-      const event: LookingGlassEvent = {
-        id: parsed.id || crypto.randomUUID(),
-        sessionId: sessionId || '',
-        timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
-        type: parsed.type as LookingGlassEventType || 'flow.step',
-        title: parsed.title || 'Event',
-        description: parsed.description,
-        stepId: parsed.step_id,
-        status: inferEventStatus(parsed),
-        data: parsed.data,
-        annotations: parsed.annotations,
-        duration: parsed.duration,
-      }
+    const chunks = message.split('\n').filter(Boolean)
+    for (const chunk of chunks) {
+      try {
+        const parsed = JSON.parse(chunk) as {
+          type?: string
+          payload?: Record<string, unknown>
+        }
+        const messageType = parsed.type || ''
+        const payload = (parsed.payload || parsed) as Record<string, unknown>
 
-      // Update events with limit
-      setEvents(prev => {
-        const updated = [event, ...prev].slice(0, mergedConfig.maxEvents)
-        eventsRef.current = updated
-        return updated
-      })
+        if (messageType === 'session.info') {
+          const sessionInfo = payload as Record<string, unknown>
+          setSession({
+            id: String(sessionInfo.id || sessionId || ''),
+            protocolId: String(sessionInfo.protocol_id || ''),
+            flowId: String(sessionInfo.flow_id || ''),
+            state: (sessionInfo.state as LookingGlassSession['state']) || 'active',
+            events: [],
+            currentStep: 0,
+            metadata: {},
+            createdAt: sessionInfo.created_at ? new Date(String(sessionInfo.created_at)) : new Date(),
+            updatedAt: sessionInfo.created_at ? new Date(String(sessionInfo.created_at)) : new Date(),
+          })
+          continue
+        }
 
-      // Update current step if this is a step event
-      if (event.type === 'flow.step' && event.data?.step !== undefined) {
-        setCurrentStepIndex(Number(event.data.step))
+        const eventType = (payload.type || messageType) as LookingGlassEventType || 'flow.step'
+        const eventId = String(payload.id || crypto.randomUUID())
+        if (eventIdsRef.current.has(eventId)) {
+          continue
+        }
+        eventIdsRef.current.add(eventId)
+
+        const event: LookingGlassEvent = {
+          id: eventId,
+          sessionId: sessionId || '',
+          timestamp: payload.timestamp ? new Date(String(payload.timestamp)) : new Date(),
+          type: eventType,
+          title: String(payload.title || 'Event'),
+          description: payload.description ? String(payload.description) : undefined,
+          stepId: payload.step_id ? String(payload.step_id) : undefined,
+          status: inferEventStatus(eventType),
+          data: payload.data as Record<string, unknown> | undefined,
+          annotations: payload.annotations as LookingGlassEvent['annotations'],
+          duration: typeof payload.duration === 'number' ? payload.duration : undefined,
+        }
+
+        setEvents(prev => {
+          const updated = [event, ...prev].slice(0, mergedConfig.maxEvents)
+          eventsRef.current = updated
+          return updated
+        })
+
+        if (event.type === 'flow.step' && event.data?.step !== undefined) {
+          setCurrentStepIndex(Number(event.data.step))
+        }
+
+        if (event.type === 'http.exchange' && event.data?.exchange) {
+          const exchange = normalizeWireExchange(event.data.exchange)
+          if (exchange && !wireExchangeIdsRef.current.has(exchange.id)) {
+            wireExchangeIdsRef.current.add(exchange.id)
+            setWireExchanges(prev => [exchange, ...prev].slice(0, mergedConfig.maxEvents))
+          }
+        }
+      } catch {
+        // Ignore malformed message chunks
       }
-    } catch {
-      // Ignore non-JSON messages
     }
   }, [sessionId, mergedConfig.maxEvents])
 
@@ -178,7 +228,10 @@ export function useLookingGlassSession(
   // Clear events
   const clearEvents = useCallback(() => {
     setEvents([])
+    setWireExchanges([])
     eventsRef.current = []
+    eventIdsRef.current = new Set()
+    wireExchangeIdsRef.current = new Set()
     setCurrentStepIndex(0)
   }, [])
 
@@ -190,6 +243,7 @@ export function useLookingGlassSession(
   return {
     session,
     events,
+    wireExchanges,
     currentStepIndex,
     connected,
     clearEvents,
@@ -289,13 +343,132 @@ export function useFlowSimulation(flow: LookingGlassFlow | null) {
 /**
  * Infer event status from parsed data
  */
-function inferEventStatus(parsed: Record<string, unknown>): LookingGlassEvent['status'] {
-  const type = String(parsed.type || '')
-  
-  if (type.includes('error')) return 'error'
-  if (type.includes('warning')) return 'warning'
-  if (type.includes('pending')) return 'pending'
+function inferEventStatus(eventType: string): LookingGlassEvent['status'] {
+  if (eventType.includes('error')) return 'error'
+  if (eventType.includes('warning')) return 'warning'
+  if (eventType.includes('pending')) return 'pending'
   return 'success'
+}
+
+function normalizeWireExchange(raw: unknown): WireCapturedExchange | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+  const data = raw as Record<string, unknown>
+  const request = normalizeWireMessage(data.request)
+  const response = normalizeWireMessage(data.response)
+  if (!request || !response) {
+    return null
+  }
+
+  return {
+    id: String(data.id || crypto.randomUUID()),
+    sessionId: data.session_id ? String(data.session_id) : undefined,
+    request,
+    response,
+    timing: normalizeWireTiming(data.timing),
+    tls: normalizeWireTLS(data.tls),
+    meta: normalizeWireMeta(data.meta),
+  }
+}
+
+function normalizeWireMessage(raw: unknown): WireCapturedExchange['request'] | null {
+  if (!raw || typeof raw !== 'object') {
+    return null
+  }
+  const data = raw as Record<string, unknown>
+  return {
+    method: data.method ? String(data.method) : undefined,
+    url: data.url ? String(data.url) : undefined,
+    host: data.host ? String(data.host) : undefined,
+    proto: data.proto ? String(data.proto) : undefined,
+    headers: normalizeWireHeaders(data.headers),
+    body: normalizeWirePayload(data.body),
+    raw: normalizeWirePayload(data.raw),
+    status: typeof data.status === 'number' ? data.status : undefined,
+    statusText: data.status_text ? String(data.status_text) : undefined,
+  }
+}
+
+function normalizeWireHeaders(raw: unknown): Record<string, string[]> | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+  const headers = raw as Record<string, unknown>
+  const normalized: Record<string, string[]> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      normalized[key] = value.map(item => String(item))
+    } else if (value != null) {
+      normalized[key] = [String(value)]
+    }
+  }
+  return normalized
+}
+
+function normalizeWirePayload(raw: unknown): WireCapturedExchange['request']['body'] | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+  const payload = raw as Record<string, unknown>
+  const encoding = payload.encoding === 'base64' ? 'base64' : 'utf-8'
+  return {
+    encoding,
+    data: typeof payload.data === 'string' ? payload.data : undefined,
+    size: typeof payload.size === 'number' ? payload.size : 0,
+    truncated: Boolean(payload.truncated),
+    contentType: typeof payload.content_type === 'string' ? payload.content_type : undefined,
+  }
+}
+
+function normalizeWireTiming(raw: unknown): WireCapturedExchange['timing'] {
+  if (!raw || typeof raw !== 'object') {
+    return { startUnixMicro: 0, endUnixMicro: 0, durationMicro: 0 }
+  }
+  const timing = raw as Record<string, unknown>
+  return {
+    startUnixMicro: Number(timing.start_unix_micro || 0),
+    endUnixMicro: Number(timing.end_unix_micro || 0),
+    durationMicro: Number(timing.duration_micro || 0),
+  }
+}
+
+function normalizeWireTLS(raw: unknown): WireCapturedExchange['tls'] | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+  const tls = raw as Record<string, unknown>
+  return {
+    version: tls.version ? String(tls.version) : undefined,
+    cipherSuite: tls.cipher_suite ? String(tls.cipher_suite) : undefined,
+    serverName: tls.server_name ? String(tls.server_name) : undefined,
+    negotiatedProtocol: tls.negotiated_protocol ? String(tls.negotiated_protocol) : undefined,
+    peerCertSubjects: Array.isArray(tls.peer_cert_subjects)
+      ? tls.peer_cert_subjects.map(item => String(item))
+      : undefined,
+  }
+}
+
+function normalizeWireMeta(raw: unknown): WireCapturedExchange['meta'] {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      captureSource: 'unknown',
+      headerOrderPreserved: false,
+      bodyLimitBytes: 0,
+      requestBodyReadBytes: 0,
+      responseBodyWrittenBytes: 0,
+      rawReconstructed: false,
+    }
+  }
+  const meta = raw as Record<string, unknown>
+  return {
+    captureSource: String(meta.capture_source || 'middleware'),
+    headerOrderPreserved: Boolean(meta.header_order_preserved),
+    bodyLimitBytes: Number(meta.body_limit_bytes || 0),
+    requestBodyReadBytes: Number(meta.request_body_read_bytes || 0),
+    responseBodyWrittenBytes: Number(meta.response_body_written_bytes || 0),
+    rawReconstructed: Boolean(meta.raw_reconstructed),
+  }
 }
 
 /**
@@ -352,6 +525,8 @@ export interface UseRealFlowExecutorOptions {
   token?: string
   /** Access token (for UserInfo endpoint) */
   accessToken?: string
+  /** Looking Glass session ID for wire capture */
+  lookingGlassSessionId?: string
 }
 
 export interface RealFlowExecutorResult {
@@ -606,6 +781,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       bearerToken: options.bearerToken,
       token: options.token,
       accessToken: options.accessToken,
+      lookingGlassSessionId: options.lookingGlassSessionId,
     }
 
     console.log('[useRealFlowExecutor] Creating executor for:', executorFlowId, 'with config:', config)
@@ -649,6 +825,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.flowId,
     options.token,
     options.accessToken,
+    options.lookingGlassSessionId,
   ])
 
   const execute = useCallback(async () => {

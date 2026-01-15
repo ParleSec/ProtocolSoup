@@ -22,6 +22,8 @@ export interface FlowExecutorConfig {
   scopes: string[]
   /** Additional parameters specific to the flow */
   extraParams?: Record<string, string>
+  /** Looking Glass session ID for wire capture */
+  captureSessionId?: string
 }
 
 export interface FlowExecutorState {
@@ -183,6 +185,26 @@ export abstract class FlowExecutorBase {
     return fullExchange
   }
 
+  protected withCaptureHeaders(headers?: Record<string, string>): Record<string, string> {
+    const merged: Record<string, string> = {
+      ...(headers || {}),
+    }
+    if (this.config.captureSessionId) {
+      merged['X-Looking-Glass-Session'] = this.config.captureSessionId
+    }
+    return merged
+  }
+
+  protected withCaptureQuery(url: string): string {
+    if (!this.config.captureSessionId) {
+      return url
+    }
+    const [base, hash] = url.split('#')
+    const parsed = new URL(base, window.location.origin)
+    parsed.searchParams.set('lg_session', this.config.captureSessionId)
+    return hash ? `${parsed.toString()}#${hash}` : parsed.toString()
+  }
+
   /** Make an HTTP request and capture it */
   protected async makeRequest(
     method: string,
@@ -194,9 +216,7 @@ export abstract class FlowExecutorBase {
       rfcReference?: string
     }
   ): Promise<{ response: Response; data: unknown; exchange: CapturedExchange }> {
-    const headers: Record<string, string> = {
-      ...options.headers,
-    }
+    const headers = this.withCaptureHeaders(options.headers)
 
     let bodyStr: string | undefined
     if (options.body) {

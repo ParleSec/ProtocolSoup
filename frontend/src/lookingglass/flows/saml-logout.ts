@@ -105,7 +105,9 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
 
     try {
       // First, check if there are active sessions to logout
-      const sessionsResponse = await fetch(`${this.config.baseUrl}/demo/sessions`)
+      const sessionsResponse = await fetch(`${this.config.baseUrl}/demo/sessions`, {
+        headers: this.withCaptureHeaders(),
+      })
       const sessionsData = await sessionsResponse.json() as { 
         sessions: Array<{
           id: string
@@ -209,7 +211,9 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
     }
     logoutRequestUrl.searchParams.set('relay_state', relayState)
 
-    const logoutRequestResponse = await fetch(logoutRequestUrl.toString())
+    const logoutRequestResponse = await fetch(this.withCaptureQuery(logoutRequestUrl.toString()), {
+      headers: this.withCaptureHeaders(),
+    })
     
     if (!logoutRequestResponse.ok) {
       throw new Error('Failed to create LogoutRequest')
@@ -280,7 +284,7 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
 
     const logoutResponse = await fetch(`${this.config.baseUrl}/looking-glass/logout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
       body: processLogoutFormData.toString(),
     })
 
@@ -391,7 +395,9 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
     }
     logoutRequestUrl.searchParams.set('relay_state', generateSecureRandom(16))
 
-    const logoutRequestResponse = await fetch(logoutRequestUrl.toString())
+    const logoutRequestResponse = await fetch(this.withCaptureQuery(logoutRequestUrl.toString()), {
+      headers: this.withCaptureHeaders(),
+    })
     
     if (!logoutRequestResponse.ok) {
       throw new Error('Failed to create LogoutRequest')
@@ -420,7 +426,7 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
 
     const logoutResponse = await fetch(`${this.config.baseUrl}/looking-glass/logout`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
       body: processLogoutFormData.toString(),
     })
 

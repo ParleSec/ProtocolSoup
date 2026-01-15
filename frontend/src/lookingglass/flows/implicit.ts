@@ -216,7 +216,7 @@ export class ImplicitExecutor extends FlowExecutorBase {
       }
     }
 
-    return `${this.config.baseUrl}/authorize?${params.toString()}`
+    return this.withCaptureQuery(`${this.config.baseUrl}/authorize?${params.toString()}`)
   }
 
   private openAuthorizationPopup(authUrl: string): Promise<{

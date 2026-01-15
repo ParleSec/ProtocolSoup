@@ -107,6 +107,59 @@ export interface LookingGlassEvent {
   duration?: number
 }
 
+export interface WireCapturedExchange {
+  id: string
+  sessionId?: string
+  request: WireCapturedMessage
+  response: WireCapturedMessage
+  timing: WireExchangeTiming
+  tls?: WireTLSInfo
+  meta: WireCaptureMeta
+}
+
+export interface WireCapturedMessage {
+  method?: string
+  url?: string
+  host?: string
+  proto?: string
+  headers?: Record<string, string[]>
+  body?: WireCapturedPayload
+  raw?: WireCapturedPayload
+  status?: number
+  statusText?: string
+}
+
+export interface WireCapturedPayload {
+  encoding: 'utf-8' | 'base64'
+  data?: string
+  size: number
+  truncated: boolean
+  contentType?: string
+}
+
+export interface WireExchangeTiming {
+  startUnixMicro: number
+  endUnixMicro: number
+  durationMicro: number
+}
+
+export interface WireTLSInfo {
+  version?: string
+  cipherSuite?: string
+  serverName?: string
+  negotiatedProtocol?: string
+  peerCertSubjects?: string[]
+}
+
+export interface WireCaptureMeta {
+  captureSource: string
+  headerOrderPreserved: boolean
+  bodyLimitBytes: number
+  requestBodyReadBytes: number
+  responseBodyWrittenBytes: number
+  rawReconstructed: boolean
+}
+
 /**
  * Event types emitted by the Looking Glass
  */
@@ -115,6 +168,7 @@ export type LookingGlassEventType =
   | 'flow.step'
   | 'flow.completed'
   | 'flow.error'
+  | 'http.exchange'
   | 'request.sent'
   | 'request.received'
   | 'response.sent'

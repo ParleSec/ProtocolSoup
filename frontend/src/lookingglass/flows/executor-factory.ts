@@ -352,6 +352,8 @@ export interface ExecutorFactoryConfig {
   token?: string
   /** Token type hint (access_token or refresh_token) */
   tokenTypeHint?: 'access_token' | 'refresh_token'
+  /** Looking Glass session ID for wire capture */
+  lookingGlassSessionId?: string
 }
 
 /**
@@ -379,6 +381,7 @@ export function createFlowExecutor(
     clientSecret: config.clientSecret,
     redirectUri: config.redirectUri,
     scopes: config.scopes,
+    captureSessionId: config.lookingGlassSessionId,
   }
 
   // Merge additional config for the flow

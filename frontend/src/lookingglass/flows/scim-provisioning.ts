@@ -154,9 +154,9 @@ abstract class SCIMExecutorBase extends FlowExecutorBase {
     }
   ): Promise<{ response: Response; data: T }> {
     const url = `${this.scimBaseUrl}${path}`
-    const headers: Record<string, string> = {
+    const headers: Record<string, string> = this.withCaptureHeaders({
       'Accept': 'application/scim+json',
-    }
+    })
 
     // Bearer token authentication is required for SCIM operations
     if (this.bearerToken) {
