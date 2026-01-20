@@ -805,7 +805,7 @@ function SSFFlowPanel({
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id as typeof activeTab)}
-            className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
+            className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2.5 sm:py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
               activeTab === tab.id
                 ? 'bg-surface-800 text-white'
                 : 'text-surface-400 hover:text-white active:text-white'
@@ -813,7 +813,6 @@ function SSFFlowPanel({
           >
             <tab.icon className="w-4 h-4 flex-shrink-0" />
             <span className="hidden sm:inline">{tab.label}</span>
-            <span className="sm:hidden">{tab.label}</span>
             {tab.count > 0 && (
               <span className="px-1.5 py-0.5 rounded text-xs bg-surface-700 flex-shrink-0">
                 {tab.count}
