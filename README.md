@@ -117,21 +117,19 @@ Use this for OAuth 2.0, OIDC, SAML, SCIM, and SSF demos without the SPIFFE/SPIRE
 
 ## Test Credentials
 
-### Users
+Demo users and client secrets are generated at startup unless provided via environment variables.
 
-| User | Email | Password | Role |
-|------|-------|----------|------|
-| Alice | alice@example.com | password123 | user |
-| Bob | bob@example.com | password123 | user |
-| Admin | admin@example.com | admin123 | admin |
+Environment overrides:
+- `MOCKIDP_ALICE_PASSWORD`
+- `MOCKIDP_BOB_PASSWORD`
+- `MOCKIDP_ADMIN_PASSWORD`
+- `MOCKIDP_DEMO_CLIENT_SECRET`
+- `MOCKIDP_MACHINE_CLIENT_SECRET`
 
-### Registered Clients
-
-| client_id | Type | Secret |
-|-----------|------|--------|
-| `public-app` | Public | - |
-| `demo-app` | Confidential | `demo-secret` |
-| `machine-client` | Confidential | `machine-secret` |
+You can fetch the current demo credentials from:
+- `GET /oauth2/demo/users`
+- `GET /oauth2/demo/clients`
+- `GET /saml/demo/users`
 
 ---
 

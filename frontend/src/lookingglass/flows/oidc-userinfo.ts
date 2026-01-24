@@ -3,7 +3,7 @@
  * 
  * Implements OIDC Core 1.0 Section 5.3 - UserInfo Endpoint
  * 
- * Makes REAL requests to the UserInfo endpoint and captures actual user claims.
+ * Makes live requests to the UserInfo endpoint and captures user claims.
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
@@ -90,7 +90,7 @@ export class OIDCUserInfoExecutor extends FlowExecutorBase {
       currentStep: 'Sending UserInfo request',
     })
 
-    // Make the REAL request with Bearer token
+    // Make the request with Bearer token
     const { response, data } = await this.makeRequest(
       'GET',
       `${this.config.baseUrl}/userinfo`,

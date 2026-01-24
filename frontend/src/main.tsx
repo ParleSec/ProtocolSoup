@@ -24,17 +24,67 @@ function showFallbackError(message: string) {
   const root = document.getElementById('root')
   if (!root) return
   
-  root.innerHTML = `
-    <div style="min-height: 100vh; background: #020617; display: flex; align-items: center; justify-content: center; padding: 1rem;">
-      <div style="max-width: 400px; width: 100%; background: #0f172a; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 24px; text-align: center;">
-        <div style="font-size: 2rem; margin-bottom: 1rem;">🍜</div>
-        <h1 style="font-size: 1.25rem; font-weight: 600; color: white; margin-bottom: 0.5rem;">Failed to Load</h1>
-        <p style="color: #94a3b8; font-size: 0.875rem; margin-bottom: 1.5rem;">The app failed to start. This might be due to a cached version.</p>
-        <p style="color: #64748b; font-size: 0.75rem; margin-bottom: 1.5rem; font-family: monospace;">${message}</p>
-        <button onclick="clearCacheAndReload()" style="width: 100%; padding: 12px 16px; background: #f97316; color: white; font-weight: 500; border: none; border-radius: 8px; cursor: pointer;">Clear Cache and Reload</button>
-      </div>
-    </div>
-  `
+  root.innerHTML = ''
+
+  const wrapper = document.createElement('div')
+  wrapper.style.minHeight = '100vh'
+  wrapper.style.background = '#020617'
+  wrapper.style.display = 'flex'
+  wrapper.style.alignItems = 'center'
+  wrapper.style.justifyContent = 'center'
+  wrapper.style.padding = '1rem'
+
+  const card = document.createElement('div')
+  card.style.maxWidth = '400px'
+  card.style.width = '100%'
+  card.style.background = '#0f172a'
+  card.style.border = '1px solid rgba(255,255,255,0.1)'
+  card.style.borderRadius = '12px'
+  card.style.padding = '24px'
+  card.style.textAlign = 'center'
+
+  const icon = document.createElement('div')
+  icon.style.fontSize = '2rem'
+  icon.style.marginBottom = '1rem'
+  icon.textContent = '🍜'
+
+  const title = document.createElement('h1')
+  title.style.fontSize = '1.25rem'
+  title.style.fontWeight = '600'
+  title.style.color = 'white'
+  title.style.marginBottom = '0.5rem'
+  title.textContent = 'Failed to Load'
+
+  const description = document.createElement('p')
+  description.style.color = '#94a3b8'
+  description.style.fontSize = '0.875rem'
+  description.style.marginBottom = '1.5rem'
+  description.textContent = 'The app failed to start. This might be due to a cached version.'
+
+  const details = document.createElement('p')
+  details.style.color = '#64748b'
+  details.style.fontSize = '0.75rem'
+  details.style.marginBottom = '1.5rem'
+  details.style.fontFamily = 'monospace'
+  details.textContent = message
+
+  const button = document.createElement('button')
+  button.style.width = '100%'
+  button.style.padding = '12px 16px'
+  button.style.background = '#f97316'
+  button.style.color = 'white'
+  button.style.fontWeight = '500'
+  button.style.border = 'none'
+  button.style.borderRadius = '8px'
+  button.style.cursor = 'pointer'
+  button.textContent = 'Clear Cache and Reload'
+  button.addEventListener('click', () => {
+    void window.clearCacheAndReload()
+  })
+
+  card.append(icon, title, description, details, button)
+  wrapper.appendChild(card)
+  root.appendChild(wrapper)
 }
 
 // Make clearCacheAndReload available globally

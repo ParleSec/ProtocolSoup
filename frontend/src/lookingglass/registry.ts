@@ -149,7 +149,7 @@ function inferSensitivity(name: string): LookingGlassParameter['sensitivity'] {
   const lowerName = name.toLowerCase()
   
   if (secretPatterns.some(p => lowerName.includes(p))) {
-    return 'secret'
+    return 'sensitive'
   }
   if (internalPatterns.some(p => lowerName.includes(p))) {
     return 'internal'

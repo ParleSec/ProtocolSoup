@@ -184,7 +184,7 @@ The system requires **at least one active connection** within the 90-day CA wind
 #### Certificate Rotation Response (Real Events)
 ```json
 {
-  "description": "REAL X.509-SVID rotation events captured from SPIRE Agent",
+  "description": "X.509-SVID rotation events captured from SPIRE Agent",
   "enabled": true,
   "spiffe_id": "spiffe://protocolsoup.com/workload/backend",
   "current_serial": "123456789...",

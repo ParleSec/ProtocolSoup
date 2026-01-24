@@ -1,6 +1,8 @@
 package oidc
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"html"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
@@ -150,23 +153,31 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate redirect URI
-	if !p.mockIdP.ValidateRedirectURI(clientID, redirectURI) {
+	normalizedRedirectURI, err := p.mockIdP.NormalizeRedirectURI(clientID, redirectURI)
+	if err != nil {
 		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid redirect_uri")
 		return
 	}
+	redirectURI = normalizedRedirectURI
+
+	loginRequestID := p.storeLoginRequest(loginRequestInfo{
+		ClientID:            clientID,
+		RedirectURI:         redirectURI,
+		Scope:               scope,
+		State:               state,
+		Nonce:               nonce,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+		ResponseType:        responseType,
+	})
 
 	// Generate login page with HTML-escaped values to prevent XSS
 	loginPage := p.generateOIDCLoginPage(
 		htmlEscape(clientID),
-		htmlEscape(redirectURI),
 		htmlEscape(scope),
-		htmlEscape(state),
-		htmlEscape(nonce),
-		htmlEscape(codeChallenge),
-		htmlEscape(codeChallengeMethod),
 		htmlEscape(sessionID),
 		htmlEscape(client.Name),
-		htmlEscape(responseType),
+		htmlEscape(loginRequestID),
 	)
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(loginPage))
@@ -183,22 +194,28 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	// Get form values
 	email := r.FormValue("email")
 	password := r.FormValue("password")
-	clientID := r.FormValue("client_id")
-	redirectURI := r.FormValue("redirect_uri")
-	scope := r.FormValue("scope")
-	state := r.FormValue("state")
-	nonce := r.FormValue("nonce")
-	codeChallenge := r.FormValue("code_challenge")
-	codeChallengeMethod := r.FormValue("code_challenge_method")
-	responseType := r.FormValue("response_type")
-	if responseType == "" {
-		responseType = "code"
+	loginRequestID := r.FormValue("login_request_id")
+	if loginRequestID == "" {
+		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Missing login request")
+		return
 	}
 
-	// Validate redirect URI against registered client URIs to prevent open redirect
-	if !p.mockIdP.ValidateRedirectURI(clientID, redirectURI) {
-		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid redirect_uri")
+	requestInfo, ok := p.getLoginRequest(loginRequestID)
+	if !ok {
+		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Login request expired or invalid")
 		return
+	}
+
+	clientID := requestInfo.ClientID
+	redirectURI := requestInfo.RedirectURI
+	scope := requestInfo.Scope
+	state := requestInfo.State
+	nonce := requestInfo.Nonce
+	codeChallenge := requestInfo.CodeChallenge
+	codeChallengeMethod := requestInfo.CodeChallengeMethod
+	responseType := requestInfo.ResponseType
+	if responseType == "" {
+		responseType = "code"
 	}
 
 	// Validate user credentials
@@ -212,21 +229,18 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		loginPage := p.generateOIDCLoginPage(
 			htmlEscape(clientID),
-			htmlEscape(redirectURI),
 			htmlEscape(scope),
-			htmlEscape(state),
-			htmlEscape(nonce),
-			htmlEscape(codeChallenge),
-			htmlEscape(codeChallengeMethod),
 			htmlEscape(sessionID),
 			htmlEscape(clientName),
-			htmlEscape(responseType),
+			htmlEscape(loginRequestID),
 		)
 		loginPage = strings.Replace(loginPage, "<!-- ERROR -->", `<div class="error">Invalid email or password</div>`, 1)
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(loginPage))
 		return
 	}
+
+	p.consumeLoginRequest(loginRequestID)
 
 	// Build redirect URL - redirect URI was already validated above
 	redirectURL, err := url.Parse(redirectURI)
@@ -793,7 +807,7 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	return response, nil
 }
 
-func (p *Plugin) generateOIDCLoginPage(clientID, redirectURI, scope, state, nonce, codeChallenge, codeChallengeMethod, sessionID, clientName, responseType string) string {
+func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
 	if clientName == "" {
 		if client, exists := p.mockIdP.GetClient(clientID); exists {
 			clientName = client.Name
@@ -801,13 +815,12 @@ func (p *Plugin) generateOIDCLoginPage(clientID, redirectURI, scope, state, nonc
 			clientName = clientID
 		}
 	}
-	if responseType == "" {
-		responseType = "code"
-	}
 	formAction := "/oidc/authorize"
 	if sessionID != "" {
 		formAction += "?lg_session=" + url.QueryEscape(sessionID)
 	}
+
+	demoUsersHTML := buildDemoUsersHTML(p.mockIdP.GetDemoUserPresets())
 
 	return `<!DOCTYPE html>
 <html>
@@ -973,14 +986,7 @@ func (p *Plugin) generateOIDCLoginPage(clientID, redirectURI, scope, state, nonc
         <!-- ERROR -->
 
         <form method="POST" action="` + formAction + `">
-            <input type="hidden" name="client_id" value="` + clientID + `">
-            <input type="hidden" name="redirect_uri" value="` + redirectURI + `">
-            <input type="hidden" name="scope" value="` + scope + `">
-            <input type="hidden" name="state" value="` + state + `">
-            <input type="hidden" name="nonce" value="` + nonce + `">
-            <input type="hidden" name="code_challenge" value="` + codeChallenge + `">
-            <input type="hidden" name="code_challenge_method" value="` + codeChallengeMethod + `">
-            <input type="hidden" name="response_type" value="` + responseType + `">
+            <input type="hidden" name="login_request_id" value="` + loginRequestID + `">
             
             <div class="form-group">
                 <label for="email">Email</label>
@@ -995,17 +1001,7 @@ func (p *Plugin) generateOIDCLoginPage(clientID, redirectURI, scope, state, nonc
             <button type="submit">Sign In with OpenID Connect</button>
         </form>
 
-        <div class="demo-users">
-            <h3>Demo Users (click to autofill)</h3>
-            <div class="demo-user" onclick="fillCredentials('alice@example.com', 'password123')">
-                <div class="name">Alice (Standard User)</div>
-                <div class="email">alice@example.com</div>
-            </div>
-            <div class="demo-user" onclick="fillCredentials('admin@example.com', 'admin123')">
-                <div class="name">Admin (Elevated Permissions)</div>
-                <div class="email">admin@example.com</div>
-            </div>
-        </div>
+        ` + demoUsersHTML + `
 
         <div class="scopes">
             Requested scopes: ` + formatOIDCScopes(scope) + `
@@ -1020,6 +1016,95 @@ func (p *Plugin) generateOIDCLoginPage(clientID, redirectURI, scope, state, nonc
     </script>
 </body>
 </html>`
+}
+
+func buildDemoUsersHTML(presets []mockidp.DemoUserPreset) string {
+	if len(presets) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString(`<div class="demo-users">`)
+	builder.WriteString(`<h3>Demo Users (click to autofill)</h3>`)
+	for _, preset := range presets {
+		email := preset.Credentials.Email
+		password := preset.Credentials.Password
+		if email == "" || password == "" {
+			continue
+		}
+		builder.WriteString(`<div class="demo-user" data-email="`)
+		builder.WriteString(html.EscapeString(email))
+		builder.WriteString(`" data-password="`)
+		builder.WriteString(html.EscapeString(password))
+		builder.WriteString(`" onclick="fillCredentials(this.dataset.email || '', this.dataset.password || '')">`)
+		builder.WriteString(`<div class="name">`)
+		builder.WriteString(html.EscapeString(preset.Name))
+		builder.WriteString(`</div>`)
+		builder.WriteString(`<div class="email">`)
+		builder.WriteString(html.EscapeString(email))
+		builder.WriteString(`</div></div>`)
+	}
+	builder.WriteString(`</div>`)
+	return builder.String()
+}
+
+type loginRequestInfo struct {
+	ClientID            string
+	RedirectURI         string
+	Scope               string
+	State               string
+	Nonce               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+	ResponseType        string
+	CreatedAt           time.Time
+}
+
+func (p *Plugin) storeLoginRequest(info loginRequestInfo) string {
+	loginRequestID := newLoginRequestID()
+	info.CreatedAt = time.Now()
+
+	p.loginRequestsMu.Lock()
+	p.loginRequests[loginRequestID] = info
+	p.loginRequestsMu.Unlock()
+
+	return loginRequestID
+}
+
+func (p *Plugin) getLoginRequest(loginRequestID string) (loginRequestInfo, bool) {
+	p.loginRequestsMu.RLock()
+	defer p.loginRequestsMu.RUnlock()
+
+	info, ok := p.loginRequests[loginRequestID]
+	return info, ok
+}
+
+func (p *Plugin) consumeLoginRequest(loginRequestID string) {
+	p.loginRequestsMu.Lock()
+	delete(p.loginRequests, loginRequestID)
+	p.loginRequestsMu.Unlock()
+}
+
+func (p *Plugin) cleanupLoginRequests() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cutoff := time.Now().Add(-p.loginRequestTTL)
+		p.loginRequestsMu.Lock()
+		for id, info := range p.loginRequests {
+			if info.CreatedAt.Before(cutoff) {
+				delete(p.loginRequests, id)
+			}
+		}
+		p.loginRequestsMu.Unlock()
+	}
+}
+
+func newLoginRequestID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 func formatOIDCScopes(scope string) string {

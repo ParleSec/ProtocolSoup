@@ -1,7 +1,7 @@
 /**
  * Live Flow Executor
  * 
- * Executes REAL protocol flows against the MockIdP, capturing actual
+ * Executes protocol flows against the MockIdP, capturing
  * requests, responses, tokens, and cryptographic operations.
  * 
  * This is NOT a simulation - it runs real OAuth 2.0 and OIDC flows.

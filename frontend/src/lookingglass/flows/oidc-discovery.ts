@@ -3,7 +3,7 @@
  * 
  * Implements OpenID Connect Discovery 1.0
  * 
- * Makes REAL requests to the discovery and JWKS endpoints, capturing actual responses.
+ * Makes live requests to the discovery and JWKS endpoints, capturing responses.
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
@@ -67,7 +67,7 @@ export class OIDCDiscoveryExecutor extends FlowExecutorBase {
       currentStep: 'Fetching discovery document',
     })
 
-    // Make the REAL request
+    // Make the request
     const { response, data } = await this.makeRequest(
       'GET',
       `${this.config.baseUrl}/.well-known/openid-configuration`,
@@ -124,7 +124,7 @@ export class OIDCDiscoveryExecutor extends FlowExecutorBase {
       currentStep: 'Fetching JWKS',
     })
 
-    // Make the REAL request
+    // Make the request
     const { response, data } = await this.makeRequest(
       'GET',
       jwksUri,

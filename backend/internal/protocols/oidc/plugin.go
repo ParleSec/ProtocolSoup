@@ -2,6 +2,8 @@ package oidc
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -19,6 +21,9 @@ type Plugin struct {
 	keySet       *crypto.KeySet
 	lookingGlass *lookingglass.Engine
 	baseURL      string
+	loginRequests   map[string]loginRequestInfo
+	loginRequestsMu sync.RWMutex
+	loginRequestTTL time.Duration
 }
 
 // NewPlugin creates a new OIDC plugin
@@ -33,6 +38,8 @@ func NewPlugin(oauth2Plugin *oauth2.Plugin) *Plugin {
 			RFCs:        []string{"OpenID Connect Core 1.0", "OpenID Connect Discovery 1.0"},
 		}),
 		oauth2Plugin: oauth2Plugin,
+		loginRequests:   make(map[string]loginRequestInfo),
+		loginRequestTTL: 10 * time.Minute,
 	}
 }
 
@@ -52,6 +59,8 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
 		p.lookingGlass = lg
 	}
+
+	go p.cleanupLoginRequests()
 
 	return nil
 }

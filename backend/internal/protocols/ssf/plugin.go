@@ -89,7 +89,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	p.transmitter = NewTransmitter(storage, privateKey, keyID, p.baseURL)
 
 	// Initialize action executor for real state changes (shared by both receivers)
-	p.actionExecutor = NewMockIdPActionExecutor(p.baseURL)
+	p.actionExecutor = NewMockIdPActionExecutor(storage, p.baseURL)
 
 	// Initialize legacy receiver (main port - used in production)
 	var publicKey *rsa.PublicKey

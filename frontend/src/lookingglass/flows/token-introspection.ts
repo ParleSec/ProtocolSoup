@@ -3,7 +3,7 @@
  * 
  * Implements RFC 7662 - OAuth 2.0 Token Introspection
  * 
- * Makes REAL requests to the introspection endpoint and captures actual responses.
+ * Makes live requests to the introspection endpoint and captures responses.
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
@@ -109,7 +109,7 @@ export class TokenIntrospectionExecutor extends FlowExecutorBase {
       body.client_secret = this.flowConfig.clientSecret
     }
 
-    // Make the REAL request and capture traffic
+    // Make the request and capture traffic
     const { response, data } = await this.makeRequest(
       'POST',
       `${this.config.baseUrl}/introspect`,
@@ -137,7 +137,7 @@ export class TokenIntrospectionExecutor extends FlowExecutorBase {
         type: 'security',
         title: 'Token Status: ACTIVE',
         description: `Token is valid. Subject: ${introspectionResponse.sub || 'N/A'}, Scope: ${introspectionResponse.scope || 'N/A'}`,
-        data: introspectionResponse, // Include the REAL response data
+        data: introspectionResponse, // Include the response data
       })
     } else {
       this.addEvent({

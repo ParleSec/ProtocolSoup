@@ -162,6 +162,21 @@ func (p *Plugin) processSSORequest(w http.ResponseWriter, r *http.Request, xmlDa
 func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestInfo map[string]string) {
 	users := p.mockIdP.ListUsers()
 
+	loginRequestID, err := p.createLoginRequest(requestInfo)
+	if err != nil {
+		http.Error(w, "Invalid login request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "saml_login_request",
+		Value:    loginRequestID,
+		Path:     "/saml",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	tmpl := `<!DOCTYPE html>
 <html>
 <head>
@@ -263,13 +278,8 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
             <h3>Select a Demo User</h3>
             {{range .Users}}
             <form method="POST" action="/saml/login" style="display: inline;">
-                <input type="hidden" name="request_id" value="{{$.RequestID}}">
-                <input type="hidden" name="issuer" value="{{$.Issuer}}">
-                <input type="hidden" name="acs_url" value="{{$.ACSURL}}">
-                <input type="hidden" name="relay_state" value="{{$.RelayState}}">
-                <input type="hidden" name="binding_type" value="{{$.BindingType}}">
                 <input type="hidden" name="username" value="{{.Username}}">
-                <input type="hidden" name="password" value="password">
+                <input type="hidden" name="password" value="{{.Password}}">
                 <button type="submit" class="user-btn">
                     <strong>{{.Name}}</strong>
                     <span>{{.Email}}</span>
@@ -281,11 +291,6 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
         <div class="divider">- or enter credentials -</div>
         
         <form method="POST" action="/saml/login">
-            <input type="hidden" name="request_id" value="{{.RequestID}}">
-            <input type="hidden" name="issuer" value="{{.Issuer}}">
-            <input type="hidden" name="acs_url" value="{{.ACSURL}}">
-            <input type="hidden" name="relay_state" value="{{.RelayState}}">
-            <input type="hidden" name="binding_type" value="{{.BindingType}}">
             
             <div class="form-group">
                 <label>Username</label>
@@ -308,22 +313,15 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
 	}
 
 	data := struct {
-		RequestID   string
-		Issuer      string
-		ACSURL      string
-		RelayState  string
-		BindingType string
+		Issuer string
 		Users       []struct {
 			Username string
 			Name     string
 			Email    string
+			Password string
 		}
 	}{
-		RequestID:   requestInfo["request_id"],
-		Issuer:      requestInfo["issuer"],
-		ACSURL:      requestInfo["acs_url"],
-		RelayState:  requestInfo["relay_state"],
-		BindingType: requestInfo["binding_type"],
+		Issuer: requestInfo["issuer"],
 	}
 
 	for _, u := range users {
@@ -331,10 +329,12 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
 			Username string
 			Name     string
 			Email    string
+			Password string
 		}{
 			Username: u.ID,
 			Name:     u.Name,
 			Email:    u.Email,
+			Password: u.Password,
 		})
 	}
 
@@ -437,35 +437,39 @@ func (p *Plugin) handleSPInitiatedLoginSubmit(w http.ResponseWriter, r *http.Req
 
 	username := r.FormValue("username")
 	password := r.FormValue("password")
-	requestID := r.FormValue("request_id")
-	issuer := r.FormValue("issuer")
-	acsURL := r.FormValue("acs_url")
-	relayState := r.FormValue("relay_state")
-	bindingType := r.FormValue("binding_type")
-
-	// Validate ACS URL to prevent open redirect (CWE-601) and XSS (CWE-79)
-	// Per SAML 2.0 security best practices, ACS URL must be validated against known endpoints
-	validatedACSURL, err := p.validateRedirectURL(acsURL)
-	if err != nil {
-		http.Error(w, "Invalid ACS URL: "+err.Error(), http.StatusBadRequest)
+	loginCookie, err := r.Cookie("saml_login_request")
+	if err != nil || loginCookie.Value == "" {
+		http.Error(w, "Missing login request", http.StatusBadRequest)
 		return
 	}
-	// Use only the validated URL - this is critical for security
-	acsURL = validatedACSURL
 
-	// Additional sanitization: re-parse and reconstruct URL to ensure no injection
-	parsedACS, err := url.Parse(acsURL)
-	if err != nil {
-		http.Error(w, "Malformed ACS URL", http.StatusBadRequest)
+	requestInfo, ok := p.takeLoginRequest(loginCookie.Value)
+	if !ok {
+		http.Error(w, "Login request expired or invalid", http.StatusBadRequest)
 		return
 	}
-	// Reconstruct clean URL (removes any potential malicious components)
-	acsURL = parsedACS.String()
 
-	// Sanitize RelayState
-	relayState = sanitizeRelayState(relayState)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "saml_login_request",
+		Value:    "",
+		Path:     "/saml",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
 
-	// Validate binding type
+	if requestInfo.ACSURL != p.acsURL {
+		http.Error(w, "ACS URL not allowed", http.StatusBadRequest)
+		return
+	}
+
+	requestID := html.EscapeString(requestInfo.RequestID)
+	issuer := html.EscapeString(requestInfo.Issuer)
+	acsURL := p.acsURL
+	relayState := html.EscapeString(requestInfo.RelayState)
+	bindingType := requestInfo.BindingType
+
 	if bindingType != "post" && bindingType != "redirect" {
 		bindingType = "post"
 	}
@@ -1203,26 +1207,10 @@ func (p *Plugin) handleLogoutResponse(w http.ResponseWriter, r *http.Request, re
 
 // handleListUsers returns the list of demo users
 func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
-	users := p.mockIdP.ListUsers()
-
-	type userResponse struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Email string `json:"email"`
-	}
-
-	response := make([]userResponse, len(users))
-	for i, u := range users {
-		response[i] = userResponse{
-			ID:    u.ID,
-			Name:  u.Name,
-			Email: u.Email,
-		}
-	}
-
+	presets := p.mockIdP.GetDemoUserPresets()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"users": response,
+		"users": presets,
 	})
 }
 
@@ -1310,7 +1298,14 @@ func (p *Plugin) handleIdPInitiatedSSO(w http.ResponseWriter, r *http.Request) {
 		spACSURL = spEntityID + "/saml/acs"
 	}
 
-	relayState := r.URL.Query().Get("RelayState")
+	validatedACSURL, err := p.validateRedirectURL(spACSURL)
+	if err != nil {
+		http.Error(w, "Invalid ACS URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	spACSURL = validatedACSURL
+
+	relayState := sanitizeRelayState(r.URL.Query().Get("RelayState"))
 
 	// For IdP-initiated, we need the user to be already authenticated
 	// Show login page with SP info
@@ -1321,6 +1316,83 @@ func (p *Plugin) handleIdPInitiatedSSO(w http.ResponseWriter, r *http.Request) {
 		"relay_state":  relayState,
 		"binding_type": "post",
 	})
+}
+
+// LoginRequestInfo stores trusted login request details
+type LoginRequestInfo struct {
+	RequestID   string
+	Issuer      string
+	ACSURL      string
+	RelayState  string
+	BindingType string
+	IssuedAt    time.Time
+}
+
+func (p *Plugin) createLoginRequest(requestInfo map[string]string) (string, error) {
+	acsURL, err := p.validateRedirectURL(requestInfo["acs_url"])
+	if err != nil {
+		return "", err
+	}
+
+	issuer := strings.TrimSpace(requestInfo["issuer"])
+	if issuer == "" {
+		return "", fmt.Errorf("missing issuer")
+	}
+
+	bindingType := requestInfo["binding_type"]
+	if bindingType != "post" && bindingType != "redirect" {
+		bindingType = "post"
+	}
+
+	relayState := sanitizeRelayState(requestInfo["relay_state"])
+
+	info := LoginRequestInfo{
+		RequestID:   requestInfo["request_id"],
+		Issuer:      issuer,
+		ACSURL:      acsURL,
+		RelayState:  relayState,
+		BindingType: bindingType,
+	}
+
+	return p.storeLoginRequest(info), nil
+}
+
+func (p *Plugin) storeLoginRequest(info LoginRequestInfo) string {
+	loginRequestID := GenerateID()
+	info.IssuedAt = time.Now()
+
+	p.loginRequestsMu.Lock()
+	p.loginRequests[loginRequestID] = info
+	p.loginRequestsMu.Unlock()
+
+	return loginRequestID
+}
+
+func (p *Plugin) takeLoginRequest(loginRequestID string) (LoginRequestInfo, bool) {
+	p.loginRequestsMu.Lock()
+	defer p.loginRequestsMu.Unlock()
+
+	info, ok := p.loginRequests[loginRequestID]
+	if ok {
+		delete(p.loginRequests, loginRequestID)
+	}
+	return info, ok
+}
+
+func (p *Plugin) cleanupLoginRequests() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		cutoff := time.Now().Add(-p.loginRequestTTL)
+		p.loginRequestsMu.Lock()
+		for id, info := range p.loginRequests {
+			if info.IssuedAt.Before(cutoff) {
+				delete(p.loginRequests, id)
+			}
+		}
+		p.loginRequestsMu.Unlock()
+	}
 }
 
 // validateRedirectURL validates that a URL is safe for redirect
@@ -1336,9 +1408,9 @@ func (p *Plugin) validateRedirectURL(rawURL string) (string, error) {
 		return "", fmt.Errorf("invalid URL: %w", err)
 	}
 
-	// Allow relative URLs
+	// Require absolute URLs for ACS endpoints
 	if !parsedURL.IsAbs() {
-		return rawURL, nil
+		return "", fmt.Errorf("absolute URL required")
 	}
 
 	// For absolute URLs, validate the scheme
@@ -1493,7 +1565,7 @@ func getStatusDescription(statusCode string) string {
 // ============================================================================
 // These handlers return JSON responses with full SAML protocol data for
 // real-time visualization in the Looking Glass UI.
-// They execute REAL protocol operations - no fake or placeholder data.
+// They execute protocol operations - no fake or placeholder data.
 // ============================================================================
 
 // handleLookingGlassCreateAuthnRequest creates an AuthnRequest and returns all details
@@ -1507,7 +1579,7 @@ func (p *Plugin) handleLookingGlassCreateAuthnRequest(w http.ResponseWriter, r *
 		relayState = GenerateID()
 	}
 
-	// Create REAL AuthnRequest
+	// Create AuthnRequest
 	authnRequest := NewAuthnRequest(p.entityID, p.ssoServiceURL, p.acsURL)
 
 	// Store request ID for InResponseTo validation
@@ -1578,7 +1650,14 @@ func (p *Plugin) handleLookingGlassAuthenticate(w http.ResponseWriter, r *http.R
 		spEntityID = p.entityID
 	}
 
-	// Authenticate user - REAL authentication
+	validatedACSURL, err := p.validateRedirectURL(acsURL)
+	if err != nil {
+		writeJSONError(w, "Invalid ACS URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	acsURL = validatedACSURL
+
+	// Authenticate user
 	user, err := p.mockIdP.ValidateCredentials(username, password)
 	if err != nil {
 		user, err = p.mockIdP.ValidateCredentials(username+"@example.com", password)
@@ -1588,7 +1667,7 @@ func (p *Plugin) handleLookingGlassAuthenticate(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Create REAL SAML Response
+	// Create SAML Response
 	response := NewResponse(p.entityID, acsURL, requestID, requestID != "")
 
 	attributes := map[string][]string{
