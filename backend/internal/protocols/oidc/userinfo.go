@@ -177,7 +177,6 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		htmlEscape(scope),
 		htmlEscape(sessionID),
 		htmlEscape(client.Name),
-		htmlEscape(responseType),
 		htmlEscape(loginRequestID),
 	)
 	w.Header().Set("Content-Type", "text/html")
@@ -233,7 +232,6 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			htmlEscape(scope),
 			htmlEscape(sessionID),
 			htmlEscape(clientName),
-			htmlEscape(responseType),
 			htmlEscape(loginRequestID),
 		)
 		loginPage = strings.Replace(loginPage, "<!-- ERROR -->", `<div class="error">Invalid email or password</div>`, 1)
@@ -809,16 +807,13 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	return response, nil
 }
 
-func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, responseType, loginRequestID string) string {
+func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
 	if clientName == "" {
 		if client, exists := p.mockIdP.GetClient(clientID); exists {
 			clientName = client.Name
 		} else {
 			clientName = clientID
 		}
-	}
-	if responseType == "" {
-		responseType = "code"
 	}
 	formAction := "/oidc/authorize"
 	if sessionID != "" {
