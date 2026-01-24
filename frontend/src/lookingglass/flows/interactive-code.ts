@@ -446,7 +446,7 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
    * Build the authorization URL with all required parameters
    */
   private buildAuthorizationUrl(): string {
-    const endpoint = this.discovery?.authorization_endpoint || `${this.config.baseUrl}/authorize`
+    const endpoint = `${this.config.baseUrl}/authorize`
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -490,13 +490,21 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
    */
   private openAuthorizationPopup(authUrl: string): Promise<{ code: string; state: string }> {
     return new Promise((resolve, reject) => {
+      let safeAuthUrl: string
+      try {
+        safeAuthUrl = this.ensureAllowedAuthUrl(authUrl)
+      } catch (error) {
+        reject(error)
+        return
+      }
+
       const width = 600
       const height = 700
       const left = window.screenX + (window.outerWidth - width) / 2
       const top = window.screenY + (window.outerHeight - height) / 2
 
       const popup = window.open(
-        authUrl,
+        safeAuthUrl,
         'oauth_authorization',
         `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
       )
@@ -512,7 +520,7 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
         description: 'User must authenticate and authorize the application',
         data: {
           action: 'User authentication in progress',
-          tip: 'Demo users: alice@example.com / password123',
+          tip: 'Use demo credentials from the IdP presets',
         },
       })
 
@@ -797,6 +805,33 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
         description: 'Could not fetch additional user claims',
       })
     }
+  }
+
+  /**
+   * Helper: Parse URL parameters for logging
+   */
+  private ensureAllowedAuthUrl(authUrl: string): string {
+    const resolved = new URL(authUrl, window.location.origin)
+    const baseUrl = new URL(this.config.baseUrl, window.location.origin)
+    const allowedOrigins = new Set<string>([window.location.origin, baseUrl.origin])
+
+    if (this.discovery?.issuer) {
+      try {
+        allowedOrigins.add(new URL(this.discovery.issuer).origin)
+      } catch {
+        // Ignore malformed issuer; enforced by origin check below.
+      }
+    }
+
+    if (!['http:', 'https:'].includes(resolved.protocol)) {
+      throw new Error(`Unsupported authorization URL scheme: ${resolved.protocol}`)
+    }
+
+    if (!allowedOrigins.has(resolved.origin)) {
+      throw new Error(`Authorization endpoint origin not allowed: ${resolved.origin}`)
+    }
+
+    return resolved.toString()
   }
 
   /**

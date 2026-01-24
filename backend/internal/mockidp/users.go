@@ -209,35 +209,30 @@ type DemoCredentials struct {
 
 // GetDemoUserPresets returns preset configurations for demo users
 func (idp *MockIdP) GetDemoUserPresets() []DemoUserPreset {
+	alice := idp.getUserPreset("alice")
+	bob := idp.getUserPreset("bob")
+	admin := idp.getUserPreset("admin")
+
 	return []DemoUserPreset{
 		{
 			ID:          "alice",
 			Name:        "Alice (Standard User)",
 			Description: "A standard user with basic permissions",
-			Credentials: DemoCredentials{
-				Email:    "alice@example.com",
-				Password: "password123",
-			},
+			Credentials: alice,
 			Scopes: []string{"openid", "profile", "email"},
 		},
 		{
 			ID:          "bob",
 			Name:        "Bob (Standard User)",
 			Description: "Another standard user for testing multi-user scenarios",
-			Credentials: DemoCredentials{
-				Email:    "bob@example.com",
-				Password: "password123",
-			},
+			Credentials: bob,
 			Scopes: []string{"openid", "profile", "email"},
 		},
 		{
 			ID:          "admin",
 			Name:        "Admin (Elevated Permissions)",
 			Description: "An administrator with elevated permissions and roles",
-			Credentials: DemoCredentials{
-				Email:    "admin@example.com",
-				Password: "admin123",
-			},
+			Credentials: admin,
 			Scopes: []string{"openid", "profile", "email", "roles"},
 		},
 	}
@@ -258,6 +253,9 @@ type DemoClientPreset struct {
 
 // GetDemoClientPresets returns preset configurations for demo clients
 func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
+	demoAppSecret := idp.getClientSecret("demo-app")
+	machineSecret := idp.getClientSecret("machine-client")
+
 	return []DemoClientPreset{
 		{
 			ID:          "demo-app",
@@ -266,7 +264,7 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 			Type:        "confidential",
 			GrantTypes:  []string{"authorization_code", "refresh_token"},
 			Scopes:      []string{"openid", "profile", "email"},
-			Secret:      "demo-secret",
+			Secret:      demoAppSecret,
 		},
 		{
 			ID:          "public-app",
@@ -283,9 +281,28 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 			Type:        "machine",
 			GrantTypes:  []string{"client_credentials"},
 			Scopes:      []string{"api:read", "api:write"},
-			Secret:      "machine-secret",
+			Secret:      machineSecret,
 		},
 	}
+}
+
+func (idp *MockIdP) getUserPreset(id string) DemoCredentials {
+	user, ok := idp.GetUser(id)
+	if !ok || user == nil {
+		return DemoCredentials{}
+	}
+	return DemoCredentials{
+		Email:    user.Email,
+		Password: user.Password,
+	}
+}
+
+func (idp *MockIdP) getClientSecret(id string) string {
+	client, ok := idp.GetClient(id)
+	if !ok || client == nil {
+		return ""
+	}
+	return client.Secret
 }
 
 // TokenMetadata provides metadata about issued tokens for inspection

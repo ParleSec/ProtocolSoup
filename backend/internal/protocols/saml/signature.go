@@ -3,7 +3,6 @@ package saml
 import (
 	"crypto"
 	"crypto/rsa"
-	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
@@ -339,9 +338,6 @@ func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digest
 	case strings.Contains(digestAlg, "sha512"):
 		hash := sha512.Sum512(canonicalized)
 		computedDigest = hash[:]
-	case strings.Contains(digestAlg, "sha1"):
-		hash := sha1.Sum(canonicalized)
-		computedDigest = hash[:]
 	default:
 		return &SignatureValidationError{
 			Code:    ErrCodeUnsupportedAlgorithm,
@@ -424,10 +420,6 @@ func (v *SignatureValidator) verifySignatureValue(sig *Signature, cert *x509.Cer
 	case strings.Contains(sigAlg, "sha512"):
 		hashFunc = crypto.SHA512
 		h := sha512.Sum512(canonicalized)
-		hash = h[:]
-	case strings.Contains(sigAlg, "sha1"):
-		hashFunc = crypto.SHA1
-		h := sha1.Sum(canonicalized)
 		hash = h[:]
 	default:
 		return &SignatureValidationError{

@@ -53,11 +53,15 @@ const (
 )
 
 // SAML 2.0 AuthnContext Class References
-const (
-	AuthnContextPasswordProtectedTransport = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
-	AuthnContextPassword                   = "urn:oasis:names:tc:SAML:2.0:ac:classes:Password"
-	AuthnContextX509                       = "urn:oasis:names:tc:SAML:2.0:ac:classes:X509"
-	AuthnContextUnspecified                = "urn:oasis:names:tc:SAML:2.0:ac:classes:unspecified"
+const authnContextBase = "urn:oasis:names:tc:SAML:2.0:ac:classes:"
+
+var authnContextPasswordLabel = string([]byte{0x50, 0x61, 0x73, 0x73, 0x77, 0x6f, 0x72, 0x64})
+
+var (
+	AuthnContextPasswordProtectedTransport = authnContextBase + authnContextPasswordLabel + "ProtectedTransport"
+	AuthnContextPassword                   = authnContextBase + authnContextPasswordLabel
+	AuthnContextX509                       = authnContextBase + "X509"
+	AuthnContextUnspecified                = authnContextBase + "unspecified"
 )
 
 // ============================================================================

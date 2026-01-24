@@ -182,13 +182,11 @@ export function SSFSandbox() {
       setSubjects(subjectsData.subjects || [])
       setSecurityStates(statesData.states || {})
 
-      if (subjectsData.subjects?.length > 0 && !selectedSubject) {
-        setSelectedSubject(subjectsData.subjects[0])
-      }
+      setSelectedSubject((prev) => prev ?? subjectsData.subjects?.[0] ?? null)
     } catch (err) {
       console.error('Failed to fetch data:', err)
     }
-  }, [selectedSubject])
+  }, [])
 
   // Gentle background polling - 30 seconds when idle to avoid rate limits
   // This enables live state updates without overwhelming the server

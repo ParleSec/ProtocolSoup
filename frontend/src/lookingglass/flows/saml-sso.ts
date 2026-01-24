@@ -272,15 +272,22 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
     if (!usersResponse.ok) {
       throw new Error('Failed to fetch demo users from IdP')
     }
-    const usersData = await usersResponse.json() as { users: Array<{ id: string; name: string; email: string }> }
+    const usersData = await usersResponse.json() as {
+      users: Array<{ id: string; name: string; credentials?: { email: string; password: string } }>
+    }
 
     const selectedUser = usersData.users[0]
+    const selectedEmail = selectedUser?.credentials?.email
+    const selectedPassword = selectedUser?.credentials?.password
+    if (!selectedEmail || !selectedPassword) {
+      throw new Error('Demo user credentials unavailable')
+    }
     
     this.addEvent({
       type: 'user_action',
       title: 'User Authentication',
-      description: `Authenticating as ${selectedUser.name} (${selectedUser.email})`,
-      data: { user: selectedUser },
+      description: `Authenticating as ${selectedUser.name} (${selectedEmail})`,
+      data: { user: { id: selectedUser.id, name: selectedUser.name, email: selectedEmail } },
     })
 
     // Step 3: Authenticate and get SAML Response
@@ -291,7 +298,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
     const authFormData = new URLSearchParams()
     authFormData.set('username', selectedUser.id)
-    authFormData.set('password', 'password123')
+    authFormData.set('password', selectedPassword)
     authFormData.set('request_id', authnData.requestId)
     authFormData.set('acs_url', authnData.acsUrl)
     authFormData.set('sp_entity_id', authnData.issuer)
@@ -447,14 +454,21 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
     if (!usersResponse.ok) {
       throw new Error('Failed to fetch demo users from IdP')
     }
-    const usersData = await usersResponse.json() as { users: Array<{ id: string; name: string; email: string }> }
+    const usersData = await usersResponse.json() as {
+      users: Array<{ id: string; name: string; credentials?: { email: string; password: string } }>
+    }
     const selectedUser = usersData.users[0]
+    const selectedEmail = selectedUser?.credentials?.email
+    const selectedPassword = selectedUser?.credentials?.password
+    if (!selectedEmail || !selectedPassword) {
+      throw new Error('Demo user credentials unavailable')
+    }
 
     this.addEvent({
       type: 'user_action',
       title: 'User at IdP Portal',
       description: `User ${selectedUser.name} selects Service Provider to access`,
-      data: { user: selectedUser },
+      data: { user: { id: selectedUser.id, name: selectedUser.name, email: selectedEmail } },
     })
 
     // Authenticate without request ID (IdP-initiated)
@@ -465,7 +479,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
     const authFormData = new URLSearchParams()
     authFormData.set('username', selectedUser.id)
-    authFormData.set('password', 'password123')
+    authFormData.set('password', selectedPassword)
     // NO request_id for IdP-initiated
     authFormData.set('acs_url', `${window.location.origin}${this.config.baseUrl}/acs`)
     authFormData.set('sp_entity_id', window.location.origin)
