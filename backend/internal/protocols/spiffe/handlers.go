@@ -33,7 +33,7 @@ func (p *Plugin) handleStatus(w http.ResponseWriter, r *http.Request) {
 			status.SPIFFEID = id.String()
 		}
 	} else {
-		status.Message = "SPIFFE integration not available (running in demo mode)"
+		status.Message = "SPIFFE Workload API unavailable"
 	}
 
 	writeJSON(w, http.StatusOK, status)
@@ -49,8 +49,7 @@ type TrustBundleResponse struct {
 // GET /.well-known/spiffe-bundle
 func (p *Plugin) handleTrustBundle(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		// Return demo trust bundle
-		writeJSON(w, http.StatusOK, getDemoTrustBundle())
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -123,7 +122,7 @@ type ExtensionInfo struct {
 // handleX509SVID returns the current X.509-SVID
 func (p *Plugin) handleX509SVID(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, getDemoX509SVID())
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -209,8 +208,7 @@ func (p *Plugin) handleX509SVID(w http.ResponseWriter, r *http.Request) {
 // handleX509SVIDChain returns the X.509-SVID certificate chain as PEM
 func (p *Plugin) handleX509SVIDChain(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		w.Header().Set("Content-Type", "application/x-pem-file")
-		w.Write([]byte(getDemoCertificatePEM()))
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -243,7 +241,7 @@ func (p *Plugin) handleJWTSVID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, getDemoJWTSVID(audience))
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -283,10 +281,7 @@ type SVIDInfoResponse struct {
 // handleSVIDInfo returns detailed information about current SVIDs
 func (p *Plugin) handleSVIDInfo(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, SVIDInfoResponse{
-			Status: "demo_mode",
-			X509SVID: getDemoX509SVID(),
-		})
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -331,18 +326,7 @@ func (p *Plugin) handleValidateJWT(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !p.IsEnabled() {
-		// Demo validation
-		header, claims := parseJWTForDisplay(req.Token)
-		resp := ValidationResponse{
-			Valid:    true,
-			SPIFFEID: "spiffe://protocolsoup.com/demo/workload",
-			Details: map[string]interface{}{
-				"header": header,
-				"claims": claims,
-				"note":   "Demo mode - signature not verified",
-			},
-		}
-		writeJSON(w, http.StatusOK, resp)
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -351,152 +335,38 @@ func (p *Plugin) handleValidateJWT(w http.ResponseWriter, r *http.Request) {
 		audiences = []string{"protocolsoup"}
 	}
 
-	// Try full cryptographic validation first when SPIFFE is enabled
-	if p.workloadClient != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-		defer cancel()
-		
-		svid, err := p.workloadClient.ValidateJWTSVID(ctx, req.Token, audiences)
-		if err != nil {
-			// Cryptographic validation failed - parse for error details
-			header, claims := parseJWTForDisplay(req.Token)
-			writeJSON(w, http.StatusOK, ValidationResponse{
-				Valid: false,
-				Error: fmt.Sprintf("JWT-SVID validation failed: %v", err),
-				Details: map[string]interface{}{
-					"header":          header,
-					"claims":          claims,
-					"validation_type": "cryptographic",
-					"trust_bundle":    "verified against SPIFFE trust bundle",
-				},
-			})
-			return
-		}
-		
-		// Full validation succeeded
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	svid, err := p.workloadClient.ValidateJWTSVID(ctx, req.Token, audiences)
+	if err != nil {
 		header, claims := parseJWTForDisplay(req.Token)
 		writeJSON(w, http.StatusOK, ValidationResponse{
-			Valid:    true,
-			SPIFFEID: svid.ID.String(),
+			Valid: false,
+			Error: fmt.Sprintf("JWT-SVID validation failed: %v", err),
 			Details: map[string]interface{}{
 				"header":          header,
 				"claims":          claims,
 				"validation_type": "cryptographic",
-				"signature":       "verified against SPIFFE trust bundle",
-				"audience":        svid.Audience,
-				"expiry":          svid.Expiry,
+				"trust_bundle":    "verified against SPIFFE trust bundle",
 			},
 		})
 		return
 	}
 
-	// Fallback to structural validation when SPIFFE workload client unavailable
-	// Per SPIFFE JWT-SVID specification, validation requires:
-	// 1. Signature verification against trust bundle public keys
-	// 2. SPIFFE ID (sub claim) validation
-	// 3. Audience (aud claim) validation
-	// 4. Expiration (exp claim) validation
-	
-	// First, parse the token structure for display
 	header, claims := parseJWTForDisplay(req.Token)
-	
-	// Basic structural validation
-	if header == nil || claims == nil {
-		writeJSON(w, http.StatusOK, ValidationResponse{
-			Valid: false,
-			Error: "Invalid JWT format - must be a valid JWT with header.payload.signature",
-		})
-		return
-	}
-
-	// Extract SPIFFE ID from sub claim (REQUIRED per JWT-SVID spec)
-	subClaim, ok := claims["sub"].(string)
-	if !ok || !strings.HasPrefix(subClaim, "spiffe://") {
-		writeJSON(w, http.StatusOK, ValidationResponse{
-			Valid: false,
-			Error: "Invalid or missing SPIFFE ID in 'sub' claim - must be spiffe:// URI",
-		})
-		return
-	}
-
-	// Check expiration (REQUIRED per JWT-SVID spec)
-	if expClaim, ok := claims["exp"].(float64); ok {
-		if time.Now().Unix() > int64(expClaim) {
-			writeJSON(w, http.StatusOK, ValidationResponse{
-				Valid:    false,
-				SPIFFEID: subClaim,
-				Error:    "JWT-SVID has expired (exp claim in the past)",
-				Details: map[string]interface{}{
-					"header": header,
-					"claims": claims,
-					"validation_note": "Per JWT-SVID spec, expired tokens MUST be rejected",
-				},
-			})
-			return
-		}
-	} else {
-		writeJSON(w, http.StatusOK, ValidationResponse{
-			Valid: false,
-			Error: "Missing 'exp' claim - required per JWT-SVID specification",
-		})
-		return
-	}
-
-	// Check audience (REQUIRED per JWT-SVID spec - aud MUST match expected audience)
-	audClaim := claims["aud"]
-	var audMatch bool
-	switch aud := audClaim.(type) {
-	case string:
-		for _, a := range audiences {
-			if aud == a {
-				audMatch = true
-				break
-			}
-		}
-	case []interface{}:
-		for _, audItem := range aud {
-			if audStr, ok := audItem.(string); ok {
-				for _, a := range audiences {
-					if audStr == a {
-						audMatch = true
-						break
-					}
-				}
-			}
-		}
-	}
-
-	if !audMatch && len(audiences) > 0 {
-		writeJSON(w, http.StatusOK, ValidationResponse{
-			Valid:    false,
-			SPIFFEID: subClaim,
-			Error:    fmt.Sprintf("Audience mismatch: expected one of %v", audiences),
-			Details: map[string]interface{}{
-				"header": header,
-				"claims": claims,
-				"validation_note": "Per JWT-SVID spec, audience MUST match the intended recipient",
-			},
-		})
-		return
-	}
-
-	// NOTE: Full cryptographic signature verification against trust bundle 
-	// requires the JWT bundle source. In a production environment, this would
-	// use p.workloadClient.ValidateJWTSVID() with the trust bundle.
-	// For this educational tool, we validate structure and claims but note
-	// that signature verification requires the SPIFFE trust bundle.
-	
-	resp := ValidationResponse{
+	writeJSON(w, http.StatusOK, ValidationResponse{
 		Valid:    true,
-		SPIFFEID: subClaim,
+		SPIFFEID: svid.ID.String(),
 		Details: map[string]interface{}{
-			"header":   header,
-			"claims":   claims,
-			"note":     "Signature validation requires JWKS from SPIRE Server",
+			"header":          header,
+			"claims":          claims,
+			"validation_type": "cryptographic",
+			"signature":       "verified against SPIFFE trust bundle",
+			"audience":        svid.Audience,
+			"expiry":          svid.Expiry,
 		},
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	})
 }
 
 // handleValidateX509 validates an X.509-SVID
@@ -512,26 +382,47 @@ func (p *Plugin) handleValidateX509(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Decode certificate
-	certData, err := base64.StdEncoding.DecodeString(req.Cert)
-	if err != nil {
-		// Try PEM format
-		block, _ := pem.Decode([]byte(req.Cert))
-		if block == nil {
-			writeError(w, http.StatusBadRequest, "Invalid certificate format")
-			return
-		}
-		certData = block.Bytes
-	}
-
-	cert, err := x509.ParseCertificate(certData)
-	if err != nil {
-		writeJSON(w, http.StatusOK, ValidationResponse{
-			Valid: false,
-			Error: "Failed to parse certificate: " + err.Error(),
-		})
+	if !p.IsEnabled() {
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
+
+	var certs []*x509.Certificate
+	if certData, err := base64.StdEncoding.DecodeString(req.Cert); err == nil {
+		if cert, err := x509.ParseCertificate(certData); err == nil {
+			certs = append(certs, cert)
+		}
+	}
+
+	if len(certs) == 0 {
+		rest := []byte(req.Cert)
+		for {
+			block, remaining := pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			rest = remaining
+			if block.Type != "CERTIFICATE" {
+				continue
+			}
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				writeJSON(w, http.StatusOK, ValidationResponse{
+					Valid: false,
+					Error: "Failed to parse certificate: " + err.Error(),
+				})
+				return
+			}
+			certs = append(certs, cert)
+		}
+	}
+
+	if len(certs) == 0 {
+		writeError(w, http.StatusBadRequest, "Invalid certificate format")
+		return
+	}
+
+	cert := certs[0]
 
 	// Extract SPIFFE ID from SAN URI
 	var spiffeID string
@@ -542,41 +433,81 @@ func (p *Plugin) handleValidateX509(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Basic validation
-	now := time.Now()
-	valid := true
-	var validationErrors []string
-
-	if now.Before(cert.NotBefore) {
-		valid = false
-		validationErrors = append(validationErrors, "Certificate not yet valid")
-	}
-	if now.After(cert.NotAfter) {
-		valid = false
-		validationErrors = append(validationErrors, "Certificate expired")
-	}
 	if spiffeID == "" {
-		valid = false
-		validationErrors = append(validationErrors, "No SPIFFE ID in SAN URI")
+		writeJSON(w, http.StatusOK, ValidationResponse{
+			Valid: false,
+			Error: "No SPIFFE ID in SAN URI",
+			Details: map[string]interface{}{
+				"subject":    cert.Subject.String(),
+				"issuer":     cert.Issuer.String(),
+				"not_before": cert.NotBefore,
+				"not_after":  cert.NotAfter,
+				"serial":     cert.SerialNumber.String(),
+			},
+		})
+		return
+	}
+
+	roots, err := p.workloadClient.GetTrustBundle()
+	if err != nil {
+		writeJSON(w, http.StatusOK, ValidationResponse{
+			Valid:    false,
+			SPIFFEID: spiffeID,
+			Error:    "Failed to get trust bundle: " + err.Error(),
+		})
+		return
+	}
+
+	rootPool := x509.NewCertPool()
+	for _, root := range roots {
+		rootPool.AddCert(root)
+	}
+
+	intermediatePool := x509.NewCertPool()
+	if len(certs) > 1 {
+		for _, intermediate := range certs[1:] {
+			intermediatePool.AddCert(intermediate)
+		}
+	}
+
+	opts := x509.VerifyOptions{
+		Roots:         rootPool,
+		Intermediates: intermediatePool,
+		CurrentTime:   time.Now(),
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
+
+	chains, verifyErr := cert.Verify(opts)
+	if verifyErr != nil {
+		writeJSON(w, http.StatusOK, ValidationResponse{
+			Valid:    false,
+			SPIFFEID: spiffeID,
+			Error:    "Certificate verification failed: " + verifyErr.Error(),
+			Details: map[string]interface{}{
+				"subject":    cert.Subject.String(),
+				"issuer":     cert.Issuer.String(),
+				"not_before": cert.NotBefore,
+				"not_after":  cert.NotAfter,
+				"serial":     cert.SerialNumber.String(),
+			},
+		})
+		return
 	}
 
 	resp := ValidationResponse{
-		Valid:    valid,
+		Valid:    true,
 		SPIFFEID: spiffeID,
 		Details: map[string]interface{}{
-			"subject":      cert.Subject.String(),
-			"issuer":       cert.Issuer.String(),
-			"not_before":   cert.NotBefore,
-			"not_after":    cert.NotAfter,
-			"serial":       cert.SerialNumber.String(),
-			"dns_names":    cert.DNSNames,
-			"key_usage":    cert.KeyUsage,
-			"is_ca":        cert.IsCA,
+			"subject":            cert.Subject.String(),
+			"issuer":             cert.Issuer.String(),
+			"not_before":         cert.NotBefore,
+			"not_after":          cert.NotAfter,
+			"serial":             cert.SerialNumber.String(),
+			"dns_names":          cert.DNSNames,
+			"key_usage":          cert.KeyUsage,
+			"is_ca":              cert.IsCA,
+			"verified_chain_len": len(chains),
 		},
-	}
-
-	if len(validationErrors) > 0 {
-		resp.Error = strings.Join(validationErrors, "; ")
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -596,19 +527,7 @@ type WorkloadInfoResponse struct {
 // handleWorkloadInfo returns information about the current workload
 func (p *Plugin) handleWorkloadInfo(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, WorkloadInfoResponse{
-			Enabled:     false,
-			TrustDomain: "protocolsoup.com",
-			SocketPath:  "/run/spire/sockets/agent.sock",
-			Capabilities: []string{
-				"x509_svid",
-				"jwt_svid",
-				"trust_bundle",
-			},
-			Metadata: map[string]interface{}{
-				"mode": "demo",
-			},
-		})
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -661,20 +580,7 @@ type CertificateInfo struct {
 // handleTrustBundleInfo returns detailed trust bundle information
 func (p *Plugin) handleTrustBundleInfo(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, TrustBundleInfoResponse{
-			TrustDomain: "protocolsoup.com",
-			NumRoots:    1,
-			Roots: []CertificateInfo{
-				{
-					Subject:      "CN=SPIRE Demo Root CA,O=ProtocolLens",
-					Issuer:       "CN=SPIRE Demo Root CA,O=ProtocolLens",
-					NotBefore:    time.Now().Add(-24 * time.Hour),
-					NotAfter:     time.Now().Add(365 * 24 * time.Hour),
-					SerialNumber: "1",
-					IsCA:         true,
-				},
-			},
-		})
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -741,25 +647,10 @@ func (p *Plugin) handleMTLSDemo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleMTLSCall performs a REAL mTLS call demonstrating mutual TLS authentication
+// handleMTLSCall performs an mTLS call demonstrating mutual TLS authentication
 func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, MTLSDemoResponse{
-			Success:      true,
-			ClientSPIFFE: "spiffe://protocolsoup.com/demo/client",
-			ServerSPIFFE: "spiffe://protocolsoup.com/demo/server",
-			TLSVersion:   "TLS 1.3",
-			CipherSuite:  "TLS_AES_256_GCM_SHA384",
-			Steps: []string{
-				"[DEMO] Client X.509-SVID obtained",
-				"[DEMO] TLS handshake initiated",
-				"[DEMO] Server certificate verified",
-				"[DEMO] Client certificate presented",
-				"[DEMO] Mutual authentication successful",
-				"[DEMO] SPIFFE IDs extracted",
-				"[DEMO] Secure channel established",
-			},
-		})
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -771,7 +662,7 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		targetAddr = "protocolsoup-spire.internal:8081"
 	}
 
-	// Perform REAL mTLS call
+	// Perform mTLS call
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
@@ -845,20 +736,7 @@ func (p *Plugin) handleJWTAuthCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success":   true,
-			"spiffe_id": "spiffe://protocolsoup.com/demo/workload",
-			"audience":  audience,
-			"steps": []string{
-				"[DEMO] JWT-SVID requested for audience: " + audience,
-				"[DEMO] JWT-SVID issued",
-				"[DEMO] Authorization header set",
-				"[DEMO] JWT signature verified",
-				"[DEMO] Audience validated",
-				"[DEMO] SPIFFE ID extracted",
-				"[DEMO] Request authorized",
-			},
-		})
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -889,20 +767,10 @@ func (p *Plugin) handleJWTAuthCall(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleRotationDemo shows REAL certificate rotation events captured from the SPIRE Agent
+// handleRotationDemo shows certificate rotation events captured from the SPIRE Agent
 func (p *Plugin) handleRotationDemo(w http.ResponseWriter, r *http.Request) {
 	if !p.IsEnabled() {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"description":   "Automatic X.509-SVID rotation demonstration",
-			"enabled":       false,
-			"current_svid":  getDemoX509SVID(),
-			"next_rotation": time.Now().Add(30 * time.Minute),
-			"rotation_info": map[string]string{
-				"strategy":  "Rotate at 50% of TTL",
-				"mechanism": "Streaming Workload API",
-				"impact":    "Zero downtime - new connections use new cert",
-			},
-		})
+		writeError(w, http.StatusServiceUnavailable, "SPIFFE Workload API unavailable")
 		return
 	}
 
@@ -916,7 +784,7 @@ func (p *Plugin) handleRotationDemo(w http.ResponseWriter, r *http.Request) {
 	lifetime := info.NotAfter.Sub(info.NotBefore)
 	rotationTime := info.NotBefore.Add(lifetime / 2)
 
-	// Get REAL rotation events captured by the workload client
+	// Get rotation events captured by the workload client
 	rotationEvents := p.workloadClient.GetRotationEvents()
 	lastRotation := p.workloadClient.GetLastRotation()
 
@@ -935,7 +803,7 @@ func (p *Plugin) handleRotationDemo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := map[string]interface{}{
-		"description":      "REAL X.509-SVID rotation events captured from SPIRE Agent",
+		"description":      "X.509-SVID rotation events captured from SPIRE Agent",
 		"enabled":          true,
 		"spiffe_id":        info.SPIFFEID,
 		"current_serial":   info.SerialNumber,
@@ -998,82 +866,3 @@ func parseJWTForDisplay(token string) (map[string]interface{}, map[string]interf
 
 	return header, claims
 }
-
-// Demo data generators
-
-func getDemoTrustBundle() TrustBundleResponse {
-	return TrustBundleResponse{
-		TrustDomain: "protocolsoup.com",
-		Keys: []map[string]interface{}{
-			{
-				"kty": "EC",
-				"use": "x509-svid",
-				"kid": "demo-key-1",
-				"x5c": []string{"MIIBkTCB+wIJAKHBfpE...demo..."},
-			},
-		},
-	}
-}
-
-func getDemoX509SVID() *X509SVIDResponse {
-	now := time.Now()
-	return &X509SVIDResponse{
-		SPIFFEID:     "spiffe://protocolsoup.com/demo/workload",
-		Certificate:  "MIIBkTCB+wIJAKHBfpE...demo...",
-		Chain:        []string{"MIIBkTCB+wIJAKHBfpE...demo..."},
-		NotBefore:    now.Add(-1 * time.Hour),
-		NotAfter:     now.Add(1 * time.Hour),
-		SerialNumber: "123456789",
-		Issuer:       "CN=SPIRE Demo CA,O=ProtocolLens",
-		Subject:      "O=SPIRE,C=US",
-		DNSNames:     []string{"demo.protocolsoup.com"},
-		URIs:         []string{"spiffe://protocolsoup.com/demo/workload"},
-		PublicKey: PublicKeyInfo{
-			Algorithm: "ECDSA",
-			Curve:     "P-256",
-		},
-		Signature: SignatureInfo{
-			Algorithm: "ECDSA-SHA256",
-			Value:     "MEUCIQDk...demo...",
-		},
-	}
-}
-
-func getDemoJWTSVID(audience string) JWTSVIDResponse {
-	now := time.Now()
-	exp := now.Add(5 * time.Minute)
-	
-	// Note: This is a demonstration JWT-SVID structure
-	// The token format follows SPIFFE JWT-SVID specification:
-	// - Header: alg (ES256 per spec), kid, typ
-	// - Payload: sub (SPIFFE ID), aud (audience), exp, iat
-	// - Signature: not valid in demo mode
-	return JWTSVIDResponse{
-		Token:     fmt.Sprintf("eyJhbGciOiJFUzI1NiIsImtpZCI6ImRlbW8ta2V5IiwidHlwIjoiSldUIn0.%s.demo_signature_not_valid", base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":"spiffe://protocolsoup.com/demo/workload","aud":["%s"],"exp":%d,"iat":%d}`, audience, exp.Unix(), now.Unix())))),
-		SPIFFEID:  "spiffe://protocolsoup.com/demo/workload",
-		Audience:  []string{audience},
-		ExpiresAt: exp,
-		IssuedAt:  now,
-		Header: map[string]interface{}{
-			"alg": "ES256", // Per JWT-SVID spec: ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512
-			"kid": "demo-key",
-			"typ": "JWT",
-		},
-		Claims: map[string]interface{}{
-			"sub": "spiffe://protocolsoup.com/demo/workload", // REQUIRED: SPIFFE ID
-			"aud": []string{audience},                        // REQUIRED: Audience
-			"exp": exp.Unix(),                                // REQUIRED: Expiration
-			"iat": now.Unix(),                                // RECOMMENDED: Issued At
-		},
-	}
-}
-
-func getDemoCertificatePEM() string {
-	return `-----BEGIN CERTIFICATE-----
-MIIBkTCB+wIJAKHBfpEExample
-Demo certificate for SPIFFE demonstration.
-This is not a real certificate.
------END CERTIFICATE-----
-`
-}
-

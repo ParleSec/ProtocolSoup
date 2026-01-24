@@ -3,7 +3,7 @@
  * 
  * Implements RFC 7009 - OAuth 2.0 Token Revocation
  * 
- * Makes REAL requests to the revocation endpoint and captures actual responses.
+ * Makes live requests to the revocation endpoint and captures responses.
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
@@ -108,7 +108,7 @@ export class TokenRevocationExecutor extends FlowExecutorBase {
       body.client_secret = this.flowConfig.clientSecret
     }
 
-    // Make the REAL request and capture traffic
+    // Make the request and capture traffic
     const { response, data } = await this.makeRequest(
       'POST',
       `${this.config.baseUrl}/revoke`,

@@ -242,7 +242,7 @@ export function SSFSandbox() {
     })
 
     try {
-      // Simulate the protocol flow with events
+    // Capture protocol flow events while executing real actions
       await delay(100)
       addFlowEvent({ 
         type: 'crypto', 

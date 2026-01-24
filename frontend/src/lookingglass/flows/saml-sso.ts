@@ -7,7 +7,7 @@
  * 
  * Supports both HTTP-POST and HTTP-Redirect bindings.
  * 
- * **USES REAL SAML PROTOCOL EXECUTION**
+ * **USES SAML PROTOCOL EXECUTION**
  * All data comes from actual protocol execution via Looking Glass API.
  * No fake data, no placeholder IDs, no hardcoded values.
  */
@@ -183,7 +183,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
   }
 
   private async executeSPInitiated(): Promise<void> {
-    // Step 1: Create REAL AuthnRequest via Looking Glass API
+    // Step 1: Create AuthnRequest via Looking Glass API
     const relayState = this.flowConfig.relayState || generateSecureRandom(16)
     
     this.updateState({
@@ -205,7 +205,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       currentStep: 'Creating AuthnRequest',
     })
 
-    // Call Looking Glass API to create REAL AuthnRequest
+    // Call Looking Glass API to create AuthnRequest
     const authnRequestUrl = `${this.config.baseUrl}/looking-glass/authn-request?binding=${this.flowConfig.binding}&relay_state=${encodeURIComponent(relayState)}`
     const authnResponse = await fetch(this.withCaptureQuery(authnRequestUrl), {
       headers: this.withCaptureHeaders(),
@@ -221,7 +221,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       throw new Error(authnData.error || 'AuthnRequest creation failed')
     }
 
-    // Emit REAL AuthnRequest data
+    // Emit AuthnRequest data
     this.addEvent({
       type: 'security',
       title: 'AuthnRequest Created',
@@ -283,7 +283,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       data: { user: selectedUser },
     })
 
-    // Step 3: Authenticate and get REAL SAML Response
+    // Step 3: Authenticate and get SAML Response
     this.updateState({
       status: 'executing',
       currentStep: 'IdP processing authentication',
@@ -313,7 +313,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       throw new Error(samlResponse.error || 'SAML Response creation failed')
     }
 
-    // Step 4: Emit REAL SAML Response data
+    // Step 4: Emit SAML Response data
     this.addEvent({
       type: 'rfc',
       title: 'SAML 2.0 Profiles Section 4.1.4',
@@ -340,7 +340,7 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       },
     })
 
-    // Step 5: Show REAL assertion details
+    // Step 5: Show assertion details
     this.addEvent({
       type: 'token',
       title: 'SAML Assertion',
@@ -365,14 +365,14 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
       },
     })
 
-    // Step 6: Show REAL security validation results
+    // Step 6: Show security validation results
     this.addEvent({
       type: 'security',
       title: 'Security Validation Results',
       description: `Signature: ${samlResponse.security.signatureValid ? 'VALID' : 'INVALID/MISSING'}`,
       rfcReference: 'SAML 2.0 Core Section 5',
       data: {
-        // REAL signature validation - not hardcoded
+        // Signature validation - not hardcoded
         responseSigned: samlResponse.security.responseSigned,
         assertionSigned: samlResponse.security.assertionSigned,
         signatureValid: samlResponse.security.signatureValid,
@@ -380,24 +380,24 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
         digestAlgorithm: samlResponse.security.digestAlgorithm,
         signatureErrors: samlResponse.security.signatureErrors,
         signatureWarnings: samlResponse.security.signatureWarnings,
-        // REAL InResponseTo validation
+        // InResponseTo validation
         inResponseToValid: samlResponse.security.inResponseToValid,
         inResponseToError: samlResponse.security.inResponseToError,
-        // REAL replay check
+        // Replay check
         replayCheckPassed: samlResponse.security.replayCheckPassed,
         replayError: samlResponse.security.replayError,
-        // REAL subject confirmation
+        // Subject confirmation
         subjectConfirmed: samlResponse.security.subjectConfirmed,
         recipientValid: samlResponse.security.recipientValid,
         notOnOrAfterValid: samlResponse.security.notOnOrAfterValid,
-        // REAL conditions validation
+        // Conditions validation
         conditionsValid: samlResponse.security.conditionsValid,
         audienceValid: samlResponse.security.audienceValid,
         timeValid: samlResponse.security.timeValid,
       },
     })
 
-    // Step 7: Session established with REAL data
+    // Step 7: Session established with live data
     this.addEvent({
       type: 'info',
       title: 'SP Session Created',

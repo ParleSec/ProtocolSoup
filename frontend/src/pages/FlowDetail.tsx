@@ -10,7 +10,6 @@ import {
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { FlowDiagram } from '../components/lookingglass/FlowDiagram'
 import { useProtocolFlows, FlowStep } from '../protocols'
-import { getFlowWithFallback, flowIdMap } from '../protocols/fallback-data'
 import { SEO } from '../components/common/SEO'
 import { getFlowSEO } from '../config/seo'
 import { generateFlowPageSchema } from '../utils/schema'
@@ -23,20 +22,28 @@ export function FlowDetail() {
   const [copied, setCopied] = useState(false)
   const [showCode, setShowCode] = useState(false)
 
-  const { flows, loading } = useProtocolFlows(protocolId)
-  const mappedFlowId: string = flowIdMap[flowId || ''] || flowId || ''
+  const { flows, loading, error } = useProtocolFlows(protocolId)
+  const mappedFlowId = useMemo(() => {
+    if (!flowId) return ''
+    const normalized = flowId.replace(/-/g, '_')
+    const match = flows.find(f =>
+      f.id === flowId ||
+      f.id === normalized ||
+      f.id.replace(/_/g, '-') === flowId
+    )
+    return match?.id || normalized || flowId
+  }, [flowId, flows])
 
   const flow = useMemo(() => {
+    if (!mappedFlowId) return null
     const apiFlow = flows.find(f => f.id === mappedFlowId)
-    if (apiFlow) {
-      return {
-        title: apiFlow.name,
-        description: apiFlow.description,
-        steps: apiFlow.steps,
-      }
+    if (!apiFlow) return null
+    return {
+      title: apiFlow.name,
+      description: apiFlow.description,
+      steps: apiFlow.steps,
     }
-    return getFlowWithFallback(flowId || '')
-  }, [flows, mappedFlowId, flowId])
+  }, [flows, mappedFlowId])
 
   useEffect(() => {
     setActiveStep(-1)
@@ -46,6 +53,18 @@ export function FlowDetail() {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <Loader2 className="w-6 h-6 text-surface-400 animate-spin" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-20">
+        <h1 className="text-xl font-semibold text-white mb-3">Flow Data Unavailable</h1>
+        <p className="text-sm text-surface-400 mb-6">{error.message}</p>
+        <Link to={`/protocol/${protocolId}`} className="text-cyan-400 hover:underline">
+          Back to {getProtocolName(protocolId)}
+        </Link>
       </div>
     )
   }
@@ -1150,7 +1169,7 @@ window.location.href = authUrl;`
     return badges
   }
 
-  const getProtocolName = (id: string | undefined) => {
+  function getProtocolName(id: string | undefined) {
     switch (id) {
       case 'oauth2': return 'OAuth 2.0'
       case 'oidc': return 'OpenID Connect'

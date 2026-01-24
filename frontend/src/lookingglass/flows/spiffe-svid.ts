@@ -775,7 +775,7 @@ export class CertRotationExecutor extends FlowExecutorBase {
         },
       })
 
-      // Step 3: Fetch REAL rotation events from the backend
+      // Step 3: Fetch rotation events from the backend
       this.addEvent({
         type: 'info',
         title: 'Fetching Real Rotation Events',

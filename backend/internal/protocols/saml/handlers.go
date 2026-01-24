@@ -1493,7 +1493,7 @@ func getStatusDescription(statusCode string) string {
 // ============================================================================
 // These handlers return JSON responses with full SAML protocol data for
 // real-time visualization in the Looking Glass UI.
-// They execute REAL protocol operations - no fake or placeholder data.
+// They execute protocol operations - no fake or placeholder data.
 // ============================================================================
 
 // handleLookingGlassCreateAuthnRequest creates an AuthnRequest and returns all details
@@ -1507,7 +1507,7 @@ func (p *Plugin) handleLookingGlassCreateAuthnRequest(w http.ResponseWriter, r *
 		relayState = GenerateID()
 	}
 
-	// Create REAL AuthnRequest
+	// Create AuthnRequest
 	authnRequest := NewAuthnRequest(p.entityID, p.ssoServiceURL, p.acsURL)
 
 	// Store request ID for InResponseTo validation
@@ -1578,7 +1578,7 @@ func (p *Plugin) handleLookingGlassAuthenticate(w http.ResponseWriter, r *http.R
 		spEntityID = p.entityID
 	}
 
-	// Authenticate user - REAL authentication
+	// Authenticate user
 	user, err := p.mockIdP.ValidateCredentials(username, password)
 	if err != nil {
 		user, err = p.mockIdP.ValidateCredentials(username+"@example.com", password)
@@ -1588,7 +1588,7 @@ func (p *Plugin) handleLookingGlassAuthenticate(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	// Create REAL SAML Response
+	// Create SAML Response
 	response := NewResponse(p.entityID, acsURL, requestID, requestID != "")
 
 	attributes := map[string][]string{

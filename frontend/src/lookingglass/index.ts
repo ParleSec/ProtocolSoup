@@ -18,7 +18,6 @@ export {
   useFlows,
   useFlow,
   useLookingGlassSession,
-  useFlowSimulation,
   useLookingGlassConfig,
   useRealFlowExecutor,
   type UseRealFlowExecutorOptions,

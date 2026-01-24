@@ -200,13 +200,13 @@ func NewPostBinding(privateKey *rsa.PrivateKey) *PostBinding {
 // 2. Serialize the message to XML
 // 3. Base64 encode (no compression)
 func (b *PostBinding) Encode(message interface{}) (string, error) {
-	// Sign the message if we have a signer - this creates REAL XML digital signatures
+	// Sign the message if we have a signer - this creates XML digital signatures
 	// Per SAML 2.0 Core Section 5, messages SHOULD be signed for integrity
 	if b.signer != nil {
 		switch msg := message.(type) {
 		case *Response:
 			// Sign both the Response and its Assertions per SAML best practice
-			// This creates REAL cryptographic signatures that can be validated
+			// This creates cryptographic signatures that can be validated
 			for _, assertion := range msg.Assertions {
 				if assertion != nil {
 					if err := b.signer.SignAssertion(assertion); err != nil {

@@ -685,6 +685,3 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
   )
 }
 
-// Re-export flow data from the protocols module for backwards compatibility
-// eslint-disable-next-line react-refresh/only-export-components
-export { fallbackFlows as flowData } from '../../protocols/fallback-data'

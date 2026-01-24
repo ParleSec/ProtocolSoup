@@ -133,7 +133,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/demo/logout", p.handleDemoLogout)
 
 	// Looking Glass API endpoints - return raw SAML protocol data as JSON
-	// These execute REAL protocol operations for frontend visualization
+	// These execute protocol operations for frontend visualization
 	router.Get("/looking-glass/authn-request", p.handleLookingGlassCreateAuthnRequest)
 	router.Post("/looking-glass/authenticate", p.handleLookingGlassAuthenticate)
 	router.Get("/looking-glass/logout-request", p.handleLookingGlassCreateLogoutRequest)
