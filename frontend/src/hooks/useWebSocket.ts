@@ -35,6 +35,7 @@ export function useWebSocket(
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>()
+  const shouldReconnectRef = useRef(true)
 
   const [connected, setConnected] = useState(false)
   const [lastMessage, setLastMessage] = useState<string | null>(null)
@@ -42,6 +43,7 @@ export function useWebSocket(
   const connect = useCallback(() => {
     if (!url) return
     if (wsRef.current?.readyState === WebSocket.OPEN) return
+    shouldReconnectRef.current = true
 
     try {
       // Build full WebSocket URL
@@ -62,7 +64,7 @@ export function useWebSocket(
         onClose?.()
 
         // Attempt reconnection
-        if (reconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {
+        if (shouldReconnectRef.current && reconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttemptsRef.current += 1
             connect()
@@ -84,6 +86,7 @@ export function useWebSocket(
   }, [url, onOpen, onClose, onError, onMessage, reconnect, reconnectInterval, maxReconnectAttempts])
 
   const disconnect = useCallback(() => {
+    shouldReconnectRef.current = false
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
     }
