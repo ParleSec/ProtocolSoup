@@ -73,26 +73,35 @@ func (s *Server) setupRouter() {
 	r.Get("/health", s.handleHealth)
 
 	// API routes
+	r.Get("/api", s.handleAPIIndex)
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/", s.handleAPIIndex)
+
 		// Protocol listing
 		r.Get("/protocols", s.handleListProtocols)
 		r.Get("/protocols/{id}", s.handleGetProtocol)
 		r.Get("/protocols/{id}/flows", s.handleGetProtocolFlows)
 		r.Post("/protocols/{id}/demo/{flow}", s.handleStartDemo)
 
-		// Looking glass endpoints
-		r.Route("/lookingglass", func(r chi.Router) {
-			r.Post("/decode", s.handleDecodeToken)
-			r.Get("/sessions", s.handleListSessions)
-			r.Get("/sessions/{id}", s.handleGetSession)
-		})
+		// Looking glass endpoints (optional)
+		if s.lookingGlass != nil {
+			r.Route("/lookingglass", func(r chi.Router) {
+				r.Post("/decode", s.handleDecodeToken)
+				r.Get("/sessions", s.handleListSessions)
+				r.Get("/sessions/{id}", s.handleGetSession)
+			})
+		}
 
-		// JWKS endpoint
-		r.Get("/.well-known/jwks.json", s.handleJWKS)
+		// JWKS endpoint (optional)
+		if s.keySet != nil {
+			r.Get("/.well-known/jwks.json", s.handleJWKS)
+		}
 	})
 
-	// WebSocket routes
-	r.Get("/ws/lookingglass/{session}", s.handleLookingGlassWS)
+	// WebSocket routes (optional)
+	if s.lookingGlass != nil {
+		r.Get("/ws/lookingglass/{session}", s.handleLookingGlassWS)
+	}
 
 	// Mount protocol-specific routes
 	for _, p := range s.registry.List() {
@@ -175,6 +184,42 @@ type HealthResponse struct {
 	Protocols []string `json:"protocols"`
 }
 
+// API index response
+type APIIndexResponse struct {
+	Service   string            `json:"service"`
+	Version   string            `json:"version"`
+	Protocols []string          `json:"protocols"`
+	Endpoints map[string]string `json:"endpoints"`
+}
+
+func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
+	protocols := make([]string, 0)
+	for _, p := range s.registry.List() {
+		protocols = append(protocols, p.Info().ID)
+	}
+
+	endpoints := map[string]string{
+		"protocols": "/api/protocols",
+		"health":    "/health",
+		"flows":     "/api/protocols/{id}/flows",
+		"demo":      "/api/protocols/{id}/demo/{flow}",
+	}
+	if s.lookingGlass != nil {
+		endpoints["lookingglass"] = "/api/lookingglass"
+		endpoints["lookingglass_ws"] = "/ws/lookingglass/{session}"
+	}
+	if s.keySet != nil {
+		endpoints["jwks"] = "/api/.well-known/jwks.json"
+	}
+
+	writeJSON(w, http.StatusOK, APIIndexResponse{
+		Service:   "protocol-lens",
+		Version:   "1.0.0",
+		Protocols: protocols,
+		Endpoints: endpoints,
+	})
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	protocols := make([]string, 0)
 	for _, p := range s.registry.List() {
@@ -254,6 +299,11 @@ func (s *Server) handleGetProtocolFlows(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleStartDemo(w http.ResponseWriter, r *http.Request) {
+	if s.lookingGlass == nil {
+		writeError(w, http.StatusServiceUnavailable, "Looking Glass is disabled")
+		return
+	}
+
 	protocolID := chi.URLParam(r, "id")
 	flowID := chi.URLParam(r, "flow")
 
@@ -308,6 +358,15 @@ type DecodeRequest struct {
 }
 
 func (s *Server) handleDecodeToken(w http.ResponseWriter, r *http.Request) {
+	if s.lookingGlass == nil {
+		writeError(w, http.StatusServiceUnavailable, "Looking Glass is disabled")
+		return
+	}
+	if s.keySet == nil {
+		writeError(w, http.StatusServiceUnavailable, "Key set is unavailable")
+		return
+	}
+
 	var req DecodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -324,6 +383,11 @@ func (s *Server) handleDecodeToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	if s.lookingGlass == nil {
+		writeError(w, http.StatusServiceUnavailable, "Looking Glass is disabled")
+		return
+	}
+
 	sessions := s.lookingGlass.ListSessions()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessions": sessions,
@@ -331,6 +395,11 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
+	if s.lookingGlass == nil {
+		writeError(w, http.StatusServiceUnavailable, "Looking Glass is disabled")
+		return
+	}
+
 	id := chi.URLParam(r, "id")
 	session, exists := s.lookingGlass.GetSession(id)
 	if !exists {
@@ -341,11 +410,21 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
+	if s.keySet == nil {
+		writeError(w, http.StatusServiceUnavailable, "Key set is unavailable")
+		return
+	}
+
 	jwks := s.keySet.PublicJWKS()
 	writeJSON(w, http.StatusOK, jwks)
 }
 
 func (s *Server) handleLookingGlassWS(w http.ResponseWriter, r *http.Request) {
+	if s.lookingGlass == nil {
+		writeError(w, http.StatusServiceUnavailable, "Looking Glass is disabled")
+		return
+	}
+
 	sessionID := chi.URLParam(r, "session")
 	s.lookingGlass.HandleWebSocket(w, r, sessionID)
 }
