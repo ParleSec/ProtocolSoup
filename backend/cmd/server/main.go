@@ -10,9 +10,6 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/core"
-	"github.com/ParleSec/ProtocolSoup/internal/crypto"
-	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
-	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oidc"
@@ -23,35 +20,20 @@ import (
 )
 
 func main() {
-	// Load configuration
-	cfg := core.LoadConfig()
-
-	// Initialize cryptographic key set
-	keySet, err := crypto.NewKeySet()
+	bootstrap, err := core.Bootstrap(core.BootstrapOptions{
+		EnableKeySet:       true,
+		EnableMockIdP:      true,
+		EnableLookingGlass: true,
+	})
 	if err != nil {
-		log.Fatalf("Failed to initialize key set: %v", err)
+		log.Fatalf("Failed to bootstrap server: %v", err)
 	}
-	log.Println("Cryptographic keys initialized")
-
-	// Initialize mock identity provider
-	idp := mockidp.NewMockIdP(keySet)
-	idp.SetIssuer(cfg.BaseURL) // Set issuer from config for production
-	log.Printf("Mock Identity Provider initialized with issuer: %s", cfg.BaseURL)
-
-	// Initialize looking glass engine
-	lgEngine := lookingglass.NewEngine()
-	log.Println("Looking Glass engine initialized")
 
 	// Initialize plugin registry
 	registry := plugin.NewRegistry()
 
 	// Create plugin configuration
-	pluginConfig := plugin.PluginConfig{
-		BaseURL:      cfg.BaseURL,
-		KeySet:       keySet,
-		MockIdP:      idp,
-		LookingGlass: lgEngine,
-	}
+	pluginConfig := bootstrap.PluginConfig
 
 	// Register OAuth 2.0 plugin
 	oauth2Plugin := oauth2.NewPlugin()
@@ -97,9 +79,9 @@ func main() {
 	log.Printf("Initialized %d protocol plugins", len(registry.List()))
 
 	// Create and configure server
-	server := core.NewServer(cfg, registry, lgEngine, keySet)
+	server := core.NewServer(bootstrap.Config, registry, bootstrap.LookingGlass, bootstrap.KeySet)
 	httpServer := &http.Server{
-		Addr:         cfg.ListenAddr,
+		Addr:         bootstrap.Config.ListenAddr,
 		Handler:      server.Router(),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -108,9 +90,11 @@ func main() {
 
 	// Start server in goroutine
 	go func() {
-		log.Printf("Server starting on %s", cfg.ListenAddr)
-		log.Printf("API available at %s/api", cfg.BaseURL)
-		log.Printf("Looking Glass WebSocket at %s/ws/lookingglass", cfg.BaseURL)
+		log.Printf("Server starting on %s", bootstrap.Config.ListenAddr)
+		log.Printf("API available at %s/api", bootstrap.Config.BaseURL)
+		if bootstrap.LookingGlass != nil {
+			log.Printf("Looking Glass WebSocket at %s/ws/lookingglass", bootstrap.Config.BaseURL)
+		}
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}
