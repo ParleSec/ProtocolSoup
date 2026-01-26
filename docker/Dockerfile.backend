@@ -1,6 +1,8 @@
 # Build stage
 FROM golang:1.22-alpine AS builder
 
+ARG SERVICE_CMD=./cmd/server
+
 WORKDIR /app
 
 # Install build dependencies
@@ -16,7 +18,7 @@ COPY backend/ .
 RUN go mod tidy && go mod download
 
 # Build the application
-RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}
 
 # Runtime stage
 FROM alpine:3.19
