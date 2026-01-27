@@ -14,7 +14,7 @@ An interactive sandbox for exploring authentication and identity protocols. Exec
 
 ## Quick Start
 
-### Full Stack (with SPIFFE/SPIRE)
+### Split Services (Base)
 
 ```bash
 cd ProtocolSoup/docker
@@ -22,20 +22,67 @@ docker compose up -d
 ```
 
 This starts:
-- **SPIRE Server** - Certificate authority and identity registry
-- **SPIRE Agent** - Workload attestation and SVID issuance
-- **Backend** - Go API with embedded agent for real X.509/JWT SVIDs
+- **Gateway** - Aggregates `/api` and routes protocol paths
+- **Federation** - OAuth 2.0, OIDC, SAML
+- **SCIM** - User and group provisioning
+- **SSF** - Shared Signals Framework
 - **Frontend** - React UI at `http://localhost:3000`
-- **Backend API** - Available at `http://localhost:8080`
+- **Gateway API** - Available at `http://localhost:8080`
 
-### Lightweight Stack (without SPIFFE)
+### SPIFFE/SPIRE Overlay
 
 ```bash
-cd ProtocolSoup/docker
-docker compose -f docker-compose.simple.yml up -d
+cd ProtocolLens/docker
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
 ```
 
-Use this for OAuth 2.0, OIDC, SAML, SCIM, and SSF demos without the SPIFFE/SPIRE infrastructure.
+This adds:
+- **SPIFFE Service** - Workload API demos
+- **SPIRE Server/Agent** - Identity authority and SVID issuance
+- **SPIRE Registration** - Workload entry bootstrap
+
+### Standalone Usage (API-only Images)
+
+Build any service with the shared backend Dockerfile by selecting the entrypoint:
+
+```bash
+# Gateway
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/gateway -t protocol-lens-gateway .
+
+# Federation (OAuth2/OIDC/SAML)
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-federation -t protocol-lens-federation .
+
+# SCIM
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-scim -t protocol-lens-scim .
+
+# SSF
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-ssf -t protocol-lens-ssf .
+
+# SPIFFE (requires SPIRE server/agent)
+docker build -f docker/Dockerfile.backend-spiffe --build-arg SERVICE_CMD=./cmd/server-spiffe -t protocol-lens-spiffe .
+```
+
+Example standalone runs:
+
+```bash
+# SCIM service (data volume + optional Looking Glass)
+docker run -p 8082:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SCIM_DATA_DIR=/data \
+  -e SCIM_LOOKING_GLASS=true \
+  -v scim-data:/data \
+  protocol-lens-scim
+
+# Gateway routing to standalone services
+docker run -p 8080:8080 \
+  -e FEDERATION_SERVICE_URL=http://host.docker.internal:8081 \
+  -e SCIM_SERVICE_URL=http://host.docker.internal:8082 \
+  -e SSF_SERVICE_URL=http://host.docker.internal:8083 \
+  protocol-lens-gateway
+```
+
+Note: `docker-compose.simple.yml`, `docker-compose.dev.yml`, and `docker-compose.prod.yml`
+target the legacy monolithic backend and are kept for reference.
 
 ---
 
@@ -258,10 +305,11 @@ ProtocolSoup/
 │       ├── protocols/              # Protocol registry
 │       └── hooks/                  # WebSocket, state management
 ├── docker/
-│   ├── docker-compose.yml          # Full stack with SPIFFE/SPIRE
-│   ├── docker-compose.simple.yml   # Lightweight (no SPIFFE)
-│   ├── docker-compose.dev.yml      # Development configuration
-│   ├── docker-compose.prod.yml     # Production configuration
+│   ├── docker-compose.yml          # Split services (base)
+│   ├── docker-compose.spiffe.yml   # SPIFFE/SPIRE overlay
+│   ├── docker-compose.simple.yml   # Legacy monolith (no SPIFFE)
+│   ├── docker-compose.dev.yml      # Legacy development configuration
+│   ├── docker-compose.prod.yml     # Legacy production configuration
 │   ├── spire/                      # SPIRE server/agent configurations
 │   └── Dockerfile.*                # Container definitions
 ├── docs/
@@ -327,10 +375,20 @@ ProtocolSoup/
 
 ### Running Locally (without Docker)
 
-**Backend:**
+**Backend (monolith):**
 ```bash
 cd backend
 go run ./cmd/server
+```
+
+**Backend (split services):**
+```bash
+cd backend
+go run ./cmd/gateway
+go run ./cmd/server-federation
+go run ./cmd/server-scim
+go run ./cmd/server-ssf
+go run ./cmd/server-spiffe
 ```
 
 **Frontend:**
@@ -342,14 +400,40 @@ npm run dev
 
 ### Environment Variables
 
+#### Core Services
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SHOWCASE_LISTEN_ADDR` | `:8080` | Server listen address |
 | `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public base URL |
-| `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000` | Allowed CORS origins |
+| `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `SHOWCASE_SPIFFE_ENABLED` | `false` | Enable SPIFFE integration |
 | `SHOWCASE_SPIFFE_SOCKET_PATH` | `unix:///run/spire/sockets/agent.sock` | Workload API socket |
 | `SHOWCASE_SPIFFE_TRUST_DOMAIN` | `protocolsoup.com` | SPIFFE trust domain |
+
+#### Gateway
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FEDERATION_SERVICE_URL` | (empty) | Federation upstream base URL |
+| `SCIM_SERVICE_URL` | (empty) | SCIM upstream base URL |
+| `SPIFFE_SERVICE_URL` | (empty) | SPIFFE upstream base URL |
+| `SSF_SERVICE_URL` | (empty) | SSF upstream base URL |
+| `GATEWAY_REFRESH_INTERVAL` | `30s` | Protocol refresh interval |
+| `GATEWAY_STARTUP_RETRY_INITIAL` | `2s` | Initial startup retry delay |
+| `GATEWAY_STARTUP_RETRY_MAX` | `30s` | Maximum startup retry delay |
+| `GATEWAY_REQUEST_TIMEOUT` | `5s` | Upstream request timeout |
+
+#### SCIM / SSF
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCIM_DATA_DIR` | `./data` | SCIM storage directory |
+| `SSF_DATA_DIR` | `./data` | SSF storage directory |
+| `SCIM_API_TOKEN` | (empty) | Bearer token for SCIM API auth |
+| `SCIM_LOOKING_GLASS` | `true` | Enable Looking Glass capture for SCIM |
+| `SSF_RECEIVER_PORT` | `8081` | Standalone SSF receiver port |
+| `SSF_RECEIVER_TOKEN` | (auto) | Receiver bearer token for push delivery |
 
 ---
 
