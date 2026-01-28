@@ -171,7 +171,7 @@ The system requires **at least one active connection** within the 90-day CA wind
     "[14:30:00.000] Fetching X.509-SVID from SPIRE Agent Workload API",
     "[14:30:00.001] Obtained X.509-SVID: spiffe://protocolsoup.com/workload/backend",
     "[14:30:00.002] Trust bundle loaded with 1 CA certificate(s)",
-    "[14:30:00.003] Initiating TLS handshake to protocolsoup-spire.internal:8081",
+    "[14:30:00.003] Initiating TLS handshake to spire-server:8081",
     "[14:30:00.048] TLS handshake completed in 45.123ms",
     "[14:30:00.048] Negotiated TLS version: TLS 1.3",
     "[14:30:00.048] Server presented certificate for: spiffe://protocolsoup.com/spire/server",
@@ -291,6 +291,9 @@ SHOWCASE_SPIFFE_SOCKET_PATH=unix:///run/spire/sockets/agent.sock
 
 # Trust domain (default: protocolsoup.com)
 SHOWCASE_SPIFFE_TRUST_DOMAIN=protocolsoup.com
+
+# Optional: SPIRE server address for mTLS demo (default: spire-server:8081)
+SPIRE_SERVER_ADDRESS=spire-server
 ```
 
 ### Plugin (`protocols/spiffe/plugin.go`)
@@ -324,7 +327,7 @@ inspectors := plugin.GetInspectors()
 
 ### Executable Flows (Real Infrastructure Operations)
 
-All executable flows perform **real operations** against production SPIRE infrastructure:
+All executable flows perform **real operations** against the configured SPIRE infrastructure (local or production):
 
 | Flow | Real Operation |
 |------|----------------|
@@ -440,19 +443,19 @@ fly ssh console -a protocolsoup-spire -C \
 ### Local Development with Docker Compose
 
 ```bash
-# Start SPIRE infrastructure
-docker-compose -f docker/docker-compose.spire.yml up -d
+# Start split services + SPIFFE overlay
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.spiffe.yml up -d
 
 # Wait for server to be ready
 sleep 5
 
 # Generate join token
-docker-compose -f docker/docker-compose.spire.yml exec spire-server \
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.spiffe.yml exec spire-server \
   /opt/spire/bin/spire-server token generate \
   -spiffeID spiffe://protocolsoup.com/agent/local
 
 # Register workloads
-docker-compose -f docker/docker-compose.spire.yml exec spire-server \
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.spiffe.yml exec spire-server \
   /opt/spire/bin/spire-server entry create \
   -spiffeID spiffe://protocolsoup.com/workload/backend \
   -parentID spiffe://protocolsoup.com/agent/local \
@@ -539,7 +542,7 @@ This implementation follows these SPIFFE specifications:
 
 **"failed to create X509Source: context deadline exceeded"**
 - SPIRE Agent cannot reach SPIRE Server
-- Check private network connectivity: `fly ssh console -a protocolsoup -C "nc -zv protocolsoup-spire.internal 8081"`
+- Check private network connectivity: `fly ssh console -a protocolsoup -C "nc -zv $SPIRE_SERVER_ADDRESS 8081"`
 
 ## Dependencies
 
@@ -548,8 +551,8 @@ This implementation follows these SPIFFE specifications:
 - `google.golang.org/grpc` - gRPC for Workload API
 
 **Docker Images:**
-- `ghcr.io/spiffe/spire-server:1.9` - SPIRE Server
-- `ghcr.io/spiffe/spire-agent:1.9` - SPIRE Agent
+- `ghcr.io/spiffe/spire-server:1.14` - SPIRE Server
+- `ghcr.io/spiffe/spire-agent:1.14` - SPIRE Agent
 
 ## License
 

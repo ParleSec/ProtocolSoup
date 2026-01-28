@@ -11,6 +11,15 @@ This implementation provides:
 - **Action Executor**: Performs real security state changes (session revocation, account disabling, etc.)
 - **Session Isolation**: Each user session gets an isolated sandbox for demonstration purposes
 
+## Service Deployment
+
+The SSF implementation runs as its own service in the split backend architecture. It can be used:
+
+- **Behind the gateway** (recommended): `/ssf/*` is proxied through the gateway so the frontend uses a single base URL.
+- **Standalone**: run the SSF service by itself and call `/ssf/*` directly.
+
+The service also starts a **standalone receiver** on `SSF_RECEIVER_PORT` (default `8081`) for push delivery demos.
+
 ## Architecture
 
 ```
@@ -151,7 +160,7 @@ Frontend                    Backend                     Receiver
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/security-states` | GET | Get all user security states |
+| `/ssf/security-state` | GET | Get all user security states |
 | `/ssf/security-state/{email}` | GET | Get security state for user |
 | `/ssf/security-state/{email}/reset` | POST | Reset user security state |
 
@@ -177,6 +186,18 @@ ssf/
 ├── events.go           # Event type definitions and metadata
 └── README.md           # This file
 ```
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SSF_DATA_DIR` | Directory for SQLite data | `./data` |
+| `SSF_RECEIVER_PORT` | Standalone receiver port | `8081` |
+| `SSF_RECEIVER_TOKEN` | Bearer token for receiver push | (auto-generated) |
+
+When running behind the gateway, set `SHOWCASE_BASE_URL` to the gateway URL so metadata uses the shared origin.
 
 ## Key Components
 

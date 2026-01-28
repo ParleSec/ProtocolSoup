@@ -16,6 +16,15 @@ This implementation provides:
 - **ETag Support**: Optimistic concurrency control with version tracking
 - **Looking Glass Integration**: Real-time flow visualization for educational purposes
 
+## Service Deployment
+
+The SCIM implementation runs as its own service in the split backend architecture. It can be used:
+
+- **Behind the gateway** (recommended): `/scim/*` is proxied through the gateway so the frontend and clients use a single base URL.
+- **Standalone**: run the SCIM service by itself and point your IdP directly at it.
+
+When running standalone, set `SHOWCASE_BASE_URL` to the public URL you want SCIM to advertise in links and metadata.
+
 ## Architecture
 
 ```
@@ -181,6 +190,9 @@ The system automatically detects the source Identity Provider from request heade
 | Generic | Default fallback |
 
 This information is logged for audit purposes and displayed in the Looking Glass.
+
+> Note: If `SCIM_API_TOKEN` is not set, authentication is disabled for demo and local testing.
+> For production deployments, configure `SCIM_API_TOKEN` and require it on your IdP connector.
 
 ## Filter Expressions
 
@@ -374,6 +386,7 @@ The following flows are available in the Looking Glass for educational visualiza
 |----------|-------------|---------|
 | `SCIM_API_TOKEN` | Bearer token for authentication | (none - auth disabled if not set) |
 | `SCIM_DATA_DIR` | Directory for SQLite database | `./data` or `/data/scim` on Fly.io |
+| `SCIM_LOOKING_GLASS` | Enable Looking Glass capture | `true` |
 
 ### Fly.io Deployment
 
@@ -391,7 +404,7 @@ The following flows are available in the Looking Glass for educational visualiza
 
 ```yaml
 services:
-  backend:
+  scim-service:
     environment:
       - SCIM_API_TOKEN=${SCIM_API_TOKEN}
       - SCIM_DATA_DIR=/app/data
@@ -407,7 +420,7 @@ services:
    - Applications → Create App Integration → SCIM 2.0 Test App
 
 2. **Configure SCIM Connection**
-   - Base URL: `https://protocolsoup.fly.dev/scim/v2`
+   - Base URL: `{GATEWAY_BASE_URL}/scim/v2` (or the standalone SCIM service URL)
    - Authentication: HTTP Header
    - Header Name: `Authorization`
    - Header Value: `Bearer {your-token}`
@@ -464,7 +477,7 @@ All errors follow RFC 7644 Section 3.12:
 cd docker
 docker compose up -d
 
-# Test endpoints
+# Test endpoints via gateway
 curl http://localhost:8080/scim/v2/ServiceProviderConfig
 
 # Create a user
@@ -485,7 +498,7 @@ curl -X POST http://localhost:8080/scim/v2/Users \
 fly logs -a protocolsoup | grep -i scim
 
 # Docker logs
-docker compose logs backend | grep -i scim
+docker compose logs scim-service | grep -i scim
 ```
 
 ## RFC Compliance

@@ -1,0 +1,201 @@
+name: Publish to GHCR
+
+on:
+  push:
+    branches: [master]
+  release:
+    types: [published]
+
+# Prevent duplicate builds for the same ref
+concurrency:
+  group: ghcr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write        # Required for Cosign signing
+  attestations: write    # Required for build provenance
+  security-events: write # Required for uploading Trivy SARIF results
+
+jobs:
+  build-and-push:
+    name: Build and Push ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Core backend services (using Dockerfile.backend with SERVICE_CMD)
+          - name: gateway
+            image: protocolens-gateway
+            dockerfile: docker/Dockerfile.backend
+            context: .
+            build_args: |
+              SERVICE_CMD=./cmd/gateway
+          - name: federation
+            image: protocolens-federation
+            dockerfile: docker/Dockerfile.backend
+            context: .
+            build_args: |
+              SERVICE_CMD=./cmd/server-federation
+          - name: scim
+            image: protocolens-scim
+            dockerfile: docker/Dockerfile.backend
+            context: .
+            build_args: |
+              SERVICE_CMD=./cmd/server-scim
+          - name: ssf
+            image: protocolens-ssf
+            dockerfile: docker/Dockerfile.backend
+            context: .
+            build_args: |
+              SERVICE_CMD=./cmd/server-ssf
+          # SPIFFE service (uses special Dockerfile with embedded SPIRE agent)
+          - name: spiffe
+            image: protocolens-spiffe
+            dockerfile: docker/Dockerfile.backend-spiffe
+            context: .
+            build_args: |
+              SERVICE_CMD=./cmd/server-spiffe
+          # Frontend
+          - name: frontend
+            image: protocolens-frontend
+            dockerfile: docker/Dockerfile.frontend
+            context: .
+            build_args: ""
+          # SPIRE infrastructure
+          - name: spire-server
+            image: protocolens-spire-server
+            dockerfile: docker/spire/server/Dockerfile
+            context: docker/spire/server
+            build_args: ""
+          - name: spire-agent
+            image: protocolens-spire-agent
+            dockerfile: docker/spire/agent/Dockerfile
+            context: docker/spire/agent
+            build_args: ""
+          - name: spire-registration
+            image: protocolens-spire-registration
+            dockerfile: docker/spire/registration/Dockerfile
+            context: docker/spire/registration
+            build_args: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            # Set latest tag for master branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            # Set sha tag for all builds
+            type=sha,prefix=sha-
+            # Set version tags for releases
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+          labels: |
+            org.opencontainers.image.title=ProtocolLens ${{ matrix.name }}
+            org.opencontainers.image.description=ProtocolLens ${{ matrix.name }} service - Security protocol demonstration platform
+            org.opencontainers.image.vendor=ProtocolLens
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ matrix.build_args }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          # Enable SBOM and provenance generation
+          sbom: true
+          provenance: mode=max
+
+      # Security: Scan image for vulnerabilities
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.name }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'  # Don't fail build, but report issues
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results-${{ matrix.name }}.sarif'
+          category: 'container-${{ matrix.name }}'
+        continue-on-error: true
+
+      # Security: Sign image with Cosign (keyless signing via Sigstore)
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image with Cosign
+        run: |
+          cosign sign --yes \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+
+      # Supply chain: Generate attestation
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  # Summary job that runs after all builds complete
+  publish-summary:
+    name: Publish Summary
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: always()
+    steps:
+      - name: Check build results
+        run: |
+          if [ "${{ needs.build-and-push.result }}" == "success" ]; then
+            echo "✅ All container images published successfully to GHCR!"
+            echo ""
+            echo "Published images:"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-gateway"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-federation"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-scim"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-ssf"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spiffe"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-frontend"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spire-server"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spire-agent"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spire-registration"
+          else
+            echo "❌ Some container builds failed. Check the individual job logs."
+            exit 1
+          fi
