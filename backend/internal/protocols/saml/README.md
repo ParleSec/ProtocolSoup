@@ -569,4 +569,4 @@ curl -X POST http://localhost:8080/saml/looking-glass/logout \
 
 ## License
 
-Part of the ProtocolLens project.
+Part of the ProtocolSoup project.

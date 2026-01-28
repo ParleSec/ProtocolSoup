@@ -1,4 +1,4 @@
-// Package spiffe implements the SPIFFE/SPIRE protocol plugin for ProtocolLens.
+// Package spiffe implements the SPIFFE/SPIRE protocol plugin for ProtocolSoup.
 // It provides educational visualization of SPIFFE workload identity concepts
 // while demonstrating real SPIRE integration with actual SVIDs and mTLS.
 package spiffe
@@ -7,10 +7,10 @@ import (
 	"context"
 	"log"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	spiffelib "github.com/ParleSec/ProtocolSoup/internal/spiffe"
+	"github.com/go-chi/chi/v5"
 )
 
 // Plugin implements the SPIFFE/SPIRE protocol plugin
@@ -55,7 +55,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 
 	// Create SPIFFE workload client (non-blocking)
 	spiffeCfg := spiffelib.DefaultConfig()
-	
+
 	// Check if SPIFFE is enabled via environment
 	if spiffeCfg.Enabled {
 		workloadClient, err := spiffelib.NewWorkloadClient(spiffeCfg)
@@ -63,7 +63,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 			log.Printf("SPIFFE plugin: workload client creation failed (SPIFFE features disabled): %v", err)
 		} else {
 			p.workloadClient = workloadClient
-			
+
 			// Start the workload client in background - don't block server startup
 			go func() {
 				if err := workloadClient.Start(); err != nil {
@@ -93,28 +93,28 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// SPIFFE Bundle endpoint (per SPIFFE spec)
 	router.Get("/.well-known/spiffe-bundle", p.handleTrustBundle)
-	
+
 	// SVID endpoints
 	router.Get("/svid/x509", p.handleX509SVID)
 	router.Get("/svid/x509/chain", p.handleX509SVIDChain)
 	router.Get("/svid/jwt", p.handleJWTSVID)
 	router.Get("/svid/info", p.handleSVIDInfo)
-	
+
 	// Validation endpoints
 	router.Post("/validate/jwt", p.handleValidateJWT)
 	router.Post("/validate/x509", p.handleValidateX509)
-	
+
 	// Workload information
 	router.Get("/workload", p.handleWorkloadInfo)
 	router.Get("/trust-bundle", p.handleTrustBundleInfo)
-	
+
 	// Demo endpoints for educational visualization
 	router.Get("/demo/mtls", p.handleMTLSDemo)
 	router.Post("/demo/mtls/call", p.handleMTLSCall)
 	router.Get("/demo/jwt-auth", p.handleJWTAuthDemo)
 	router.Post("/demo/jwt-auth/call", p.handleJWTAuthCall)
 	router.Get("/demo/rotation", p.handleRotationDemo)
-	
+
 	// Status endpoint
 	router.Get("/status", p.handleStatus)
 }
@@ -213,4 +213,3 @@ func (p *Plugin) WorkloadClient() *spiffelib.WorkloadClient {
 func (p *Plugin) IsEnabled() bool {
 	return p.workloadClient != nil && p.workloadClient.IsEnabled()
 }
-

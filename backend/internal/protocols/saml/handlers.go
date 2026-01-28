@@ -32,10 +32,10 @@ func (p *Plugin) handleMetadata(w http.ResponseWriter, r *http.Request) {
 		ACSURL:               p.acsURL,
 		SLOURL:               p.sloURL,
 		SSOURL:               p.ssoServiceURL,
-		OrgName:              "ProtocolLens Demo",
-		OrgDisplayName:       "ProtocolLens SAML Demo",
+		OrgName:              "ProtocolSoup Demo",
+		OrgDisplayName:       "ProtocolSoup SAML Demo",
 		OrgURL:               p.baseURL,
-		TechnicalContact:     "demo@protocollens.example",
+		TechnicalContact:     "demo@protocolsoup.example",
 	}
 
 	// Generate both SP and IdP metadata (since we act as both for demo purposes)
@@ -182,7 +182,7 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SAML IdP Login - ProtocolLens</title>
+    <title>SAML IdP Login - ProtocolSoup</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { 
@@ -267,7 +267,7 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
 <body>
     <div class="container">
         <h1>🔐 SAML IdP Login</h1>
-        <p class="subtitle">ProtocolLens Identity Provider</p>
+        <p class="subtitle">ProtocolSoup Identity Provider</p>
         
         <div class="sp-info">
             <h3>Service Provider</h3>
@@ -314,7 +314,7 @@ func (p *Plugin) showLoginPage(w http.ResponseWriter, _ *http.Request, requestIn
 
 	data := struct {
 		Issuer string
-		Users       []struct {
+		Users  []struct {
 			Username string
 			Name     string
 			Email    string

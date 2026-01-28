@@ -31,55 +31,55 @@ jobs:
         include:
           # Core backend services (using Dockerfile.backend with SERVICE_CMD)
           - name: gateway
-            image: protocolens-gateway
+            image: protocolsoup-gateway
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/gateway
           - name: federation
-            image: protocolens-federation
+            image: protocolsoup-federation
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-federation
           - name: scim
-            image: protocolens-scim
+            image: protocolsoup-scim
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-scim
           - name: ssf
-            image: protocolens-ssf
+            image: protocolsoup-ssf
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-ssf
           # SPIFFE service (uses special Dockerfile with embedded SPIRE agent)
           - name: spiffe
-            image: protocolens-spiffe
+            image: protocolsoup-spiffe
             dockerfile: docker/Dockerfile.backend-spiffe
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-spiffe
           # Frontend
           - name: frontend
-            image: protocolens-frontend
+            image: protocolsoup-frontend
             dockerfile: docker/Dockerfile.frontend
             context: .
             build_args: ""
           # SPIRE infrastructure
           - name: spire-server
-            image: protocolens-spire-server
+            image: protocolsoup-spire-server
             dockerfile: docker/spire/server/Dockerfile
             context: docker/spire/server
             build_args: ""
           - name: spire-agent
-            image: protocolens-spire-agent
+            image: protocolsoup-spire-agent
             dockerfile: docker/spire/agent/Dockerfile
             context: docker/spire/agent
             build_args: ""
           - name: spire-registration
-            image: protocolens-spire-registration
+            image: protocolsoup-spire-registration
             dockerfile: docker/spire/registration/Dockerfile
             context: docker/spire/registration
             build_args: ""
@@ -122,9 +122,9 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
           labels: |
-            org.opencontainers.image.title=ProtocolLens ${{ matrix.name }}
-            org.opencontainers.image.description=ProtocolLens ${{ matrix.name }} service - Security protocol demonstration platform
-            org.opencontainers.image.vendor=ProtocolLens
+            org.opencontainers.image.title=ProtocolSoup ${{ matrix.name }}
+            org.opencontainers.image.description=ProtocolSoup ${{ matrix.name }} service - Security protocol demonstration platform
+            org.opencontainers.image.vendor=ProtocolSoup
 
       - name: Build and push Docker image
         id: build
@@ -193,15 +193,15 @@ jobs:
             echo "✅ All container images published successfully to GHCR!"
             echo ""
             echo "Published images:"
-            echo "  - ghcr.io/${OWNER}/protocolens-gateway"
-            echo "  - ghcr.io/${OWNER}/protocolens-federation"
-            echo "  - ghcr.io/${OWNER}/protocolens-scim"
-            echo "  - ghcr.io/${OWNER}/protocolens-ssf"
-            echo "  - ghcr.io/${OWNER}/protocolens-spiffe"
-            echo "  - ghcr.io/${OWNER}/protocolens-frontend"
-            echo "  - ghcr.io/${OWNER}/protocolens-spire-server"
-            echo "  - ghcr.io/${OWNER}/protocolens-spire-agent"
-            echo "  - ghcr.io/${OWNER}/protocolens-spire-registration"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-gateway"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-federation"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-scim"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-ssf"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-spiffe"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-frontend"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-spire-server"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-spire-agent"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-spire-registration"
           else
             echo "❌ Some container builds failed. Check the individual job logs."
             exit 1

@@ -1,4 +1,4 @@
-# Protocol Lens - Simple Stack (no SPIFFE/SPIRE)
+# Protocol Soup - Simple Stack (no SPIFFE/SPIRE)
 # Run with: docker compose -f docker-compose.simple.yml up -d
 #
 # Use this if you only want OAuth2, OIDC, and SAML demos

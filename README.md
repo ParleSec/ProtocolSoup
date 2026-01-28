@@ -385,7 +385,7 @@ This starts:
 ### SPIFFE/SPIRE Overlay
 
 ```bash
-cd ProtocolLens/docker
+cd ProtocolSoup/docker
 docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
 ```
 
@@ -445,24 +445,24 @@ Pre-built container images are available from GitHub Container Registry. Use the
 
 | Image | Description |
 |-------|-------------|
-| `ghcr.io/parlesec/protocolens-gateway` | API Gateway - routes to protocol services |
-| `ghcr.io/parlesec/protocolens-federation` | Federation service (OAuth 2.0, OIDC, SAML) |
-| `ghcr.io/parlesec/protocolens-scim` | SCIM 2.0 user/group provisioning |
-| `ghcr.io/parlesec/protocolens-ssf` | Shared Signals Framework |
-| `ghcr.io/parlesec/protocolens-spiffe` | SPIFFE workload identity (requires SPIRE) |
-| `ghcr.io/parlesec/protocolens-frontend` | React frontend UI |
-| `ghcr.io/parlesec/protocolens-spire-server` | SPIRE Server for workload identity |
-| `ghcr.io/parlesec/protocolens-spire-agent` | SPIRE Agent for workload attestation |
-| `ghcr.io/parlesec/protocolens-spire-registration` | SPIRE workload registration |
+| `ghcr.io/parlesec/protocolsoup-gateway` | API Gateway - routes to protocol services |
+| `ghcr.io/parlesec/protocolsoup-federation` | Federation service (OAuth 2.0, OIDC, SAML) |
+| `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 user/group provisioning |
+| `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework |
+| `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity (requires SPIRE) |
+| `ghcr.io/parlesec/protocolsoup-frontend` | React frontend UI |
+| `ghcr.io/parlesec/protocolsoup-spire-server` | SPIRE Server for workload identity |
+| `ghcr.io/parlesec/protocolsoup-spire-agent` | SPIRE Agent for workload attestation |
+| `ghcr.io/parlesec/protocolsoup-spire-registration` | SPIRE workload registration |
 
 **Quick start with GHCR images:**
 
 ```bash
 # Pull and run individual services
-docker pull ghcr.io/parlesec/protocolens-federation:latest
+docker pull ghcr.io/parlesec/protocolsoup-federation:latest
 docker run -p 8080:8080 \
   -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  ghcr.io/parlesec/protocolens-federation:latest
+  ghcr.io/parlesec/protocolsoup-federation:latest
 ```
 
 **Using with docker-compose:**

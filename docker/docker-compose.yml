@@ -1,4 +1,4 @@
-# Protocol Lens - Split Backend Services (Base)
+# Protocol Soup - Split Backend Services (Base)
 # Run with: docker compose up -d
 #
 # This starts:
@@ -16,11 +16,11 @@
 # 2. Uncomment the 'image:' line with the GHCR URL
 #
 # Available images:
-#   ghcr.io/parlesec/protocolens-gateway:latest
-#   ghcr.io/parlesec/protocolens-federation:latest
-#   ghcr.io/parlesec/protocolens-scim:latest
-#   ghcr.io/parlesec/protocolens-ssf:latest
-#   ghcr.io/parlesec/protocolens-frontend:latest
+#   ghcr.io/parlesec/protocolsoup-gateway:latest
+#   ghcr.io/parlesec/protocolsoup-federation:latest
+#   ghcr.io/parlesec/protocolsoup-scim:latest
+#   ghcr.io/parlesec/protocolsoup-ssf:latest
+#   ghcr.io/parlesec/protocolsoup-frontend:latest
 # ==============================================
 
 services:
@@ -35,7 +35,7 @@ services:
       args:
         SERVICE_CMD: ./cmd/gateway
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-gateway:latest
+    # image: ghcr.io/parlesec/protocolsoup-gateway:latest
     image: protocol-lens-gateway:latest
     container_name: protocol-lens-gateway
     ports:
@@ -76,7 +76,7 @@ services:
       args:
         SERVICE_CMD: ./cmd/server-federation
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-federation:latest
+    # image: ghcr.io/parlesec/protocolsoup-federation:latest
     image: protocol-lens-federation:latest
     container_name: protocol-lens-federation
     environment:
@@ -106,7 +106,7 @@ services:
       args:
         SERVICE_CMD: ./cmd/server-scim
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-scim:latest
+    # image: ghcr.io/parlesec/protocolsoup-scim:latest
     image: protocol-lens-scim:latest
     container_name: protocol-lens-scim
     environment:
@@ -142,7 +142,7 @@ services:
       args:
         SERVICE_CMD: ./cmd/server-ssf
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-ssf:latest
+    # image: ghcr.io/parlesec/protocolsoup-ssf:latest
     image: protocol-lens-ssf:latest
     container_name: protocol-lens-ssf
     environment:
@@ -172,7 +172,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.frontend
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-frontend:latest
+    # image: ghcr.io/parlesec/protocolsoup-frontend:latest
     container_name: protocol-showcase-frontend
     ports:
       - "3000:3000"

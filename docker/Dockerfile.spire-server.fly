@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 go build -o health-server health-server.go
 
 # Final production image
 FROM alpine:3.21
-LABEL authors="ProtocolLens"
+LABEL authors="ProtocolSoup"
 LABEL description="SPIRE Server for Fly.io production with extended CA TTL"
 
 RUN apk add --no-cache ca-certificates supervisor

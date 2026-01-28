@@ -1,4 +1,4 @@
-# Protocol Lens - SPIFFE/SPIRE Overlay
+# Protocol Soup - SPIFFE/SPIRE Overlay
 # Run with: docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
 #
 # ==============================================
@@ -9,10 +9,10 @@
 # 2. Uncomment the 'image:' line with the GHCR URL
 #
 # Available images:
-#   ghcr.io/parlesec/protocolens-spiffe:latest
-#   ghcr.io/parlesec/protocolens-spire-server:latest
-#   ghcr.io/parlesec/protocolens-spire-agent:latest
-#   ghcr.io/parlesec/protocolens-spire-registration:latest
+#   ghcr.io/parlesec/protocolsoup-spiffe:latest
+#   ghcr.io/parlesec/protocolsoup-spire-server:latest
+#   ghcr.io/parlesec/protocolsoup-spire-agent:latest
+#   ghcr.io/parlesec/protocolsoup-spire-registration:latest
 # ==============================================
 
 services:
@@ -29,7 +29,7 @@ services:
       context: ./spire/server
       dockerfile: Dockerfile
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-spire-server:latest
+    # image: ghcr.io/parlesec/protocolsoup-spire-server:latest
     container_name: protocolsoup-spire-server
     hostname: spire-server
     volumes:
@@ -55,7 +55,7 @@ services:
       context: ./spire/agent
       dockerfile: Dockerfile
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-spire-agent:latest
+    # image: ghcr.io/parlesec/protocolsoup-spire-agent:latest
     container_name: protocolsoup-spire-agent
     hostname: spire-agent
     depends_on:
@@ -85,7 +85,7 @@ services:
       context: ./spire/registration
       dockerfile: Dockerfile
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-spire-registration:latest
+    # image: ghcr.io/parlesec/protocolsoup-spire-registration:latest
     container_name: protocolsoup-spire-registration
     depends_on:
       spire-server:
@@ -109,7 +109,7 @@ services:
       args:
         SERVICE_CMD: ./cmd/server-spiffe
     # For using published GHCR images, comment 'build:' above and uncomment:
-    # image: ghcr.io/parlesec/protocolens-spiffe:latest
+    # image: ghcr.io/parlesec/protocolsoup-spiffe:latest
     image: protocol-lens-spiffe:latest
     container_name: protocol-lens-spiffe
     labels:
