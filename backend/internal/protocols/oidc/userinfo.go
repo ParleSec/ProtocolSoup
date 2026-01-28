@@ -103,14 +103,18 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Validate response type
 	validResponseTypes := map[string]bool{
-		"code":           true,
-		"token":          true,
-		"id_token":       true,
-		"id_token token": true,
-		"token id_token": true,
+		"code":                true,
+		"token":               true,
+		"id_token":            true,
+		"id_token token":      true,
+		"token id_token":      true,
+		"code id_token":       true,
+		"code token":          true,
+		"code id_token token": true,
+		"code token id_token": true,
 	}
 	if !validResponseTypes[responseType] {
-		writeOIDCError(w, http.StatusBadRequest, "unsupported_response_type", "Supported: code, token, id_token, id_token token")
+		writeOIDCError(w, http.StatusBadRequest, "unsupported_response_type", "Supported: code, token, id_token, id_token token, code id_token, code token, code id_token token")
 		return
 	}
 
