@@ -551,8 +551,8 @@ This implementation follows these SPIFFE specifications:
 - `google.golang.org/grpc` - gRPC for Workload API
 
 **Docker Images:**
-- `ghcr.io/spiffe/spire-server:1.9` - SPIRE Server
-- `ghcr.io/spiffe/spire-agent:1.9` - SPIRE Agent
+- `ghcr.io/spiffe/spire-server:1.14` - SPIRE Server
+- `ghcr.io/spiffe/spire-agent:1.14` - SPIRE Agent
 
 ## License
 

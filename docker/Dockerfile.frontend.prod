@@ -20,7 +20,7 @@ ENV VITE_APP_ENV=production
 RUN npm run build
 
 # Final stage - copy built assets to volume
-FROM alpine:3.19
+FROM alpine:3.21
 
 WORKDIR /app
 

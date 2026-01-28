@@ -25,7 +25,7 @@ RUN npm run build
 # ============================================
 # Stage 2: Build Backend
 # ============================================
-FROM golang:1.22-alpine AS backend-builder
+FROM golang:1.23-alpine AS backend-builder
 
 WORKDIR /app
 
@@ -45,13 +45,13 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflag
 # ============================================
 # Stage 3: Get SPIRE binaries
 # ============================================
-FROM ghcr.io/spiffe/spire-agent:1.9.6 AS spire-agent
-FROM ghcr.io/spiffe/spire-server:1.9.6 AS spire-server
+FROM ghcr.io/spiffe/spire-agent:1.14.0 AS spire-agent
+FROM ghcr.io/spiffe/spire-server:1.14.0 AS spire-server
 
 # ============================================
 # Stage 4: Production Image with SPIRE Agent
 # ============================================
-FROM alpine:3.19
+FROM alpine:3.21
 
 WORKDIR /app
 
