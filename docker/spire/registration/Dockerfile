@@ -1,9 +1,9 @@
 # SPIRE Registration Dockerfile
 # Registers workload entries with SPIRE Server
 
-FROM ghcr.io/spiffe/spire-server:1.9.6 AS spire
+FROM ghcr.io/spiffe/spire-server:1.14.0 AS spire
 
-FROM alpine:3.19
+FROM alpine:3.21
 
 # Copy SPIRE server binary for registration commands
 COPY --from=spire /opt/spire/bin/spire-server /opt/spire/bin/spire-server

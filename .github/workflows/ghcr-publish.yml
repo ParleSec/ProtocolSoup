@@ -88,12 +88,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+<<<<<<< HEAD
       # GHCR requires lowercase image names
       - name: Set lowercase image name
         id: image
         run: |
           echo "name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}" | tr '[:upper:]' '[:lower:]' >> $GITHUB_OUTPUT
 
+=======
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -111,7 +114,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
+<<<<<<< HEAD
           images: ${{ steps.image.outputs.name }}
+=======
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
           tags: |
             # Set latest tag for master branch
             type=raw,value=latest,enable={{is_default_branch}}
@@ -147,7 +154,11 @@ jobs:
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@0.28.0
         with:
+<<<<<<< HEAD
           image-ref: ${{ steps.image.outputs.name }}:latest
+=======
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
           format: 'sarif'
           output: 'trivy-results-${{ matrix.name }}.sarif'
           severity: 'CRITICAL,HIGH'
@@ -167,7 +178,11 @@ jobs:
       - name: Sign image with Cosign
         run: |
           cosign sign --yes \
+<<<<<<< HEAD
             ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+=======
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
         env:
           COSIGN_EXPERIMENTAL: "true"
 
@@ -175,7 +190,11 @@ jobs:
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v2
         with:
+<<<<<<< HEAD
           subject-name: ${{ steps.image.outputs.name }}
+=======
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
@@ -188,11 +207,15 @@ jobs:
     steps:
       - name: Check build results
         run: |
+<<<<<<< HEAD
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+=======
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
           if [ "${{ needs.build-and-push.result }}" == "success" ]; then
             echo "✅ All container images published successfully to GHCR!"
             echo ""
             echo "Published images:"
+<<<<<<< HEAD
             echo "  - ghcr.io/${OWNER}/protocolens-gateway"
             echo "  - ghcr.io/${OWNER}/protocolens-federation"
             echo "  - ghcr.io/${OWNER}/protocolens-scim"
@@ -202,6 +225,17 @@ jobs:
             echo "  - ghcr.io/${OWNER}/protocolens-spire-server"
             echo "  - ghcr.io/${OWNER}/protocolens-spire-agent"
             echo "  - ghcr.io/${OWNER}/protocolens-spire-registration"
+=======
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-gateway"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-federation"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-scim"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-ssf"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spiffe"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-frontend"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spire-server"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spire-agent"
+            echo "  - ghcr.io/${{ github.repository_owner }}/protocolens-spire-registration"
+>>>>>>> bf24f1e2e8187f75f68fe3a0a5ed80075c6eda46
           else
             echo "❌ Some container builds failed. Check the individual job logs."
             exit 1

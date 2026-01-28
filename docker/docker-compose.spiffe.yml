@@ -1,0 +1,159 @@
+# Protocol Lens - SPIFFE/SPIRE Overlay
+# Run with: docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+#
+# ==============================================
+# GHCR Public Images
+# ==============================================
+# To use pre-built images from GitHub Container Registry:
+# 1. Comment out the 'build:' section for each service
+# 2. Uncomment the 'image:' line with the GHCR URL
+#
+# Available images:
+#   ghcr.io/parlesec/protocolens-spiffe:latest
+#   ghcr.io/parlesec/protocolens-spire-server:latest
+#   ghcr.io/parlesec/protocolens-spire-agent:latest
+#   ghcr.io/parlesec/protocolens-spire-registration:latest
+# ==============================================
+
+services:
+  gateway:
+    environment:
+      - SPIFFE_SERVICE_URL=http://spiffe-service:8080
+
+  # ============================================
+  # SPIRE Server - Identity Authority
+  # ============================================
+  spire-server:
+    # For local development (build from source):
+    build:
+      context: ./spire/server
+      dockerfile: Dockerfile
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spire-server:latest
+    container_name: protocolsoup-spire-server
+    hostname: spire-server
+    volumes:
+      - spire-server-data:/opt/spire/data/server
+      - spire-server-socket:/run/spire/sockets
+    networks:
+      - spire-network
+      - showcase-network
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck", "-socketPath", "/run/spire/sockets/server.sock"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
+  # SPIRE Agent - Standalone for other workloads
+  # ============================================
+  spire-agent:
+    # For local development (build from source):
+    build:
+      context: ./spire/agent
+      dockerfile: Dockerfile
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spire-agent:latest
+    container_name: protocolsoup-spire-agent
+    hostname: spire-agent
+    depends_on:
+      spire-server:
+        condition: service_healthy
+    volumes:
+      - spire-agent-socket:/run/spire/sockets
+      - spire-agent-data:/opt/spire/data/agent
+      - spire-server-socket:/run/spire/sockets/server:ro
+    networks:
+      - spire-network
+      - showcase-network
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-agent", "healthcheck", "-socketPath", "/run/spire/sockets/agent.sock"]
+      interval: 30s
+      timeout: 10s
+      start_period: 45s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # SPIRE Workload Registration
+  # ============================================
+  spire-registration:
+    # For local development (build from source):
+    build:
+      context: ./spire/registration
+      dockerfile: Dockerfile
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spire-registration:latest
+    container_name: protocolsoup-spire-registration
+    depends_on:
+      spire-server:
+        condition: service_healthy
+      spire-agent:
+        condition: service_healthy
+    volumes:
+      - spire-server-socket:/run/spire/sockets:ro
+    networks:
+      - spire-network
+    restart: "no"
+
+  # ============================================
+  # SPIFFE Service
+  # ============================================
+  spiffe-service:
+    # For local development (build from source):
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend-spiffe
+      args:
+        SERVICE_CMD: ./cmd/server-spiffe
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spiffe:latest
+    image: protocol-lens-spiffe:latest
+    container_name: protocol-lens-spiffe
+    labels:
+      - "app=protocol-spiffe"
+      - "spiffe.io/spiffe-id=spiffe://protocolsoup.com/workload/backend"
+    volumes:
+      - spire-server-socket:/run/spire/sockets/server:ro
+      - spiffe-agent-data:/opt/spire/data/agent
+    environment:
+      - SHOWCASE_ENV=demo
+      - SHOWCASE_LISTEN_ADDR=:8080
+      - SHOWCASE_BASE_URL=http://localhost:8080
+      - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      - SHOWCASE_SPIFFE_ENABLED=true
+      - SHOWCASE_SPIFFE_SOCKET_PATH=unix:///run/spire/sockets/agent.sock
+      - SHOWCASE_SPIFFE_TRUST_DOMAIN=protocolsoup.com
+    depends_on:
+      spire-server:
+        condition: service_healthy
+    networks:
+      - spire-network
+      - showcase-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  spire-network:
+    driver: bridge
+  showcase-network:
+    driver: bridge
+
+volumes:
+  spire-server-data:
+    driver: local
+  spire-server-socket:
+    driver: local
+  spire-agent-socket:
+    driver: local
+  spire-agent-data:
+    driver: local
+  spiffe-agent-data:
+    driver: local

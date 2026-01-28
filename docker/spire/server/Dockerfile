@@ -1,7 +1,7 @@
 # SPIRE Server Dockerfile
 # Production-ready SPIRE Server for workload identity management
 
-FROM ghcr.io/spiffe/spire-server:1.9.6
+FROM ghcr.io/spiffe/spire-server:1.14.0
 
 # Copy server configuration
 COPY server.conf /opt/spire/conf/server/server.conf

@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -654,12 +656,10 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get target address from query param, or use self-connection to SPIRE server
+	// Get target address from query param, or use configured SPIRE server
 	targetAddr := r.URL.Query().Get("target")
 	if targetAddr == "" {
-		// Default: connect to SPIRE Server for mTLS demonstration
-		// This proves we can establish mTLS with our SVID
-		targetAddr = "protocolsoup-spire.internal:8081"
+		targetAddr = defaultSpireServerAddress()
 	}
 
 	// Perform mTLS call
@@ -703,6 +703,19 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		"steps":              result.Steps,
 		"target":             targetAddr,
 	})
+}
+
+func defaultSpireServerAddress() string {
+	addr := strings.TrimSpace(os.Getenv("SPIRE_SERVER_ADDRESS"))
+	if addr == "" {
+		addr = "spire-server"
+	}
+
+	if _, _, err := net.SplitHostPort(addr); err == nil {
+		return addr
+	}
+
+	return net.JoinHostPort(addr, "8081")
 }
 
 // handleJWTAuthDemo returns information for JWT authentication demonstration
