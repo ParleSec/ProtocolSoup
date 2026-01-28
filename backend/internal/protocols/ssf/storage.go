@@ -30,6 +30,11 @@ func NewStorage(dataDir string) (*Storage, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
 	storage := &Storage{db: db}
 	if err := storage.initSchema(); err != nil {
 		db.Close()
@@ -77,6 +82,20 @@ func (s *Storage) initSchema() error {
 		UNIQUE(stream_id, format, identifier)
 	);
 
+	-- Security state tracking (persisted IdP actions)
+	CREATE TABLE IF NOT EXISTS security_states (
+		stream_id TEXT NOT NULL,
+		identifier TEXT NOT NULL,
+		sessions_active INTEGER NOT NULL,
+		account_enabled INTEGER NOT NULL,
+		password_reset_required INTEGER NOT NULL,
+		tokens_valid INTEGER NOT NULL,
+		last_modified DATETIME NOT NULL,
+		modified_by TEXT NOT NULL,
+		PRIMARY KEY (stream_id, identifier),
+		FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE
+	);
+
 	-- Event log
 	CREATE TABLE IF NOT EXISTS events (
 		id TEXT PRIMARY KEY,
@@ -111,6 +130,8 @@ func (s *Storage) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 	CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 	CREATE INDEX IF NOT EXISTS idx_subjects_stream ON subjects(stream_id);
+	CREATE INDEX IF NOT EXISTS idx_security_states_stream ON security_states(stream_id);
+	CREATE INDEX IF NOT EXISTS idx_security_states_identifier ON security_states(identifier);
 	`
 
 	_, err := s.db.Exec(schema)
@@ -354,6 +375,131 @@ func (s *Storage) UpdateSubject(ctx context.Context, subject Subject) error {
 func (s *Storage) DeleteSubject(ctx context.Context, subjectID string) error {
 	_, err := s.db.ExecContext(ctx, "DELETE FROM subjects WHERE id = ?", subjectID)
 	return err
+}
+
+// UpsertSecurityState creates or updates a persisted security state
+func (s *Storage) UpsertSecurityState(ctx context.Context, streamID string, state UserSecurityState) error {
+	lastModified := state.LastModified
+	if lastModified.IsZero() {
+		lastModified = time.Now()
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO security_states (
+			stream_id, identifier, sessions_active, account_enabled, password_reset_required,
+			tokens_valid, last_modified, modified_by
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(stream_id, identifier) DO UPDATE SET
+			sessions_active = excluded.sessions_active,
+			account_enabled = excluded.account_enabled,
+			password_reset_required = excluded.password_reset_required,
+			tokens_valid = excluded.tokens_valid,
+			last_modified = excluded.last_modified,
+			modified_by = excluded.modified_by
+	`,
+		streamID,
+		state.Email,
+		state.SessionsActive,
+		boolToInt(state.AccountEnabled),
+		boolToInt(state.PasswordResetRequired),
+		boolToInt(state.TokensValid),
+		lastModified,
+		state.ModifiedBy,
+	)
+	return err
+}
+
+// GetSecurityState retrieves a persisted security state by stream and identifier
+func (s *Storage) GetSecurityState(ctx context.Context, streamID, identifier string) (*UserSecurityState, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT identifier, sessions_active, account_enabled, password_reset_required,
+			tokens_valid, last_modified, modified_by
+		FROM security_states
+		WHERE stream_id = ? AND identifier = ?`, streamID, identifier)
+
+	var state UserSecurityState
+	var accountEnabled, passwordResetRequired, tokensValid int
+	if err := row.Scan(
+		&state.Email,
+		&state.SessionsActive,
+		&accountEnabled,
+		&passwordResetRequired,
+		&tokensValid,
+		&state.LastModified,
+		&state.ModifiedBy,
+	); err != nil {
+		return nil, err
+	}
+
+	state.AccountEnabled = intToBool(accountEnabled)
+	state.PasswordResetRequired = intToBool(passwordResetRequired)
+	state.TokensValid = intToBool(tokensValid)
+
+	return &state, nil
+}
+
+// ListSecurityStates returns all security states for a stream
+func (s *Storage) ListSecurityStates(ctx context.Context, streamID string) (map[string]*UserSecurityState, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT identifier, sessions_active, account_enabled, password_reset_required,
+			tokens_valid, last_modified, modified_by
+		FROM security_states
+		WHERE stream_id = ?
+		ORDER BY identifier ASC`, streamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	states := make(map[string]*UserSecurityState)
+	for rows.Next() {
+		var state UserSecurityState
+		var accountEnabled, passwordResetRequired, tokensValid int
+		if err := rows.Scan(
+			&state.Email,
+			&state.SessionsActive,
+			&accountEnabled,
+			&passwordResetRequired,
+			&tokensValid,
+			&state.LastModified,
+			&state.ModifiedBy,
+		); err != nil {
+			return nil, err
+		}
+		state.AccountEnabled = intToBool(accountEnabled)
+		state.PasswordResetRequired = intToBool(passwordResetRequired)
+		state.TokensValid = intToBool(tokensValid)
+		states[state.Email] = &state
+	}
+
+	return states, nil
+}
+
+// DeleteSecurityState removes a persisted security state
+func (s *Storage) DeleteSecurityState(ctx context.Context, streamID, identifier string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM security_states WHERE stream_id = ? AND identifier = ?`,
+		streamID, identifier)
+	return err
+}
+
+// CleanupSecurityStates removes security states for expired session streams
+func (s *Storage) CleanupSecurityStates(ctx context.Context, maxAge time.Duration) (int, error) {
+	cutoff := time.Now().Add(-maxAge)
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM security_states
+		WHERE stream_id IN (
+			SELECT id FROM streams WHERE id LIKE 'session-%' AND updated_at < ?
+		)`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(rows), nil
 }
 
 // StoredEvent represents an event in the database
@@ -681,4 +827,15 @@ func (s *Storage) CleanupOldSessions(ctx context.Context, maxAge time.Duration) 
 	}
 
 	return count, nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func intToBool(value int) bool {
+	return value != 0
 }

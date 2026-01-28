@@ -2,6 +2,7 @@ package saml
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -26,6 +27,10 @@ type Plugin struct {
 	ssoServiceURL    string
 	sessions         map[string]*SAMLSession // sessionID -> session
 	nameIDToSessions map[string][]string     // nameID -> list of sessionIDs (for SLO)
+	// Pending login requests to avoid trusting form inputs
+	loginRequests   map[string]LoginRequestInfo
+	loginRequestsMu sync.RWMutex
+	loginRequestTTL time.Duration
 
 	// Security validation components (SAML 2.0 Core Section 5)
 	signatureValidator *SignatureValidator // XML digital signature validator
@@ -59,6 +64,8 @@ func NewPlugin() *Plugin {
 		}),
 		sessions:           make(map[string]*SAMLSession),
 		nameIDToSessions:   make(map[string][]string),
+		loginRequests:      make(map[string]LoginRequestInfo),
+		loginRequestTTL:    10 * time.Minute,
 		signatureValidator: NewSignatureValidator(),
 		// Assertion cache TTL matches typical assertion validity (5 minutes + clock skew)
 		assertionCache: NewAssertionCache(10 * time.Minute),
@@ -90,6 +97,8 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	p.sloURL = p.baseURL + "/saml/slo"
 	p.metadataURL = p.baseURL + "/saml/metadata"
 	p.ssoServiceURL = p.baseURL + "/saml/sso"
+
+	go p.cleanupLoginRequests()
 
 	return nil
 }
@@ -133,7 +142,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/demo/logout", p.handleDemoLogout)
 
 	// Looking Glass API endpoints - return raw SAML protocol data as JSON
-	// These execute REAL protocol operations for frontend visualization
+	// These execute protocol operations for frontend visualization
 	router.Get("/looking-glass/authn-request", p.handleLookingGlassCreateAuthnRequest)
 	router.Post("/looking-glass/authenticate", p.handleLookingGlassAuthenticate)
 	router.Get("/looking-glass/logout-request", p.handleLookingGlassCreateLogoutRequest)

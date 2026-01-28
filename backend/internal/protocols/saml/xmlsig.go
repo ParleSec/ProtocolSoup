@@ -16,7 +16,7 @@ import (
 // ============================================================================
 // XML Digital Signature Generation (XML-DSig)
 // Per W3C XML Signature Syntax and SAML 2.0 Core Section 5
-// This creates REAL signatures that can be validated
+// This creates signatures that can be validated
 // ============================================================================
 
 // XMLSigner creates XML digital signatures per XML-DSig specification
@@ -168,7 +168,7 @@ func (s *XMLSigner) canonicalize(xmlData []byte) []byte {
 
 // ============================================================================
 // Certificate Generation for Demo IdP
-// Creates a REAL self-signed certificate for the mock IdP
+// Creates a self-signed certificate for the mock IdP
 // ============================================================================
 
 // GenerateSelfSignedCert generates a self-signed X.509 certificate for SAML signing

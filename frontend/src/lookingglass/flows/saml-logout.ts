@@ -8,7 +8,7 @@
  * - IdP-initiated logout
  * - HTTP-POST and HTTP-Redirect bindings
  * 
- * **USES REAL SAML PROTOCOL EXECUTION**
+ * **USES SAML PROTOCOL EXECUTION**
  * All data comes from actual protocol execution via Looking Glass API.
  * No fake data, no placeholder IDs, no hardcoded values.
  */
@@ -189,7 +189,7 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
       },
     })
 
-    // Step 2: Create REAL LogoutRequest via Looking Glass API
+    // Step 2: Create LogoutRequest via Looking Glass API
     this.addEvent({
       type: 'rfc',
       title: 'SAML 2.0 Profiles Section 4.4.3',
@@ -225,7 +225,7 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
       throw new Error(logoutRequest.error || 'LogoutRequest creation failed')
     }
 
-    // Show REAL LogoutRequest data
+    // Show LogoutRequest data
     this.addEvent({
       type: 'request',
       title: 'LogoutRequest Created',
@@ -299,7 +299,7 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
       throw new Error(result.error || 'Logout processing failed')
     }
 
-    // Step 4: Show REAL LogoutResponse
+    // Step 4: Show LogoutResponse
     this.addEvent({
       type: 'rfc',
       title: 'SAML 2.0 Profiles Section 4.4.4',

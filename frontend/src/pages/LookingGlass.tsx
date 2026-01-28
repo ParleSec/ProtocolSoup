@@ -92,14 +92,47 @@ export function LookingGlass() {
   // Use stored token or user input for flows that need a token
   const activeToken = tokenInput || storedAccessToken || ''
 
+  const [machineClientSecret, setMachineClientSecret] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (flowId !== 'client-credentials') {
+      setMachineClientSecret(null)
+      return
+    }
+
+    let cancelled = false
+    fetch('/oauth2/demo/clients')
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error('Failed to fetch demo clients')
+        }
+        return res.json()
+      })
+      .then((data) => {
+        if (cancelled) return
+        const clients = Array.isArray(data?.clients) ? data.clients : []
+        const machineClient = clients.find((client: { id?: string }) => client?.id === 'machine-client')
+        setMachineClientSecret(machineClient?.secret || null)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMachineClientSecret(null)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [flowId])
+
   const clientConfig = useMemo(() => {
     if (flowId === 'client-credentials') {
-      return { clientId: 'machine-client', clientSecret: 'machine-secret' }
+      return { clientId: 'machine-client', clientSecret: machineClientSecret || undefined }
     }
     // All other flows (including refresh-token) use public-app
     // The refresh token must be used with the same client that obtained it
     return { clientId: 'public-app', clientSecret: undefined }
-  }, [flowId])
+  }, [flowId, machineClientSecret])
 
   // Use stored token, input, or empty
   const activeRefreshToken = refreshTokenInput || storedRefreshToken || ''

@@ -69,7 +69,7 @@ export interface LookingGlassParameter {
   /** Example value */
   example?: string
   /** Security sensitivity level */
-  sensitivity?: 'public' | 'internal' | 'secret'
+  sensitivity?: 'public' | 'internal' | 'sensitive'
 }
 
 /**

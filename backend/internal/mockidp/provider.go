@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"os"
 	"sync"
 	"time"
 
@@ -63,12 +64,18 @@ func (idp *MockIdP) GetIssuer() string {
 
 // initDemoData initializes demo users and clients
 func (idp *MockIdP) initDemoData() {
+	alicePassword := envOrRandom("MOCKIDP_ALICE_PASSWORD", 24)
+	bobPassword := envOrRandom("MOCKIDP_BOB_PASSWORD", 24)
+	adminPassword := envOrRandom("MOCKIDP_ADMIN_PASSWORD", 24)
+	demoClientSecret := envOrRandom("MOCKIDP_DEMO_CLIENT_SECRET", 32)
+	machineClientSecret := envOrRandom("MOCKIDP_MACHINE_CLIENT_SECRET", 32)
+
 	// Demo users
 	idp.users["alice"] = &models.User{
 		ID:       "alice",
 		Email:    "alice@example.com",
 		Name:     "Alice Johnson",
-		Password: "password123", // In a real system, this would be hashed
+		Password: alicePassword, // In a real system, this would be hashed
 		Roles:    []string{"user"},
 		Claims: map[string]string{
 			"department": "Engineering",
@@ -80,7 +87,7 @@ func (idp *MockIdP) initDemoData() {
 		ID:       "bob",
 		Email:    "bob@example.com",
 		Name:     "Bob Smith",
-		Password: "password123",
+		Password: bobPassword,
 		Roles:    []string{"user"},
 		Claims: map[string]string{
 			"department": "Marketing",
@@ -92,7 +99,7 @@ func (idp *MockIdP) initDemoData() {
 		ID:       "admin",
 		Email:    "admin@example.com",
 		Name:     "Admin User",
-		Password: "admin123",
+		Password: adminPassword,
 		Roles:    []string{"user", "admin"},
 		Claims: map[string]string{
 			"department": "IT",
@@ -104,7 +111,7 @@ func (idp *MockIdP) initDemoData() {
 	// Note: Redirect URIs include local development, Fly.io, and custom domain URLs
 	idp.clients["demo-app"] = &models.Client{
 		ID:     "demo-app",
-		Secret: "demo-secret",
+		Secret: demoClientSecret,
 		Name:   "Demo Application",
 		RedirectURIs: []string{
 			"http://localhost:3000/callback",
@@ -138,7 +145,7 @@ func (idp *MockIdP) initDemoData() {
 
 	idp.clients["machine-client"] = &models.Client{
 		ID:           "machine-client",
-		Secret:       "machine-secret",
+		Secret:       machineClientSecret,
 		Name:         "Machine-to-Machine Client",
 		RedirectURIs: []string{},
 		GrantTypes:   []string{"client_credentials"},
@@ -212,6 +219,20 @@ func (idp *MockIdP) ValidateRedirectURI(clientID, redirectURI string) bool {
 		}
 	}
 	return false
+}
+
+// NormalizeRedirectURI returns the registered redirect URI if it matches exactly
+func (idp *MockIdP) NormalizeRedirectURI(clientID, redirectURI string) (string, error) {
+	client, exists := idp.GetClient(clientID)
+	if !exists {
+		return "", errors.New("client not found")
+	}
+	for _, uri := range client.RedirectURIs {
+		if uri == redirectURI {
+			return uri, nil
+		}
+	}
+	return "", errors.New("invalid redirect_uri")
 }
 
 // CreateAuthorizationCode creates and stores an authorization code
@@ -480,4 +501,11 @@ func generateRandomString(length int) string {
 	b := make([]byte, length)
 	rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)[:length]
+}
+
+func envOrRandom(envKey string, length int) string {
+	if value := os.Getenv(envKey); value != "" {
+		return value
+	}
+	return generateRandomString(length)
 }

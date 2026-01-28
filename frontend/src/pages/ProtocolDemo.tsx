@@ -151,7 +151,7 @@ export function ProtocolDemo() {
   
   // Fetch from modular plugin system
   const { protocol, loading: protocolLoading } = useProtocol(protocolId)
-  const { flows, loading: flowsLoading } = useProtocolFlows(protocolId)
+  const { flows, loading: flowsLoading, error: flowsError } = useProtocolFlows(protocolId)
   
   const loading = protocolLoading || flowsLoading
   
@@ -167,6 +167,18 @@ export function ProtocolDemo() {
     return (
       <div className="text-center py-20">
         <h1 className="text-2xl font-bold text-white mb-4">Protocol Not Found</h1>
+        <Link to="/" className="text-accent-orange hover:underline">
+          Back to Dashboard
+        </Link>
+      </div>
+    )
+  }
+
+  if (flowsError) {
+    return (
+      <div className="text-center py-20">
+        <h1 className="text-2xl font-bold text-white mb-4">Protocol Data Unavailable</h1>
+        <p className="text-surface-400 mb-6">{flowsError.message}</p>
         <Link to="/" className="text-accent-orange hover:underline">
           Back to Dashboard
         </Link>

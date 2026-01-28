@@ -2,6 +2,8 @@ package oauth2
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
@@ -17,6 +19,9 @@ type Plugin struct {
 	keySet       *crypto.KeySet
 	lookingGlass *lookingglass.Engine
 	baseURL      string
+	loginRequests   map[string]loginRequestInfo
+	loginRequestsMu sync.RWMutex
+	loginRequestTTL time.Duration
 }
 
 // NewPlugin creates a new OAuth 2.0 plugin
@@ -30,6 +35,8 @@ func NewPlugin() *Plugin {
 			Tags:        []string{"authorization", "tokens", "pkce"},
 			RFCs:        []string{"RFC 6749", "RFC 7636", "RFC 7009", "RFC 7662"},
 		}),
+		loginRequests:   make(map[string]loginRequestInfo),
+		loginRequestTTL: 10 * time.Minute,
 	}
 }
 
@@ -49,6 +56,8 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
 		p.lookingGlass = lg
 	}
+
+	go p.cleanupLoginRequests()
 
 	return nil
 }

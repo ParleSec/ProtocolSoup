@@ -244,6 +244,10 @@ func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if p.actionExecutor != nil {
+		p.actionExecutor.ResetUserStateForSession(sessionID, subject.Identifier, subject.ActiveSessions)
+	}
+
 	writeJSON(w, http.StatusCreated, subject)
 }
 
@@ -253,6 +257,11 @@ func (p *Plugin) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 	if subjectID == "" {
 		writeError(w, http.StatusBadRequest, "Subject ID is required")
 		return
+	}
+
+	subject, err := p.storage.GetSubject(r.Context(), subjectID)
+	if err == nil {
+		_ = p.storage.DeleteSecurityState(r.Context(), subject.StreamID, subject.Identifier)
 	}
 
 	if err := p.storage.DeleteSubject(r.Context(), subjectID); err != nil {
@@ -698,8 +707,7 @@ func (p *Plugin) handleReceiverActions(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) handleGetSecurityStates(w http.ResponseWriter, r *http.Request) {
 	sessionID := getSessionID(r)
 
-	// Initialize session states if needed
-	if sessionID != "" {
+	if p.actionExecutor != nil {
 		p.actionExecutor.InitSessionUserStates(sessionID)
 	}
 
@@ -727,8 +735,7 @@ func (p *Plugin) handleGetSecurityState(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Initialize session states if needed
-	if sessionID != "" {
+	if p.actionExecutor != nil {
 		p.actionExecutor.InitSessionUserStates(sessionID)
 	}
 

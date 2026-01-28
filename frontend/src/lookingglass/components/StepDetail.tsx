@@ -139,7 +139,7 @@ function ParameterItem({ parameter }: { parameter: LookingGlassParameter }) {
   const sensitivityColors = {
     public: 'text-green-400 bg-green-500/10',
     internal: 'text-yellow-400 bg-yellow-500/10',
-    secret: 'text-red-400 bg-red-500/10',
+    sensitive: 'text-red-400 bg-red-500/10',
   }
 
   const colors = sensitivityColors[parameter.sensitivity || 'public']
@@ -154,7 +154,7 @@ function ParameterItem({ parameter }: { parameter: LookingGlassParameter }) {
               required
             </span>
           )}
-          {parameter.sensitivity === 'secret' && (
+          {parameter.sensitivity === 'sensitive' && (
             <Lock className="w-3 h-3 text-red-400" />
           )}
         </div>

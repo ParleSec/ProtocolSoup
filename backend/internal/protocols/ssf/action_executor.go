@@ -2,22 +2,18 @@ package ssf
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
-// MockIdPActionExecutor executes SSF response actions against the mock IdP
+// MockIdPActionExecutor executes SSF response actions against persisted state
 type MockIdPActionExecutor struct {
-	idpBaseURL string
-	httpClient *http.Client
-
-	// Session-based state tracking - key is "sessionID:email"
-	userStates map[string]*UserSecurityState
-	stateMu    sync.RWMutex
+	baseURL string
+	storage *Storage
 }
 
 // UserSecurityState tracks the security state of a user
@@ -33,53 +29,108 @@ type UserSecurityState struct {
 }
 
 // NewMockIdPActionExecutor creates a new action executor
-func NewMockIdPActionExecutor(idpBaseURL string) *MockIdPActionExecutor {
-	executor := &MockIdPActionExecutor{
-		idpBaseURL: idpBaseURL,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-		userStates: make(map[string]*UserSecurityState),
+func NewMockIdPActionExecutor(storage *Storage, baseURL string) *MockIdPActionExecutor {
+	return &MockIdPActionExecutor{
+		baseURL: baseURL,
+		storage: storage,
 	}
-
-	return executor
 }
 
-// stateKey generates a session-namespaced key for user state
-func stateKey(sessionID, email string) string {
-	if sessionID == "" {
-		return email // Fallback for legacy/non-session requests
+func (e *MockIdPActionExecutor) streamForSession(ctx context.Context, sessionID string) (*Stream, error) {
+	if sessionID != "" {
+		return e.storage.GetSessionStream(ctx, sessionID, e.baseURL)
 	}
-	return sessionID + ":" + email
+	return e.storage.GetDefaultStream(ctx, e.baseURL)
+}
+
+func (e *MockIdPActionExecutor) ensureUserState(ctx context.Context, sessionID, streamID, email string, sessions int) {
+	if _, err := e.storage.GetSecurityState(ctx, streamID, email); err == nil {
+		return
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		log.Printf("[ActionExecutor] Failed to load security state for %s: %v", redactIdentifier(email), err)
+		return
+	}
+
+	state := UserSecurityState{
+		Email:                 email,
+		SessionID:             sessionID,
+		SessionsActive:        sessions,
+		AccountEnabled:        true,
+		PasswordResetRequired: false,
+		TokensValid:           true,
+		LastModified:          time.Now(),
+		ModifiedBy:            "system",
+	}
+
+	if err := e.storage.UpsertSecurityState(ctx, streamID, state); err != nil {
+		log.Printf("[ActionExecutor] Failed to seed security state for %s: %v", redactIdentifier(email), err)
+	}
+}
+
+func (e *MockIdPActionExecutor) getOrCreateState(ctx context.Context, sessionID, email string) (*UserSecurityState, string, error) {
+	stream, err := e.streamForSession(ctx, sessionID)
+	if err != nil {
+		return nil, "", err
+	}
+
+	state, err := e.storage.GetSecurityState(ctx, stream.ID, email)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, "", err
+		}
+		state = &UserSecurityState{
+			Email:                 email,
+			SessionID:             sessionID,
+			SessionsActive:        0,
+			AccountEnabled:        true,
+			PasswordResetRequired: false,
+			TokensValid:           true,
+			LastModified:          time.Now(),
+			ModifiedBy:            "system",
+		}
+		if err := e.storage.UpsertSecurityState(ctx, stream.ID, *state); err != nil {
+			return nil, "", err
+		}
+	}
+
+	state.SessionID = sessionID
+	return state, stream.ID, nil
+}
+
+func (e *MockIdPActionExecutor) updateSubjectState(ctx context.Context, streamID, email string, sessionsActive int, accountEnabled bool) {
+	subject, err := e.storage.GetSubjectByIdentifier(ctx, streamID, SubjectFormatEmail, email)
+	if err != nil {
+		return
+	}
+
+	subject.ActiveSessions = sessionsActive
+	if accountEnabled {
+		subject.Status = SubjectStatusActive
+	} else {
+		subject.Status = SubjectStatusDisabled
+	}
+	now := time.Now()
+	subject.LastActivity = &now
+	_ = e.storage.UpdateSubject(ctx, *subject)
 }
 
 // InitSessionUserStates initializes security states for demo users in a session
 func (e *MockIdPActionExecutor) InitSessionUserStates(sessionID string) {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	demoUsers := []struct {
-		email    string
-		sessions int
-	}{
-		{"alice@example.com", 3},
-		{"bob@example.com", 2},
-		{"charlie@example.com", 1},
+	ctx := context.Background()
+	stream, err := e.streamForSession(ctx, sessionID)
+	if err != nil {
+		log.Printf("[ActionExecutor] Failed to load stream for session %s: %v", sessionID, err)
+		return
 	}
 
-	for _, u := range demoUsers {
-		key := stateKey(sessionID, u.email)
-		// Only init if not exists
-		if _, ok := e.userStates[key]; !ok {
-			e.userStates[key] = &UserSecurityState{
-				Email:                 u.email,
-				SessionID:             sessionID,
-				SessionsActive:        u.sessions,
-				AccountEnabled:        true,
-				PasswordResetRequired: false,
-				TokensValid:           true,
-				LastModified:          time.Now(),
-				ModifiedBy:            "system",
-			}
-		}
+	subjects, err := e.storage.ListSubjects(ctx, stream.ID)
+	if err != nil {
+		log.Printf("[ActionExecutor] Failed to list subjects for session %s: %v", sessionID, err)
+		return
+	}
+
+	for _, subject := range subjects {
+		e.ensureUserState(ctx, sessionID, stream.ID, subject.Identifier, subject.ActiveSessions)
 	}
 }
 
@@ -90,20 +141,9 @@ func (e *MockIdPActionExecutor) RevokeUserSessions(ctx context.Context, email st
 
 // RevokeUserSessionsForSession revokes all sessions for a user in a specific session
 func (e *MockIdPActionExecutor) RevokeUserSessionsForSession(ctx context.Context, sessionID, email string) error {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	key := stateKey(sessionID, email)
-	state, ok := e.userStates[key]
-	if !ok {
-		state = &UserSecurityState{
-			Email:          email,
-			SessionID:      sessionID,
-			SessionsActive: 0,
-			AccountEnabled: true,
-			TokensValid:    true,
-		}
-		e.userStates[key] = state
+	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
+	if err != nil {
+		return err
 	}
 
 	previousSessions := state.SessionsActive
@@ -111,8 +151,12 @@ func (e *MockIdPActionExecutor) RevokeUserSessionsForSession(ctx context.Context
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
 
-	log.Printf("[ActionExecutor] REAL ACTION: Revoked %d sessions for %s (session: %s)", previousSessions, email, sessionID)
+	if err := e.storage.UpsertSecurityState(ctx, streamID, *state); err != nil {
+		return err
+	}
+	e.updateSubjectState(ctx, streamID, email, state.SessionsActive, state.AccountEnabled)
 
+	log.Printf("[ActionExecutor] Revoked %d sessions for %s (session: %s)", previousSessions, redactIdentifier(email), redactSessionID(sessionID))
 	return nil
 }
 
@@ -123,29 +167,24 @@ func (e *MockIdPActionExecutor) DisableUser(ctx context.Context, email string) e
 
 // DisableUserForSession disables a user account in a specific session
 func (e *MockIdPActionExecutor) DisableUserForSession(ctx context.Context, sessionID, email string) error {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	key := stateKey(sessionID, email)
-	state, ok := e.userStates[key]
-	if !ok {
-		state = &UserSecurityState{
-			Email:          email,
-			SessionID:      sessionID,
-			AccountEnabled: false,
-		}
-		e.userStates[key] = state
+	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
+	if err != nil {
+		return err
 	}
 
 	wasEnabled := state.AccountEnabled
 	state.AccountEnabled = false
-	state.SessionsActive = 0 // Disabling also revokes sessions
+	state.SessionsActive = 0
 	state.TokensValid = false
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
 
-	log.Printf("[ActionExecutor] REAL ACTION: Disabled account for %s (was enabled: %v, session: %s)", email, wasEnabled, sessionID)
+	if err := e.storage.UpsertSecurityState(ctx, streamID, *state); err != nil {
+		return err
+	}
+	e.updateSubjectState(ctx, streamID, email, state.SessionsActive, state.AccountEnabled)
 
+	log.Printf("[ActionExecutor] Disabled account for %s (was enabled: %v, session: %s)", redactIdentifier(email), wasEnabled, redactSessionID(sessionID))
 	return nil
 }
 
@@ -156,18 +195,9 @@ func (e *MockIdPActionExecutor) EnableUser(ctx context.Context, email string) er
 
 // EnableUserForSession enables a user account in a specific session
 func (e *MockIdPActionExecutor) EnableUserForSession(ctx context.Context, sessionID, email string) error {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	key := stateKey(sessionID, email)
-	state, ok := e.userStates[key]
-	if !ok {
-		state = &UserSecurityState{
-			Email:          email,
-			SessionID:      sessionID,
-			AccountEnabled: true,
-		}
-		e.userStates[key] = state
+	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
+	if err != nil {
+		return err
 	}
 
 	wasEnabled := state.AccountEnabled
@@ -176,8 +206,12 @@ func (e *MockIdPActionExecutor) EnableUserForSession(ctx context.Context, sessio
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
 
-	log.Printf("[ActionExecutor] REAL ACTION: Enabled account for %s (was enabled: %v, session: %s)", email, wasEnabled, sessionID)
+	if err := e.storage.UpsertSecurityState(ctx, streamID, *state); err != nil {
+		return err
+	}
+	e.updateSubjectState(ctx, streamID, email, state.SessionsActive, state.AccountEnabled)
 
+	log.Printf("[ActionExecutor] Enabled account for %s (was enabled: %v, session: %s)", redactIdentifier(email), wasEnabled, redactSessionID(sessionID))
 	return nil
 }
 
@@ -188,27 +222,20 @@ func (e *MockIdPActionExecutor) ForcePasswordReset(ctx context.Context, email st
 
 // ForcePasswordResetForSession forces a password reset for a user in a specific session
 func (e *MockIdPActionExecutor) ForcePasswordResetForSession(ctx context.Context, sessionID, email string) error {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	key := stateKey(sessionID, email)
-	state, ok := e.userStates[key]
-	if !ok {
-		state = &UserSecurityState{
-			Email:                 email,
-			SessionID:             sessionID,
-			AccountEnabled:        true,
-			PasswordResetRequired: true,
-		}
-		e.userStates[key] = state
+	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
+	if err != nil {
+		return err
 	}
 
 	state.PasswordResetRequired = true
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
 
-	log.Printf("[ActionExecutor] REAL ACTION: Forced password reset for %s (session: %s)", email, sessionID)
+	if err := e.storage.UpsertSecurityState(ctx, streamID, *state); err != nil {
+		return err
+	}
 
+	log.Printf("[ActionExecutor] Forced password reset for %s (session: %s)", redactIdentifier(email), redactSessionID(sessionID))
 	return nil
 }
 
@@ -219,18 +246,9 @@ func (e *MockIdPActionExecutor) InvalidateTokens(ctx context.Context, email stri
 
 // InvalidateTokensForSession invalidates all tokens for a user in a specific session
 func (e *MockIdPActionExecutor) InvalidateTokensForSession(ctx context.Context, sessionID, email string) error {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	key := stateKey(sessionID, email)
-	state, ok := e.userStates[key]
-	if !ok {
-		state = &UserSecurityState{
-			Email:       email,
-			SessionID:   sessionID,
-			TokensValid: false,
-		}
-		e.userStates[key] = state
+	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
+	if err != nil {
+		return err
 	}
 
 	wasValid := state.TokensValid
@@ -238,8 +256,11 @@ func (e *MockIdPActionExecutor) InvalidateTokensForSession(ctx context.Context, 
 	state.LastModified = time.Now()
 	state.ModifiedBy = "ssf-receiver"
 
-	log.Printf("[ActionExecutor] REAL ACTION: Invalidated tokens for %s (were valid: %v, session: %s)", email, wasValid, sessionID)
+	if err := e.storage.UpsertSecurityState(ctx, streamID, *state); err != nil {
+		return err
+	}
 
+	log.Printf("[ActionExecutor] Invalidated tokens for %s (were valid: %v, session: %s)", redactIdentifier(email), wasValid, redactSessionID(sessionID))
 	return nil
 }
 
@@ -250,18 +271,17 @@ func (e *MockIdPActionExecutor) GetUserState(email string) (*UserSecurityState, 
 
 // GetUserStateForSession returns the current security state for a user in a specific session
 func (e *MockIdPActionExecutor) GetUserStateForSession(sessionID, email string) (*UserSecurityState, error) {
-	e.stateMu.RLock()
-	defer e.stateMu.RUnlock()
-
-	key := stateKey(sessionID, email)
-	state, ok := e.userStates[key]
-	if !ok {
-		return nil, fmt.Errorf("user not found: %s (session: %s)", email, sessionID)
+	stream, err := e.streamForSession(context.Background(), sessionID)
+	if err != nil {
+		return nil, err
 	}
 
-	// Return a copy
-	stateCopy := *state
-	return &stateCopy, nil
+	state, err := e.storage.GetSecurityState(context.Background(), stream.ID, email)
+	if err != nil {
+		return nil, fmt.Errorf("user not found: %s (session: %s)", email, sessionID)
+	}
+	state.SessionID = sessionID
+	return state, nil
 }
 
 // GetAllUserStates returns security states for all tracked users (legacy, all sessions)
@@ -271,29 +291,20 @@ func (e *MockIdPActionExecutor) GetAllUserStates() map[string]*UserSecurityState
 
 // GetAllUserStatesForSession returns security states for users in a specific session
 func (e *MockIdPActionExecutor) GetAllUserStatesForSession(sessionID string) map[string]*UserSecurityState {
-	e.stateMu.RLock()
-	defer e.stateMu.RUnlock()
-
-	result := make(map[string]*UserSecurityState)
-	prefix := sessionID + ":"
-	if sessionID == "" {
-		// Return all if no session specified (for legacy compatibility)
-		for k, v := range e.userStates {
-			stateCopy := *v
-			result[k] = &stateCopy
-		}
-		return result
+	stream, err := e.streamForSession(context.Background(), sessionID)
+	if err != nil {
+		return map[string]*UserSecurityState{}
 	}
 
-	for k, v := range e.userStates {
-		// Filter by session prefix
-		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
-			// Use email as key in result (strip session prefix)
-			stateCopy := *v
-			result[v.Email] = &stateCopy
-		}
+	states, err := e.storage.ListSecurityStates(context.Background(), stream.ID)
+	if err != nil {
+		return map[string]*UserSecurityState{}
 	}
-	return result
+
+	for _, state := range states {
+		state.SessionID = sessionID
+	}
+	return states
 }
 
 // ResetUserState resets a user's security state (legacy, no session)
@@ -303,11 +314,13 @@ func (e *MockIdPActionExecutor) ResetUserState(email string, sessions int) {
 
 // ResetUserStateForSession resets a user's security state in a specific session
 func (e *MockIdPActionExecutor) ResetUserStateForSession(sessionID, email string, sessions int) {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
+	ctx := context.Background()
+	stream, err := e.streamForSession(ctx, sessionID)
+	if err != nil {
+		return
+	}
 
-	key := stateKey(sessionID, email)
-	e.userStates[key] = &UserSecurityState{
+	state := UserSecurityState{
 		Email:                 email,
 		SessionID:             sessionID,
 		SessionsActive:        sessions,
@@ -317,22 +330,42 @@ func (e *MockIdPActionExecutor) ResetUserStateForSession(sessionID, email string
 		LastModified:          time.Now(),
 		ModifiedBy:            "system-reset",
 	}
+	_ = e.storage.UpsertSecurityState(ctx, stream.ID, state)
+	e.updateSubjectState(ctx, stream.ID, email, sessions, true)
 }
 
 // CleanupOldSessions removes states for sessions not accessed recently
 func (e *MockIdPActionExecutor) CleanupOldSessions(maxAge time.Duration) int {
-	e.stateMu.Lock()
-	defer e.stateMu.Unlock()
-
-	cutoff := time.Now().Add(-maxAge)
-	count := 0
-
-	for k, v := range e.userStates {
-		// Only clean session-based keys (contain ":")
-		if strings.Contains(k, ":") && v.LastModified.Before(cutoff) {
-			delete(e.userStates, k)
-			count++
-		}
+	count, err := e.storage.CleanupSecurityStates(context.Background(), maxAge)
+	if err != nil {
+		log.Printf("[ActionExecutor] Cleanup failed: %v", err)
+		return 0
 	}
 	return count
+}
+
+func redactIdentifier(identifier string) string {
+	if identifier == "" {
+		return "<redacted>"
+	}
+	parts := strings.SplitN(identifier, "@", 2)
+	if len(parts) != 2 {
+		return "<redacted>"
+	}
+	local := parts[0]
+	domain := parts[1]
+	if len(local) <= 2 {
+		return "***@" + domain
+	}
+	return local[:2] + "***@" + domain
+}
+
+func redactSessionID(sessionID string) string {
+	if sessionID == "" {
+		return "<none>"
+	}
+	if len(sessionID) <= 6 {
+		return "***"
+	}
+	return sessionID[:6] + "..."
 }
