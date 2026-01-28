@@ -12,19 +12,19 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	issuer := p.mockIdP.GetIssuer()
 
 	discovery := models.DiscoveryDocument{
-		Issuer:                           issuer,
-		AuthorizationEndpoint:            issuer + "/oidc/authorize",
-		TokenEndpoint:                    issuer + "/oidc/token",
-		UserinfoEndpoint:                 issuer + "/oidc/userinfo",
-		JwksURI:                          issuer + "/oidc/.well-known/jwks.json",
-		RevocationEndpoint:               issuer + "/oauth2/revoke",
-		IntrospectionEndpoint:            issuer + "/oauth2/introspect",
-		ScopesSupported:                  []string{"openid", "profile", "email", "roles"},
-		ResponseTypesSupported:           []string{"code", "token", "id_token", "code token", "code id_token", "token id_token", "code token id_token"},
-		ResponseModesSupported:           []string{"query", "fragment"},
-		GrantTypesSupported:              []string{"authorization_code", "refresh_token", "client_credentials"},
-		SubjectTypesSupported:            []string{"public"},
-		IDTokenSigningAlgValuesSupported: []string{"RS256", "ES256"},
+		Issuer:                            issuer,
+		AuthorizationEndpoint:             issuer + "/oidc/authorize",
+		TokenEndpoint:                     issuer + "/oidc/token",
+		UserinfoEndpoint:                  issuer + "/oidc/userinfo",
+		JwksURI:                           issuer + "/oidc/.well-known/jwks.json",
+		RevocationEndpoint:                issuer + "/oauth2/revoke",
+		IntrospectionEndpoint:             issuer + "/oauth2/introspect",
+		ScopesSupported:                   []string{"openid", "profile", "email", "roles"},
+		ResponseTypesSupported:            []string{"code", "token", "id_token", "code token", "code id_token", "token id_token", "code id_token token"},
+		ResponseModesSupported:            []string{"query", "fragment"},
+		GrantTypesSupported:               []string{"authorization_code", "refresh_token", "client_credentials"},
+		SubjectTypesSupported:             []string{"public"},
+		IDTokenSigningAlgValuesSupported:  []string{"RS256", "ES256"},
 		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
 		ClaimsSupported: []string{
 			"sub", "iss", "aud", "exp", "iat", "auth_time", "nonce",
@@ -51,19 +51,19 @@ func (p *Plugin) handleJWKS(w http.ResponseWriter, r *http.Request) {
 // DiscoveryAnnotations returns annotations explaining the discovery document fields
 func DiscoveryAnnotations() map[string]string {
 	return map[string]string{
-		"issuer":                             "URL that the OP asserts as its Issuer Identifier. Must exactly match the iss claim in ID Tokens.",
-		"authorization_endpoint":             "URL of the OP's OAuth 2.0 Authorization Endpoint.",
-		"token_endpoint":                     "URL of the OP's OAuth 2.0 Token Endpoint.",
-		"userinfo_endpoint":                  "URL of the OP's UserInfo Endpoint. Returns claims about the authenticated user.",
-		"jwks_uri":                           "URL of the OP's JSON Web Key Set document containing public keys for token validation.",
-		"registration_endpoint":              "URL of the OP's Dynamic Client Registration Endpoint (if supported).",
-		"scopes_supported":                   "List of OAuth 2.0 scope values supported. Must include 'openid'.",
-		"response_types_supported":           "List of OAuth 2.0 response_type values supported.",
-		"grant_types_supported":              "List of OAuth 2.0 Grant Type values supported.",
-		"subject_types_supported":            "List of Subject Identifier types supported (public or pairwise).",
+		"issuer":                                "URL that the OP asserts as its Issuer Identifier. Must exactly match the iss claim in ID Tokens.",
+		"authorization_endpoint":                "URL of the OP's OAuth 2.0 Authorization Endpoint.",
+		"token_endpoint":                        "URL of the OP's OAuth 2.0 Token Endpoint.",
+		"userinfo_endpoint":                     "URL of the OP's UserInfo Endpoint. Returns claims about the authenticated user.",
+		"jwks_uri":                              "URL of the OP's JSON Web Key Set document containing public keys for token validation.",
+		"registration_endpoint":                 "URL of the OP's Dynamic Client Registration Endpoint (if supported).",
+		"scopes_supported":                      "List of OAuth 2.0 scope values supported. Must include 'openid'.",
+		"response_types_supported":              "List of OAuth 2.0 response_type values supported.",
+		"grant_types_supported":                 "List of OAuth 2.0 Grant Type values supported.",
+		"subject_types_supported":               "List of Subject Identifier types supported (public or pairwise).",
 		"id_token_signing_alg_values_supported": "List of JWS signing algorithms supported for ID Tokens.",
-		"claims_supported":                   "List of Claim Names that may be returned in ID Tokens or UserInfo responses.",
-		"code_challenge_methods_supported":   "PKCE code challenge methods supported. S256 is recommended.",
+		"claims_supported":                      "List of Claim Names that may be returned in ID Tokens or UserInfo responses.",
+		"code_challenge_methods_supported":      "PKCE code challenge methods supported. S256 is recommended.",
 	}
 }
 
@@ -132,4 +132,3 @@ func (p *Plugin) GetEndpointInfo() []DiscoveryEndpointInfo {
 		},
 	}
 }
-
