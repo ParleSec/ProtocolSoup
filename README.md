@@ -14,77 +14,7 @@ An interactive sandbox for exploring authentication and identity protocols. Exec
 
 ## Quick Start
 
-### Split Services (Base)
 
-```bash
-cd ProtocolSoup/docker
-docker compose up -d
-```
-
-This starts:
-- **Gateway** - Aggregates `/api` and routes protocol paths
-- **Federation** - OAuth 2.0, OIDC, SAML
-- **SCIM** - User and group provisioning
-- **SSF** - Shared Signals Framework
-- **Frontend** - React UI at `http://localhost:3000`
-- **Gateway API** - Available at `http://localhost:8080`
-
-### SPIFFE/SPIRE Overlay
-
-```bash
-cd ProtocolLens/docker
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
-```
-
-This adds:
-- **SPIFFE Service** - Workload API demos
-- **SPIRE Server/Agent** - Identity authority and SVID issuance
-- **SPIRE Registration** - Workload entry bootstrap
-
-### Standalone Usage (API-only Images)
-
-Build any service with the shared backend Dockerfile by selecting the entrypoint:
-
-```bash
-# Gateway
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/gateway -t protocol-lens-gateway .
-
-# Federation (OAuth2/OIDC/SAML)
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-federation -t protocol-lens-federation .
-
-# SCIM
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-scim -t protocol-lens-scim .
-
-# SSF
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-ssf -t protocol-lens-ssf .
-
-# SPIFFE (requires SPIRE server/agent)
-docker build -f docker/Dockerfile.backend-spiffe --build-arg SERVICE_CMD=./cmd/server-spiffe -t protocol-lens-spiffe .
-```
-
-Example standalone runs:
-
-```bash
-# SCIM service (data volume + optional Looking Glass)
-docker run -p 8082:8080 \
-  -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  -e SCIM_DATA_DIR=/data \
-  -e SCIM_LOOKING_GLASS=true \
-  -v scim-data:/data \
-  protocol-lens-scim
-
-# Gateway routing to standalone services
-docker run -p 8080:8080 \
-  -e FEDERATION_SERVICE_URL=http://host.docker.internal:8081 \
-  -e SCIM_SERVICE_URL=http://host.docker.internal:8082 \
-  -e SSF_SERVICE_URL=http://host.docker.internal:8083 \
-  protocol-lens-gateway
-```
-
-Note: `docker-compose.simple.yml`, `docker-compose.dev.yml`, and `docker-compose.prod.yml`
-target the legacy monolithic backend and are kept for reference.
-
----
 
 ## Features
 
@@ -434,6 +364,112 @@ npm run dev
 | `SCIM_LOOKING_GLASS` | `true` | Enable Looking Glass capture for SCIM |
 | `SSF_RECEIVER_PORT` | `8081` | Standalone SSF receiver port |
 | `SSF_RECEIVER_TOKEN` | (auto) | Receiver bearer token for push delivery |
+
+---
+
+### Split Services (Base)
+
+```bash
+cd ProtocolSoup/docker
+docker compose up -d
+```
+
+This starts:
+- **Gateway** - Aggregates `/api` and routes protocol paths
+- **Federation** - OAuth 2.0, OIDC, SAML
+- **SCIM** - User and group provisioning
+- **SSF** - Shared Signals Framework
+- **Frontend** - React UI at `http://localhost:3000`
+- **Gateway API** - Available at `http://localhost:8080`
+
+### SPIFFE/SPIRE Overlay
+
+```bash
+cd ProtocolLens/docker
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+This adds:
+- **SPIFFE Service** - Workload API demos
+- **SPIRE Server/Agent** - Identity authority and SVID issuance
+- **SPIRE Registration** - Workload entry bootstrap
+
+### Standalone Usage (API-only Images)
+
+Build any service with the shared backend Dockerfile by selecting the entrypoint:
+
+```bash
+# Gateway
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/gateway -t protocol-lens-gateway .
+
+# Federation (OAuth2/OIDC/SAML)
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-federation -t protocol-lens-federation .
+
+# SCIM
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-scim -t protocol-lens-scim .
+
+# SSF
+docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-ssf -t protocol-lens-ssf .
+
+# SPIFFE (requires SPIRE server/agent)
+docker build -f docker/Dockerfile.backend-spiffe --build-arg SERVICE_CMD=./cmd/server-spiffe -t protocol-lens-spiffe .
+```
+
+Example standalone runs:
+
+```bash
+# SCIM service (data volume + optional Looking Glass)
+docker run -p 8082:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SCIM_DATA_DIR=/data \
+  -e SCIM_LOOKING_GLASS=true \
+  -v scim-data:/data \
+  protocol-lens-scim
+
+# Gateway routing to standalone services
+docker run -p 8080:8080 \
+  -e FEDERATION_SERVICE_URL=http://host.docker.internal:8081 \
+  -e SCIM_SERVICE_URL=http://host.docker.internal:8082 \
+  -e SSF_SERVICE_URL=http://host.docker.internal:8083 \
+  protocol-lens-gateway
+```
+
+Note: `docker-compose.simple.yml`, `docker-compose.dev.yml`, and `docker-compose.prod.yml`
+target the legacy monolithic backend and are kept for reference.
+
+### Using Pre-built GHCR Images
+
+Pre-built container images are available from GitHub Container Registry. Use these for quick deployment without building from source.
+
+**Available images:**
+
+| Image | Description |
+|-------|-------------|
+| `ghcr.io/parlesec/protocolens-gateway` | API Gateway - routes to protocol services |
+| `ghcr.io/parlesec/protocolens-federation` | Federation service (OAuth 2.0, OIDC, SAML) |
+| `ghcr.io/parlesec/protocolens-scim` | SCIM 2.0 user/group provisioning |
+| `ghcr.io/parlesec/protocolens-ssf` | Shared Signals Framework |
+| `ghcr.io/parlesec/protocolens-spiffe` | SPIFFE workload identity (requires SPIRE) |
+| `ghcr.io/parlesec/protocolens-frontend` | React frontend UI |
+| `ghcr.io/parlesec/protocolens-spire-server` | SPIRE Server for workload identity |
+| `ghcr.io/parlesec/protocolens-spire-agent` | SPIRE Agent for workload attestation |
+| `ghcr.io/parlesec/protocolens-spire-registration` | SPIRE workload registration |
+
+**Quick start with GHCR images:**
+
+```bash
+# Pull and run individual services
+docker pull ghcr.io/parlesec/protocolens-federation:latest
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolens-federation:latest
+```
+
+**Using with docker-compose:**
+
+Edit `docker/docker-compose.yml` (and `docker/docker-compose.spiffe.yml` for SPIFFE/SPIRE):
+1. Comment out the `build:` section for each service
+2. Uncomment the `image: ghcr.io/parlesec/...` line
 
 ---
 

@@ -1,5 +1,19 @@
 # Protocol Lens - SPIFFE/SPIRE Overlay
 # Run with: docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+#
+# ==============================================
+# GHCR Public Images
+# ==============================================
+# To use pre-built images from GitHub Container Registry:
+# 1. Comment out the 'build:' section for each service
+# 2. Uncomment the 'image:' line with the GHCR URL
+#
+# Available images:
+#   ghcr.io/parlesec/protocolens-spiffe:latest
+#   ghcr.io/parlesec/protocolens-spire-server:latest
+#   ghcr.io/parlesec/protocolens-spire-agent:latest
+#   ghcr.io/parlesec/protocolens-spire-registration:latest
+# ==============================================
 
 services:
   gateway:
@@ -10,9 +24,12 @@ services:
   # SPIRE Server - Identity Authority
   # ============================================
   spire-server:
+    # For local development (build from source):
     build:
       context: ./spire/server
       dockerfile: Dockerfile
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spire-server:latest
     container_name: protocolsoup-spire-server
     hostname: spire-server
     volumes:
@@ -33,9 +50,12 @@ services:
   # SPIRE Agent - Standalone for other workloads
   # ============================================
   spire-agent:
+    # For local development (build from source):
     build:
       context: ./spire/agent
       dockerfile: Dockerfile
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spire-agent:latest
     container_name: protocolsoup-spire-agent
     hostname: spire-agent
     depends_on:
@@ -60,9 +80,12 @@ services:
   # SPIRE Workload Registration
   # ============================================
   spire-registration:
+    # For local development (build from source):
     build:
       context: ./spire/registration
       dockerfile: Dockerfile
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spire-registration:latest
     container_name: protocolsoup-spire-registration
     depends_on:
       spire-server:
@@ -79,11 +102,14 @@ services:
   # SPIFFE Service
   # ============================================
   spiffe-service:
+    # For local development (build from source):
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend-spiffe
       args:
         SERVICE_CMD: ./cmd/server-spiffe
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-spiffe:latest
     image: protocol-lens-spiffe:latest
     container_name: protocol-lens-spiffe
     labels:

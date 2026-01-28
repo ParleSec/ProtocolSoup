@@ -7,17 +7,35 @@
 # - SCIM service
 # - SSF service
 # - Frontend UI
+#
+# ==============================================
+# GHCR Public Images
+# ==============================================
+# To use pre-built images from GitHub Container Registry instead of building locally:
+# 1. Comment out the 'build:' section for each service
+# 2. Uncomment the 'image:' line with the GHCR URL
+#
+# Available images:
+#   ghcr.io/parlesec/protocolens-gateway:latest
+#   ghcr.io/parlesec/protocolens-federation:latest
+#   ghcr.io/parlesec/protocolens-scim:latest
+#   ghcr.io/parlesec/protocolens-ssf:latest
+#   ghcr.io/parlesec/protocolens-frontend:latest
+# ==============================================
 
 services:
   # ============================================
   # Gateway - API Aggregation + Routing
   # ============================================
   gateway:
+    # For local development (build from source):
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
       args:
         SERVICE_CMD: ./cmd/gateway
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-gateway:latest
     image: protocol-lens-gateway:latest
     container_name: protocol-lens-gateway
     ports:
@@ -51,11 +69,14 @@ services:
   # Federation Service (OAuth2/OIDC/SAML)
   # ============================================
   federation-service:
+    # For local development (build from source):
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
       args:
         SERVICE_CMD: ./cmd/server-federation
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-federation:latest
     image: protocol-lens-federation:latest
     container_name: protocol-lens-federation
     environment:
@@ -78,11 +99,14 @@ services:
   # SCIM Service
   # ============================================
   scim-service:
+    # For local development (build from source):
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
       args:
         SERVICE_CMD: ./cmd/server-scim
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-scim:latest
     image: protocol-lens-scim:latest
     container_name: protocol-lens-scim
     environment:
@@ -111,11 +135,14 @@ services:
   # SSF Service
   # ============================================
   ssf-service:
+    # For local development (build from source):
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
       args:
         SERVICE_CMD: ./cmd/server-ssf
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-ssf:latest
     image: protocol-lens-ssf:latest
     container_name: protocol-lens-ssf
     environment:
@@ -140,9 +167,12 @@ services:
   # Frontend UI
   # ============================================
   frontend:
+    # For local development (build from source):
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolens-frontend:latest
     container_name: protocol-showcase-frontend
     ports:
       - "3000:3000"
