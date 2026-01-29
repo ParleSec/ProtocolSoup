@@ -1,5 +1,5 @@
 /**
- * Interactive Code Flow Executor
+ * Interaction Code Flow Executor
  * 
  * A comprehensive, step-by-step OAuth 2.0 Authorization Code flow
  * with real-time events against actual infrastructure.
@@ -79,8 +79,8 @@ interface JWKSDocument {
 }
 
 export class InteractiveCodeExecutor extends FlowExecutorBase {
-  readonly flowType = 'interactive_code'
-  readonly flowName = 'Interactive Authorization Code Flow'
+  readonly flowType = 'interaction-code'
+  readonly flowName = 'Interaction Authorization Code Flow'
   readonly rfcReference = 'RFC 6749, RFC 7636, OIDC Core 1.0'
 
   private flowConfig: InteractiveCodeConfig
@@ -105,12 +105,12 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
     this.updateState({
       ...this.createInitialState(),
       status: 'executing',
-      currentStep: 'Initializing Interactive Code Flow',
+      currentStep: 'Initializing Interaction Code Flow',
     })
 
     this.addEvent({
       type: 'info',
-      title: 'Starting Interactive Authorization Code Flow',
+      title: 'Starting Interaction Authorization Code Flow',
       description: 'A comprehensive OAuth 2.0/OIDC flow with real infrastructure',
       rfcReference: this.rfcReference,
       data: {
@@ -189,7 +189,7 @@ export class InteractiveCodeExecutor extends FlowExecutorBase {
 
       this.addEvent({
         type: 'info',
-        title: 'Interactive Code Flow Complete',
+        title: 'Interaction Code Flow Complete',
         description: this.generateCompletionSummary(),
         rfcReference: this.rfcReference,
         data: {

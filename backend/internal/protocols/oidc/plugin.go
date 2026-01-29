@@ -5,22 +5,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
+	"github.com/go-chi/chi/v5"
 )
 
 // Plugin implements the OpenID Connect protocol plugin
 type Plugin struct {
 	*plugin.BasePlugin
-	oauth2Plugin *oauth2.Plugin
-	mockIdP      *mockidp.MockIdP
-	keySet       *crypto.KeySet
-	lookingGlass *lookingglass.Engine
-	baseURL      string
+	oauth2Plugin    *oauth2.Plugin
+	mockIdP         *mockidp.MockIdP
+	keySet          *crypto.KeySet
+	lookingGlass    *lookingglass.Engine
+	baseURL         string
 	loginRequests   map[string]loginRequestInfo
 	loginRequestsMu sync.RWMutex
 	loginRequestTTL time.Duration
@@ -37,7 +37,7 @@ func NewPlugin(oauth2Plugin *oauth2.Plugin) *Plugin {
 			Tags:        []string{"identity", "authentication", "id-token", "userinfo"},
 			RFCs:        []string{"OpenID Connect Core 1.0", "OpenID Connect Discovery 1.0"},
 		}),
-		oauth2Plugin: oauth2Plugin,
+		oauth2Plugin:    oauth2Plugin,
 		loginRequests:   make(map[string]loginRequestInfo),
 		loginRequestTTL: 10 * time.Minute,
 	}
@@ -659,11 +659,11 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				},
 			},
 		},
-		// Interactive Code Flow - comprehensive OIDC flow for the Looking Glass
+		// Interaction Code Flow - comprehensive OIDC flow for the Looking Glass
 		{
-			ID:          "interactive_code",
-			Name:        "Interactive Code Flow",
-			Description: "Full interactive OAuth 2.0 + OIDC flow with Discovery, PKCE, and Nonce validation. This comprehensive flow demonstrates the complete authentication journey including provider discovery, secure code exchange with PKCE, ID Token validation, and UserInfo retrieval.",
+			ID:          "interaction-code",
+			Name:        "Interaction Code Flow",
+			Description: "Full Interaction OAuth 2.0 + OIDC flow with Discovery, PKCE, and Nonce validation. This comprehensive flow demonstrates the complete authentication journey including provider discovery, secure code exchange with PKCE, ID Token validation, and UserInfo retrieval.",
 			Executable:  true,
 			Category:    "authentication",
 			Steps: []plugin.FlowStep{
@@ -855,4 +855,3 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 		},
 	}
 }
-

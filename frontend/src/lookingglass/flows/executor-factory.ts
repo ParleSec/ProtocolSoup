@@ -61,19 +61,7 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: true,
     additionalConfig: { usePkce: true },
   },
-  'interactive-code': {
-    executorClass: InteractiveCodeExecutor,
-    description: 'Comprehensive interactive flow with discovery, PKCE, nonce, and UserInfo',
-    rfcReference: 'RFC 6749, RFC 7636, OIDC Core 1.0',
-    requiresUserInteraction: true,
-    additionalConfig: { 
-      usePkce: true, 
-      includeNonce: true, 
-      useDiscovery: true,
-      fetchUserInfo: true,
-    },
-  },
-  'interactive_code': {
+  'interaction-code': {
     executorClass: InteractiveCodeExecutor,
     description: 'Comprehensive interactive flow with discovery, PKCE, nonce, and UserInfo',
     rfcReference: 'RFC 6749, RFC 7636, OIDC Core 1.0',
@@ -404,8 +392,8 @@ export function createFlowExecutor(
     (fullConfig as ClientCredentialsConfig).clientSecret = config.clientSecret
   }
 
-  // Handle Interactive Code flow
-  if (flowId === 'interactive-code' || flowId === 'interactive_code') {
+  // Handle Interaction Code flow
+  if (flowId === 'interaction-code') {
     (fullConfig as InteractiveCodeConfig).usePkce = true;
     (fullConfig as InteractiveCodeConfig).includeNonce = true;
     (fullConfig as InteractiveCodeConfig).useDiscovery = true;
