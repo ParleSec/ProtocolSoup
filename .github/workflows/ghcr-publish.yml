@@ -36,24 +36,28 @@ jobs:
             context: .
             build_args: |
               SERVICE_CMD=./cmd/gateway
+            description: API Gateway - routes to protocol services
           - name: federation
             image: protocolsoup-federation
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-federation
+            description: OAuth 2.0, OpenID Connect, SAML 2.0 Identity Provider
           - name: scim
             image: protocolsoup-scim
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-scim
+            description: SCIM 2.0 User and Group Provisioning Server
           - name: ssf
             image: protocolsoup-ssf
             dockerfile: docker/Dockerfile.backend
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-ssf
+            description: Shared Signals Framework (CAEP/RISC) Transmitter & Receiver
           # SPIFFE service (uses special Dockerfile with embedded SPIRE agent)
           - name: spiffe
             image: protocolsoup-spiffe
@@ -61,28 +65,33 @@ jobs:
             context: .
             build_args: |
               SERVICE_CMD=./cmd/server-spiffe
+            description: SPIFFE/SPIRE Workload Identity Service
           # Frontend
           - name: frontend
             image: protocolsoup-frontend
             dockerfile: docker/Dockerfile.frontend
             context: .
             build_args: ""
+            description: React UI for ProtocolSoup
           # SPIRE infrastructure
           - name: spire-server
             image: protocolsoup-spire-server
             dockerfile: docker/spire/server/Dockerfile
             context: docker/spire/server
             build_args: ""
+            description: SPIRE Server - Certificate Authority for Workload Identity
           - name: spire-agent
             image: protocolsoup-spire-agent
             dockerfile: docker/spire/agent/Dockerfile
             context: docker/spire/agent
             build_args: ""
+            description: SPIRE Agent - Workload Attestation
           - name: spire-registration
             image: protocolsoup-spire-registration
             dockerfile: docker/spire/registration/Dockerfile
             context: docker/spire/registration
             build_args: ""
+            description: SPIRE Workload Registration Bootstrap
 
     steps:
       - name: Checkout code
@@ -122,9 +131,10 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
           labels: |
-            org.opencontainers.image.title=ProtocolSoup ${{ matrix.name }}
-            org.opencontainers.image.description=ProtocolSoup ${{ matrix.name }} service - Security protocol demonstration platform
-            org.opencontainers.image.vendor=ProtocolSoup
+            org.opencontainers.image.title=protocolsoup-${{ matrix.name }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.vendor=ParleSec
+            org.opencontainers.image.documentation=https://github.com/ParleSec/ProtocolLens/blob/master/docs/packages/${{ matrix.name }}.md
 
       - name: Build and push Docker image
         id: build

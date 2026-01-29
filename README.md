@@ -174,12 +174,14 @@ POST   /scim/v2/Groups                         Create group
 GET    /scim/v2/Groups/{id}                    Get group by ID
 PATCH  /scim/v2/Groups/{id}                    Update group membership
 DELETE /scim/v2/Groups/{id}                    Delete group
+POST   /scim/v2/Bulk                           Bulk operations
 ```
 
 ### Shared Signals Framework (SSF)
 
 ```
 GET  /ssf/.well-known/ssf-configuration        Transmitter configuration
+GET  /ssf/jwks                                 Signing keys (JWKS)
 POST /ssf/stream                               Create event stream
 GET  /ssf/stream/{id}                          Get stream configuration
 PUT  /ssf/stream/{id}                          Update stream
@@ -188,7 +190,9 @@ POST /ssf/stream/{id}/subjects                 Add subject to stream
 DELETE /ssf/stream/{id}/subjects/{subject}     Remove subject
 POST /ssf/stream/{id}/events                   Emit event to stream
 GET  /ssf/stream/{id}/events                   List stream events
-POST /ssf/receiver/push                        SET push delivery endpoint
+POST /ssf/actions/{event-type}                 Trigger security event (demo)
+GET  /ssf/security-state/{email}               User security state
+POST /ssf/receiver/push                        SET push delivery endpoint (port 8081)
 GET  /ssf/receiver/events                      List received events
 POST /ssf/receiver/events/{id}/ack             Acknowledge event
 ```
@@ -258,7 +262,7 @@ ProtocolSoup/
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| Go | 1.22 | Core language |
+| Go | 1.24 | Core language |
 | chi | 5.1 | HTTP router |
 | golang-jwt | 5.2 | JWT creation/validation |
 | gorilla/websocket | 1.5 | Real-time communication |
@@ -299,7 +303,7 @@ ProtocolSoup/
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - Node.js 18+
 - Docker & Docker Compose
 
