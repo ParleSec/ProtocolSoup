@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Terminal, Square,
@@ -26,6 +26,7 @@ import { LookingGlassSEO } from '../components/common/SEO'
 
 export function LookingGlass() {
   useParams<{ sessionId?: string }>()
+  const navigate = useNavigate()
 
   const [selectedProtocol, setSelectedProtocol] = useState<LookingGlassProtocol | null>(null)
   const [selectedFlow, setSelectedFlow] = useState<LookingGlassFlow | null>(null)
@@ -164,6 +165,11 @@ export function LookingGlass() {
   }, [realExecutor.state?.status, realExecutor.state?.tokens.refreshToken, realExecutor.state?.tokens.accessToken])
 
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
+    // SSF has its own dedicated sandbox - redirect there
+    if (protocol.id === 'ssf') {
+      navigate('/ssf-sandbox')
+      return
+    }
     setSelectedProtocol(protocol)
     setSelectedFlow(null)
     realExecutor.reset()
@@ -172,9 +178,14 @@ export function LookingGlass() {
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor, clearWireEvents])
+  }, [realExecutor, clearWireEvents, navigate])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
+    // SSF flows should redirect to the SSF Sandbox
+    if (selectedProtocol?.id === 'ssf') {
+      navigate('/ssf-sandbox')
+      return
+    }
     setSelectedFlow(flow)
     realExecutor.reset()
     setWireSessionId(null)
@@ -182,7 +193,7 @@ export function LookingGlass() {
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor, clearWireEvents])
+  }, [realExecutor, clearWireEvents, selectedProtocol, navigate])
 
   const handleReset = useCallback(() => {
     realExecutor.reset()
@@ -240,10 +251,18 @@ export function LookingGlass() {
   }, [pendingExecute, wireSessionId, realExecutor])
 
   const handleQuickSelect = useCallback((protocolId: string, flowId: string) => {
+    const normalizeFlowId = (id: string) => id.toLowerCase().replace(/_/g, '-')
+
+    // SSF flows should redirect to the SSF Sandbox
+    if (protocolId === 'ssf') {
+      navigate('/ssf-sandbox')
+      return
+    }
     const protocol = protocols.find(p => p.id === protocolId)
     if (protocol) {
       setSelectedProtocol(protocol)
-      const flow = protocol.flows.find(f => f.id === flowId)
+      const normalizedTarget = normalizeFlowId(flowId)
+      const flow = (protocol.flows || []).find(f => normalizeFlowId(f.id) === normalizedTarget)
       if (flow) {
         setSelectedFlow(flow)
         realExecutor.reset()
@@ -254,7 +273,7 @@ export function LookingGlass() {
         setInspectedToken('')
       }
     }
-  }, [protocols, realExecutor, clearWireEvents])
+  }, [protocols, realExecutor, clearWireEvents, navigate])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
   const status = realExecutor.state?.status || 'idle'
@@ -293,10 +312,10 @@ export function LookingGlass() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <FlowButton
               icon={Workflow}
-              label="Interactive Code Flow"
+              label="Interaction Code Flow"
               sublabel="Full OAuth 2.0 + OIDC"
               color="cyan"
-              onClick={() => handleQuickSelect('oidc', 'interactive-code')}
+              onClick={() => handleQuickSelect('oidc', 'interaction-code')}
             />
             <FlowButton
               icon={Shield}

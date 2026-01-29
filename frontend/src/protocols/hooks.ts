@@ -77,12 +77,8 @@ export function useProtocolFlows(protocolId: string | undefined) {
     setLoading(true)
     fetchProtocolFlows(protocolId)
       .then((apiFlows) => {
-        if (!apiFlows || apiFlows.length === 0) {
-          setFlows([])
-          setError(new Error(`No flows returned for protocol "${protocolId}"`))
-          return
-        }
-        setFlows(apiFlows)
+        setFlows(apiFlows || [])
+        setError(null)
       })
       .catch((err) => {
         setFlows([])
