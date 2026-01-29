@@ -86,6 +86,19 @@ The server is pre-configured for the `protocolsoup.com` trust domain with:
 - 1-hour SVID TTL
 - RSA-2048 CA key
 
+## Platform Notes
+
+### Windows Docker
+
+When running on Windows with Docker Desktop, **use Docker Compose instead of standalone `docker run`** for SPIRE containers. Windows Docker has limitations with Unix socket volumes that can cause the server socket to fail initialization.
+
+**Recommended approach:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+The standalone `docker run` commands work correctly on Linux and macOS.
+
 ## Use With
 
 - `protocolsoup-spire-agent` - Standalone agent

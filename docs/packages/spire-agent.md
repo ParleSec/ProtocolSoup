@@ -78,3 +78,16 @@ source, err := workloadapi.NewX509Source(ctx,
     ),
 )
 ```
+
+## Platform Notes
+
+### Windows Docker
+
+When running on Windows with Docker Desktop, **use Docker Compose instead of standalone `docker run`** for SPIRE containers. Windows Docker has limitations with Unix socket volumes that can prevent proper socket sharing between containers.
+
+**Recommended approach:**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+The standalone `docker run` commands work correctly on Linux and macOS.

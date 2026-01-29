@@ -96,7 +96,19 @@ Response:
 curl -X POST http://localhost:8080/spiffe/validate/jwt \
   -H "Content-Type: application/json" \
   -d '{
-    "token": "eyJhbGciOiJSUzI1NiIs...",
-    "audience": "my-service"
+    "token": "eyJhbGciOiJFUzI1NiIs...",
+    "audience": ["my-service"]
   }'
+```
+
+Response:
+```json
+{
+  "valid": true,
+  "spiffe_id": "spiffe://protocolsoup.com/workload/backend",
+  "details": {
+    "validation_type": "cryptographic",
+    "signature": "verified against SPIFFE trust bundle"
+  }
+}
 ```

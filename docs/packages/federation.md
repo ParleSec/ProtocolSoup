@@ -20,10 +20,10 @@ docker run -p 8080:8080 \
 | Endpoint | Description |
 |----------|-------------|
 | `GET /oauth2/authorize` | Authorization endpoint |
+| `POST /oauth2/authorize` | Authorization form submit |
 | `POST /oauth2/token` | Token endpoint |
-| `POST /oauth2/introspect` | Token introspection |
-| `POST /oauth2/revoke` | Token revocation |
-| `POST /oauth2/device` | Device authorization |
+| `POST /oauth2/introspect` | Token introspection (RFC 7662) |
+| `POST /oauth2/revoke` | Token revocation (RFC 7009) |
 
 ### OpenID Connect
 | Endpoint | Description |
@@ -79,8 +79,6 @@ Passwords are randomized at startup. Retrieve via `GET /oauth2/demo/users`.
 - Authorization Code (with PKCE)
 - Client Credentials
 - Implicit (legacy)
-- Device Code
-- Resource Owner Password (legacy)
 - Refresh Token
 
 ## Example: Get an Access Token

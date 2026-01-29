@@ -37,9 +37,6 @@ An interactive sandbox for exploring authentication and identity protocols. Exec
 |------|-----|-------------|
 | Authorization Code | RFC 6749 | Standard web app flow with PKCE support |
 | Client Credentials | RFC 6749 | Machine-to-machine authentication |
-| Implicit | RFC 6749 | Legacy browser-based flow (not recommended) |
-| Device Code | RFC 8628 | Input-constrained device flow |
-| Resource Owner Password | RFC 6749 | Direct username/password (legacy) |
 | Refresh Token | RFC 6749 | Token renewal flow |
 | Token Introspection | RFC 7662 | Active token metadata inspection |
 | Token Revocation | RFC 7009 | Token invalidation |
@@ -119,7 +116,7 @@ GET  /oauth2/authorize          Authorization endpoint
 POST /oauth2/token              Token endpoint
 POST /oauth2/introspect         Token introspection
 POST /oauth2/revoke             Token revocation
-POST /oauth2/device             Device authorization
+POST /oauth2/authorize          Authorization form submit
 ```
 
 ### OpenID Connect
@@ -192,9 +189,9 @@ POST /ssf/stream/{id}/events                   Emit event to stream
 GET  /ssf/stream/{id}/events                   List stream events
 POST /ssf/actions/{event-type}                 Trigger security event (demo)
 GET  /ssf/security-state/{email}               User security state
-POST /ssf/receiver/push                        SET push delivery endpoint (port 8081)
-GET  /ssf/receiver/events                      List received events
-POST /ssf/receiver/events/{id}/ack             Acknowledge event
+GET  /ssf/receiver/events                      List received events (proxy to 8081)
+GET  /ssf/receiver/status                      Receiver status (proxy to 8081)
+GET  /ssf/receiver/actions                     Response actions taken (proxy to 8081)
 ```
 
 ### Internal API

@@ -88,13 +88,15 @@ docker run -p 8080:8080 \
 The container starts with demo users and groups:
 
 **Users:**
-- `alice@example.com` (Engineering)
-- `bob@example.com` (Security)
-- `carol@example.com` (Product)
+| User | Department | Groups |
+|------|------------|--------|
+| `alice@example.com` | Engineering | Engineering, All Users |
+| `bob@example.com` | Security | Engineering, All Users |
+| `carol@example.com` | Product | All Users |
 
 **Groups:**
-- Engineering
-- All Users
+- Engineering (Alice, Bob)
+- All Users (Alice, Bob, Carol)
 
 ## Example: Create a User
 

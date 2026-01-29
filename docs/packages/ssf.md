@@ -54,9 +54,12 @@ The standalone receiver runs on a separate port for external transmitters to pus
 
 | Endpoint | Description |
 |----------|-------------|
-| `POST /ssf/receiver/push` | SET push delivery endpoint |
-| `GET /ssf/receiver/events` | List received events |
-| `POST /ssf/receiver/events/{id}/ack` | Acknowledge event |
+| `POST /ssf/push` | SET push delivery endpoint |
+| `GET /ssf/events` | List received events |
+| `GET /ssf/status` | Receiver status |
+| `GET /ssf/actions` | Response actions taken |
+
+**Note:** Port 8080 has proxy routes at `/ssf/receiver/*` that forward to port 8081's `/ssf/*` endpoints.
 
 ## Supported Event Types
 

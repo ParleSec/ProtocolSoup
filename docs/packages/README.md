@@ -21,6 +21,8 @@ Documentation for all ProtocolSoup container images available on GitHub Containe
 | [protocolsoup-spire-agent](https://ghcr.io/parlesec/protocolsoup-spire-agent) | SPIRE Agent | [spire-agent.md](spire-agent.md) |
 | [protocolsoup-spire-registration](https://ghcr.io/parlesec/protocolsoup-spire-registration) | Bootstrap entries | [spire-registration.md](spire-registration.md) |
 
+> **Note:** SPIRE containers require Unix socket sharing. On **Windows Docker**, use Docker Compose instead of standalone `docker run` commands. See individual package docs for details.
+
 ## Quick Start
 
 ### Single Service
