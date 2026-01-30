@@ -293,6 +293,7 @@ ProtocolSoup/
 - [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
 - [Adding Protocols](docs/ADDING_PROTOCOLS.md) - Plugin development guide
 - [SPIFFE/SPIRE Integration](docs/SPIFFE.md) - Workload identity setup
+- [Container Images](docs/packages/README.md) - GHCR package documentation
 
 ---
 
@@ -444,17 +445,19 @@ Pre-built container images are available from GitHub Container Registry. Use the
 
 **Available images:**
 
-| Image | Description |
-|-------|-------------|
-| `ghcr.io/parlesec/protocolsoup-gateway` | API Gateway - routes to protocol services |
-| `ghcr.io/parlesec/protocolsoup-federation` | Federation service (OAuth 2.0, OIDC, SAML) |
-| `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 user/group provisioning |
-| `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework |
-| `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity (requires SPIRE) |
-| `ghcr.io/parlesec/protocolsoup-frontend` | React frontend UI |
-| `ghcr.io/parlesec/protocolsoup-spire-server` | SPIRE Server for workload identity |
-| `ghcr.io/parlesec/protocolsoup-spire-agent` | SPIRE Agent for workload attestation |
-| `ghcr.io/parlesec/protocolsoup-spire-registration` | SPIRE workload registration |
+**[Container Image Documentation](docs/packages/README.md)** - Detailed docs for each image
+
+| Image | Description | Docs |
+|-------|-------------|------|
+| `ghcr.io/parlesec/protocolsoup-gateway` | API Gateway | [gateway.md](docs/packages/gateway.md) |
+| `ghcr.io/parlesec/protocolsoup-federation` | OAuth 2.0, OIDC, SAML | [federation.md](docs/packages/federation.md) |
+| `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 provisioning | [scim.md](docs/packages/scim.md) |
+| `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework | [ssf.md](docs/packages/ssf.md) |
+| `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity | [spiffe.md](docs/packages/spiffe.md) |
+| `ghcr.io/parlesec/protocolsoup-frontend` | React frontend UI | [frontend.md](docs/packages/frontend.md) |
+| `ghcr.io/parlesec/protocolsoup-spire-server` | SPIRE Server (CA) | [spire-server.md](docs/packages/spire-server.md) |
+| `ghcr.io/parlesec/protocolsoup-spire-agent` | SPIRE Agent | [spire-agent.md](docs/packages/spire-agent.md) |
+| `ghcr.io/parlesec/protocolsoup-spire-registration` | SPIRE registration | [spire-registration.md](docs/packages/spire-registration.md) |
 
 **Quick start with GHCR images:**
 
