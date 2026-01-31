@@ -60,8 +60,8 @@ function parseStaticRoutes() {
   while ((match = routeRegex.exec(content)) !== null) {
     const path = match[1];
     
-    // Skip dynamic routes (contain :) and callback routes
-    if (path.includes(':') || path === '/callback') {
+    // Skip dynamic, callback, and wildcard routes
+    if (path.includes(':') || path === '/callback' || path.includes('*')) {
       continue;
     }
     
