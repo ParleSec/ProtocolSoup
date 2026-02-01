@@ -2,7 +2,9 @@ package core
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -47,6 +49,7 @@ func (s *Server) setupRouter() {
 	r := chi.NewRouter()
 
 	// Global middleware
+	r.Use(s.redirectWWWToCanonical())
 	r.Use(CaptureMiddleware(s.lookingGlass))
 	r.Use(Recovery)
 	r.Use(RequestLogger)
@@ -117,6 +120,47 @@ func (s *Server) setupRouter() {
 	}
 
 	s.router = r
+}
+
+func (s *Server) redirectWWWToCanonical() func(http.Handler) http.Handler {
+	baseURL := strings.TrimSpace(s.config.BaseURL)
+	if baseURL == "" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+
+	parsedBase, err := url.Parse(baseURL)
+	if err != nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+
+	canonicalHost := strings.ToLower(parsedBase.Hostname())
+	if canonicalHost == "" || strings.HasPrefix(canonicalHost, "www.") {
+		return func(next http.Handler) http.Handler { return next }
+	}
+
+	canonicalScheme := parsedBase.Scheme
+	if canonicalScheme == "" {
+		canonicalScheme = "https"
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			reqHost := strings.ToLower(r.Host)
+			if host, _, err := net.SplitHostPort(reqHost); err == nil {
+				reqHost = host
+			}
+
+			if reqHost == "www."+canonicalHost {
+				target := *r.URL
+				target.Scheme = canonicalScheme
+				target.Host = canonicalHost
+				http.Redirect(w, r, target.String(), http.StatusMovedPermanently)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // setupStaticFileServing configures static file serving with SPA fallback
