@@ -408,7 +408,7 @@ The following events are emitted for real-time visualization:
 
 | client_id | Type | Grant Types | Secret |
 |-----------|------|-------------|--------|
-| `public-app` | Public | authorization_code, refresh_token | — |
+| `public-app` | Public | authorization_code, refresh_token | - |
 | `demo-app` | Confidential | authorization_code, refresh_token | (env or auto) |
 | `machine-client` | Confidential | client_credentials | (env or auto) |
 

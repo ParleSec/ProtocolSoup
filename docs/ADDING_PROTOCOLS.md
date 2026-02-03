@@ -1,336 +1,267 @@
-# Adding New Protocols
+# Adding Protocols (Contributor Guide)
 
-This guide walks through adding a new protocol to the Security Protocol Showcase.
+This is a concrete, end-to-end checklist for adding a new protocol plugin. It includes exact files to touch and a worked example.
 
-## Overview
+## 0. Choose IDs and naming
 
-Each protocol is implemented as a self-contained plugin that integrates with the core framework. The plugin system provides:
+- Protocol ID: lowercase, URL-safe, no spaces. This becomes the base route `/<id>` and API id.
+- Package dir: `backend/internal/protocols/<id>`
+- Flow IDs: lowercase, snake_case or kebab-case. The UI normalizes underscores to hyphens.
+- Demo scenario IDs: use the same ID as the flow you want to execute.
+ - Use the exact backend flow ID in `flowMeta`. The Looking Glass executor uses the hyphen-normalized flow ID.
 
-- Automatic route registration
-- Looking Glass integration
-- Common crypto services
-- Mock identity provider access
+## 1. Backend package
 
-## Step 1: Create the Plugin Directory
+Create the directory:
 
 ```bash
 mkdir -p backend/internal/protocols/newprotocol
 ```
 
-## Step 2: Implement the Plugin Interface
-
-Create `plugin.go`:
+Create `plugin.go` and implement `plugin.ProtocolPlugin`:
 
 ```go
 package newprotocol
 
 import (
-    "context"
-    
-    "github.com/go-chi/chi/v5"
-    "github.com/security-showcase/protocol-showcase/internal/plugin"
+	"context"
+
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
+	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/go-chi/chi/v5"
 )
 
 type Plugin struct {
-    *plugin.BasePlugin
-    // Add protocol-specific fields
+	*plugin.BasePlugin
+	mockIdP      *mockidp.MockIdP
+	keySet       *crypto.KeySet
+	lookingGlass *lookingglass.Engine
+	baseURL      string
 }
 
 func NewPlugin() *Plugin {
-    return &Plugin{
-        BasePlugin: plugin.NewBasePlugin(plugin.PluginInfo{
-            ID:          "newprotocol",
-            Name:        "New Protocol",
-            Version:     "1.0.0",
-            Description: "Description of the new protocol",
-            Tags:        []string{"tag1", "tag2"},
-            RFCs:        []string{"RFC XXXX"},
-        }),
-    }
+	return &Plugin{
+		BasePlugin: plugin.NewBasePlugin(plugin.PluginInfo{
+			ID:          "newprotocol",
+			Name:        "New Protocol",
+			Version:     "1.0.0",
+			Description: "Short description",
+			Tags:        []string{"tag1", "tag2"},
+			RFCs:        []string{"RFC XXXX"},
+		}),
+	}
 }
 
 func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) error {
-    p.SetConfig(config)
-    // Initialize protocol-specific resources
-    return nil
+	p.SetConfig(config)
+	p.baseURL = config.BaseURL
+
+	if idp, ok := config.MockIdP.(*mockidp.MockIdP); ok {
+		p.mockIdP = idp
+	}
+	if ks, ok := config.KeySet.(*crypto.KeySet); ok {
+		p.keySet = ks
+	}
+	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
+		p.lookingGlass = lg
+	}
+	return nil
 }
 
-func (p *Plugin) Shutdown(ctx context.Context) error {
-    // Clean up resources
-    return nil
-}
+func (p *Plugin) Shutdown(ctx context.Context) error { return nil }
 
 func (p *Plugin) RegisterRoutes(router chi.Router) {
-    // Register HTTP endpoints
-    router.Get("/endpoint", p.handleEndpoint)
+	router.Get("/endpoint", p.handleEndpoint)
 }
 
-func (p *Plugin) GetInspectors() []plugin.Inspector {
-    return []plugin.Inspector{
-        {
-            ID:          "newprotocol-inspector",
-            Name:        "New Protocol Inspector",
-            Description: "Inspect protocol artifacts",
-            Type:        "token", // or "request", "response", "flow"
-        },
-    }
-}
+func (p *Plugin) GetInspectors() []plugin.Inspector          { return nil }
+func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition { return nil }
+func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario     { return nil }
+```
 
-func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
-    return []plugin.FlowDefinition{
-        {
-            ID:          "main_flow",
-            Name:        "Main Protocol Flow",
-            Description: "Description of the flow",
-            Steps:       []plugin.FlowStep{
-                // Define flow steps
-            },
-        },
-    }
-}
+Notes:
 
-func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
-    return []plugin.DemoScenario{
-        {
-            ID:          "demo1",
-            Name:        "Demo Scenario",
-            Description: "Interactive demonstration",
-            Steps:       []plugin.DemoStep{
-                // Define demo steps
-            },
-        },
-    }
+- Routes are mounted at `/<protocol_id>`. If your plugin ID is `acme`, the route above becomes `/acme/endpoint`.
+- Use real protocol execution and real cryptographic operations. Do not hardcode tokens or protocol artifacts; if you return demo metadata, include real values (timestamps, IDs) from execution.
+
+## 2. Handlers and Looking Glass capture
+
+Implement handlers in `handlers.go`. To emit events, you need the session id:
+
+```go
+sessionID := r.Header.Get("X-Looking-Glass-Session")
+if sessionID == "" {
+	sessionID = r.URL.Query().Get("lg_session")
+}
+if sessionID != "" && p.lookingGlass != nil {
+	b := p.lookingGlass.NewEventBroadcaster(sessionID)
+	b.EmitFlowStep(1, "Step Name", "Client", "Server", map[string]interface{}{
+		"note": "What happened",
+	})
 }
 ```
 
-## Step 3: Implement HTTP Handlers
+Important:
 
-Create `handlers.go`:
+- The capture middleware automatically emits HTTP request/response exchanges when the request includes `X-Looking-Glass-Session` or `lg_session`.
+- Use `EmitFlowStep` and `EmitTokenIssued` to add semantic context.
+- For browser redirects where headers are hard to set, use the `lg_session` query parameter.
+
+## 3. Flow definitions (UI + diagram)
+
+Flow definitions power the protocol pages and the Looking Glass diagram.
 
 ```go
-package newprotocol
-
-import (
-    "encoding/json"
-    "net/http"
-)
-
-func (p *Plugin) handleEndpoint(w http.ResponseWriter, r *http.Request) {
-    // Implement endpoint logic
-    
-    // Emit looking glass event
-    if p.lookingGlass != nil {
-        broadcaster := p.lookingGlass.NewEventBroadcaster(sessionID)
-        broadcaster.Emit(
-            lookingglass.EventTypeFlowStep,
-            "Step Name",
-            map[string]interface{}{
-                "key": "value",
-            },
-        )
-    }
-    
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
+plugin.FlowDefinition{
+	ID:          "flow_id",
+	Name:        "Flow Name",
+	Description: "What the flow demonstrates",
+	Executable:  true,
+	Category:    "authorization",
+	Steps: []plugin.FlowStep{
+		{
+			Order:       1,
+			Name:        "Request",
+			Description: "Client sends request to server",
+			From:        "Client",
+			To:          "Authorization Server",
+			Type:        "request", // request | response | redirect | internal
+			Parameters:  map[string]string{"param": "description"},
+			Security:    []string{"RFC XXXX Section Y - security note"},
+		},
+	},
 }
 ```
 
-## Step 4: Register the Plugin
+Use `Executable: false` for flows that are documentation-only. These still appear on protocol pages but are hidden from the Looking Glass executor list.
 
-In `backend/cmd/server/main.go`:
+## 4. Demo scenarios
+
+Add a demo scenario with the same ID as the flow you want to execute:
 
 ```go
-import (
+plugin.DemoScenario{
+	ID:          "flow_id",
+	Name:        "Flow Demo",
+	Description: "Interactive demonstration",
+	Steps: []plugin.DemoStep{
+		{Order: 1, Name: "Start", Description: "Initialize", Auto: true},
+		{Order: 2, Name: "User Action", Description: "User interaction", Auto: false},
+	},
+}
+```
+
+## 5. Register the plugin
+
+Add the plugin in the correct entrypoint:
+
+- Monolith: `backend/cmd/server/main.go`
+- Split services: `backend/cmd/server-federation/main.go`, `server-scim`, `server-ssf`, `server-spiffe`, etc.
+
+If you create a new service, update docker compose and gateway routing as needed.
+
+## 6. Frontend wiring (minimum to appear in UI)
+
+Add the new protocol metadata (inside the object literal):
+
+1) `frontend/src/protocols/registry.ts`:
+
+```ts
+export const protocolMeta = {
+  // ...
+  newprotocol: {
+    icon: 'Shield',
+    color: 'orange',
+    gradient: 'from-orange-500 to-amber-500',
+    features: ['Key feature 1', 'Key feature 2', 'Key feature 3'],
+  },
+}
+```
+
+2) `frontend/src/lookingglass/registry.ts`:
+
+```ts
+const PROTOCOL_COLORS = {
+  // ...
+  newprotocol: 'orange',
+}
+
+const PROTOCOL_ICONS = {
+  // ...
+  newprotocol: 'shield',
+}
+```
+
+3) `frontend/src/pages/ProtocolDemo.tsx`:
+
+```ts
+const flowMeta = {
+  // ...
+  'flow_id': {
+    icon: Shield,
+    color: 'from-orange-500 to-amber-600',
+    features: ['Feature A', 'Feature B'],
+    recommended: true,
+  },
+}
+```
+Use the exact `flow.id` string from the backend, not the URL slug.
+
+4) `frontend/vite.config.ts` (dev only): add a proxy entry for the protocol base path so executors can call `/${protocolId}` locally.
+
+```ts
+server: {
+  proxy: {
     // ...
-    "github.com/security-showcase/protocol-showcase/internal/protocols/newprotocol"
-)
+    '/newprotocol': { target: 'http://localhost:8080', changeOrigin: true },
+  },
+},
+```
 
-func main() {
-    // ... existing code ...
-    
-    // Register new protocol plugin
-    newPlugin := newprotocol.NewPlugin()
-    if err := registry.Register(newPlugin); err != nil {
-        log.Fatalf("Failed to register new protocol: %v", err)
-    }
-    
-    // ... rest of main ...
+## 7. Optional: Looking Glass executor (for real execution)
+
+If your flow is executable, implement a flow executor.
+
+- `frontend/src/lookingglass/flows/newprotocol-flow.ts`
+- `frontend/src/lookingglass/flows/index.ts` (export it)
+- `frontend/src/lookingglass/flows/executor-factory.ts` (map the flow ID)
+
+Looking Glass normalizes flow IDs by replacing underscores with hyphens. Use the hyphenated ID in `FLOW_EXECUTOR_MAP` and add a snake_case alias if needed.
+
+Minimal skeleton:
+
+```ts
+export class NewProtocolExecutor extends FlowExecutorBase {
+  readonly flowType = 'newprotocol-flow'
+  readonly flowName = 'New Protocol Flow'
+  readonly rfcReference = 'RFC XXXX'
+
+  async execute(): Promise<void> {
+    this.updateState({ status: 'executing', currentStep: 'Starting' })
+    await this.makeRequest('GET', `${this.config.baseUrl}/endpoint`, {
+      step: 'Call endpoint',
+      rfcReference: this.rfcReference,
+    })
+    this.updateState({ status: 'completed', currentStep: 'Done' })
+  }
 }
 ```
 
-## Step 5: Create Frontend Components
 
-Create protocol-specific components:
+## Documentation
 
-```
-frontend/src/components/protocols/newprotocol/
-├── index.ts
-├── NewProtocolDemo.tsx
-└── NewProtocolInspector.tsx
-```
+Add `backend/internal/protocols/<id>/README.md`:
 
-Example component:
+- Supported flows
+- RFC/spec references
+- Any config knobs or special behavior
 
-```tsx
-// NewProtocolDemo.tsx
-import { motion } from 'framer-motion'
+## Acceptance criteria
 
-interface NewProtocolDemoProps {
-  flow: string
-  onComplete: () => void
-}
-
-export function NewProtocolDemo({ flow, onComplete }: NewProtocolDemoProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="space-y-4"
-    >
-      {/* Protocol-specific UI */}
-    </motion.div>
-  )
-}
-```
-
-## Step 6: Add to Protocol Demo Page
-
-Update `frontend/src/pages/ProtocolDemo.tsx` to handle the new protocol:
-
-```tsx
-// Import new protocol component
-import { NewProtocolDemo } from '../components/protocols/newprotocol'
-
-// In the component:
-{protocolId === 'newprotocol' && (
-  <NewProtocolDemo flow={flowId} onComplete={handleComplete} />
-)}
-```
-
-## Step 7: Define Flow Steps
-
-Flow steps are visualized in the UI. Define them thoroughly:
-
-```go
-Steps: []plugin.FlowStep{
-    {
-        Order:       1,
-        Name:        "Step Name",
-        Description: "What happens in this step",
-        From:        "Actor A",  // e.g., "Client", "Server"
-        To:          "Actor B",
-        Type:        "request",  // "request", "response", "internal"
-        Parameters: map[string]string{
-            "param1": "description",
-            "param2": "description",
-        },
-        Security: []string{
-            "Security consideration 1",
-            "Security consideration 2",
-        },
-    },
-    // More steps...
-}
-```
-
-## Step 8: Add Demo Scenarios
-
-Demo scenarios guide users through interactive demonstrations:
-
-```go
-Steps: []plugin.DemoStep{
-    {
-        Order:       1,
-        Name:        "Setup",
-        Description: "Configure initial state",
-        Auto:        true,  // Executes automatically
-    },
-    {
-        Order:       2,
-        Name:        "User Action",
-        Description: "User performs some action",
-        Auto:        false,  // Waits for user
-    },
-}
-```
-
-## Step 9: Looking Glass Integration
-
-Emit events for real-time visibility:
-
-```go
-// Get broadcaster for session
-broadcaster := p.lookingGlass.NewEventBroadcaster(sessionID)
-
-// Emit different event types
-broadcaster.EmitFlowStep(1, "Step Name", "Client", "Server", data)
-broadcaster.EmitTokenIssued("access_token", claims)
-broadcaster.EmitRequest("POST", "/endpoint", headers, body)
-broadcaster.EmitResponse(200, headers, body)
-
-// With security annotations
-broadcaster.Emit(
-    lookingglass.EventTypeSecurityInfo,
-    "Security Note",
-    data,
-    lookingglass.Annotation{
-        Type:        lookingglass.AnnotationTypeBestPractice,
-        Title:       "Best Practice",
-        Description: "Explanation",
-        Reference:   "RFC XXXX Section X",
-    },
-)
-```
-
-## Testing
-
-1. **Unit Tests**: Test protocol logic in isolation
-2. **Integration Tests**: Test HTTP endpoints
-3. **E2E Tests**: Test full flows through the UI
-
-## Example: SAML Plugin Skeleton
-
-```go
-package saml
-
-import (
-    "context"
-    "github.com/go-chi/chi/v5"
-    "github.com/security-showcase/protocol-showcase/internal/plugin"
-)
-
-type Plugin struct {
-    *plugin.BasePlugin
-}
-
-func NewPlugin() *Plugin {
-    return &Plugin{
-        BasePlugin: plugin.NewBasePlugin(plugin.PluginInfo{
-            ID:          "saml",
-            Name:        "SAML 2.0",
-            Version:     "1.0.0",
-            Description: "Security Assertion Markup Language 2.0",
-            Tags:        []string{"federation", "xml", "sso"},
-            RFCs:        []string{"SAML 2.0 Core", "SAML 2.0 Bindings"},
-        }),
-    }
-}
-
-func (p *Plugin) RegisterRoutes(router chi.Router) {
-    router.Get("/metadata", p.handleMetadata)
-    router.Get("/sso", p.handleSSOService)
-    router.Post("/acs", p.handleAssertionConsumer)
-}
-
-// ... implement remaining methods
-```
-
-## Best Practices
-
-1. **Follow RFC Specifications**: Implement protocols according to their specifications
-2. **Add Security Annotations**: Help users understand security implications
-3. **Include Error Handling**: Provide clear error messages
-4. **Document Flows**: Thorough flow definitions help visualization
-5. **Test Edge Cases**: Handle invalid inputs gracefully
-6. **Use Looking Glass Events**: Emit events for all significant actions
+- Real HTTP requests and real tokens (no placeholders)
+- Looking Glass shows request/response + semantic events
+- Flow definitions match the spec and contain RFC references
+- UI metadata added so the protocol and flows are discoverable
 

@@ -472,9 +472,9 @@ function FilterView({ filter }: FilterViewProps) {
       </div>
 
       <div className="text-xs text-slate-500 space-y-1">
-        <div><span className="text-amber-400">eq ne co sw ew gt lt ge le pr</span> — Comparison operators</div>
-        <div><span className="text-purple-400">and or not</span> — Logical operators</div>
-        <div><span className="text-green-400">"..."</span> — String values</div>
+        <div><span className="text-amber-400">eq ne co sw ew gt lt ge le pr</span> - Comparison operators</div>
+        <div><span className="text-purple-400">and or not</span> - Logical operators</div>
+        <div><span className="text-green-400">"..."</span> - String values</div>
       </div>
     </div>
   )

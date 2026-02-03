@@ -404,7 +404,7 @@ export function SSFSandbox() {
             </div>
           </div>
           <p className="text-surface-400 text-xs sm:text-base ml-10 sm:ml-[52px] leading-relaxed">
-            Execute SSF flows and inspect the traffic — your sandbox is isolated from other users
+            Execute SSF flows and inspect the traffic - your sandbox is isolated from other users
           </p>
         </div>
       </header>
