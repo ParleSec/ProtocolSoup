@@ -221,38 +221,39 @@ export function ProtocolDemo() {
         keywords={seoData.keywords}
         structuredData={structuredData}
       />
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8 px-1 sm:px-0">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-start sm:items-center gap-3 sm:gap-4">
         <Link
           to="/"
-          className="p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+          className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-white/10 transition-colors flex-shrink-0"
         >
-          <ArrowLeft className="w-5 h-5" />
+          <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
         </Link>
-        <div className="flex-1">
-          <h1 className="font-display text-3xl font-bold text-white flex items-center gap-3">
-            <ProtocolIcon className="w-8 h-8 text-accent-orange" />
-            {protocol.name}
+        <div className="flex-1 min-w-0">
+          <h1 className="font-display text-xl sm:text-3xl font-bold text-white flex items-center gap-2 sm:gap-3">
+            <ProtocolIcon className="w-6 h-6 sm:w-8 sm:h-8 text-accent-orange flex-shrink-0" />
+            <span className="truncate">{protocol.name}</span>
           </h1>
-          <p className="text-surface-400 mt-2 max-w-3xl">{protocol.description}</p>
+          <p className="text-surface-400 mt-1.5 sm:mt-2 max-w-3xl text-sm sm:text-base">{protocol.description}</p>
         </div>
       </div>
 
       {/* Quick Actions */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
         {recommendedFlow && (
           <Link
             to={`/protocol/${protocolId}/flow/${flowIdToSlug(recommendedFlow.id)}`}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-accent-orange to-accent-purple text-white font-medium hover:opacity-90 transition-opacity"
+            className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-accent-orange to-accent-purple text-white text-sm sm:text-base font-medium hover:opacity-90 transition-opacity"
           >
             <Zap className="w-4 h-4" />
-            Start with Recommended Flow
+            <span className="hidden sm:inline">Start with Recommended Flow</span>
+            <span className="sm:hidden">Recommended Flow</span>
           </Link>
         )}
         <Link
           to={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-medium hover:bg-white/10 transition-colors"
+          className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm sm:text-base font-medium hover:bg-white/10 transition-colors"
         >
           {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
           {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
@@ -261,10 +262,10 @@ export function ProtocolDemo() {
 
       {/* Flows Grid - Data from modular plugins */}
       <div>
-        <h2 className="font-display text-xl font-semibold text-white mb-4">
+        <h2 className="font-display text-lg sm:text-xl font-semibold text-white mb-3 sm:mb-4">
           Available Flows
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
           {flows.map((flow, idx) => {
             const meta = flowMeta[flow.id] || { 
               icon: Shield, 
@@ -282,21 +283,21 @@ export function ProtocolDemo() {
               >
                 <Link
                   to={`/protocol/${protocolId}/flow/${flowIdToSlug(flow.id)}`}
-                  className="block relative overflow-hidden rounded-2xl p-6 bg-surface-900/50 border border-white/5 hover:border-white/10 transition-all group hover:shadow-xl"
+                  className="block relative overflow-hidden rounded-xl sm:rounded-2xl p-4 sm:p-6 bg-surface-900/50 border border-white/5 hover:border-white/10 transition-all group hover:shadow-xl"
                 >
                   {/* Gradient accent */}
                   <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${meta.color}`} />
                   
 
-                  <div className="flex items-start gap-4">
-                    <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${meta.color} flex items-center justify-center shadow-lg`}>
-                      <FlowIcon className="w-7 h-7 text-white" />
+                  <div className="flex items-start gap-3 sm:gap-4">
+                    <div className={`w-10 h-10 sm:w-14 sm:h-14 rounded-lg sm:rounded-xl bg-gradient-to-br ${meta.color} flex items-center justify-center shadow-lg flex-shrink-0`}>
+                      <FlowIcon className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
                     </div>
-                    <div className="flex-1 min-w-0 pr-8">
-                      <h3 className="font-display text-lg font-semibold text-white group-hover:text-white transition-colors">
+                    <div className="flex-1 min-w-0 pr-6 sm:pr-8">
+                      <h3 className="font-display text-base sm:text-lg font-semibold text-white group-hover:text-white transition-colors">
                         {flow.name}
                       </h3>
-                      <p className="text-surface-400 text-sm mt-1 line-clamp-2">
+                      <p className="text-surface-400 text-xs sm:text-sm mt-1 line-clamp-2">
                         {flow.description}
                       </p>
                     </div>
@@ -304,11 +305,11 @@ export function ProtocolDemo() {
 
                   {/* Features */}
                   {meta.features.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-4">
+                    <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-3 sm:mt-4">
                       {meta.features.map(feature => (
                         <span 
                           key={feature}
-                          className="px-2.5 py-1 rounded-lg bg-white/5 text-xs text-surface-400"
+                          className="px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg bg-white/5 text-[10px] sm:text-xs text-surface-400"
                         >
                           {feature}
                         </span>
@@ -317,9 +318,9 @@ export function ProtocolDemo() {
                   )}
 
                   {/* Action hint */}
-                  <div className="flex items-center gap-1 mt-4 text-sm text-surface-400 group-hover:text-accent-orange transition-colors">
+                  <div className="flex items-center gap-1 mt-3 sm:mt-4 text-xs sm:text-sm text-surface-400 group-hover:text-accent-orange transition-colors">
                     <span>View flow diagram</span>
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                    <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 group-hover:translate-x-1 transition-transform" />
                   </div>
                 </Link>
               </motion.div>
@@ -329,11 +330,11 @@ export function ProtocolDemo() {
       </div>
 
       {/* Protocol Features - from modular meta */}
-      <div className="glass rounded-xl p-6">
-        <h2 className="font-display text-lg font-semibold text-white mb-4">
+      <div className="glass rounded-xl p-4 sm:p-6">
+        <h2 className="font-display text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
           {protocol.name} Features
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
           {meta.features.slice(0, 3).map((feature, i) => (
             <FeatureCard
               key={feature}
@@ -411,9 +412,9 @@ function FeatureCard({ title, description, color }: {
   }
 
   return (
-    <div className={`p-4 rounded-xl border ${colorClasses[color]}`}>
-      <h3 className="font-medium text-white mb-1">{title}</h3>
-      <p className="text-sm text-surface-400">{description}</p>
+    <div className={`p-3 sm:p-4 rounded-xl border ${colorClasses[color]}`}>
+      <h3 className="font-medium text-white mb-1 text-sm sm:text-base">{title}</h3>
+      <p className="text-xs sm:text-sm text-surface-400">{description}</p>
     </div>
   )
 }

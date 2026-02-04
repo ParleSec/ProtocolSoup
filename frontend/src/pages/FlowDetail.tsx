@@ -1215,10 +1215,20 @@ window.location.href = authUrl;`
         keywords={seoData.keywords}
         structuredData={structuredData}
       />
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6 px-1 sm:px-0">
       {/* Breadcrumb & Title */}
       <header>
-        <div className="flex items-center gap-2 text-sm text-surface-400 mb-2">
+        {/* Mobile breadcrumb - simplified */}
+        <nav className="sm:hidden text-xs text-surface-400 mb-3">
+          <Link to="/protocols" className="hover:text-white transition-colors">Protocols</Link>
+          <span className="mx-1.5">›</span>
+          <Link to={`/protocol/${protocolId}`} className="hover:text-white transition-colors">
+            {getProtocolName(protocolId)}
+          </Link>
+        </nav>
+        
+        {/* Desktop breadcrumb - full */}
+        <div className="hidden sm:flex items-center gap-2 text-sm text-surface-400 mb-2">
           <Link to="/protocols" className="hover:text-white transition-colors">Protocols</Link>
           <ChevronRight className="w-4 h-4" />
           <Link to={`/protocol/${protocolId}`} className="hover:text-white transition-colors">
@@ -1228,7 +1238,28 @@ window.location.href = authUrl;`
           <span className="text-surface-300">{flow.title}</span>
         </div>
         
-        <div className="flex items-start justify-between gap-4">
+        {/* Mobile layout - stacked */}
+        <div className="flex flex-col gap-3 sm:hidden">
+          <div>
+            <h1 className="text-xl font-semibold text-white mb-1.5">{flow.title}</h1>
+            <p className="text-sm text-surface-400">{flow.description}</p>
+          </div>
+          
+          <Link
+            to={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
+            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r ${
+              protocolId === 'ssf' 
+                ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
+                : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
+            } border text-sm font-medium transition-all w-full`}
+          >
+            {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
+          </Link>
+        </div>
+        
+        {/* Desktop layout - side by side */}
+        <div className="hidden sm:flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-white mb-2">{flow.title}</h1>
             <p className="text-surface-400">{flow.description}</p>
@@ -1249,11 +1280,11 @@ window.location.href = authUrl;`
 
         {/* Badges */}
         {badges.length > 0 && (
-          <div className="flex gap-2 mt-4">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-3 sm:mt-4">
             {badges.map(badge => (
               <span 
                 key={badge.label}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border
+                className={`inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-medium border
                   ${badge.color === 'green' ? 'bg-green-500/10 text-green-400 border-green-500/20' : ''}
                   ${badge.color === 'yellow' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : ''}
                   ${badge.color === 'blue' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : ''}
@@ -1262,7 +1293,7 @@ window.location.href = authUrl;`
                   ${badge.color === 'amber' ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : ''}
                 `}
               >
-                <badge.icon className="w-3 h-3" />
+                <badge.icon className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                 {badge.label}
               </span>
             ))}
@@ -1272,11 +1303,11 @@ window.location.href = authUrl;`
 
       {/* Sequence Diagram */}
       <section className="rounded-xl border border-white/10 bg-surface-900/30 overflow-hidden">
-        <div className="px-5 py-4 border-b border-white/10">
-          <h2 className="font-medium text-white">Sequence Diagram</h2>
-          <p className="text-sm text-surface-400 mt-1">Click any step for details</p>
+        <div className="px-3 sm:px-5 py-3 sm:py-4 border-b border-white/10">
+          <h2 className="font-medium text-white text-sm sm:text-base">Sequence Diagram</h2>
+          <p className="text-xs sm:text-sm text-surface-400 mt-0.5 sm:mt-1">Click any step for details</p>
         </div>
-        <div className="p-5">
+        <div className="p-3 sm:p-5">
           <FlowDiagram 
             steps={flow.steps}
             activeStep={activeStep}
@@ -1289,9 +1320,9 @@ window.location.href = authUrl;`
       <section className="rounded-xl border border-white/10 bg-surface-900/30 overflow-hidden">
         <button
           onClick={() => setShowCode(!showCode)}
-          className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
+          className="w-full px-3 sm:px-5 py-3 sm:py-4 flex items-center justify-between hover:bg-white/[0.02] transition-colors"
         >
-          <h2 className="font-medium text-white flex items-center gap-2">
+          <h2 className="font-medium text-white flex items-center gap-2 text-sm sm:text-base">
             <Code className="w-4 h-4 text-surface-400" />
             Implementation Example
           </h2>
@@ -1309,12 +1340,12 @@ window.location.href = authUrl;`
               <div className="relative border-t border-white/10">
                 <button
                   onClick={() => copyCode(getCodeExample())}
-                  className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
+                  className="absolute top-2 right-2 sm:top-3 sm:right-3 flex items-center gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5 rounded-lg text-xs text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
                 >
                   {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
                   {copied ? 'Copied!' : 'Copy'}
                 </button>
-                <pre className="p-5 overflow-x-auto text-sm">
+                <pre className="p-3 sm:p-5 overflow-x-auto text-xs sm:text-sm">
                   <code className="text-surface-300 font-mono leading-relaxed">{getCodeExample()}</code>
                 </pre>
               </div>
@@ -1325,11 +1356,11 @@ window.location.href = authUrl;`
 
       {/* Step-by-Step Breakdown */}
       <section className="rounded-xl border border-white/10 bg-surface-900/30 overflow-hidden">
-        <div className="px-5 py-4 border-b border-white/10">
-          <h2 className="font-medium text-white">Step-by-Step Breakdown</h2>
+        <div className="px-3 sm:px-5 py-3 sm:py-4 border-b border-white/10">
+          <h2 className="font-medium text-white text-sm sm:text-base">Step-by-Step Breakdown</h2>
         </div>
-        <div className="p-5">
-          <div className="space-y-3">
+        <div className="p-3 sm:p-5">
+          <div className="space-y-2 sm:space-y-3">
             {flow.steps.map((step, index) => (
               <StepRow
                 key={step.order}
@@ -1346,39 +1377,41 @@ window.location.href = authUrl;`
 
       {/* Token Inspector */}
       <section className="rounded-xl border border-white/10 bg-surface-900/30 overflow-hidden">
-        <div className="px-5 py-4 border-b border-white/10">
-          <h2 className="font-medium text-white flex items-center gap-2">
+        <div className="px-3 sm:px-5 py-3 sm:py-4 border-b border-white/10">
+          <h2 className="font-medium text-white flex items-center gap-2 text-sm sm:text-base">
             <Key className="w-4 h-4 text-amber-400" />
             Token Inspector
           </h2>
         </div>
-        <div className="p-5">
+        <div className="p-3 sm:p-5">
           <input
             type="text"
             value={token}
             onChange={(e) => setToken(e.target.value)}
             placeholder="Paste a JWT to decode..."
-            className="w-full px-4 py-2.5 rounded-lg bg-surface-900 border border-white/10 text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-cyan-500/50 mb-4"
+            className="w-full px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-cyan-500/50 mb-3 sm:mb-4"
           />
           {token && <TokenInspector token={token} />}
         </div>
       </section>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between pt-2">
+      <div className="flex items-center justify-between pt-2 pb-4 sm:pb-0">
         <Link
           to={`/protocols`}
-          className="flex items-center gap-2 text-sm text-surface-400 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" />
-          All Protocols
+          <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <span className="hidden sm:inline">All Protocols</span>
+          <span className="sm:hidden">Back</span>
         </Link>
         <Link
           to={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
-          className="flex items-center gap-2 text-sm text-surface-400 hover:text-white transition-colors"
+          className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
         >
-          {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
-          <ExternalLink className="w-4 h-4" />
+          <span className="hidden sm:inline">{protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}</span>
+          <span className="sm:hidden">{protocolId === 'ssf' ? 'SSF Sandbox' : 'Looking Glass'}</span>
+          <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </Link>
       </div>
     </div>
@@ -1408,7 +1441,7 @@ function StepRow({ step, index, isActive, isLast, onClick }: {
     <div className="relative">
       {/* Connector line */}
       {!isLast && (
-        <div className="absolute left-5 top-10 bottom-0 w-px bg-white/10" />
+        <div className="absolute left-4 sm:left-5 top-9 sm:top-10 bottom-0 w-px bg-white/10" />
       )}
       
       <motion.div
@@ -1422,25 +1455,25 @@ function StepRow({ step, index, isActive, isLast, onClick }: {
             : 'border-transparent hover:bg-white/[0.02] hover:border-white/10'
         }`}
       >
-        <div className="p-3 flex items-start gap-3">
+        <div className="p-2 sm:p-3 flex items-start gap-2 sm:gap-3">
           {/* Step number */}
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium flex-shrink-0 border ${config.color}`}>
+          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-medium flex-shrink-0 border ${config.color}`}>
             {step.order}
           </div>
           
           {/* Content */}
-          <div className="flex-1 min-w-0 pt-1">
-            <div className="flex items-center gap-2 mb-0.5">
-              <span className="font-medium text-white">{step.name}</span>
-              <TypeIcon className={`w-3.5 h-3.5 ${config.color.split(' ')[0]}`} />
+          <div className="flex-1 min-w-0 pt-0.5 sm:pt-1">
+            <div className="flex items-center gap-1.5 sm:gap-2 mb-0.5">
+              <span className="font-medium text-white text-sm sm:text-base truncate">{step.name}</span>
+              <TypeIcon className={`w-3 h-3 sm:w-3.5 sm:h-3.5 flex-shrink-0 ${config.color.split(' ')[0]}`} />
             </div>
-            <div className="text-sm text-surface-400">
+            <div className="text-xs sm:text-sm text-surface-400 truncate">
               {step.from} → {step.to}
             </div>
           </div>
 
           {/* Expand indicator */}
-          <ChevronDown className={`w-4 h-4 text-surface-400 transition-transform mt-2 ${isActive ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`w-4 h-4 text-surface-400 transition-transform mt-1 sm:mt-2 flex-shrink-0 ${isActive ? 'rotate-180' : ''}`} />
         </div>
 
         {/* Expanded content */}
@@ -1452,29 +1485,29 @@ function StepRow({ step, index, isActive, isLast, onClick }: {
               exit={{ height: 0, opacity: 0 }}
               className="overflow-hidden"
             >
-              <div className="px-3 pb-3 pt-1 ml-[52px] space-y-3">
-                <p className="text-sm text-surface-300">{step.description}</p>
+              <div className="px-2 sm:px-3 pb-2 sm:pb-3 pt-1 ml-10 sm:ml-[52px] space-y-2 sm:space-y-3">
+                <p className="text-xs sm:text-sm text-surface-300">{step.description}</p>
 
                 {step.parameters && Object.keys(step.parameters).length > 0 && (
-                  <div className="grid gap-1.5">
+                  <div className="grid gap-1 sm:gap-1.5">
                     {Object.entries(step.parameters).map(([key, value]) => (
-                      <div key={key} className="flex gap-3 text-sm">
-                        <code className="text-cyan-400 font-mono">{key}</code>
-                        <span className="text-surface-400">{value}</span>
+                      <div key={key} className="flex flex-col sm:flex-row sm:gap-3 text-xs sm:text-sm">
+                        <code className="text-cyan-400 font-mono break-all">{key}</code>
+                        <span className="text-surface-400 break-words">{value}</span>
                       </div>
                     ))}
                   </div>
                 )}
 
                 {step.security && step.security.length > 0 && (
-                  <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400 mb-2">
-                      <AlertTriangle className="w-3.5 h-3.5" />
+                  <div className="p-2 sm:p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400 mb-1.5 sm:mb-2">
+                      <AlertTriangle className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                       Security Note
                     </div>
                     <ul className="space-y-1">
                       {step.security.map((note, i) => (
-                        <li key={i} className="text-sm text-amber-200/80">• {note}</li>
+                        <li key={i} className="text-xs sm:text-sm text-amber-200/80">• {note}</li>
                       ))}
                     </ul>
                   </div>

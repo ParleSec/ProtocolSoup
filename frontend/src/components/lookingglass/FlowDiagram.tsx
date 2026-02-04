@@ -614,11 +614,11 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap items-center justify-center gap-6 text-xs text-surface-400 py-2">
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-6 text-[10px] sm:text-xs text-surface-400 py-2">
         {Object.entries(messageColors).map(([type, config]) => (
-          <div key={type} className="flex items-center gap-2">
+          <div key={type} className="flex items-center gap-1.5 sm:gap-2">
             <div 
-              className="w-8 h-0.5 rounded"
+              className="w-5 sm:w-8 h-0.5 rounded"
               style={{ backgroundColor: config.stroke, opacity: 0.8 }}
             />
             <span className="capitalize">{config.label}</span>
@@ -633,24 +633,24 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="relative rounded-xl border border-white/10 bg-surface-900/80 p-5"
+            className="relative rounded-xl border border-white/10 bg-surface-900/80 p-3 sm:p-5"
           >
             <button
               onClick={() => setSelectedStep(null)}
-              className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+              className="absolute top-2 right-2 sm:top-3 sm:right-3 p-1.5 rounded-lg hover:bg-white/5 transition-colors"
             >
               <X className="w-4 h-4 text-surface-400" />
             </button>
 
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-2.5 sm:gap-3 mb-3 sm:mb-4 pr-8">
               <div 
-                className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-sm text-white"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center font-bold text-xs sm:text-sm text-white flex-shrink-0"
                 style={{ backgroundColor: messageColors[selectedStepData.type]?.stroke || '#6366f1', opacity: 0.9 }}
               >
                 {selectedStepData.order}
               </div>
-              <div>
-                <h3 className="font-medium text-white">{selectedStepData.name}</h3>
+              <div className="min-w-0">
+                <h3 className="font-medium text-white text-sm sm:text-base truncate">{selectedStepData.name}</h3>
                 <p className="text-xs text-surface-400">
                   {actorConfig[selectedStepData.from]?.shortLabel || selectedStepData.from}
                   {' → '}
@@ -659,19 +659,19 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
               </div>
             </div>
 
-            <p className="text-sm text-surface-400 mb-4">{selectedStepData.description}</p>
+            <p className="text-xs sm:text-sm text-surface-400 mb-3 sm:mb-4">{selectedStepData.description}</p>
 
             {selectedStepData.parameters && Object.keys(selectedStepData.parameters).length > 0 && (
-              <div className="mb-4">
+              <div className="mb-3 sm:mb-4">
                 <h4 className="flex items-center gap-2 text-xs font-medium text-surface-400 uppercase tracking-wider mb-2">
                   <Key className="w-3 h-3" />
                   Parameters
                 </h4>
                 <div className="space-y-1.5">
                   {Object.entries(selectedStepData.parameters).map(([key, value]) => (
-                    <div key={key} className="flex gap-3 p-2 rounded-lg bg-surface-800/50 text-sm">
-                      <code className="text-cyan-400/80 font-mono text-xs">{key}</code>
-                      <span className="text-surface-400 text-xs">{value}</span>
+                    <div key={key} className="flex flex-col sm:flex-row sm:gap-3 p-2 rounded-lg bg-surface-800/50">
+                      <code className="text-cyan-400/80 font-mono text-xs break-all">{key}</code>
+                      <span className="text-surface-400 text-xs break-words">{value}</span>
                     </div>
                   ))}
                 </div>
