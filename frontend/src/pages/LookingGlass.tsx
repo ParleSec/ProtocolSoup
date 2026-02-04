@@ -83,6 +83,15 @@ export function LookingGlass() {
     [selectedFlow?.id]
   )
 
+  const showTLSContext = useMemo(() => {
+    const normalizedFlowId = flowId || ''
+    const protocolId = selectedProtocol?.id || ''
+    return normalizedFlowId.includes('mtls')
+      || normalizedFlowId.includes('certificate')
+      || protocolId === 'spiffe'
+      || (protocolId === 'oauth2' && normalizedFlowId === 'mtls-token-binding')
+  }, [flowId, selectedProtocol?.id])
+
   const isRefreshTokenFlow = flowId === 'refresh-token'
   const isTokenIntrospectionFlow = flowId === 'token-introspection'
   const isTokenRevocationFlow = flowId === 'token-revocation'
@@ -621,6 +630,7 @@ export function LookingGlass() {
               wireExchanges={wireExchanges}
               wireConnected={wireConnected}
               wireSessionError={wireSessionError}
+              showTLSContext={showTLSContext}
             />
           </div>
         </motion.section>

@@ -17,6 +17,7 @@ import {
   type LookingGlassConfig,
   type LookingGlassActor,
   type WireCapturedExchange,
+  type WireCertificateInfo,
 } from './types'
 
 /**
@@ -345,6 +346,38 @@ function normalizeWireTiming(raw: unknown): WireCapturedExchange['timing'] {
   }
 }
 
+function normalizeWireCertificate(raw: unknown): WireCertificateInfo | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+  const cert = raw as Record<string, unknown>
+  const subject = cert.subject ? String(cert.subject) : ''
+  const issuer = cert.issuer ? String(cert.issuer) : ''
+  const thumbprint = cert.thumbprint ? String(cert.thumbprint) : ''
+  if (!subject && !issuer && !thumbprint) {
+    return undefined
+  }
+  return {
+    subject,
+    issuer,
+    spiffeId: cert.spiffe_id ? String(cert.spiffe_id) : undefined,
+    thumbprint,
+    notBefore: cert.not_before ? String(cert.not_before) : '',
+    notAfter: cert.not_after ? String(cert.not_after) : '',
+    serialNumber: cert.serial_number ? String(cert.serial_number) : '',
+  }
+}
+
+function normalizeWireCertificateChain(raw: unknown): WireCertificateInfo[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined
+  }
+  const chain = raw
+    .map(item => normalizeWireCertificate(item))
+    .filter((item): item is WireCertificateInfo => Boolean(item))
+  return chain.length > 0 ? chain : undefined
+}
+
 function normalizeWireTLS(raw: unknown): WireCapturedExchange['tls'] | undefined {
   if (!raw || typeof raw !== 'object') {
     return undefined
@@ -358,6 +391,15 @@ function normalizeWireTLS(raw: unknown): WireCapturedExchange['tls'] | undefined
     peerCertSubjects: Array.isArray(tls.peer_cert_subjects)
       ? tls.peer_cert_subjects.map(item => String(item))
       : undefined,
+    clientCert: normalizeWireCertificate(tls.client_cert),
+    serverCert: normalizeWireCertificate(tls.server_cert),
+    clientChain: normalizeWireCertificateChain(tls.client_chain),
+    serverChain: normalizeWireCertificateChain(tls.server_chain),
+    mutualTLS: typeof tls.mutual_tls === 'boolean' ? tls.mutual_tls : undefined,
+    verifiedChainLength: typeof tls.verified_chain_length === 'number'
+      ? tls.verified_chain_length
+      : undefined,
+    source: tls.source ? String(tls.source) : undefined,
   }
 }
 

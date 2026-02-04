@@ -21,6 +21,7 @@ import type {
   DecodedToken 
 } from '../flows'
 import type { WireCapturedExchange } from '../types'
+import { TLSInspector } from '../../components/lookingglass/TLSInspector'
 
 // ============================================================================
 // Main Panel Component
@@ -47,6 +48,7 @@ interface RealFlowPanelProps {
   wireExchanges?: WireCapturedExchange[]
   wireConnected?: boolean
   wireSessionError?: string | null
+  showTLSContext?: boolean
 }
 
 export function RealFlowPanel({
@@ -61,6 +63,7 @@ export function RealFlowPanel({
   wireExchanges = [],
   wireConnected = false,
   wireSessionError = null,
+  showTLSContext = false,
 }: RealFlowPanelProps) {
   const [activeTab, setActiveTab] = useState<'events' | 'http' | 'wire' | 'tokens'>('events')
 
@@ -257,6 +260,7 @@ export function RealFlowPanel({
                 exchanges={wireExchanges}
                 connected={wireConnected}
                 error={wireSessionError}
+                showTLSContext={showTLSContext}
               />
             </motion.div>
           )}
@@ -497,10 +501,12 @@ function WireExchangesList({
   exchanges,
   connected,
   error,
+  showTLSContext,
 }: {
   exchanges: WireCapturedExchange[]
   connected: boolean
   error: string | null
+  showTLSContext: boolean
 }) {
   if (error) {
     return (
@@ -527,13 +533,13 @@ function WireExchangesList({
   return (
     <div className="space-y-3">
       {exchanges.map(exchange => (
-        <WireExchangeCard key={exchange.id} exchange={exchange} />
+        <WireExchangeCard key={exchange.id} exchange={exchange} showTLSContext={showTLSContext} />
       ))}
     </div>
   )
 }
 
-function WireExchangeCard({ exchange }: { exchange: WireCapturedExchange }) {
+function WireExchangeCard({ exchange, showTLSContext }: { exchange: WireCapturedExchange; showTLSContext: boolean }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const durationMs = Math.round((exchange.timing.durationMicro || 0) / 1000)
   const method = exchange.request.method || 'REQUEST'
@@ -592,6 +598,7 @@ function WireExchangeCard({ exchange }: { exchange: WireCapturedExchange }) {
             <div className="p-3 space-y-4">
               <WireRequestSection exchange={exchange} />
               <WireResponseSection exchange={exchange} />
+              {showTLSContext && exchange.tls && <TLSInspector exchange={exchange} />}
               <WireMetaSection exchange={exchange} />
             </div>
           </motion.div>
