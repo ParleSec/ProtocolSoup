@@ -3,7 +3,9 @@ package core
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"io"
 	"log"
@@ -194,6 +196,7 @@ type captureResponseWriter struct {
 	status      int
 	wroteHeader bool
 	capture     *bodyCapture
+	tlsOverride *lookingglass.TLSInfo
 }
 
 func newCaptureResponseWriter(w http.ResponseWriter, capture *bodyCapture) *captureResponseWriter {
@@ -253,6 +256,10 @@ func (w *captureResponseWriter) Push(target string, opts *http.PushOptions) erro
 
 func (w *captureResponseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+func (w *captureResponseWriter) SetTLSInfo(info *lookingglass.TLSInfo) {
+	w.tlsOverride = info
 }
 
 func CaptureMiddleware(lg *lookingglass.Engine) func(http.Handler) http.Handler {
@@ -321,6 +328,11 @@ func buildCapturedExchange(
 	responseBody := payloadFromCapture(responseCapture, w.Header().Get("Content-Type"))
 	responseRaw := rawPayload(buildRawResponse(r.Proto, status, statusText, responseHeaders, responseCapture), captureRawLimitBytes, w.Header().Get("Content-Type"))
 
+	tlsInfo := buildTLSInfo(r.TLS)
+	if tlsInfo == nil && w != nil && w.tlsOverride != nil {
+		tlsInfo = w.tlsOverride
+	}
+
 	return lookingglass.CapturedExchange{
 		ID:        uuid.NewString(),
 		SessionID: sessionID,
@@ -346,7 +358,7 @@ func buildCapturedExchange(
 			EndUnixMicro:   end.UnixMicro(),
 			DurationMicro:  end.Sub(start).Microseconds(),
 		},
-		TLS: buildTLSInfo(r.TLS),
+		TLS: tlsInfo,
 		Meta: lookingglass.CaptureMeta{
 			CaptureSource:            "middleware",
 			HeaderOrderPreserved:     false,
@@ -484,11 +496,70 @@ func buildTLSInfo(state *tls.ConnectionState) *lookingglass.TLSInfo {
 		}
 		peerCerts = append(peerCerts, cert.Subject.String())
 	}
+
+	verifiedChainLength := 0
+	chainCerts := state.PeerCertificates
+	if len(state.VerifiedChains) > 0 && len(state.VerifiedChains[0]) > 0 {
+		chainCerts = state.VerifiedChains[0]
+		verifiedChainLength = len(state.VerifiedChains[0])
+	}
+
+	var clientCert *lookingglass.CertificateInfo
+	clientChain := make([]lookingglass.CertificateInfo, 0, len(chainCerts))
+	for _, cert := range chainCerts {
+		info := certificateInfoFromX509(cert)
+		if info == nil {
+			continue
+		}
+		if clientCert == nil {
+			clientCert = info
+		}
+		clientChain = append(clientChain, *info)
+	}
+
 	return &lookingglass.TLSInfo{
-		Version:            version,
-		CipherSuite:        cipher,
-		ServerName:         state.ServerName,
-		NegotiatedProtocol: state.NegotiatedProtocol,
-		PeerCertificates:   peerCerts,
+		Version:             version,
+		CipherSuite:         cipher,
+		ServerName:          state.ServerName,
+		NegotiatedProtocol:  state.NegotiatedProtocol,
+		PeerCertificates:    peerCerts,
+		ClientCert:          clientCert,
+		ClientChain:         clientChain,
+		MutualTLS:           clientCert != nil,
+		VerifiedChainLength: verifiedChainLength,
+		Source:              "inbound",
+	}
+}
+
+func certificateInfoFromX509(cert *x509.Certificate) *lookingglass.CertificateInfo {
+	if cert == nil {
+		return nil
+	}
+
+	thumbprint := ""
+	if len(cert.Raw) > 0 {
+		sum := sha256.Sum256(cert.Raw)
+		thumbprint = base64.RawURLEncoding.EncodeToString(sum[:])
+	}
+
+	spiffeID := ""
+	for _, uri := range cert.URIs {
+		if uri == nil {
+			continue
+		}
+		if uri.Scheme == "spiffe" {
+			spiffeID = uri.String()
+			break
+		}
+	}
+
+	return &lookingglass.CertificateInfo{
+		Subject:      cert.Subject.String(),
+		Issuer:       cert.Issuer.String(),
+		SPIFFEID:     spiffeID,
+		Thumbprint:   thumbprint,
+		NotBefore:    cert.NotBefore,
+		NotAfter:     cert.NotAfter,
+		SerialNumber: cert.SerialNumber.String(),
 	}
 }

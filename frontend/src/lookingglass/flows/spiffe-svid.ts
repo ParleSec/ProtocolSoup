@@ -574,7 +574,7 @@ export class MTLSExecutor extends FlowExecutorBase {
       this.addEvent({
         type: 'crypto',
         title: 'Performing mTLS Call',
-        description: 'Making actual TLS connection to SPIRE Server using X.509-SVID',
+        description: 'Making actual TLS connection to SPIRE Server using X.509-SVID (handshake metadata returned by the demo call)',
         rfcReference: 'RFC 8446 Section 4.4.2',
       })
 

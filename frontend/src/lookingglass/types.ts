@@ -143,12 +143,29 @@ export interface WireExchangeTiming {
   durationMicro: number
 }
 
+export interface WireCertificateInfo {
+  subject: string
+  issuer: string
+  spiffeId?: string
+  thumbprint: string
+  notBefore: string
+  notAfter: string
+  serialNumber: string
+}
+
 export interface WireTLSInfo {
   version?: string
   cipherSuite?: string
   serverName?: string
   negotiatedProtocol?: string
   peerCertSubjects?: string[]
+  clientCert?: WireCertificateInfo
+  serverCert?: WireCertificateInfo
+  clientChain?: WireCertificateInfo[]
+  serverChain?: WireCertificateInfo[]
+  mutualTLS?: boolean
+  verifiedChainLength?: number
+  source?: string
 }
 
 export interface WireCaptureMeta {

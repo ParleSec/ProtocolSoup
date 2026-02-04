@@ -111,13 +111,31 @@ type ExchangeTiming struct {
 	DurationMicro  int64 `json:"duration_micro"`
 }
 
+// CertificateInfo captures parsed certificate metadata
+type CertificateInfo struct {
+	Subject      string    `json:"subject"`
+	Issuer       string    `json:"issuer"`
+	SPIFFEID     string    `json:"spiffe_id,omitempty"`
+	Thumbprint   string    `json:"thumbprint"`
+	NotBefore    time.Time `json:"not_before"`
+	NotAfter     time.Time `json:"not_after"`
+	SerialNumber string    `json:"serial_number"`
+}
+
 // TLSInfo captures TLS negotiation details when available
 type TLSInfo struct {
-	Version            string   `json:"version,omitempty"`
-	CipherSuite        string   `json:"cipher_suite,omitempty"`
-	ServerName         string   `json:"server_name,omitempty"`
-	NegotiatedProtocol string   `json:"negotiated_protocol,omitempty"`
-	PeerCertificates   []string `json:"peer_cert_subjects,omitempty"`
+	Version             string            `json:"version,omitempty"`
+	CipherSuite         string            `json:"cipher_suite,omitempty"`
+	ServerName          string            `json:"server_name,omitempty"`
+	NegotiatedProtocol  string            `json:"negotiated_protocol,omitempty"`
+	PeerCertificates    []string          `json:"peer_cert_subjects,omitempty"`
+	ClientCert          *CertificateInfo  `json:"client_cert,omitempty"`
+	ServerCert          *CertificateInfo  `json:"server_cert,omitempty"`
+	ClientChain         []CertificateInfo `json:"client_chain,omitempty"`
+	ServerChain         []CertificateInfo `json:"server_chain,omitempty"`
+	MutualTLS           bool              `json:"mutual_tls"`
+	VerifiedChainLength int               `json:"verified_chain_length"`
+	Source              string            `json:"source,omitempty"`
 }
 
 // CaptureMeta describes capture characteristics

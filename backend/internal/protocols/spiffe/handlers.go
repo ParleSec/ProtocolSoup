@@ -2,6 +2,8 @@ package spiffe
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -10,8 +12,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
 // StatusResponse represents the SPIFFE status
@@ -86,19 +91,19 @@ func (p *Plugin) handleTrustBundle(w http.ResponseWriter, r *http.Request) {
 
 // X509SVIDResponse represents X.509-SVID information
 type X509SVIDResponse struct {
-	SPIFFEID     string           `json:"spiffe_id"`
-	Certificate  string           `json:"certificate"`
-	Chain        []string         `json:"chain"`
-	NotBefore    time.Time        `json:"not_before"`
-	NotAfter     time.Time        `json:"not_after"`
-	SerialNumber string           `json:"serial_number"`
-	Issuer       string           `json:"issuer"`
-	Subject      string           `json:"subject"`
-	DNSNames     []string         `json:"dns_names,omitempty"`
-	URIs         []string         `json:"uris"`
-	PublicKey    PublicKeyInfo    `json:"public_key"`
-	Signature    SignatureInfo    `json:"signature"`
-	Extensions   []ExtensionInfo  `json:"extensions,omitempty"`
+	SPIFFEID     string          `json:"spiffe_id"`
+	Certificate  string          `json:"certificate"`
+	Chain        []string        `json:"chain"`
+	NotBefore    time.Time       `json:"not_before"`
+	NotAfter     time.Time       `json:"not_after"`
+	SerialNumber string          `json:"serial_number"`
+	Issuer       string          `json:"issuer"`
+	Subject      string          `json:"subject"`
+	DNSNames     []string        `json:"dns_names,omitempty"`
+	URIs         []string        `json:"uris"`
+	PublicKey    PublicKeyInfo   `json:"public_key"`
+	Signature    SignatureInfo   `json:"signature"`
+	Extensions   []ExtensionInfo `json:"extensions,omitempty"`
 }
 
 // PublicKeyInfo contains public key details
@@ -135,7 +140,7 @@ func (p *Plugin) handleX509SVID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cert := svid.Certificates[0]
-	
+
 	// Build chain
 	chain := make([]string, len(svid.Certificates))
 	for i, c := range svid.Certificates {
@@ -308,10 +313,10 @@ type ValidationRequest struct {
 
 // ValidationResponse represents validation results
 type ValidationResponse struct {
-	Valid     bool                   `json:"valid"`
-	SPIFFEID  string                 `json:"spiffe_id,omitempty"`
-	Details   map[string]interface{} `json:"details,omitempty"`
-	Error     string                 `json:"error,omitempty"`
+	Valid    bool                   `json:"valid"`
+	SPIFFEID string                 `json:"spiffe_id,omitempty"`
+	Details  map[string]interface{} `json:"details,omitempty"`
+	Error    string                 `json:"error,omitempty"`
 }
 
 // handleValidateJWT validates a JWT-SVID
@@ -552,10 +557,10 @@ func (p *Plugin) handleWorkloadInfo(w http.ResponseWriter, r *http.Request) {
 			"svid_rotation",
 		},
 		Metadata: map[string]interface{}{
-			"serial_number":    info.SerialNumber,
-			"issuer":           info.Issuer,
-			"signature_alg":    info.SignatureAlg,
-			"public_key_alg":   info.PublicKeyAlg,
+			"serial_number":  info.SerialNumber,
+			"issuer":         info.Issuer,
+			"signature_alg":  info.SignatureAlg,
+			"public_key_alg": info.PublicKeyAlg,
 		},
 	}
 
@@ -564,9 +569,9 @@ func (p *Plugin) handleWorkloadInfo(w http.ResponseWriter, r *http.Request) {
 
 // TrustBundleInfoResponse contains trust bundle details
 type TrustBundleInfoResponse struct {
-	TrustDomain  string            `json:"trust_domain"`
-	NumRoots     int               `json:"num_roots"`
-	Roots        []CertificateInfo `json:"roots"`
+	TrustDomain string            `json:"trust_domain"`
+	NumRoots    int               `json:"num_roots"`
+	Roots       []CertificateInfo `json:"roots"`
 }
 
 // CertificateInfo contains certificate summary
@@ -617,12 +622,12 @@ func (p *Plugin) handleTrustBundleInfo(w http.ResponseWriter, r *http.Request) {
 
 // MTLSDemoResponse represents mTLS demo results
 type MTLSDemoResponse struct {
-	Success       bool     `json:"success"`
-	ClientSPIFFE  string   `json:"client_spiffe_id"`
-	ServerSPIFFE  string   `json:"server_spiffe_id"`
-	TLSVersion    string   `json:"tls_version"`
-	CipherSuite   string   `json:"cipher_suite"`
-	Steps         []string `json:"steps"`
+	Success      bool     `json:"success"`
+	ClientSPIFFE string   `json:"client_spiffe_id"`
+	ServerSPIFFE string   `json:"server_spiffe_id"`
+	TLSVersion   string   `json:"tls_version"`
+	CipherSuite  string   `json:"cipher_suite"`
+	Steps        []string `json:"steps"`
 }
 
 // handleMTLSDemo returns information for mTLS demonstration
@@ -686,6 +691,13 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if result.TLSState != nil {
+		tlsInfo := buildOutboundTLSInfo(result.TLSState, result.ClientCerts)
+		if tlsInfo != nil {
+			setTLSInfo(w, tlsInfo)
+		}
+	}
+
 	// Return the full real mTLS result
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":            result.Success,
@@ -703,6 +715,124 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		"steps":              result.Steps,
 		"target":             targetAddr,
 	})
+}
+
+func buildOutboundTLSInfo(state *tls.ConnectionState, clientCerts []*x509.Certificate) *lookingglass.TLSInfo {
+	if state == nil {
+		return nil
+	}
+
+	version := tls.VersionName(state.Version)
+	if version == "" {
+		version = "0x" + strconv.FormatUint(uint64(state.Version), 16)
+	}
+	cipher := tls.CipherSuiteName(state.CipherSuite)
+	if cipher == "" {
+		cipher = "0x" + strconv.FormatUint(uint64(state.CipherSuite), 16)
+	}
+
+	peerCerts := make([]string, 0, len(state.PeerCertificates))
+	for _, cert := range state.PeerCertificates {
+		if cert == nil {
+			continue
+		}
+		peerCerts = append(peerCerts, cert.Subject.String())
+	}
+
+	verifiedChainLength := 0
+	serverChain := state.PeerCertificates
+	if len(state.VerifiedChains) > 0 && len(state.VerifiedChains[0]) > 0 {
+		serverChain = state.VerifiedChains[0]
+		verifiedChainLength = len(state.VerifiedChains[0])
+	}
+
+	var serverCert *lookingglass.CertificateInfo
+	serverChainInfo := make([]lookingglass.CertificateInfo, 0, len(serverChain))
+	for _, cert := range serverChain {
+		info := certificateInfoFromX509(cert)
+		if info == nil {
+			continue
+		}
+		if serverCert == nil {
+			serverCert = info
+		}
+		serverChainInfo = append(serverChainInfo, *info)
+	}
+
+	var clientCert *lookingglass.CertificateInfo
+	clientChainInfo := make([]lookingglass.CertificateInfo, 0, len(clientCerts))
+	for _, cert := range clientCerts {
+		info := certificateInfoFromX509(cert)
+		if info == nil {
+			continue
+		}
+		if clientCert == nil {
+			clientCert = info
+		}
+		clientChainInfo = append(clientChainInfo, *info)
+	}
+
+	return &lookingglass.TLSInfo{
+		Version:             version,
+		CipherSuite:         cipher,
+		ServerName:          state.ServerName,
+		NegotiatedProtocol:  state.NegotiatedProtocol,
+		PeerCertificates:    peerCerts,
+		ClientCert:          clientCert,
+		ServerCert:          serverCert,
+		ClientChain:         clientChainInfo,
+		ServerChain:         serverChainInfo,
+		MutualTLS:           clientCert != nil && serverCert != nil,
+		VerifiedChainLength: verifiedChainLength,
+		Source:              "outbound",
+	}
+}
+
+func certificateInfoFromX509(cert *x509.Certificate) *lookingglass.CertificateInfo {
+	if cert == nil {
+		return nil
+	}
+
+	thumbprint := ""
+	if len(cert.Raw) > 0 {
+		sum := sha256.Sum256(cert.Raw)
+		thumbprint = base64.RawURLEncoding.EncodeToString(sum[:])
+	}
+
+	spiffeID := ""
+	for _, uri := range cert.URIs {
+		if uri == nil {
+			continue
+		}
+		if uri.Scheme == "spiffe" {
+			spiffeID = uri.String()
+			break
+		}
+	}
+
+	return &lookingglass.CertificateInfo{
+		Subject:      cert.Subject.String(),
+		Issuer:       cert.Issuer.String(),
+		SPIFFEID:     spiffeID,
+		Thumbprint:   thumbprint,
+		NotBefore:    cert.NotBefore,
+		NotAfter:     cert.NotAfter,
+		SerialNumber: cert.SerialNumber.String(),
+	}
+}
+
+func setTLSInfo(w http.ResponseWriter, info *lookingglass.TLSInfo) {
+	for {
+		if setter, ok := w.(interface{ SetTLSInfo(*lookingglass.TLSInfo) }); ok {
+			setter.SetTLSInfo(info)
+			return
+		}
+		if unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter }); ok {
+			w = unwrapper.Unwrap()
+			continue
+		}
+		return
+	}
 }
 
 func defaultSpireServerAddress() string {

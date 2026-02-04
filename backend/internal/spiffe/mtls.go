@@ -300,20 +300,22 @@ func PeerSPIFFEID(state tls.ConnectionState, trustDomain spiffeid.TrustDomain) (
 
 // MTLSCallResult contains the results of a real mTLS call
 type MTLSCallResult struct {
-	Success          bool      `json:"success"`
-	ClientSPIFFEID   string    `json:"client_spiffe_id"`
-	ServerSPIFFEID   string    `json:"server_spiffe_id"`
-	TLSVersion       string    `json:"tls_version"`
-	CipherSuite      string    `json:"cipher_suite"`
-	ServerName       string    `json:"server_name"`
-	HandshakeTime    string    `json:"handshake_time"`
-	PeerCertSubject  string    `json:"peer_cert_subject"`
-	PeerCertIssuer   string    `json:"peer_cert_issuer"`
-	PeerCertExpiry   time.Time `json:"peer_cert_expiry"`
-	PeerCertSerial   string    `json:"peer_cert_serial"`
-	TrustChainLength int       `json:"trust_chain_length"`
-	Error            string    `json:"error,omitempty"`
-	Steps            []string  `json:"steps"`
+	Success          bool                 `json:"success"`
+	ClientSPIFFEID   string               `json:"client_spiffe_id"`
+	ServerSPIFFEID   string               `json:"server_spiffe_id"`
+	TLSVersion       string               `json:"tls_version"`
+	CipherSuite      string               `json:"cipher_suite"`
+	ServerName       string               `json:"server_name"`
+	HandshakeTime    string               `json:"handshake_time"`
+	PeerCertSubject  string               `json:"peer_cert_subject"`
+	PeerCertIssuer   string               `json:"peer_cert_issuer"`
+	PeerCertExpiry   time.Time            `json:"peer_cert_expiry"`
+	PeerCertSerial   string               `json:"peer_cert_serial"`
+	TrustChainLength int                  `json:"trust_chain_length"`
+	Error            string               `json:"error,omitempty"`
+	Steps            []string             `json:"steps"`
+	TLSState         *tls.ConnectionState `json:"-"`
+	ClientCerts      []*x509.Certificate  `json:"-"`
 }
 
 // PerformMTLSCall makes a real mTLS connection to a target endpoint
@@ -338,6 +340,7 @@ func (c *WorkloadClient) PerformMTLSCall(ctx context.Context, targetAddr string)
 	}
 	result.ClientSPIFFEID = svid.ID.String()
 	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Obtained X.509-SVID: %s", time.Now().Format("15:04:05.000"), svid.ID.String()))
+	result.ClientCerts = svid.Certificates
 
 	// Step 2: Get trust bundle for server verification
 	result.Steps = append(result.Steps, fmt.Sprintf("[%s] Fetching trust bundle for peer verification", time.Now().Format("15:04:05.000")))
@@ -380,6 +383,8 @@ func (c *WorkloadClient) PerformMTLSCall(ctx context.Context, targetAddr string)
 
 	// Step 5: Extract connection details
 	state := conn.ConnectionState()
+	stateCopy := state
+	result.TLSState = &stateCopy
 	result.TLSVersion = tlsVersionString(state.Version)
 	result.CipherSuite = tls.CipherSuiteName(state.CipherSuite)
 	result.ServerName = state.ServerName
