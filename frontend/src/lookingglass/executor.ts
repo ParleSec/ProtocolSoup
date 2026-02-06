@@ -366,16 +366,17 @@ export class FlowExecutor {
 
   private openAuthorizationPopup(authUrl: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      // Calculate popup position
-      const width = 600
-      const height = 700
-      const left = window.screenX + (window.outerWidth - width) / 2
-      const top = window.screenY + (window.outerHeight - height) / 2
+      // Calculate popup position - use full screen on mobile
+      const isMobile = window.innerWidth < 640
+      const width = isMobile ? window.screen.width : 600
+      const height = isMobile ? window.screen.height : 700
+      const left = isMobile ? 0 : window.screenX + (window.outerWidth - width) / 2
+      const top = isMobile ? 0 : window.screenY + (window.outerHeight - height) / 2
 
       const popup = window.open(
         authUrl,
         'oauth_popup',
-        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes`
+        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
       )
 
       if (!popup) {

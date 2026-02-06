@@ -830,6 +830,7 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
 <html>
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Login - OpenID Connect</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -841,16 +842,21 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
             align-items: center;
             justify-content: center;
             color: #e4e4e7;
+            padding: 16px;
         }
         .container {
             background: rgba(255, 255, 255, 0.03);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 16px;
-            padding: 40px;
+            padding: 28px;
             width: 100%;
             max-width: 420px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        @media (min-width: 480px) {
+            body { padding: 0; }
+            .container { padding: 40px; }
         }
         .logo {
             text-align: center;
