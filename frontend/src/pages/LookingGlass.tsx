@@ -71,12 +71,15 @@ export function LookingGlass() {
     }
   }, [selectedProtocol?.id, scimBearerToken])
 
-  const scopes = useMemo(() => 
-    selectedProtocol?.id === 'oidc' 
+  const scopes = useMemo(() => {
+    // Client credentials flow uses machine-client scopes (api:read, api:write)
+    if (selectedFlow?.id?.toLowerCase().replace(/_/g, '-') === 'client-credentials') {
+      return ['api:read', 'api:write']
+    }
+    return selectedProtocol?.id === 'oidc' 
       ? ['openid', 'profile', 'email'] 
-      : ['profile', 'email'],
-    [selectedProtocol?.id]
-  )
+      : ['profile', 'email']
+  }, [selectedProtocol?.id, selectedFlow?.id])
 
   const flowId = useMemo(() => 
     selectedFlow?.id?.toLowerCase().replace(/_/g, '-'),
