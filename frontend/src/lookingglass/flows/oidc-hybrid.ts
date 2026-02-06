@@ -162,7 +162,9 @@ export class OIDCHybridExecutor extends FlowExecutorBase {
     if (this.flowConfig.responseType.includes('id_token')) {
       tokens.push('id_token')
     }
-    if (this.flowConfig.responseType.includes('token')) {
+    // Check for standalone "token" (access_token), not "id_token" which also contains "token"
+    // For hybrid types, ' token' (space-prefixed) appears in 'code token' and 'code id_token token'
+    if (this.flowConfig.responseType.includes(' token')) {
       tokens.push('access_token')
     }
     return tokens
@@ -336,9 +338,11 @@ export class OIDCHybridExecutor extends FlowExecutorBase {
       this.addEvent({
         type: 'error',
         title: 'c_hash Mismatch',
-        description: 'Authorization code may have been tampered with',
-        rfcReference: 'OIDC Core 1.0 Section 3.3.2.11',
+        description: 'Authorization code may have been tampered with — aborting flow per OIDC Core 1.0 Section 3.3.2.12',
+        rfcReference: 'OIDC Core 1.0 Section 3.3.2.12',
       })
+      // OIDC Core 1.0 Section 3.3.2.12: "If the c_hash is not correct, the RP MUST abort."
+      throw new Error('c_hash validation failed — authorization code may have been tampered with (OIDC Core 1.0 Section 3.3.2.12)')
     }
   }
 
@@ -378,8 +382,11 @@ export class OIDCHybridExecutor extends FlowExecutorBase {
       this.addEvent({
         type: 'error',
         title: 'at_hash Mismatch',
-        description: 'Access token may have been tampered with',
+        description: 'Access token may have been tampered with — aborting flow per OIDC Core 1.0 Section 3.3.2.12',
+        rfcReference: 'OIDC Core 1.0 Section 3.3.2.12',
       })
+      // OIDC Core 1.0 Section 3.3.2.12: hash validation failure means RP MUST abort
+      throw new Error('at_hash validation failed — access token may have been tampered with (OIDC Core 1.0 Section 3.3.2.12)')
     }
   }
 
@@ -397,10 +404,22 @@ export class OIDCHybridExecutor extends FlowExecutorBase {
       const decoded = this.decodeJwt(response.id_token, 'id_token')
       decodedTokens.push(decoded)
 
+      // OIDC Core 1.0 Section 3.3.2.12: Validate ID token claims including nonce
+      if (!decoded.isValid && decoded.validationErrors?.length) {
+        this.addEvent({
+          type: 'error',
+          title: 'ID Token Validation Failed',
+          description: `Validation errors: ${decoded.validationErrors.join(', ')}`,
+          rfcReference: 'OIDC Core 1.0 Section 3.3.2.12',
+        })
+        // Per OIDC Core 1.0 Section 3.3.2.12: nonce must match, token must be valid
+        throw new Error(`ID token validation failed: ${decoded.validationErrors.join(', ')} (OIDC Core 1.0 Section 3.3.2.12)`)
+      }
+
       this.addEvent({
         type: 'token',
         title: 'ID Token from Authorization Endpoint',
-        description: 'Received before token exchange',
+        description: 'Received and validated before token exchange',
         rfcReference: 'OIDC Core 1.0 Section 3.3.2.11',
       })
     }

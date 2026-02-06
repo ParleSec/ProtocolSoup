@@ -176,20 +176,12 @@ function extractCallbackData(
     }
   }
 
-  // Authorization code in query string
-  if (query.code) {
+  // Hybrid Flow detection — MUST come before pure authorization_code check.
+  // Per OIDC Core 1.0 Section 3.3.2.5, all hybrid response params go in the fragment
+  // (code + tokens together). Check for code + tokens in fragment first.
+  if (fragment.code && (fragment.access_token || fragment.id_token)) {
     return {
-      type: 'authorization_code',
-      code: query.code,
-      state: query.state,
-    }
-  }
-
-  // Implicit or Hybrid: tokens in fragment
-  if (fragment.access_token || fragment.id_token) {
-    const hasCode = !!fragment.code
-    return {
-      type: hasCode ? 'hybrid' : 'implicit',
+      type: 'hybrid',
       code: fragment.code,
       access_token: fragment.access_token,
       id_token: fragment.id_token,
@@ -199,7 +191,41 @@ function extractCallbackData(
     }
   }
 
-  // Hybrid with just code in fragment
+  // Hybrid: code in query + tokens in fragment (non-spec-compliant servers)
+  if (query.code && (fragment.access_token || fragment.id_token)) {
+    return {
+      type: 'hybrid',
+      code: query.code,
+      access_token: fragment.access_token,
+      id_token: fragment.id_token,
+      token_type: fragment.token_type,
+      expires_in: fragment.expires_in ? parseInt(fragment.expires_in, 10) : undefined,
+      state: query.state || fragment.state,
+    }
+  }
+
+  // Pure Authorization Code Flow — code in query string, no fragment tokens
+  if (query.code) {
+    return {
+      type: 'authorization_code',
+      code: query.code,
+      state: query.state,
+    }
+  }
+
+  // Implicit Flow: tokens in fragment without code
+  if (fragment.access_token || fragment.id_token) {
+    return {
+      type: 'implicit',
+      access_token: fragment.access_token,
+      id_token: fragment.id_token,
+      token_type: fragment.token_type,
+      expires_in: fragment.expires_in ? parseInt(fragment.expires_in, 10) : undefined,
+      state: fragment.state,
+    }
+  }
+
+  // Hybrid with just code in fragment (e.g. response_type="code" with response_mode="fragment")
   if (fragment.code) {
     return {
       type: 'hybrid',

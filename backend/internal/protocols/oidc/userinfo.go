@@ -343,16 +343,12 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		redirectURL.RawQuery = q.Encode()
 	} else if hasCode {
-		// Hybrid Flow - code in query string, tokens in fragment (per OIDC Core 1.0 Section 3.3)
-		q := redirectURL.Query()
-		q.Set("code", authorizationCode)
-		if state != "" {
-			q.Set("state", state)
-		}
-		redirectURL.RawQuery = q.Encode()
-
-		// Tokens go in fragment for hybrid flow
+		// Hybrid Flow - ALL response parameters in fragment per OIDC Core 1.0 Section 3.3.2.5:
+		// "When using the Hybrid Flow, the Authentication Response is returned from the
+		// Authorization Endpoint with the response parameters added to the fragment
+		// component of the Redirection URI."
 		fragment := url.Values{}
+		fragment.Set("code", authorizationCode)
 		if accessToken != "" {
 			fragment.Set("access_token", accessToken)
 			fragment.Set("token_type", "Bearer")
@@ -361,9 +357,10 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		if idToken != "" {
 			fragment.Set("id_token", idToken)
 		}
-		if len(fragment) > 0 {
-			redirectURL.Fragment = fragment.Encode()
+		if state != "" {
+			fragment.Set("state", state)
 		}
+		redirectURL.Fragment = fragment.Encode()
 	} else {
 		// Implicit Flow - everything in fragment (per OIDC Core 1.0 Section 3.2)
 		fragment := url.Values{}

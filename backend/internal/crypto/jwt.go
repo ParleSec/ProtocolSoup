@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -153,17 +154,13 @@ func computeHashClaim(value string, alg string) string {
 		hashBytes = hash[:]
 		leftBits = 16 // 128 bits = 16 bytes
 	case "RS384", "ES384":
-		// For SHA-384, we'd need crypto/sha512.Sum384
-		// For now, fall back to SHA-256 approach
-		hash := sha256.Sum256([]byte(value))
+		hash := sha512.Sum384([]byte(value))
 		hashBytes = hash[:]
-		leftBits = 16
+		leftBits = 24 // 192 bits = 24 bytes
 	case "RS512", "ES512":
-		// For SHA-512, we'd need crypto/sha512.Sum512
-		// For now, fall back to SHA-256 approach
-		hash := sha256.Sum256([]byte(value))
+		hash := sha512.Sum512([]byte(value))
 		hashBytes = hash[:]
-		leftBits = 16
+		leftBits = 32 // 256 bits = 32 bytes
 	default:
 		// Default to SHA-256
 		hash := sha256.Sum256([]byte(value))
