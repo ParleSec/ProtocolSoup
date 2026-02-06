@@ -126,7 +126,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       rfcReference: 'RFC 6749 Section 4.4.2',
       data: {
         grant_type: 'client_credentials',
-        authentication: 'client_id + client_secret',
+        authentication: 'HTTP Basic (client_id:client_secret)',
       },
     })
 
@@ -136,8 +136,6 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
 
     const body: Record<string, string> = {
       grant_type: 'client_credentials',
-      client_id: this.config.clientId,
-      client_secret: this.flowConfig.clientSecret,
     }
 
     // Add scope if specified
@@ -145,14 +143,18 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       body.scope = this.config.scopes.join(' ')
     }
 
+    // RFC 6749 Section 2.3.1: "Clients in possession of a client password MAY use the
+    // HTTP Basic authentication scheme." POST body credentials "is NOT RECOMMENDED and
+    // SHOULD be limited to clients unable to directly utilize the HTTP Basic
+    // authentication scheme."
     this.addEvent({
       type: 'security',
       title: 'Client Authentication',
-      description: 'Sending client credentials (client_id + client_secret)',
+      description: 'Sending client credentials via HTTP Basic Authentication (RECOMMENDED per RFC 6749 Section 2.3.1)',
       rfcReference: 'RFC 6749 Section 2.3.1',
       data: {
-        method: 'POST body (application/x-www-form-urlencoded)',
-        note: 'Alternatively could use HTTP Basic Auth',
+        method: 'HTTP Basic (Authorization header)',
+        note: 'POST body credentials are NOT RECOMMENDED per RFC 6749 Section 2.3.1',
       },
     })
 
@@ -160,6 +162,9 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       'POST',
       `${this.config.baseUrl}/token`,
       {
+        headers: {
+          'Authorization': `Basic ${btoa(`${this.config.clientId}:${this.flowConfig.clientSecret}`)}`,
+        },
         body,
         step: 'Token Request (Client Credentials)',
         rfcReference: 'RFC 6749 Section 4.4.2',

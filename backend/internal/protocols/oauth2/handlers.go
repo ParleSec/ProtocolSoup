@@ -640,19 +640,45 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 }
 
 func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
-	clientID := r.FormValue("client_id")
-	clientSecret := r.FormValue("client_secret")
 	scope := r.FormValue("scope")
 
-	// Try to get client credentials from Authorization header
-	if clientID == "" {
-		clientID, clientSecret, _ = r.BasicAuth()
+	// Determine client authentication method
+	// RFC 6749 Section 2.3.1: "The client MUST NOT use more than one authentication method
+	// in each request."
+	postClientID := r.FormValue("client_id")
+	postClientSecret := r.FormValue("client_secret")
+	basicClientID, basicClientSecret, hasBasicAuth := r.BasicAuth()
+	hasPostAuth := postClientSecret != ""
+
+	// Reject requests using multiple authentication methods (RFC 6749 Section 2.3.1)
+	if hasBasicAuth && hasPostAuth {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Dual Authentication Methods Rejected", map[string]interface{}{
+			"error":  "invalid_request",
+			"detail": "Client sent both Authorization header and POST body credentials",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Multiple Auth Methods Rejected",
+			Description: "A client MUST NOT use more than one authentication method in each request.",
+			Reference:   "RFC 6749 Section 2.3.1",
+		})
+		writeOAuth2Error(w, "invalid_request",
+			"A client MUST NOT use more than one authentication method in each request (RFC 6749 Section 2.3.1)", "")
+		return
 	}
+
+	// Resolve credentials from the single authentication method used
+	var clientID, clientSecret string
 	clientAuthMethod := "none"
-	if _, _, ok := r.BasicAuth(); ok {
+	if hasBasicAuth {
+		clientID = basicClientID
+		clientSecret = basicClientSecret
 		clientAuthMethod = "basic"
-	} else if clientSecret != "" {
+	} else if hasPostAuth {
+		clientID = postClientID
+		clientSecret = postClientSecret
 		clientAuthMethod = "post"
+	} else {
+		clientID = postClientID
 	}
 
 	// Emit client credentials request
@@ -680,7 +706,16 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 			"error":              "invalid_credentials",
 			"client_auth_method": clientAuthMethod,
 		})
-		writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
+		// RFC 6749 Section 5.2: "If the client attempted to authenticate via the
+		// 'Authorization' request header field, the authorization server MUST respond
+		// with an HTTP 401 (Unauthorized) status code and include the
+		// 'WWW-Authenticate' response header field."
+		if hasBasicAuth {
+			w.Header().Set("WWW-Authenticate", `Basic realm="oauth2"`)
+			writeOAuth2ErrorStatus(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", "")
+		} else {
+			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
+		}
 		return
 	}
 
@@ -707,6 +742,55 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Validate requested scopes against client's registered scopes (RFC 6749 Section 3.3)
+	// "If the client omits the scope parameter when requesting authorization, the
+	// authorization server MUST either process the request using a pre-defined default
+	// value, or fail the request indicating an invalid scope."
+	requestedScopes := strings.Fields(scope)
+	if len(requestedScopes) > 0 {
+		allowedScopes := make(map[string]bool)
+		for _, s := range client.Scopes {
+			allowedScopes[s] = true
+		}
+		var grantedScopes []string
+		for _, s := range requestedScopes {
+			if allowedScopes[s] {
+				grantedScopes = append(grantedScopes, s)
+			}
+		}
+		if len(grantedScopes) == 0 {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Scope", map[string]interface{}{
+				"requested_scopes": requestedScopes,
+				"allowed_scopes":   client.Scopes,
+			})
+			writeOAuth2Error(w, "invalid_scope", "None of the requested scopes are permitted for this client", "")
+			return
+		}
+		if len(grantedScopes) < len(requestedScopes) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Scope Narrowed", map[string]interface{}{
+				"requested_scopes": requestedScopes,
+				"granted_scopes":   grantedScopes,
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "Scope Narrowing",
+				Description: "The authorization server reduced the granted scopes to only those the client is permitted to use.",
+				Reference:   "RFC 6749 Section 3.3",
+			})
+		}
+		scope = strings.Join(grantedScopes, " ")
+	} else {
+		// No scope requested — use client's registered scopes as default (RFC 6749 Section 3.3)
+		scope = strings.Join(client.Scopes, " ")
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Default Scope Applied", map[string]interface{}{
+			"default_scopes": client.Scopes,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeExplanation,
+			Title:       "Default Scope",
+			Description: "No scope requested; using client's registered scopes as default.",
+			Reference:   "RFC 6749 Section 3.3",
+		})
+	}
+
 	// Issue access token (no refresh token for client credentials)
 	jwtService := p.mockIdP.JWTService()
 	accessToken, err := jwtService.CreateAccessToken(
@@ -722,7 +806,8 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
 			"error": err.Error(),
 		})
-		writeOAuth2Error(w, "server_error", "Failed to create access token", "")
+		// server_error is an internal failure, not a client error — use HTTP 500
+		writeOAuth2ErrorStatus(w, http.StatusInternalServerError, "server_error", "Failed to create access token", "")
 		return
 	}
 
@@ -1080,6 +1165,24 @@ func writeOAuth2ErrorWithURI(w http.ResponseWriter, errorCode, description, stat
 		response["state"] = state
 	}
 	writeJSON(w, http.StatusBadRequest, response)
+}
+
+// writeOAuth2ErrorStatus writes an OAuth2-compliant error response with a specific HTTP status code.
+// Use this instead of writeOAuth2Error when the error requires a non-400 status:
+//   - 401 for invalid_client when Authorization header was used (RFC 6749 Section 5.2)
+//   - 500 for server_error (internal failures, not client errors)
+func writeOAuth2ErrorStatus(w http.ResponseWriter, status int, errorCode, description, state string) {
+	response := map[string]string{
+		"error":             errorCode,
+		"error_description": description,
+	}
+	if defaultURI, exists := oauth2ErrorURIs[errorCode]; exists {
+		response["error_uri"] = defaultURI
+	}
+	if state != "" {
+		response["state"] = state
+	}
+	writeJSON(w, status, response)
 }
 
 func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
