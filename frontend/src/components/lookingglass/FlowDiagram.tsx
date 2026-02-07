@@ -4,6 +4,96 @@ import {
   User, Globe, Shield, Database, Key, X, Users
 } from 'lucide-react'
 
+// Native SVG icon paths for reliable rendering inside SVG (no foreignObject needed)
+// Each renders centered at (0,0) within a given size
+function SvgActorIcon({ type, cx, cy, size, color }: { 
+  type: React.ElementType; cx: number; cy: number; size: number; color: string 
+}) {
+  const s = size / 2 // half-size for centering
+  const opacity = 0.8
+  const sw = size * 0.08 // stroke width proportional to size
+
+  // Globe icon
+  if (type === Globe) {
+    return (
+      <g transform={`translate(${cx},${cy})`} opacity={opacity}>
+        <circle cx={0} cy={0} r={s * 0.85} fill="none" stroke={color} strokeWidth={sw} />
+        <ellipse cx={0} cy={0} rx={s * 0.4} ry={s * 0.85} fill="none" stroke={color} strokeWidth={sw * 0.7} />
+        <line x1={-s * 0.85} y1={0} x2={s * 0.85} y2={0} stroke={color} strokeWidth={sw * 0.7} />
+      </g>
+    )
+  }
+
+  // Shield icon
+  if (type === Shield) {
+    return (
+      <g transform={`translate(${cx},${cy})`} opacity={opacity}>
+        <path
+          d={`M 0 ${-s * 0.9} L ${s * 0.75} ${-s * 0.45} L ${s * 0.75} ${s * 0.2} Q ${s * 0.6} ${s * 0.75} 0 ${s * 0.95} Q ${-s * 0.6} ${s * 0.75} ${-s * 0.75} ${s * 0.2} L ${-s * 0.75} ${-s * 0.45} Z`}
+          fill="none" stroke={color} strokeWidth={sw} strokeLinejoin="round"
+        />
+      </g>
+    )
+  }
+
+  // User icon
+  if (type === User) {
+    return (
+      <g transform={`translate(${cx},${cy})`} opacity={opacity}>
+        <circle cx={0} cy={-s * 0.3} r={s * 0.35} fill="none" stroke={color} strokeWidth={sw} />
+        <path
+          d={`M ${-s * 0.65} ${s * 0.9} Q ${-s * 0.65} ${s * 0.15} 0 ${s * 0.15} Q ${s * 0.65} ${s * 0.15} ${s * 0.65} ${s * 0.9}`}
+          fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round"
+        />
+      </g>
+    )
+  }
+
+  // Database icon
+  if (type === Database) {
+    const ry = s * 0.25
+    const top = -s * 0.7
+    const bot = s * 0.7
+    return (
+      <g transform={`translate(${cx},${cy})`} opacity={opacity}>
+        <ellipse cx={0} cy={top} rx={s * 0.7} ry={ry} fill="none" stroke={color} strokeWidth={sw} />
+        <line x1={-s * 0.7} y1={top} x2={-s * 0.7} y2={bot} stroke={color} strokeWidth={sw} />
+        <line x1={s * 0.7} y1={top} x2={s * 0.7} y2={bot} stroke={color} strokeWidth={sw} />
+        <path d={`M ${-s * 0.7} ${bot} Q ${-s * 0.7} ${bot + ry} 0 ${bot + ry} Q ${s * 0.7} ${bot + ry} ${s * 0.7} ${bot}`} fill="none" stroke={color} strokeWidth={sw} />
+      </g>
+    )
+  }
+
+  // Key icon
+  if (type === Key) {
+    return (
+      <g transform={`translate(${cx},${cy})`} opacity={opacity}>
+        <circle cx={-s * 0.3} cy={0} r={s * 0.4} fill="none" stroke={color} strokeWidth={sw} />
+        <line x1={s * 0.1} y1={0} x2={s * 0.85} y2={0} stroke={color} strokeWidth={sw} />
+        <line x1={s * 0.6} y1={0} x2={s * 0.6} y2={s * 0.3} stroke={color} strokeWidth={sw} />
+        <line x1={s * 0.8} y1={0} x2={s * 0.8} y2={s * 0.25} stroke={color} strokeWidth={sw} />
+      </g>
+    )
+  }
+
+  // Users icon
+  if (type === Users) {
+    return (
+      <g transform={`translate(${cx},${cy})`} opacity={opacity}>
+        <circle cx={-s * 0.2} cy={-s * 0.35} r={s * 0.28} fill="none" stroke={color} strokeWidth={sw} />
+        <path d={`M ${-s * 0.7} ${s * 0.8} Q ${-s * 0.7} ${s * 0.1} ${-s * 0.2} ${s * 0.1} Q ${s * 0.15} ${s * 0.1} ${s * 0.2} ${s * 0.5}`} fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" />
+        <circle cx={s * 0.35} cy={-s * 0.25} r={s * 0.24} fill="none" stroke={color} strokeWidth={sw} />
+        <path d={`M ${s * 0.0} ${s * 0.85} Q ${s * 0.05} ${s * 0.25} ${s * 0.35} ${s * 0.2} Q ${s * 0.7} ${s * 0.2} ${s * 0.8} ${s * 0.7}`} fill="none" stroke={color} strokeWidth={sw} strokeLinecap="round" />
+      </g>
+    )
+  }
+
+  // Fallback: simple circle
+  return (
+    <circle cx={cx} cy={cy} r={s * 0.6} fill="none" stroke={color} strokeWidth={sw} opacity={opacity} />
+  )
+}
+
 interface FlowStep {
   order: number
   name: string
@@ -385,13 +475,14 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
     onStepClick?.(newSelection ?? -1)
   }
 
-  // Calculate dimensions - larger for better visibility
-  const actorWidth = 120
-  const leftPadding = 60  // Extra space for step numbers
-  const rightPadding = 40
-  const actorSpacing = 180
-  const headerHeight = 100
-  const rowHeight = 70
+  // Calculate dimensions - responsive for mobile
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640
+  const actorWidth = isMobile ? 90 : 120
+  const leftPadding = isMobile ? 40 : 60  // Extra space for step numbers
+  const rightPadding = isMobile ? 20 : 40
+  const actorSpacing = isMobile ? 130 : 180
+  const headerHeight = isMobile ? 85 : 100
+  const rowHeight = isMobile ? 60 : 70
 
   // Get actor center X position
   const getActorCenterX = (actorName: string) => {
@@ -410,12 +501,12 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
   return (
     <div className="space-y-4">
       {/* Sequence Diagram */}
-      <div className="relative overflow-auto">
+      <div className="relative overflow-x-auto overflow-y-hidden scrollbar-hide">
         <svg 
           viewBox={`0 0 ${totalWidth} ${diagramHeight}`}
           className="w-full"
-          style={{ minWidth: 500, maxWidth: Math.max(totalWidth + 40, 800), height: maxHeight, margin: '0 auto', display: 'block' }}
-          preserveAspectRatio="xMidYMin meet"
+          style={{ minWidth: Math.min(totalWidth, 420), maxWidth: Math.max(totalWidth + 40, 800), height: maxHeight, margin: '0 auto', display: 'block' }}
+          preserveAspectRatio="xMinYMin meet"
         >
           <defs>
             {/* Arrow markers */}
@@ -456,8 +547,11 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
           {actors.map((actorName) => {
             const actor = actorConfig[actorName]
             const centerX = getActorCenterX(actorName)
-            const Icon = actor.icon
-            
+            const boxHeight = isMobile ? 55 : 65
+            const fontSize = isMobile ? 11 : 13
+            const iconSize = isMobile ? 16 : 20
+            const iconCY = 12 + (boxHeight - (isMobile ? 18 : 22)) / 2
+
             return (
               <g key={actorName}>
                 {/* Actor box */}
@@ -465,26 +559,28 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
                   x={centerX - actorWidth / 2}
                   y={12}
                   width={actorWidth}
-                  height={65}
+                  height={boxHeight}
                   rx="8"
                   fill="#111827"
                   stroke={actor.color}
                   strokeWidth="1.5"
                   opacity="0.9"
                 />
-                {/* Icon */}
-                <foreignObject x={centerX - 12} y={22} width="24" height="24">
-                  <div className="flex items-center justify-center w-full h-full">
-                    <Icon className="w-5 h-5" style={{ color: actor.color, opacity: 0.8 }} />
-                  </div>
-                </foreignObject>
+                {/* Icon - native SVG, no foreignObject */}
+                <SvgActorIcon
+                  type={actor.icon}
+                  cx={centerX}
+                  cy={iconCY}
+                  size={iconSize}
+                  color={actor.color}
+                />
                 {/* Label */}
                 <text
                   x={centerX}
-                  y={68}
+                  y={isMobile ? 58 : 68}
                   textAnchor="middle"
                   fill={actor.color}
-                  fontSize="13"
+                  fontSize={fontSize}
                   fontWeight="500"
                   opacity="0.9"
                 >
@@ -534,9 +630,9 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
 
                 {/* Step number */}
                 <circle
-                  cx={30}
+                  cx={isMobile ? 20 : 30}
                   cy={y}
-                  r="14"
+                  r={isMobile ? 12 : 14}
                   fill={highlight ? msgColor.stroke : "#1f2937"}
                   fillOpacity={highlight ? 0.9 : 1}
                   stroke={msgColor.stroke}
@@ -544,11 +640,11 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
                   strokeOpacity={highlight ? 1 : 0.5}
                 />
                 <text
-                  x={30}
+                  x={isMobile ? 20 : 30}
                   y={y + 4}
                   textAnchor="middle"
                   fill={highlight ? "#fff" : "#9ca3af"}
-                  fontSize="11"
+                  fontSize={isMobile ? "10" : "11"}
                   fontWeight="600"
                 >
                   {step.order}
@@ -559,9 +655,9 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
                   <g>
                     <path
                       d={`M ${fromX + 5} ${y - 6}
-                          Q ${fromX + 40} ${y - 6},
-                            ${fromX + 40} ${y}
-                          Q ${fromX + 40} ${y + 6},
+                          Q ${fromX + (isMobile ? 30 : 40)} ${y - 6},
+                            ${fromX + (isMobile ? 30 : 40)} ${y}
+                          Q ${fromX + (isMobile ? 30 : 40)} ${y + 6},
                             ${fromX + 5} ${y + 6}`}
                       fill="none"
                       stroke={msgColor.stroke}
@@ -570,10 +666,10 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
                       markerEnd={`url(#arrow-${step.type})`}
                     />
                     <text
-                      x={fromX + 55}
+                      x={fromX + (isMobile ? 40 : 55)}
                       y={y + 4}
                       fill={highlight ? "#f3f4f6" : "#9ca3af"}
-                      fontSize="12"
+                      fontSize={isMobile ? "10" : "12"}
                       fontWeight={highlight ? "500" : "400"}
                     >
                       {step.name}
@@ -596,10 +692,10 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
                     {/* Message label */}
                     <text
                       x={(fromX + toX) / 2}
-                      y={y - 12}
+                      y={y - (isMobile ? 10 : 12)}
                       textAnchor="middle"
                       fill={highlight ? "#f3f4f6" : "#9ca3af"}
-                      fontSize="12"
+                      fontSize={isMobile ? "10" : "12"}
                       fontWeight={highlight ? "500" : "400"}
                     >
                       {step.name}
