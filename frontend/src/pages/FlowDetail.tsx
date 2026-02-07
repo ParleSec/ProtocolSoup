@@ -15,6 +15,11 @@ import { getFlowSEO } from '../config/seo'
 import { generateFlowPageSchema } from '../utils/schema'
 import { SITE_CONFIG } from '../config/seo'
 
+const FLOW_ALIASES: Record<string, Record<string, string>> = {
+  oidc: { hybrid: 'oidc_hybrid', userinfo: 'oidc_userinfo', discovery: 'oidc_discovery' },
+  scim: { 'group-management': 'group-membership', 'filter-queries': 'user-discovery' },
+}
+
 export function FlowDetail() {
   const { protocolId, flowId } = useParams()
   const [activeStep, setActiveStep] = useState<number>(-1)
@@ -23,12 +28,6 @@ export function FlowDetail() {
   const [showCode, setShowCode] = useState(false)
 
   const { flows, loading, error } = useProtocolFlows(protocolId)
-
-  // Alias map: URL slug → backend flow ID (for cases where they don't match via simple normalization)
-  const FLOW_ALIASES: Record<string, Record<string, string>> = {
-    oidc: { hybrid: 'oidc_hybrid', userinfo: 'oidc_userinfo', discovery: 'oidc_discovery' },
-    scim: { 'group-management': 'group-membership', 'filter-queries': 'user-discovery' },
-  }
 
   const mappedFlowId = useMemo(() => {
     if (!flowId) return ''
