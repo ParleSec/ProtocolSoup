@@ -15,6 +15,11 @@ import { getFlowSEO } from '../config/seo'
 import { generateFlowPageSchema } from '../utils/schema'
 import { SITE_CONFIG } from '../config/seo'
 
+const FLOW_ALIASES: Record<string, Record<string, string>> = {
+  oidc: { hybrid: 'oidc_hybrid', userinfo: 'oidc_userinfo', discovery: 'oidc_discovery' },
+  scim: { 'group-management': 'group-membership', 'filter-queries': 'user-discovery' },
+}
+
 export function FlowDetail() {
   const { protocolId, flowId } = useParams()
   const [activeStep, setActiveStep] = useState<number>(-1)
@@ -23,16 +28,20 @@ export function FlowDetail() {
   const [showCode, setShowCode] = useState(false)
 
   const { flows, loading, error } = useProtocolFlows(protocolId)
+
   const mappedFlowId = useMemo(() => {
     if (!flowId) return ''
     const normalized = flowId.replace(/-/g, '_')
+    // Check alias map first
+    const aliased = protocolId ? FLOW_ALIASES[protocolId]?.[flowId] : undefined
     const match = flows.find(f =>
       f.id === flowId ||
       f.id === normalized ||
-      f.id.replace(/_/g, '-') === flowId
+      f.id.replace(/_/g, '-') === flowId ||
+      (aliased && f.id === aliased)
     )
-    return match?.id || normalized || flowId
-  }, [flowId, flows])
+    return match?.id || aliased || normalized || flowId
+  }, [flowId, flows, protocolId])
 
   const flow = useMemo(() => {
     if (!mappedFlowId) return null
