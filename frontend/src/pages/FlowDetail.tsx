@@ -23,16 +23,26 @@ export function FlowDetail() {
   const [showCode, setShowCode] = useState(false)
 
   const { flows, loading, error } = useProtocolFlows(protocolId)
+
+  // Alias map: URL slug → backend flow ID (for cases where they don't match via simple normalization)
+  const FLOW_ALIASES: Record<string, Record<string, string>> = {
+    oidc: { hybrid: 'oidc_hybrid', userinfo: 'oidc_userinfo', discovery: 'oidc_discovery' },
+    scim: { 'group-management': 'group-membership', 'filter-queries': 'user-discovery' },
+  }
+
   const mappedFlowId = useMemo(() => {
     if (!flowId) return ''
     const normalized = flowId.replace(/-/g, '_')
+    // Check alias map first
+    const aliased = protocolId ? FLOW_ALIASES[protocolId]?.[flowId] : undefined
     const match = flows.find(f =>
       f.id === flowId ||
       f.id === normalized ||
-      f.id.replace(/_/g, '-') === flowId
+      f.id.replace(/_/g, '-') === flowId ||
+      (aliased && f.id === aliased)
     )
-    return match?.id || normalized || flowId
-  }, [flowId, flows])
+    return match?.id || aliased || normalized || flowId
+  }, [flowId, flows, protocolId])
 
   const flow = useMemo(() => {
     if (!mappedFlowId) return null
