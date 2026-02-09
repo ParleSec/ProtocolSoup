@@ -293,8 +293,8 @@ type SecurityEvent struct {
 	Audience       []string          `json:"audience"`
 	TransactionID  string            `json:"txn,omitempty"`
 
-	// Session isolation - used to namespace state changes per user session
-	SessionID string `json:"ssf_session_id,omitempty"`
+	// Session isolation - used to namespace state changes per user session (internal, not a SET claim)
+	SessionID string `json:"session_id,omitempty"`
 
 	// Event-specific data
 	Reason           string      `json:"reason,omitempty"`

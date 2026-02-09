@@ -263,9 +263,15 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 		r.actionExecutor.InitSessionUserStates(sessionID)
 	}
 
+	// Extract subject email (guard against nil Subject for verification events)
+	var subjectEmail string
+	if decoded.Subject != nil {
+		subjectEmail = decoded.Subject.Email
+	}
+
 	// Execute response actions for each event
 	for _, event := range decoded.Events {
-		r.executeResponseActions(ctx, jti, event, decoded.Subject.Email, sessionID)
+		r.executeResponseActions(ctx, jti, event, subjectEmail, sessionID)
 	}
 
 	processedAt := time.Now()

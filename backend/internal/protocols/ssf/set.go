@@ -9,20 +9,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// SET represents a Security Event Token per RFC 8417
-type SET struct {
-	// Standard JWT claims
-	Issuer    string   `json:"iss"`
-	IssuedAt  int64    `json:"iat"`
-	JTI       string   `json:"jti"`
-	Audience  []string `json:"aud"`
-	
-	// SET-specific claims
-	Subject   *SETSubject            `json:"sub_id,omitempty"`
-	Events    map[string]interface{} `json:"events"`
-	TransactionID string             `json:"txn,omitempty"`
-}
-
 // SETSubject represents the subject identifier in a SET
 type SETSubject struct {
 	Format      string `json:"format"`

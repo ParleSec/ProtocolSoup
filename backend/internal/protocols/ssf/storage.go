@@ -150,7 +150,7 @@ type Stream struct {
 	ID               string    `json:"stream_id"`
 	Issuer           string    `json:"iss"`
 	Audience         []string  `json:"aud"`
-	EventsSupported  []string  `json:"events_supported"`
+	EventsSupported  []string  `json:"events_delivered"`
 	EventsRequested  []string  `json:"events_requested"`
 	DeliveryMethod   string    `json:"delivery_method"`
 	DeliveryEndpoint string    `json:"delivery_endpoint_url,omitempty"`

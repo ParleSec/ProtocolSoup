@@ -334,18 +334,15 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	
 	log.Printf("[SSF Receiver] SET signature verified successfully")
 	
-	// Extract claims and process
+	// Build structured DecodedSET directly from the verified token's claims
+	// instead of re-parsing via DecodeWithoutValidation (which would be a redundant third parse).
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	if !ok {
 		return SetStatus{Status: "failed", Description: "Invalid claims format"}
 	}
-	
-	// Decode the SET for processing
-	decoded, err := DecodeWithoutValidation(setToken)
-	if err != nil {
-		return SetStatus{Status: "failed", Description: "Failed to decode SET"}
-	}
-	
+
+	decoded := buildDecodedSETFromClaims(claims, parsedToken.Header, setToken)
+
 	// Extract JTI from the decoded token
 	jti := decoded.JTI
 	log.Printf("[SSF Receiver] Processing SET: %s", jti)
@@ -373,12 +370,10 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		ProcessedAt:    &processedAt,
 	})
 	
-	// Extract subject email
+	// Extract subject email from the decoded SET
 	var subjectEmail string
-	if subID, ok := claims["sub_id"].(map[string]interface{}); ok {
-		if email, ok := subID["email"].(string); ok {
-			subjectEmail = email
-		}
+	if decoded.Subject != nil {
+		subjectEmail = decoded.Subject.Email
 	}
 
 	// Session ID comes from X-SSF-Session delivery header (not the SET)
@@ -527,6 +522,88 @@ func (rs *ReceiverService) GetReceivedEvents() []ReceivedEvent {
 		result[len(rs.receivedEvents)-1-i] = e
 	}
 	return result
+}
+
+// buildDecodedSETFromClaims constructs a DecodedSET from already-verified jwt.MapClaims,
+// avoiding a redundant re-parse of the raw token string.
+func buildDecodedSETFromClaims(claims jwt.MapClaims, header map[string]interface{}, rawToken string) *DecodedSET {
+	decoded := &DecodedSET{
+		RawToken: rawToken,
+		Header:   header,
+		Events:   []DecodedEvent{},
+	}
+
+	if jti, ok := claims["jti"].(string); ok {
+		decoded.JTI = jti
+	}
+	if iss, ok := claims["iss"].(string); ok {
+		decoded.Issuer = iss
+	}
+	if aud, ok := claims["aud"].([]interface{}); ok {
+		for _, a := range aud {
+			if s, ok := a.(string); ok {
+				decoded.Audience = append(decoded.Audience, s)
+			}
+		}
+	} else if aud, ok := claims["aud"].(string); ok {
+		decoded.Audience = []string{aud}
+	}
+	if iat, ok := claims["iat"].(float64); ok {
+		decoded.IssuedAt = time.Unix(int64(iat), 0)
+	}
+	if txn, ok := claims["txn"].(string); ok {
+		decoded.TransactionID = txn
+	}
+
+	// Parse sub_id
+	if subID, ok := claims["sub_id"].(map[string]interface{}); ok {
+		subject := &SETSubject{}
+		if f, ok := subID["format"].(string); ok {
+			subject.Format = f
+		}
+		if e, ok := subID["email"].(string); ok {
+			subject.Email = e
+		}
+		if p, ok := subID["phone_number"].(string); ok {
+			subject.PhoneNumber = p
+		}
+		if i, ok := subID["iss"].(string); ok {
+			subject.Issuer = i
+		}
+		if s, ok := subID["sub"].(string); ok {
+			subject.Subject = s
+		}
+		if id, ok := subID["id"].(string); ok {
+			subject.ID = id
+		}
+		if u, ok := subID["uri"].(string); ok {
+			subject.URI = u
+		}
+		decoded.Subject = subject
+	}
+
+	// Parse events
+	if events, ok := claims["events"].(map[string]interface{}); ok {
+		for eventType, payload := range events {
+			payloadBytes, err := json.Marshal(payload)
+			if err != nil {
+				continue
+			}
+			var eventPayload EventPayload
+			if err := json.Unmarshal(payloadBytes, &eventPayload); err != nil {
+				continue
+			}
+			metadata := GetEventMetadata(eventType)
+			decoded.Events = append(decoded.Events, DecodedEvent{
+				Type:       eventType,
+				Metadata:   metadata,
+				Payload:    eventPayload,
+				RawPayload: payload,
+			})
+		}
+	}
+
+	return decoded
 }
 
 // GetResponseActions returns the response actions (for backward compat)

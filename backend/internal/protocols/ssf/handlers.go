@@ -925,7 +925,7 @@ func (p *Plugin) handleReceiverStatus(w http.ResponseWriter, r *http.Request) {
 		"port":             p.receiverPort,
 		"endpoint":         fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort),
 		"transmitter_url":  p.baseURL,
-		"bearer_token":     p.receiverToken[:10] + "...", // Partial for security
+		"bearer_token":     "configured", // Never expose token material, even partially
 		"events_received":  len(p.receiverService.GetReceivedEvents()),
 		"actions_executed": len(p.receiverService.GetResponseActions()),
 	}
