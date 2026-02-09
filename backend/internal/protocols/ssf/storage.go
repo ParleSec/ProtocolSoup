@@ -153,10 +153,10 @@ type Stream struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// Delivery method constants
+// Delivery method constants per RFC 8935/8936
 const (
-	DeliveryMethodPush = "https://schemas.openid.net/secevent/risc/delivery-method/push"
-	DeliveryMethodPoll = "https://schemas.openid.net/secevent/risc/delivery-method/poll"
+	DeliveryMethodPush = "urn:ietf:rfc:8935"
+	DeliveryMethodPoll = "urn:ietf:rfc:8936"
 )
 
 // Stream status constants

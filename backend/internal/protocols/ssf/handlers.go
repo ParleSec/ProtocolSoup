@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -53,11 +54,12 @@ func (p *Plugin) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
-// handleSSFConfiguration returns the SSF transmitter metadata
+// handleSSFConfiguration returns the SSF transmitter metadata per OpenID SSF 1.0 §3.1
 func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) {
 	config := map[string]interface{}{
-		"issuer":   p.baseURL,
-		"jwks_uri": p.baseURL + "/ssf/jwks",
+		"spec_version": "1_0-ID3",
+		"issuer":       p.baseURL,
+		"jwks_uri":     p.baseURL + "/ssf/jwks",
 		"delivery_methods_supported": []string{
 			DeliveryMethodPush,
 			DeliveryMethodPoll,
@@ -65,8 +67,7 @@ func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) 
 		"configuration_endpoint":   p.baseURL + "/ssf/stream",
 		"add_subject_endpoint":     p.baseURL + "/ssf/subjects",
 		"remove_subject_endpoint":  p.baseURL + "/ssf/subjects",
-		"verification_endpoint":    p.baseURL + "/ssf/verify",
-		"status_endpoint":          p.baseURL + "/ssf/status",
+		"events_supported":         GetSupportedEventURIs(),
 		"critical_subject_members": []string{SubjectFormatEmail, SubjectFormatIssuerSub},
 	}
 	writeJSON(w, http.StatusOK, config)
@@ -118,7 +119,16 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
@@ -331,7 +341,11 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if credType == "" {
 			credType = CredentialTypePassword
 		}
-		event, err = p.transmitter.TriggerCredentialChangeWithSession(r.Context(), stream.ID, sessionID, subject, credType, initiator)
+		changeType := req.ChangeType
+		if changeType == "" {
+			changeType = "update" // CAEP §3.2 default
+		}
+		event, err = p.transmitter.TriggerCredentialChangeWithSession(r.Context(), stream.ID, sessionID, subject, credType, changeType, initiator)
 
 	case "device-compliance-change":
 		current := req.CurrentStatus
@@ -422,6 +436,7 @@ type ActionRequest struct {
 	Reason            string `json:"reason,omitempty"`
 	Initiator         string `json:"initiator,omitempty"`
 	CredentialType    string `json:"credential_type,omitempty"`
+	ChangeType        string `json:"change_type,omitempty"` // CAEP §3.2: create | revoke | update
 	CurrentStatus     string `json:"current_status,omitempty"`
 	PreviousStatus    string `json:"previous_status,omitempty"`
 	NewValue          string `json:"new_value,omitempty"`
@@ -444,7 +459,9 @@ type ActionResponse struct {
 // Event Delivery
 // ====================
 
-// handlePush handles push delivery (webhook endpoint)
+// handlePush handles push delivery per RFC 8935 §2.
+// The request body is the raw compact-serialized SET with Content-Type: application/secevent+jwt.
+// On success returns 202 Accepted with an empty body.
 func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -452,13 +469,15 @@ func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := p.receiver.ProcessPushDelivery(r.Context(), body)
+	setToken := string(body)
+	status, err := p.receiver.ProcessPushDelivery(r.Context(), setToken)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, status.Description)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	// RFC 8935 §2.2: 202 Accepted on success
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // handlePoll handles poll requests
@@ -779,42 +798,7 @@ func (p *Plugin) handleResetSecurityState(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, state)
 }
 
-// decodeURLParam decodes URL-encoded parameters
+// decodeURLParam decodes URL-encoded parameters using the standard library
 func decodeURLParam(s string) (string, error) {
-	// Simple URL decoding for common characters
-	result := s
-	replacements := map[string]string{
-		"%40": "@",
-		"%2F": "/",
-		"%3A": ":",
-		"%2B": "+",
-		"%20": " ",
-		"%3D": "=",
-		"%26": "&",
-		"%3F": "?",
-	}
-	for encoded, decoded := range replacements {
-		result = stringReplaceAll(result, encoded, decoded)
-	}
-	return result, nil
-}
-
-func stringReplaceAll(s, old, new string) string {
-	for {
-		idx := stringIndex(s, old)
-		if idx < 0 {
-			break
-		}
-		s = s[:idx] + new + s[idx+len(old):]
-	}
-	return s
-}
-
-func stringIndex(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
+	return url.QueryUnescape(s)
 }

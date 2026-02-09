@@ -296,12 +296,17 @@ type SecurityEvent struct {
 	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
 	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
 
-	// For credential events
+	// For credential events (CAEP §3.2)
 	CredentialType string `json:"credential_type,omitempty"`
+	ChangeType     string `json:"change_type,omitempty"` // create | revoke | update (REQUIRED by CAEP §3.2)
 
-	// For compliance events
+	// For compliance/status events
 	CurrentStatus  string `json:"current_status,omitempty"`
 	PreviousStatus string `json:"previous_status,omitempty"`
+
+	// For assurance level change events (CAEP §3.3 -- distinct field names from status)
+	CurrentLevel  string `json:"current_level,omitempty"`
+	PreviousLevel string `json:"previous_level,omitempty"`
 
 	// For identifier events
 	NewValue string `json:"new_value,omitempty"`
@@ -321,14 +326,18 @@ const (
 	InitiatingEntitySystem = "system"
 )
 
-// CredentialType constants
+// CredentialType constants per CAEP §3.2
 const (
-	CredentialTypePassword = "password"
-	CredentialTypePIN      = "pin"
-	CredentialTypeX509     = "x509"
-	CredentialTypeFIDO2    = "fido2-platform"
-	CredentialTypeOTP      = "otp"
-	CredentialTypeOAuth    = "oauth_token"
+	CredentialTypePassword             = "password"
+	CredentialTypePIN                  = "pin"
+	CredentialTypeX509                 = "x509"
+	CredentialTypeFIDO2Platform        = "fido2-platform"
+	CredentialTypeFIDO2Roaming         = "fido2-roaming"
+	CredentialTypeFIDOU2F              = "fido-u2f"
+	CredentialTypeVerifiableCredential = "verifiable-credential"
+	CredentialTypePhoneVoice           = "phone-voice"
+	CredentialTypePhoneSMS             = "phone-sms"
+	CredentialTypeApp                  = "app"
 )
 
 // ComplianceStatus constants

@@ -3,8 +3,9 @@ package ssf
 import (
 	"context"
 	"crypto/rsa"
-	"encoding/json"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -126,25 +127,16 @@ func (r *Receiver) broadcast(event ReceiverEvent) {
 	}
 }
 
-// ProcessPushDelivery handles events delivered via push (webhook)
-func (r *Receiver) ProcessPushDelivery(ctx context.Context, body []byte) (*PushResponse, error) {
-	// Parse the push request
-	var pushReq PushRequest
-	if err := json.Unmarshal(body, &pushReq); err != nil {
-		return nil, fmt.Errorf("invalid push request format: %w", err)
+// ProcessPushDelivery handles a single SET delivered via push per RFC 8935 §2.
+// The body is the raw compact-serialized SET (not JSON-wrapped).
+func (r *Receiver) ProcessPushDelivery(ctx context.Context, setToken string) (SetStatus, error) {
+	if setToken == "" {
+		return SetStatus{Status: "failed", Description: "Empty SET token"}, fmt.Errorf("empty SET token")
 	}
 
-	response := &PushResponse{
-		Sets: make(map[string]SetStatus),
-	}
-
-	// Process each SET
-	for jti, setToken := range pushReq.Sets {
-		status := r.processSET(ctx, jti, setToken, "push")
-		response.Sets[jti] = status
-	}
-
-	return response, nil
+	// Use the token itself as a preliminary ID; the real JTI is inside the JWT
+	status := r.processSET(ctx, "", setToken, "push")
+	return status, nil
 }
 
 // ProcessPollResponse handles events retrieved via poll
@@ -159,7 +151,9 @@ func (r *Receiver) ProcessPollResponse(ctx context.Context, sets map[string]stri
 	return statuses
 }
 
-// processSET processes a single SET token
+// processSET processes a single SET token.
+// For push delivery (RFC 8935), jti may be empty and is extracted from the decoded token.
+// For poll delivery (RFC 8936), jti is provided from the poll response map key.
 func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod string) SetStatus {
 	now := time.Now()
 
@@ -177,6 +171,11 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 	// Decode and verify the SET
 	decoded, err := r.decoder.Decode(setToken)
 
+	// For push delivery the JTI comes from the decoded token itself
+	if decoded != nil && decoded.JTI != "" {
+		jti = decoded.JTI
+	}
+
 	received := ReceivedEvent{
 		ID:             jti,
 		ReceivedAt:     now,
@@ -189,6 +188,10 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 
 		// Try decoding without validation for display
 		unverified, _ := DecodeWithoutValidation(setToken)
+		if unverified != nil && unverified.JTI != "" {
+			jti = unverified.JTI
+			received.ID = jti
+		}
 		received.SET = unverified
 
 		// Broadcast: Verify Failed
@@ -268,45 +271,11 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 	}
 }
 
-// executeResponseActions executes real response actions with session isolation
+// executeResponseActions delegates to the shared EventProcessor and records results
 func (r *Receiver) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string) {
-	metadata := event.Metadata
+	actions := ExecuteResponseActions(r.actionExecutor, eventID, event, subjectEmail, sessionID)
 
-	for i, actionDesc := range metadata.ResponseActions {
-		status := ResponseStatusExecuted
-
-		// Execute real actions if we have an executor
-		if r.actionExecutor != nil && subjectEmail != "" {
-			ctx := context.Background()
-			var err error
-			switch {
-			case containsAnyLegacy(actionDesc, "terminate", "revoke", "session"):
-				err = r.actionExecutor.RevokeUserSessionsForSession(ctx, sessionID, subjectEmail)
-			case containsAnyLegacy(actionDesc, "disable", "suspend"):
-				err = r.actionExecutor.DisableUserForSession(ctx, sessionID, subjectEmail)
-			case containsAnyLegacy(actionDesc, "enable", "reactivate"):
-				err = r.actionExecutor.EnableUserForSession(ctx, sessionID, subjectEmail)
-			case containsAnyLegacy(actionDesc, "password", "reset"):
-				err = r.actionExecutor.ForcePasswordResetForSession(ctx, sessionID, subjectEmail)
-			case containsAnyLegacy(actionDesc, "invalidate", "token"):
-				err = r.actionExecutor.InvalidateTokensForSession(ctx, sessionID, subjectEmail)
-			}
-			if err != nil {
-				status = ResponseStatusFailed
-			}
-		}
-
-		action := ResponseAction{
-			ID:          fmt.Sprintf("%s-action-%d", eventID, i),
-			EventID:     eventID,
-			EventType:   event.Type,
-			Action:      actionDesc,
-			Description: fmt.Sprintf("Automated response: %s (session: %s)", actionDesc, sessionID),
-			Status:      status,
-			ExecutedAt:  time.Now(),
-			SessionID:   sessionID,
-		}
-
+	for _, action := range actions {
 		r.addResponseAction(action)
 
 		// Broadcast: Response Action
@@ -316,9 +285,9 @@ func (r *Receiver) executeResponseActions(_ context.Context, eventID string, eve
 			EventID:   eventID,
 			Data: map[string]interface{}{
 				"action":     action.Action,
-				"event_type": metadata.Name,
-				"category":   metadata.Category,
-				"zero_trust": metadata.ZeroTrustImpact,
+				"event_type": event.Metadata.Name,
+				"category":   event.Metadata.Category,
+				"zero_trust": event.Metadata.ZeroTrustImpact,
 				"session_id": sessionID,
 			},
 		})
@@ -328,32 +297,69 @@ func (r *Receiver) executeResponseActions(_ context.Context, eventID string, eve
 	}
 }
 
-// containsAnyLegacy checks if s contains any of the substrings (case insensitive)
-func containsAnyLegacy(s string, substrs ...string) bool {
-	sLower := toLowerLegacy(s)
+// ====================
+// Shared Event Processing (used by both Receiver and ReceiverService)
+// ====================
+
+// ExecuteResponseActions executes security response actions for a decoded event.
+// This is the shared implementation used by both the legacy Receiver and the standalone ReceiverService.
+func ExecuteResponseActions(executor ActionExecutor, eventID string, event DecodedEvent, subjectEmail, sessionID string) []ResponseAction {
+	metadata := event.Metadata
+	var actions []ResponseAction
+
+	for i, actionDesc := range metadata.ResponseActions {
+		executedAt := time.Now()
+		status := ResponseStatusExecuted
+
+		// Execute real actions if we have an executor
+		if executor != nil && subjectEmail != "" {
+			ctx := context.Background()
+			var err error
+			lower := strings.ToLower(actionDesc)
+			switch {
+			case containsAnyOf(lower, "terminate", "revoke", "session"):
+				log.Printf("[SSF Receiver] Executing: Revoke sessions for %s (session: %s)", subjectEmail, sessionID)
+				err = executor.RevokeUserSessionsForSession(ctx, sessionID, subjectEmail)
+			case containsAnyOf(lower, "disable", "suspend"):
+				log.Printf("[SSF Receiver] Executing: Disable user %s (session: %s)", subjectEmail, sessionID)
+				err = executor.DisableUserForSession(ctx, sessionID, subjectEmail)
+			case containsAnyOf(lower, "enable", "reactivate"):
+				log.Printf("[SSF Receiver] Executing: Enable user %s (session: %s)", subjectEmail, sessionID)
+				err = executor.EnableUserForSession(ctx, sessionID, subjectEmail)
+			case containsAnyOf(lower, "password", "reset"):
+				log.Printf("[SSF Receiver] Executing: Force password reset for %s (session: %s)", subjectEmail, sessionID)
+				err = executor.ForcePasswordResetForSession(ctx, sessionID, subjectEmail)
+			case containsAnyOf(lower, "invalidate", "token"):
+				log.Printf("[SSF Receiver] Executing: Invalidate tokens for %s (session: %s)", subjectEmail, sessionID)
+				err = executor.InvalidateTokensForSession(ctx, sessionID, subjectEmail)
+			default:
+				log.Printf("[SSF Receiver] Executing: %s (generic action)", actionDesc)
+			}
+			if err != nil {
+				log.Printf("[SSF Receiver] Action failed: %v", err)
+				status = ResponseStatusFailed
+			}
+		}
+
+		actions = append(actions, ResponseAction{
+			ID:          fmt.Sprintf("%s-action-%d", eventID, i),
+			EventID:     eventID,
+			EventType:   event.Type,
+			Action:      actionDesc,
+			Description: fmt.Sprintf("Automated response: %s (session: %s)", actionDesc, sessionID),
+			Status:      status,
+			ExecutedAt:  executedAt,
+			SessionID:   sessionID,
+		})
+	}
+
+	return actions
+}
+
+// containsAnyOf checks if the already-lowered string s contains any of the substrings.
+func containsAnyOf(sLower string, substrs ...string) bool {
 	for _, sub := range substrs {
-		if containsLegacy(sLower, toLowerLegacy(sub)) {
-			return true
-		}
-	}
-	return false
-}
-
-func toLowerLegacy(s string) string {
-	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		b[i] = c
-	}
-	return string(b)
-}
-
-func containsLegacy(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
+		if strings.Contains(sLower, sub) {
 			return true
 		}
 	}
@@ -419,16 +425,6 @@ func (r *Receiver) ClearLogs() {
 	r.responseActionsMu.Lock()
 	r.responseActions = make([]ResponseAction, 0)
 	r.responseActionsMu.Unlock()
-}
-
-// PushRequest represents an SSF push delivery request
-type PushRequest struct {
-	Sets map[string]string `json:"sets"`
-}
-
-// PushResponse represents an SSF push delivery response
-type PushResponse struct {
-	Sets map[string]SetStatus `json:"sets"`
 }
 
 // SetStatus represents the processing status of a SET

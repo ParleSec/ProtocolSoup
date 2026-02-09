@@ -140,8 +140,8 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		return nil, fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Generate SET token
-	setToken, err := t.encoder.Encode(event, stream.Audience)
+	// Generate SET token -- use eventID as the JTI so poll responses map correctly
+	setToken, err := t.encoder.Encode(event, stream.Audience, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode SET: %w", err)
 	}
@@ -232,22 +232,14 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 	// Update status to delivering
 	_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivering)
 
-	// Prepare request body
-	body := map[string]interface{}{
-		"sets": map[string]string{
-			event.ID: event.SETToken,
-		},
-	}
-	bodyBytes, _ := json.Marshal(body)
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "POST", stream.DeliveryEndpoint, bytes.NewReader(bodyBytes))
+	// Send raw SET per RFC 8935 §2: body is the compact JWT, Content-Type is application/secevent+jwt
+	req, err := http.NewRequestWithContext(ctx, "POST", stream.DeliveryEndpoint, bytes.NewReader([]byte(event.SETToken)))
 	if err != nil {
 		t.handleDeliveryFailure(ctx, event, 0, "", err.Error())
 		return
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/secevent+jwt")
 	req.Header.Set("Accept", "application/json")
 
 	// Add bearer token if configured for authenticated push delivery
@@ -371,18 +363,19 @@ func (t *Transmitter) TriggerSessionRevokedWithSession(ctx context.Context, stre
 }
 
 // TriggerCredentialChange triggers a credential change event
-func (t *Transmitter) TriggerCredentialChange(ctx context.Context, streamID string, subject SubjectIdentifier, credentialType string, initiator string) (*StoredEvent, error) {
-	return t.TriggerCredentialChangeWithSession(ctx, streamID, "", subject, credentialType, initiator)
+func (t *Transmitter) TriggerCredentialChange(ctx context.Context, streamID string, subject SubjectIdentifier, credentialType, changeType, initiator string) (*StoredEvent, error) {
+	return t.TriggerCredentialChangeWithSession(ctx, streamID, "", subject, credentialType, changeType, initiator)
 }
 
 // TriggerCredentialChangeWithSession triggers a credential change event with session context
-func (t *Transmitter) TriggerCredentialChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, credentialType string, initiator string) (*StoredEvent, error) {
+func (t *Transmitter) TriggerCredentialChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, credentialType, changeType, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:        EventTypeCredentialChange,
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		CredentialType:   credentialType,
+		ChangeType:       changeType, // CAEP §3.2: REQUIRED (create | revoke | update)
 		InitiatingEntity: initiator,
 	}
 	return t.GenerateEvent(ctx, streamID, event)
@@ -536,8 +529,8 @@ func (t *Transmitter) TriggerAssuranceLevelChangeWithSession(ctx context.Context
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
-		CurrentStatus:    currentLevel,
-		PreviousStatus:   previousLevel,
+		CurrentLevel:     currentLevel,  // CAEP §3.3: use current_level, not current_status
+		PreviousLevel:    previousLevel, // CAEP §3.3: use previous_level, not previous_status
 		InitiatingEntity: InitiatingEntitySystem,
 	}
 	return t.GenerateEvent(ctx, streamID, event)

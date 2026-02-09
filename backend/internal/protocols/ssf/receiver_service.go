@@ -237,7 +237,8 @@ func (rs *ReceiverService) Stop(ctx context.Context) error {
 	return nil
 }
 
-// handlePush handles incoming push delivery requests
+// handlePush handles incoming push delivery requests per RFC 8935 §2.
+// The request body is the raw compact-serialized SET.
 func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 	// Authenticate the request
 	authHeader := r.Header.Get("Authorization")
@@ -250,7 +251,7 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
-	// Read request body
+	// Read raw SET token from request body (RFC 8935 §2)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("[SSF Receiver] Failed to read request body: %v", err)
@@ -258,35 +259,29 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	log.Printf("[SSF Receiver] Received push delivery: %d bytes", len(body))
-	
-	// Parse the push request
-	var pushReq PushRequest
-	if err := json.Unmarshal(body, &pushReq); err != nil {
-		log.Printf("[SSF Receiver] Failed to parse push request: %v", err)
-		http.Error(w, "Invalid request format", http.StatusBadRequest)
+	setToken := string(body)
+	if setToken == "" {
+		http.Error(w, "Empty SET token", http.StatusBadRequest)
 		return
 	}
 	
-	// Process each SET
-	response := &PushResponse{
-		Sets: make(map[string]SetStatus),
+	log.Printf("[SSF Receiver] Received push delivery: %d bytes", len(body))
+	
+	status := rs.processSET(r.Context(), setToken)
+	
+	if status.Status == "failed" {
+		http.Error(w, status.Description, http.StatusBadRequest)
+		return
 	}
 	
-	for jti, setToken := range pushReq.Sets {
-		status := rs.processSET(r.Context(), jti, setToken)
-		response.Sets[jti] = status
-	}
-	
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	// RFC 8935 §2.2: 202 Accepted on success
+	w.WriteHeader(http.StatusAccepted)
 }
 
-// processSET processes a single SET token
-func (rs *ReceiverService) processSET(ctx context.Context, jti, setToken string) SetStatus {
+// processSET processes a single raw SET token.
+// The JTI is extracted from the decoded token per RFC 8935 (push delivers a single raw SET).
+func (rs *ReceiverService) processSET(ctx context.Context, setToken string) SetStatus {
 	receivedAt := time.Now()
-	
-	log.Printf("[SSF Receiver] Processing SET: %s", jti)
 	
 	// Decode the SET header to get the key ID
 	token, _, err := new(jwt.Parser).ParseUnverified(setToken, jwt.MapClaims{})
@@ -319,7 +314,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, jti, setToken string)
 	if err != nil {
 		log.Printf("[SSF Receiver] SET signature verification failed: %v", err)
 		rs.addReceivedEvent(ReceivedEvent{
-			ID:             jti,
+			ID:             "",
 			ReceivedAt:     receivedAt,
 			DeliveryMethod: "push",
 			Verified:       false,
@@ -341,6 +336,10 @@ func (rs *ReceiverService) processSET(ctx context.Context, jti, setToken string)
 	if err != nil {
 		return SetStatus{Status: "failed", Description: "Failed to decode SET"}
 	}
+	
+	// Extract JTI from the decoded token
+	jti := decoded.JTI
+	log.Printf("[SSF Receiver] Processing SET: %s", jti)
 	
 	// Record the received event
 	processedAt := time.Now()
@@ -384,92 +383,13 @@ func (rs *ReceiverService) processSET(ctx context.Context, jti, setToken string)
 	return SetStatus{Status: "success", Description: "Event processed and actions executed"}
 }
 
-// executeResponseActions executes real response actions
+// executeResponseActions delegates to the shared EventProcessor
 func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string) {
-	metadata := event.Metadata
-	
-	for i, actionDesc := range metadata.ResponseActions {
-		actionID := fmt.Sprintf("%s-action-%d", eventID, i)
-		executedAt := time.Now()
-		status := ResponseStatusExecuted
-		
-		// Execute real actions based on event type and action description
-		// Use session-aware methods to ensure state changes are isolated per user session
-		var err error
-		if rs.actionExecutor != nil && subjectEmail != "" {
-			ctx := context.Background()
-			switch {
-			case containsAny(actionDesc, "terminate", "revoke", "session"):
-				log.Printf("[SSF Receiver] Executing: Revoke sessions for %s (session: %s)", subjectEmail, sessionID)
-				err = rs.actionExecutor.RevokeUserSessionsForSession(ctx, sessionID, subjectEmail)
-			case containsAny(actionDesc, "disable", "suspend"):
-				log.Printf("[SSF Receiver] Executing: Disable user %s (session: %s)", subjectEmail, sessionID)
-				err = rs.actionExecutor.DisableUserForSession(ctx, sessionID, subjectEmail)
-			case containsAny(actionDesc, "enable", "reactivate"):
-				log.Printf("[SSF Receiver] Executing: Enable user %s (session: %s)", subjectEmail, sessionID)
-				err = rs.actionExecutor.EnableUserForSession(ctx, sessionID, subjectEmail)
-			case containsAny(actionDesc, "password", "reset"):
-				log.Printf("[SSF Receiver] Executing: Force password reset for %s (session: %s)", subjectEmail, sessionID)
-				err = rs.actionExecutor.ForcePasswordResetForSession(ctx, sessionID, subjectEmail)
-			case containsAny(actionDesc, "invalidate", "token"):
-				log.Printf("[SSF Receiver] Executing: Invalidate tokens for %s (session: %s)", subjectEmail, sessionID)
-				err = rs.actionExecutor.InvalidateTokensForSession(ctx, sessionID, subjectEmail)
-			default:
-				log.Printf("[SSF Receiver] Executing: %s (generic action)", actionDesc)
-			}
-		}
-		
-		if err != nil {
-			log.Printf("[SSF Receiver] Action failed: %v", err)
-			status = ResponseStatusFailed
-		}
-		
-		action := ResponseAction{
-			ID:          actionID,
-			EventID:     eventID,
-			EventType:   event.Type,
-			Action:      actionDesc,
-			Description: fmt.Sprintf("Real execution: %s (session: %s)", actionDesc, sessionID),
-			Status:      status,
-			ExecutedAt:  executedAt,
-			SessionID:   sessionID,
-		}
-		
+	actions := ExecuteResponseActions(rs.actionExecutor, eventID, event, subjectEmail, sessionID)
+	for _, action := range actions {
 		rs.addResponseAction(action)
-		log.Printf("[SSF Receiver] Action recorded: %s - %s (session: %s)", actionDesc, status, sessionID)
+		log.Printf("[SSF Receiver] Action recorded: %s - %s (session: %s)", action.Action, action.Status, sessionID)
 	}
-}
-
-// containsAny checks if s contains any of the substrings
-func containsAny(s string, substrs ...string) bool {
-	sLower := stringToLower(s)
-	for _, sub := range substrs {
-		if stringContains(sLower, stringToLower(sub)) {
-			return true
-		}
-	}
-	return false
-}
-
-func stringToLower(s string) string {
-	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		b[i] = c
-	}
-	return string(b)
-}
-
-func stringContains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // addReceivedEvent adds an event to the received log

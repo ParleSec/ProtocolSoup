@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
 
 // SET represents a Security Event Token per RFC 8417
@@ -53,8 +52,11 @@ type EventPayload struct {
 	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
 	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
 	CredentialType   string      `json:"credential_type,omitempty"`
-	CurrentStatus    string      `json:"current_status,omitempty"`
+	ChangeType       string      `json:"change_type,omitempty"`    // CAEP §3.2: create | revoke | update
+	CurrentStatus    string      `json:"current_status,omitempty"` // For device compliance change (CAEP §3.4)
 	PreviousStatus   string      `json:"previous_status,omitempty"`
+	CurrentLevel     string      `json:"current_level,omitempty"`  // For assurance level change (CAEP §3.3)
+	PreviousLevel    string      `json:"previous_level,omitempty"`
 	NewValue         string      `json:"new-value,omitempty"`
 	OldValue         string      `json:"old-value,omitempty"`
 }
@@ -75,10 +77,11 @@ func NewSETEncoder(issuer string, privateKey *rsa.PrivateKey, keyID string) *SET
 	}
 }
 
-// Encode creates a signed SET from a SecurityEvent
-func (e *SETEncoder) Encode(event SecurityEvent, audience []string) (string, error) {
+// Encode creates a signed SET from a SecurityEvent.
+// The jti parameter is the unique token identifier (RFC 8417 §2.2) and MUST
+// match the event ID used in poll responses so receivers can acknowledge by JTI.
+func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) (string, error) {
 	now := time.Now()
-	jti := uuid.New().String()
 
 	// Build subject identifier
 	subject := &SETSubject{
@@ -117,11 +120,20 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string) (string, err
 	if event.CredentialType != "" {
 		eventPayload.CredentialType = event.CredentialType
 	}
+	if event.ChangeType != "" {
+		eventPayload.ChangeType = event.ChangeType
+	}
 	if event.CurrentStatus != "" {
 		eventPayload.CurrentStatus = event.CurrentStatus
 	}
 	if event.PreviousStatus != "" {
 		eventPayload.PreviousStatus = event.PreviousStatus
+	}
+	if event.CurrentLevel != "" {
+		eventPayload.CurrentLevel = event.CurrentLevel
+	}
+	if event.PreviousLevel != "" {
+		eventPayload.PreviousLevel = event.PreviousLevel
 	}
 	if event.NewValue != "" {
 		eventPayload.NewValue = event.NewValue
