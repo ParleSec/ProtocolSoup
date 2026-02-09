@@ -158,6 +158,90 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stream)
 }
 
+// handleCreateStream creates a new stream per SSF §4.1
+func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DeliveryMethod   string   `json:"delivery_method"`
+		DeliveryEndpoint string   `json:"delivery_endpoint_url,omitempty"`
+		EventsRequested  []string `json:"events_requested,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate delivery method
+	switch req.DeliveryMethod {
+	case DeliveryMethodPush, DeliveryMethodPoll:
+		// Valid
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("Invalid delivery_method: %q (must be %q or %q)", req.DeliveryMethod, DeliveryMethodPush, DeliveryMethodPoll))
+		return
+	}
+
+	// Push delivery requires an endpoint
+	if req.DeliveryMethod == DeliveryMethodPush && req.DeliveryEndpoint == "" {
+		writeError(w, http.StatusBadRequest, "delivery_endpoint_url is required for push delivery")
+		return
+	}
+
+	sessionID := getSessionID(r)
+	streamID := generateID()
+	if sessionID != "" {
+		streamID = "session-" + sessionID
+	}
+
+	eventsRequested := req.EventsRequested
+	if len(eventsRequested) == 0 {
+		eventsRequested = GetSupportedEventURIs()
+	}
+
+	stream := Stream{
+		ID:               streamID,
+		Issuer:           p.baseURL,
+		Audience:         []string{p.baseURL + "/receiver"},
+		EventsSupported:  GetSupportedEventURIs(),
+		EventsRequested:  eventsRequested,
+		DeliveryMethod:   req.DeliveryMethod,
+		DeliveryEndpoint: req.DeliveryEndpoint,
+		Status:           StreamStatusEnabled,
+	}
+
+	if err := p.storage.CreateStream(r.Context(), stream); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create stream")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, stream)
+}
+
+// handleDeleteStream deletes a stream per SSF §4.1
+func (p *Plugin) handleDeleteStream(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Stream not found")
+		return
+	}
+
+	if err := p.storage.DeleteStream(r.Context(), stream.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to delete stream")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ====================
 // Subject Management
 // ====================
@@ -467,7 +551,7 @@ type ActionResponse struct {
 func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "Failed to read request body")
 		return
 	}
 
@@ -475,7 +559,7 @@ func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.Header.Get("X-SSF-Session")
 	status, err := p.receiver.ProcessPushDelivery(r.Context(), setToken, sessionID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, status.Description)
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", status.Description)
 		return
 	}
 
@@ -496,7 +580,16 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		req.MaxEvents = 10
 	}
 
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
@@ -738,9 +831,10 @@ func (p *Plugin) handleGetResponseActions(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// handleClearLogs clears the receiver logs
+// handleClearLogs clears both the legacy and standalone receiver logs
 func (p *Plugin) handleClearLogs(w http.ResponseWriter, r *http.Request) {
 	p.receiver.ClearLogs()
+	p.receiverService.ClearLogs()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -790,6 +884,16 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// writeSSFError writes an error response per RFC 8935 §2.3.
+// The wire format is {"err":"<code>","description":"<text>"} with codes:
+// invalid_request, invalid_key, authentication_failed, access_denied.
+func writeSSFError(w http.ResponseWriter, status int, errCode, description string) {
+	writeJSON(w, status, map[string]string{
+		"err":         errCode,
+		"description": description,
+	})
 }
 
 func generateID() string {

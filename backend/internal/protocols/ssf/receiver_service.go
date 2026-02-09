@@ -26,6 +26,10 @@ type ReceiverService struct {
 	
 	// JWKS cache
 	jwksCache     *JWKSCache
+
+	// JTI replay detection per RFC 8935 §2 step 4 / RFC 8417 §2.2
+	seenJTIs   map[string]time.Time
+	seenJTIsMu sync.RWMutex
 	
 	// Event and action logs
 	receivedEvents   []ReceivedEvent
@@ -194,13 +198,14 @@ func NewReceiverService(port int, transmitterURL, bearerToken string, executor A
 	jwksURL := transmitterURL + "/ssf/jwks"
 	
 	return &ReceiverService{
-		port:           port,
-		transmitterURL: transmitterURL,
-		bearerToken:    bearerToken,
-		jwksCache:      NewJWKSCache(jwksURL, 5*time.Minute),
-		receivedEvents: make([]ReceivedEvent, 0),
+		port:            port,
+		transmitterURL:  transmitterURL,
+		bearerToken:     bearerToken,
+		jwksCache:       NewJWKSCache(jwksURL, 5*time.Minute),
+		seenJTIs:        make(map[string]time.Time),
+		receivedEvents:  make([]ReceivedEvent, 0),
 		responseActions: make([]ResponseAction, 0),
-		actionExecutor: executor,
+		actionExecutor:  executor,
 	}
 }
 
@@ -246,7 +251,7 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 		expectedAuth := "Bearer " + rs.bearerToken
 		if authHeader != expectedAuth {
 			log.Printf("[SSF Receiver] Authentication failed: invalid bearer token")
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeReceiverSSFError(w, http.StatusUnauthorized, "authentication_failed", "Invalid bearer token")
 			return
 		}
 	}
@@ -255,13 +260,13 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("[SSF Receiver] Failed to read request body: %v", err)
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", "Failed to read request body")
 		return
 	}
 	
 	setToken := string(body)
 	if setToken == "" {
-		http.Error(w, "Empty SET token", http.StatusBadRequest)
+		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", "Empty SET token")
 		return
 	}
 	
@@ -273,7 +278,7 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 	status := rs.processSET(r.Context(), setToken, sessionID)
 	
 	if status.Status == "failed" {
-		http.Error(w, status.Description, http.StatusBadRequest)
+		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", status.Description)
 		return
 	}
 	
@@ -344,6 +349,17 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	// Extract JTI from the decoded token
 	jti := decoded.JTI
 	log.Printf("[SSF Receiver] Processing SET: %s", jti)
+
+	// RFC 8935 §2 step 4 / RFC 8417 §2.2: Reject replayed SETs by tracking seen JTIs
+	if jti != "" {
+		rs.seenJTIsMu.RLock()
+		_, seen := rs.seenJTIs[jti]
+		rs.seenJTIsMu.RUnlock()
+		if seen {
+			log.Printf("[SSF Receiver] Duplicate SET rejected (jti %s already processed)", jti)
+			return SetStatus{Status: "failed", Description: fmt.Sprintf("duplicate SET rejected (jti %s already processed)", jti)}
+		}
+	}
 	
 	// Record the received event
 	processedAt := time.Now()
@@ -381,6 +397,13 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		rs.executeResponseActions(ctx, jti, event, subjectEmail, sessionID)
 	}
 	
+	// Record JTI as seen for replay detection
+	if jti != "" {
+		rs.seenJTIsMu.Lock()
+		rs.seenJTIs[jti] = time.Now()
+		rs.seenJTIsMu.Unlock()
+	}
+
 	log.Printf("[SSF Receiver] SET processed successfully: %s", jti)
 	return SetStatus{Status: "success", Description: "Event processed and actions executed"}
 }
@@ -465,15 +488,33 @@ func (rs *ReceiverService) handleGetActions(w http.ResponseWriter, r *http.Reque
 }
 
 func (rs *ReceiverService) handleClearLogs(w http.ResponseWriter, r *http.Request) {
+	rs.ClearLogs()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ClearLogs clears received events, response actions, and JTI replay cache
+func (rs *ReceiverService) ClearLogs() {
 	rs.eventsMu.Lock()
 	rs.receivedEvents = make([]ReceivedEvent, 0)
 	rs.eventsMu.Unlock()
-	
+
 	rs.actionsMu.Lock()
 	rs.responseActions = make([]ResponseAction, 0)
 	rs.actionsMu.Unlock()
-	
-	w.WriteHeader(http.StatusNoContent)
+
+	rs.seenJTIsMu.Lock()
+	rs.seenJTIs = make(map[string]time.Time)
+	rs.seenJTIsMu.Unlock()
+}
+
+// writeReceiverSSFError writes an error response per RFC 8935 §2.3.
+func writeReceiverSSFError(w http.ResponseWriter, status int, errCode, description string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{
+		"err":         errCode,
+		"description": description,
+	})
 }
 
 // GetReceivedEvents returns the received events (for backward compat)

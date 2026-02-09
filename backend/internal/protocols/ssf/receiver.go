@@ -20,6 +20,10 @@ type Receiver struct {
 	// Action executor for real state changes
 	actionExecutor ActionExecutor
 
+	// JTI replay detection per RFC 8935 §2 step 4 / RFC 8417 §2.2
+	seenJTIs   map[string]time.Time
+	seenJTIsMu sync.RWMutex
+
 	// Received events log (in-memory for demo)
 	receivedEvents   []ReceivedEvent
 	receivedEventsMu sync.RWMutex
@@ -90,6 +94,7 @@ func NewReceiver(publicKey *rsa.PublicKey, issuer, audience string, executor Act
 		issuer:          issuer,
 		audience:        audience,
 		actionExecutor:  executor,
+		seenJTIs:        make(map[string]time.Time),
 		receivedEvents:  make([]ReceivedEvent, 0),
 		responseActions: make([]ResponseAction, 0),
 	}
@@ -180,6 +185,19 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 		jti = decoded.JTI
 	}
 
+	// RFC 8935 §2 step 4 / RFC 8417 §2.2: Reject replayed SETs by tracking seen JTIs
+	if jti != "" {
+		r.seenJTIsMu.RLock()
+		_, seen := r.seenJTIs[jti]
+		r.seenJTIsMu.RUnlock()
+		if seen {
+			return SetStatus{
+				Status:      "failed",
+				Description: fmt.Sprintf("duplicate SET rejected (jti %s already processed)", jti),
+			}
+		}
+	}
+
 	received := ReceivedEvent{
 		ID:             jti,
 		ReceivedAt:     now,
@@ -255,6 +273,13 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 	received.ProcessedAt = &processedAt
 
 	r.addReceivedEvent(received)
+
+	// Record JTI as seen for replay detection
+	if jti != "" {
+		r.seenJTIsMu.Lock()
+		r.seenJTIs[jti] = processedAt
+		r.seenJTIsMu.Unlock()
+	}
 
 	// Broadcast: Event Processed
 	r.broadcast(ReceiverEvent{
@@ -417,7 +442,7 @@ func (r *Receiver) GetResponseActions() []ResponseAction {
 	return result
 }
 
-// ClearLogs clears the received events and response actions logs
+// ClearLogs clears the received events, response actions logs, and JTI replay cache
 func (r *Receiver) ClearLogs() {
 	r.receivedEventsMu.Lock()
 	r.receivedEvents = make([]ReceivedEvent, 0)
@@ -426,6 +451,10 @@ func (r *Receiver) ClearLogs() {
 	r.responseActionsMu.Lock()
 	r.responseActions = make([]ResponseAction, 0)
 	r.responseActionsMu.Unlock()
+
+	r.seenJTIsMu.Lock()
+	r.seenJTIs = make(map[string]time.Time)
+	r.seenJTIsMu.Unlock()
 }
 
 // SetStatus represents the processing status of a SET

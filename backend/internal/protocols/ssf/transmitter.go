@@ -99,6 +99,17 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		return nil, fmt.Errorf("stream not found: %w", err)
 	}
 
+	// SSF §6: Enforce stream status. Disabled/paused streams MUST NOT generate events.
+	// Empty status is treated as enabled for backward compatibility with pre-existing streams.
+	switch stream.Status {
+	case StreamStatusDisabled:
+		return nil, fmt.Errorf("stream is disabled")
+	case StreamStatusPaused:
+		return nil, fmt.Errorf("stream is paused")
+	case StreamStatusEnabled, "":
+		// OK - proceed
+	}
+
 	// Check if event type is requested by receiver.
 	// Verification events (SSF §7) are framework-level and always permitted.
 	if event.EventType != EventTypeVerification {

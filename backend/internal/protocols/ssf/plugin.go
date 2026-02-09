@@ -173,9 +173,11 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/.well-known/ssf-configuration", p.handleSSFConfiguration)
 	router.Get("/jwks", p.handleJWKS)
 
-	// Stream management
+	// Stream management (SSF §4)
+	router.Post("/stream", p.handleCreateStream)
 	router.Get("/stream", p.handleGetStream)
 	router.Patch("/stream", p.handleUpdateStream)
+	router.Delete("/stream", p.handleDeleteStream)
 
 	// Stream status (SSF §6)
 	router.Get("/status", p.handleGetStatus)
