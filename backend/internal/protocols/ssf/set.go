@@ -40,7 +40,6 @@ type SETClaims struct {
 	Events        map[string]interface{} `json:"events"`
 	SubjectID     *SETSubject            `json:"sub_id,omitempty"`
 	TransactionID string                 `json:"txn,omitempty"`
-	SessionID     string                 `json:"ssf_session_id,omitempty"` // For sandbox session isolation
 }
 
 // EventPayload represents the payload within an event
@@ -59,6 +58,7 @@ type EventPayload struct {
 	PreviousLevel    string      `json:"previous_level,omitempty"`
 	NewValue         string      `json:"new-value,omitempty"`
 	OldValue         string      `json:"old-value,omitempty"`
+	State            string      `json:"state,omitempty"` // SSF §7: verification event state
 }
 
 // SETEncoder handles encoding security events into SET tokens
@@ -141,6 +141,9 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) 
 	if event.OldValue != "" {
 		eventPayload.OldValue = event.OldValue
 	}
+	if event.State != "" {
+		eventPayload.State = event.State
+	}
 
 	// Create claims
 	claims := SETClaims{
@@ -155,7 +158,6 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) 
 		},
 		SubjectID:     subject,
 		TransactionID: event.TransactionID,
-		SessionID:     event.SessionID, // Include session ID for sandbox isolation
 	}
 
 	// Create and sign token
@@ -232,7 +234,6 @@ func (d *SETDecoder) Decode(tokenString string) (*DecodedSET, error) {
 		IssuedAt:      claims.IssuedAt.Time,
 		Subject:       claims.SubjectID,
 		TransactionID: claims.TransactionID,
-		SessionID:     claims.SessionID, // Extract session ID for sandbox isolation
 		Events:        []DecodedEvent{},
 		RawToken:      tokenString,
 		Header:        token.Header,
@@ -281,7 +282,6 @@ func DecodeWithoutValidation(tokenString string) (*DecodedSET, error) {
 		Audience:      claims.Audience,
 		Subject:       claims.SubjectID,
 		TransactionID: claims.TransactionID,
-		SessionID:     claims.SessionID, // Extract session ID for sandbox isolation
 		Events:        []DecodedEvent{},
 		RawToken:      tokenString,
 		Header:        token.Header,
@@ -323,7 +323,6 @@ type DecodedSET struct {
 	IssuedAt      time.Time              `json:"iat"`
 	Subject       *SETSubject            `json:"sub_id"`
 	TransactionID string                 `json:"txn,omitempty"`
-	SessionID     string                 `json:"ssf_session_id,omitempty"` // For sandbox session isolation
 	Events        []DecodedEvent         `json:"events"`
 	RawToken      string                 `json:"raw_token"`
 	Header        map[string]interface{} `json:"header"`

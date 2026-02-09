@@ -129,22 +129,25 @@ func (r *Receiver) broadcast(event ReceiverEvent) {
 
 // ProcessPushDelivery handles a single SET delivered via push per RFC 8935 §2.
 // The body is the raw compact-serialized SET (not JSON-wrapped).
-func (r *Receiver) ProcessPushDelivery(ctx context.Context, setToken string) (SetStatus, error) {
+// sessionID is extracted from the X-SSF-Session delivery header (not from the SET itself).
+func (r *Receiver) ProcessPushDelivery(ctx context.Context, setToken, sessionID string) (SetStatus, error) {
 	if setToken == "" {
 		return SetStatus{Status: "failed", Description: "Empty SET token"}, fmt.Errorf("empty SET token")
 	}
 
 	// Use the token itself as a preliminary ID; the real JTI is inside the JWT
-	status := r.processSET(ctx, "", setToken, "push")
+	status := r.processSET(ctx, "", setToken, "push", sessionID)
 	return status, nil
 }
 
-// ProcessPollResponse handles events retrieved via poll
-func (r *Receiver) ProcessPollResponse(ctx context.Context, sets map[string]string) []SetStatus {
+// ProcessPollResponse handles events retrieved via poll.
+// sessionIDs maps JTI -> session ID (from the stored event metadata, not from the SET).
+func (r *Receiver) ProcessPollResponse(ctx context.Context, sets map[string]string, sessionIDs map[string]string) []SetStatus {
 	var statuses []SetStatus
 
 	for jti, setToken := range sets {
-		status := r.processSET(ctx, jti, setToken, "poll")
+		sessionID := sessionIDs[jti]
+		status := r.processSET(ctx, jti, setToken, "poll", sessionID)
 		statuses = append(statuses, status)
 	}
 
@@ -154,7 +157,8 @@ func (r *Receiver) ProcessPollResponse(ctx context.Context, sets map[string]stri
 // processSET processes a single SET token.
 // For push delivery (RFC 8935), jti may be empty and is extracted from the decoded token.
 // For poll delivery (RFC 8936), jti is provided from the poll response map key.
-func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod string) SetStatus {
+// sessionID is passed via delivery context (header or stored event metadata), not from the SET itself.
+func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod, sessionID string) SetStatus {
 	now := time.Now()
 
 	// Broadcast: Event Received
@@ -236,10 +240,7 @@ func (r *Receiver) processSET(ctx context.Context, jti, setToken, deliveryMethod
 		},
 	})
 
-	// Extract session ID from decoded SET for state isolation
-	sessionID := decoded.SessionID
-
-	// Initialize session states if needed
+	// Initialize session states if needed (session ID comes from delivery context, not the SET)
 	if sessionID != "" && r.actionExecutor != nil {
 		r.actionExecutor.InitSessionUserStates(sessionID)
 	}

@@ -177,6 +177,13 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/stream", p.handleGetStream)
 	router.Patch("/stream", p.handleUpdateStream)
 
+	// Stream status (SSF §6)
+	router.Get("/status", p.handleGetStatus)
+	router.Post("/status", p.handleUpdateStatus)
+
+	// Stream verification (SSF §7)
+	router.Post("/verify", p.handleVerification)
+
 	// Subject management
 	router.Get("/subjects", p.handleListSubjects)
 	router.Post("/subjects", p.handleAddSubject)

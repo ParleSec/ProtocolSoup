@@ -265,9 +265,12 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	log.Printf("[SSF Receiver] Received push delivery: %d bytes", len(body))
+	// Extract session ID from delivery header (not from the SET itself)
+	sessionID := r.Header.Get("X-SSF-Session")
+
+	log.Printf("[SSF Receiver] Received push delivery: %d bytes (session: %s)", len(body), sessionID)
 	
-	status := rs.processSET(r.Context(), setToken)
+	status := rs.processSET(r.Context(), setToken, sessionID)
 	
 	if status.Status == "failed" {
 		http.Error(w, status.Description, http.StatusBadRequest)
@@ -280,7 +283,8 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 
 // processSET processes a single raw SET token.
 // The JTI is extracted from the decoded token per RFC 8935 (push delivers a single raw SET).
-func (rs *ReceiverService) processSET(ctx context.Context, setToken string) SetStatus {
+// sessionID is passed via the X-SSF-Session delivery header, not from the SET itself.
+func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID string) SetStatus {
 	receivedAt := time.Now()
 	
 	// Decode the SET header to get the key ID
@@ -361,11 +365,9 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken string) SetS
 		}
 	}
 
-	// Extract session ID from the SET (custom claim for sandbox isolation)
-	sessionID := ""
-	if sid, ok := claims["ssf_session_id"].(string); ok {
-		sessionID = sid
-		log.Printf("[SSF Receiver] Session ID extracted: %s", sessionID)
+	// Session ID comes from X-SSF-Session delivery header (not the SET)
+	if sessionID != "" {
+		log.Printf("[SSF Receiver] Session ID from delivery header: %s", sessionID)
 	}
 
 	// Initialize session states if this is a session-scoped event

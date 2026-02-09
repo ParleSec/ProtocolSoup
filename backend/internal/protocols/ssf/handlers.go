@@ -65,6 +65,8 @@ func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) 
 			DeliveryMethodPoll,
 		},
 		"configuration_endpoint":   p.baseURL + "/ssf/stream",
+		"status_endpoint":          p.baseURL + "/ssf/status",
+		"verification_endpoint":    p.baseURL + "/ssf/verify",
 		"add_subject_endpoint":     p.baseURL + "/ssf/subjects",
 		"remove_subject_endpoint":  p.baseURL + "/ssf/subjects",
 		"events_supported":         GetSupportedEventURIs(),
@@ -470,7 +472,8 @@ func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setToken := string(body)
-	status, err := p.receiver.ProcessPushDelivery(r.Context(), setToken)
+	sessionID := r.Header.Get("X-SSF-Session")
+	status, err := p.receiver.ProcessPushDelivery(r.Context(), setToken, sessionID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, status.Description)
 		return
@@ -499,7 +502,7 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sets, moreAvailable, err := p.transmitter.GetPendingEventsForPoll(r.Context(), stream.ID, req.MaxEvents, req.Ack)
+	sets, sessionIDs, moreAvailable, err := p.transmitter.GetPendingEventsForPoll(r.Context(), stream.ID, req.MaxEvents, req.Ack)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -507,7 +510,7 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 
 	// If this is a poll request (not just checking), process the events in receiver
 	if len(sets) > 0 {
-		p.receiver.ProcessPollResponse(r.Context(), sets)
+		p.receiver.ProcessPollResponse(r.Context(), sets, sessionIDs)
 	}
 
 	writeJSON(w, http.StatusOK, PollResponse{
@@ -533,6 +536,133 @@ func (p *Plugin) handleAcknowledge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ====================
+// Stream Verification (SSF §7)
+// ====================
+
+// handleVerification triggers a verification event per SSF §7.
+// The transmitter sends a verification SET containing the provided state value
+// through the configured delivery method, confirming the stream pipeline is healthy.
+func (p *Plugin) handleVerification(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+
+	var req struct {
+		State string `json:"state"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.State == "" {
+		writeError(w, http.StatusBadRequest, "state is required per SSF §7")
+		return
+	}
+
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return
+	}
+
+	event, err := p.transmitter.TriggerVerification(r.Context(), stream.ID, req.State)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "verification_sent",
+		"event_id": event.ID,
+		"state":    req.State,
+		"delivery": stream.DeliveryMethod,
+	})
+}
+
+// ====================
+// Stream Status (SSF §6)
+// ====================
+
+// handleGetStatus returns the current stream status per SSF §6.
+func (p *Plugin) handleGetStatus(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": stream.Status,
+	})
+}
+
+// handleUpdateStatus updates the stream status per SSF §6.
+// Accepts: enabled, paused, disabled.
+func (p *Plugin) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+
+	var req struct {
+		Status string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate status value
+	switch req.Status {
+	case StreamStatusEnabled, StreamStatusPaused, StreamStatusDisabled:
+		// Valid
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("Invalid status: %q (must be enabled, paused, or disabled)", req.Status))
+		return
+	}
+
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return
+	}
+
+	stream.Status = req.Status
+	if err := p.storage.UpdateStream(r.Context(), *stream); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update stream status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": stream.Status,
+	})
 }
 
 // ====================

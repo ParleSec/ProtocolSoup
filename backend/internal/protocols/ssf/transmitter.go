@@ -99,16 +99,19 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		return nil, fmt.Errorf("stream not found: %w", err)
 	}
 
-	// Check if event type is requested by receiver
-	eventRequested := false
-	for _, requested := range stream.EventsRequested {
-		if requested == event.EventType {
-			eventRequested = true
-			break
+	// Check if event type is requested by receiver.
+	// Verification events (SSF §7) are framework-level and always permitted.
+	if event.EventType != EventTypeVerification {
+		eventRequested := false
+		for _, requested := range stream.EventsRequested {
+			if requested == event.EventType {
+				eventRequested = true
+				break
+			}
 		}
-	}
-	if !eventRequested {
-		return nil, fmt.Errorf("event type %s not requested by receiver", event.EventType)
+		if !eventRequested {
+			return nil, fmt.Errorf("event type %s not requested by receiver", event.EventType)
+		}
 	}
 
 	// Generate event ID
@@ -186,6 +189,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		EventType: event.EventType,
 		EventData: string(eventData),
 		SETToken:  setToken,
+		SessionID: event.SessionID,
 		Status:    EventStatusPending,
 		CreatedAt: time.Now(),
 	}
@@ -215,7 +219,15 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 	return &storedEvent, nil
 }
 
-// deliverEvent attempts to deliver an event via push
+// Retry configuration for push delivery
+const (
+	maxDeliveryRetries     = 3
+	initialRetryBackoff    = 1 * time.Second
+	maxRetryBackoff        = 8 * time.Second
+	retryBackoffMultiplier = 2
+)
+
+// deliverEvent attempts to deliver an event via push with exponential backoff retry.
 func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *StoredEvent) {
 	// Broadcast: Delivery Started
 	t.broadcast(TransmitterEvent{
@@ -224,19 +236,97 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 		EventID:   event.ID,
 		EventType: event.EventType,
 		Data: map[string]interface{}{
-			"endpoint": stream.DeliveryEndpoint,
-			"method":   "POST",
+			"endpoint":    stream.DeliveryEndpoint,
+			"method":      "POST",
+			"max_retries": maxDeliveryRetries,
 		},
 	})
 
 	// Update status to delivering
 	_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivering)
 
-	// Send raw SET per RFC 8935 §2: body is the compact JWT, Content-Type is application/secevent+jwt
+	backoff := initialRetryBackoff
+
+	for attempt := 1; attempt <= maxDeliveryRetries; attempt++ {
+		statusCode, respBody, err := t.attemptDelivery(ctx, stream, event)
+
+		if err == nil && statusCode >= 200 && statusCode < 300 {
+			// Success
+			_ = t.storage.RecordDeliveryAttempt(ctx, event.ID, attempt,
+				fmt.Sprintf("%d", statusCode), statusCode, respBody, "")
+			_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
+
+			// Broadcast: Delivery Success
+			t.broadcast(TransmitterEvent{
+				Type:      TransmitterEventDeliverySuccess,
+				Timestamp: time.Now(),
+				EventID:   event.ID,
+				EventType: event.EventType,
+				Data: map[string]interface{}{
+					"status_code":   statusCode,
+					"response_body": respBody,
+					"attempt":       attempt,
+				},
+			})
+			return
+		}
+
+		// Build error description
+		errorMsg := ""
+		if err != nil {
+			errorMsg = err.Error()
+		} else {
+			errorMsg = fmt.Sprintf("HTTP %d: %s", statusCode, respBody)
+		}
+
+		// Record the failed attempt
+		_ = t.storage.RecordDeliveryAttempt(ctx, event.ID, attempt,
+			"failed", statusCode, respBody, errorMsg)
+
+		if attempt < maxDeliveryRetries {
+			// Broadcast: Retry scheduled
+			t.broadcast(TransmitterEvent{
+				Type:      TransmitterEventDeliveryFailed,
+				Timestamp: time.Now(),
+				EventID:   event.ID,
+				EventType: event.EventType,
+				Data: map[string]interface{}{
+					"status_code": statusCode,
+					"error":       errorMsg,
+					"attempt":     attempt,
+					"retrying_in": backoff.String(),
+				},
+			})
+
+			log.Printf("SSF delivery attempt %d/%d failed for event %s: %s (retrying in %s)",
+				attempt, maxDeliveryRetries, event.ID, errorMsg, backoff)
+
+			// Wait with exponential backoff, respecting context cancellation
+			select {
+			case <-ctx.Done():
+				t.handleDeliveryFailure(ctx, event, statusCode, respBody, "delivery cancelled: "+ctx.Err().Error(), attempt)
+				return
+			case <-time.After(backoff):
+			}
+
+			// Exponential backoff with cap
+			backoff *= time.Duration(retryBackoffMultiplier)
+			if backoff > maxRetryBackoff {
+				backoff = maxRetryBackoff
+			}
+		} else {
+			// All retries exhausted
+			t.handleDeliveryFailure(ctx, event, statusCode, respBody, errorMsg, attempt)
+		}
+	}
+}
+
+// attemptDelivery makes a single push delivery attempt per RFC 8935 §2.
+// Returns the HTTP status code, response body, and any transport error.
+func (t *Transmitter) attemptDelivery(ctx context.Context, stream *Stream, event *StoredEvent) (int, string, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", stream.DeliveryEndpoint, bytes.NewReader([]byte(event.SETToken)))
 	if err != nil {
-		t.handleDeliveryFailure(ctx, event, 0, "", err.Error())
-		return
+		return 0, "", err
 	}
 
 	req.Header.Set("Content-Type", "application/secevent+jwt")
@@ -247,82 +337,70 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 		req.Header.Set("Authorization", "Bearer "+stream.BearerToken)
 	}
 
-	// Execute request
+	// Pass session ID as a delivery header (not in the SET itself) for sandbox isolation
+	if event.SessionID != "" {
+		req.Header.Set("X-SSF-Session", event.SessionID)
+	}
+
 	resp, err := t.httpClient.Do(req)
 	if err != nil {
-		t.handleDeliveryFailure(ctx, event, 0, "", err.Error())
-		return
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-
-	// Record delivery attempt
-	_ = t.storage.RecordDeliveryAttempt(ctx, event.ID, 1,
-		fmt.Sprintf("%d", resp.StatusCode), resp.StatusCode, string(respBody), "")
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		// Success
-		_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
-
-		// Broadcast: Delivery Success
-		t.broadcast(TransmitterEvent{
-			Type:      TransmitterEventDeliverySuccess,
-			Timestamp: time.Now(),
-			EventID:   event.ID,
-			EventType: event.EventType,
-			Data: map[string]interface{}{
-				"status_code":   resp.StatusCode,
-				"response_body": string(respBody),
-			},
-		})
-	} else {
-		t.handleDeliveryFailure(ctx, event, resp.StatusCode, string(respBody), "")
-	}
+	return resp.StatusCode, string(respBody), nil
 }
 
-// handleDeliveryFailure handles a failed delivery attempt
-func (t *Transmitter) handleDeliveryFailure(ctx context.Context, event *StoredEvent, statusCode int, respBody, errorMsg string) {
+// handleDeliveryFailure handles final delivery failure after all retries are exhausted.
+func (t *Transmitter) handleDeliveryFailure(ctx context.Context, event *StoredEvent, statusCode int, respBody, errorMsg string, attempts int) {
 	_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusFailed)
 
 	if errorMsg == "" {
 		errorMsg = fmt.Sprintf("HTTP %d: %s", statusCode, respBody)
 	}
 
-	// Broadcast: Delivery Failed
+	// Broadcast: Delivery Failed (final)
 	t.broadcast(TransmitterEvent{
 		Type:      TransmitterEventDeliveryFailed,
 		Timestamp: time.Now(),
 		EventID:   event.ID,
 		EventType: event.EventType,
 		Data: map[string]interface{}{
-			"status_code": statusCode,
-			"error":       errorMsg,
+			"status_code":    statusCode,
+			"error":          errorMsg,
+			"attempts":       attempts,
+			"retries_exhausted": true,
 		},
 	})
 
-	log.Printf("SSF delivery failed for event %s: %s", event.ID, errorMsg)
+	log.Printf("SSF delivery failed for event %s after %d attempt(s): %s", event.ID, attempts, errorMsg)
 }
 
-// GetPendingEventsForPoll returns events pending for poll delivery
-func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID string, maxEvents int, ack []string) (map[string]string, bool, error) {
+// GetPendingEventsForPoll returns events pending for poll delivery.
+// Returns: sets (JTI -> SET token), sessionIDs (JTI -> session ID), moreAvailable, error.
+func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID string, maxEvents int, ack []string) (map[string]string, map[string]string, bool, error) {
 	// Acknowledge any events if provided
 	if len(ack) > 0 {
 		if err := t.storage.AcknowledgeEvents(ctx, ack); err != nil {
-			return nil, false, fmt.Errorf("failed to acknowledge events: %w", err)
+			return nil, nil, false, fmt.Errorf("failed to acknowledge events: %w", err)
 		}
 	}
 
 	// Get pending events
 	events, err := t.storage.GetPendingEvents(ctx, streamID, maxEvents)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to get pending events: %w", err)
+		return nil, nil, false, fmt.Errorf("failed to get pending events: %w", err)
 	}
 
 	// Build response
 	sets := make(map[string]string)
+	sessionIDs := make(map[string]string)
 	for _, event := range events {
 		sets[event.ID] = event.SETToken
+		if event.SessionID != "" {
+			sessionIDs[event.ID] = event.SessionID
+		}
 		// Mark as delivered since receiver is polling
 		_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
 	}
@@ -330,7 +408,24 @@ func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID stri
 	// Check if there are more events
 	moreAvailable := len(events) == maxEvents
 
-	return sets, moreAvailable, nil
+	return sets, sessionIDs, moreAvailable, nil
+}
+
+// TriggerVerification sends a verification SET per SSF §7.
+// The state parameter is an opaque string echoed in the verification event payload,
+// allowing the caller to correlate the response.
+func (t *Transmitter) TriggerVerification(ctx context.Context, streamID, state string) (*StoredEvent, error) {
+	event := SecurityEvent{
+		EventType:      EventTypeVerification,
+		EventTimestamp: time.Now(),
+		State:          state,
+		// Verification events use a minimal subject (the stream itself)
+		Subject: SubjectIdentifier{
+			Format: SubjectFormatOpaque,
+			ID:     streamID,
+		},
+	}
+	return t.GenerateEvent(ctx, streamID, event)
 }
 
 // TriggerSessionRevoked triggers a session revoked event

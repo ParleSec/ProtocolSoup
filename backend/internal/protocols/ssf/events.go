@@ -2,6 +2,12 @@ package ssf
 
 import "time"
 
+// SSF Framework event types
+const (
+	// Verification event per SSF §7
+	EventTypeVerification = "https://schemas.openid.net/secevent/ssf/event-type/verification"
+)
+
 // Event URIs for CAEP (Continuous Access Evaluation Profile)
 const (
 	// CAEP Event Types - Session and Access Events
@@ -311,6 +317,9 @@ type SecurityEvent struct {
 	// For identifier events
 	NewValue string `json:"new_value,omitempty"`
 	OldValue string `json:"old_value,omitempty"`
+
+	// For verification events (SSF §7)
+	State string `json:"state,omitempty"`
 }
 
 // ReasonInfo provides human-readable reason information
