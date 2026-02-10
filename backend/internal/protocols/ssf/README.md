@@ -56,8 +56,8 @@ The service also starts a **standalone receiver** on `SSF_RECEIVER_PORT` (defaul
 Each frontend user session gets an isolated sandbox:
 
 1. **Session ID Generation**: Frontend generates a unique session ID stored in `localStorage`
-2. **Header Propagation**: All requests include `X-SSF-Session` header
-3. **SET Claims**: Session ID is embedded in the SET as `ssf_session_id` claim
+2. **Header Propagation**: All requests include `X-SSF-Session` header, including push deliveries
+3. **Database Storage**: Session ID stored in the `events.session_id` column (not in the SET itself)
 4. **State Isolation**: Action executor uses `sessionID:email` composite keys for state
 
 ```
@@ -66,11 +66,11 @@ Frontend                    Backend                     Receiver
    │  X-SSF-Session: sess_abc  │                           │
    │ ─────────────────────────>│                           │
    │                           │                           │
-   │                           │  SET with ssf_session_id  │
+   │                           │  SET + X-SSF-Session hdr  │
    │                           │ ─────────────────────────>│
    │                           │                           │
    │                           │                           │ Extract sessionID
-   │                           │                           │ from SET claims
+   │                           │                           │ from X-SSF-Session header
    │                           │                           │
    │                           │                           │ Update state for
    │                           │                           │ "sess_abc:alice@..."
@@ -110,12 +110,22 @@ Frontend                    Backend                     Receiver
 | `/ssf/.well-known/ssf-configuration` | GET | SSF transmitter metadata |
 | `/ssf/jwks` | GET | Public keys for SET verification |
 
-### Stream Management
+### Stream Management (SSF sect 4)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/ssf/stream` | POST | Create a new stream (SSF sect 4.1) |
 | `/ssf/stream` | GET | Get stream configuration |
-| `/ssf/stream` | PUT | Update stream configuration |
+| `/ssf/stream` | PATCH | Update stream configuration |
+| `/ssf/stream` | DELETE | Delete a stream |
+
+### Stream Status & Verification (SSF sect 6-7)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/ssf/status` | GET | Get stream status (SSF sect 6) |
+| `/ssf/status` | POST | Update stream status (enabled/paused/disabled) |
+| `/ssf/verify` | POST | Trigger verification event (SSF sect 7) |
 
 ### Subject Management
 
@@ -178,8 +188,9 @@ ssf/
 ├── plugin.go           # Main plugin, registers routes, manages lifecycle
 ├── storage.go          # SQLite persistence for streams, subjects, events
 ├── transmitter.go      # Event generation and delivery
-├── receiver.go         # Legacy in-process receiver
-├── receiver_service.go # Standalone receiver service (production-like)
+├── receiver.go         # Shared receiver types, constants, and event processing
+├── receiver_service.go # Standalone receiver service (real HTTP, JWKS fetch, signature verification)
+├── http_capture.go     # HTTP exchange capture types for traffic visibility
 ├── action_executor.go  # Executes real security state changes
 ├── handlers.go         # HTTP request handlers
 ├── set.go              # SET encoding/decoding (RFC 8417)
@@ -236,11 +247,11 @@ event, err := transmitter.TriggerSessionsRevokedWithSession(
 Validates and processes incoming SETs:
 
 ```go
-// Process push delivery
-response, err := receiver.ProcessPushDelivery(ctx, body)
+// Process push delivery (session ID passed via X-SSF-Session header)
+response, err := receiver.ProcessPushDelivery(ctx, setToken, sessionID)
 
-// Session ID extracted from SET claims
-sessionID := decoded.SessionID
+// JTI replay detection per RFC 8935 §2 / RFC 8417 §2.2
+// Duplicate SETs are rejected automatically
 
 // Execute real actions
 actionExecutor.RevokeUserSessionsForSession(ctx, sessionID, email)
@@ -280,7 +291,6 @@ RFC 8417 compliant Security Event Token:
     "format": "email",
     "email": "alice@example.com"
   },
-  "ssf_session_id": "sess_abc123",
   "events": {
     "https://schemas.openid.net/secevent/risc/event-type/sessions-revoked": {
       "subject": { "format": "email", "email": "alice@example.com" },
@@ -320,13 +330,14 @@ curl -H "X-SSF-Session: $SESSION_ID" \
 
 ### Expected Flow
 
-1. **Event Trigger** → Transmitter creates SecurityEvent with sessionID
-2. **SET Generation** → Encoder embeds `ssf_session_id` in JWT claims
-3. **Push Delivery** → HTTP POST to internal `/ssf/push` endpoint
+1. **Event Trigger** → Transmitter creates SecurityEvent with sessionID stored in DB
+2. **SET Generation** → Encoder creates a spec-compliant SET (no custom claims)
+3. **Push Delivery** → HTTP POST to `/ssf/push` with `X-SSF-Session` header
 4. **SET Verification** → Receiver validates signature via JWKS
-5. **Session Extraction** → `ssf_session_id` extracted from decoded SET
-6. **Action Execution** → ActionExecutor updates session-scoped state
-7. **State Query** → Frontend fetches updated state with session header
+5. **Replay Detection** → Receiver checks JTI against seen-set to reject duplicates
+6. **Session Extraction** → Session ID extracted from `X-SSF-Session` delivery header
+7. **Action Execution** → ActionExecutor updates session-scoped state
+8. **State Query** → Frontend fetches updated state with session header
 
 ## Specifications
 

@@ -2,6 +2,12 @@ package ssf
 
 import "time"
 
+// SSF Framework event types
+const (
+	// Verification event per SSF §7
+	EventTypeVerification = "https://schemas.openid.net/secevent/ssf/event-type/verification"
+)
+
 // Event URIs for CAEP (Continuous Access Evaluation Profile)
 const (
 	// CAEP Event Types - Session and Access Events
@@ -287,8 +293,8 @@ type SecurityEvent struct {
 	Audience       []string          `json:"audience"`
 	TransactionID  string            `json:"txn,omitempty"`
 
-	// Session isolation - used to namespace state changes per user session
-	SessionID string `json:"ssf_session_id,omitempty"`
+	// Session isolation - used to namespace state changes per user session (internal, not a SET claim)
+	SessionID string `json:"session_id,omitempty"`
 
 	// Event-specific data
 	Reason           string      `json:"reason,omitempty"`
@@ -296,16 +302,27 @@ type SecurityEvent struct {
 	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
 	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
 
-	// For credential events
+	// For credential events (CAEP §3.2)
 	CredentialType string `json:"credential_type,omitempty"`
+	ChangeType     string `json:"change_type,omitempty"` // create | revoke | update (REQUIRED by CAEP §3.2)
 
-	// For compliance events
+	// For compliance/status events
 	CurrentStatus  string `json:"current_status,omitempty"`
 	PreviousStatus string `json:"previous_status,omitempty"`
+
+	// For assurance level change events (CAEP §3.3 -- distinct field names from status)
+	CurrentLevel  string `json:"current_level,omitempty"`
+	PreviousLevel string `json:"previous_level,omitempty"`
 
 	// For identifier events
 	NewValue string `json:"new_value,omitempty"`
 	OldValue string `json:"old_value,omitempty"`
+
+	// For token-claims-change (CAEP §3.2): map of changed claim names to their new values
+	Claims map[string]interface{} `json:"claims,omitempty"`
+
+	// For verification events (SSF §7)
+	State string `json:"state,omitempty"`
 }
 
 // ReasonInfo provides human-readable reason information
@@ -321,14 +338,18 @@ const (
 	InitiatingEntitySystem = "system"
 )
 
-// CredentialType constants
+// CredentialType constants per CAEP §3.2
 const (
-	CredentialTypePassword = "password"
-	CredentialTypePIN      = "pin"
-	CredentialTypeX509     = "x509"
-	CredentialTypeFIDO2    = "fido2-platform"
-	CredentialTypeOTP      = "otp"
-	CredentialTypeOAuth    = "oauth_token"
+	CredentialTypePassword             = "password"
+	CredentialTypePIN                  = "pin"
+	CredentialTypeX509                 = "x509"
+	CredentialTypeFIDO2Platform        = "fido2-platform"
+	CredentialTypeFIDO2Roaming         = "fido2-roaming"
+	CredentialTypeFIDOU2F              = "fido-u2f"
+	CredentialTypeVerifiableCredential = "verifiable-credential"
+	CredentialTypePhoneVoice           = "phone-voice"
+	CredentialTypePhoneSMS             = "phone-sms"
+	CredentialTypeApp                  = "app"
 )
 
 // ComplianceStatus constants

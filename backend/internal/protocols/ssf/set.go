@@ -7,22 +7,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 )
-
-// SET represents a Security Event Token per RFC 8417
-type SET struct {
-	// Standard JWT claims
-	Issuer    string   `json:"iss"`
-	IssuedAt  int64    `json:"iat"`
-	JTI       string   `json:"jti"`
-	Audience  []string `json:"aud"`
-	
-	// SET-specific claims
-	Subject   *SETSubject            `json:"sub_id,omitempty"`
-	Events    map[string]interface{} `json:"events"`
-	TransactionID string             `json:"txn,omitempty"`
-}
 
 // SETSubject represents the subject identifier in a SET
 type SETSubject struct {
@@ -41,7 +26,6 @@ type SETClaims struct {
 	Events        map[string]interface{} `json:"events"`
 	SubjectID     *SETSubject            `json:"sub_id,omitempty"`
 	TransactionID string                 `json:"txn,omitempty"`
-	SessionID     string                 `json:"ssf_session_id,omitempty"` // For sandbox session isolation
 }
 
 // EventPayload represents the payload within an event
@@ -53,10 +37,15 @@ type EventPayload struct {
 	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
 	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
 	CredentialType   string      `json:"credential_type,omitempty"`
-	CurrentStatus    string      `json:"current_status,omitempty"`
+	ChangeType       string      `json:"change_type,omitempty"`    // CAEP §3.2: create | revoke | update
+	CurrentStatus    string      `json:"current_status,omitempty"` // For device compliance change (CAEP §3.4)
 	PreviousStatus   string      `json:"previous_status,omitempty"`
-	NewValue         string      `json:"new-value,omitempty"`
-	OldValue         string      `json:"old-value,omitempty"`
+	CurrentLevel     string      `json:"current_level,omitempty"`  // For assurance level change (CAEP §3.3)
+	PreviousLevel    string      `json:"previous_level,omitempty"`
+	NewValue         string                 `json:"new-value,omitempty"`
+	OldValue         string                 `json:"old-value,omitempty"`
+	Claims           map[string]interface{} `json:"claims,omitempty"` // CAEP §3.2: changed claims
+	State            string                 `json:"state,omitempty"`  // SSF §7: verification event state
 }
 
 // SETEncoder handles encoding security events into SET tokens
@@ -75,10 +64,11 @@ func NewSETEncoder(issuer string, privateKey *rsa.PrivateKey, keyID string) *SET
 	}
 }
 
-// Encode creates a signed SET from a SecurityEvent
-func (e *SETEncoder) Encode(event SecurityEvent, audience []string) (string, error) {
+// Encode creates a signed SET from a SecurityEvent.
+// The jti parameter is the unique token identifier (RFC 8417 §2.2) and MUST
+// match the event ID used in poll responses so receivers can acknowledge by JTI.
+func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) (string, error) {
 	now := time.Now()
-	jti := uuid.New().String()
 
 	// Build subject identifier
 	subject := &SETSubject{
@@ -117,17 +107,32 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string) (string, err
 	if event.CredentialType != "" {
 		eventPayload.CredentialType = event.CredentialType
 	}
+	if event.ChangeType != "" {
+		eventPayload.ChangeType = event.ChangeType
+	}
 	if event.CurrentStatus != "" {
 		eventPayload.CurrentStatus = event.CurrentStatus
 	}
 	if event.PreviousStatus != "" {
 		eventPayload.PreviousStatus = event.PreviousStatus
 	}
+	if event.CurrentLevel != "" {
+		eventPayload.CurrentLevel = event.CurrentLevel
+	}
+	if event.PreviousLevel != "" {
+		eventPayload.PreviousLevel = event.PreviousLevel
+	}
 	if event.NewValue != "" {
 		eventPayload.NewValue = event.NewValue
 	}
 	if event.OldValue != "" {
 		eventPayload.OldValue = event.OldValue
+	}
+	if len(event.Claims) > 0 {
+		eventPayload.Claims = event.Claims
+	}
+	if event.State != "" {
+		eventPayload.State = event.State
 	}
 
 	// Create claims
@@ -143,7 +148,6 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string) (string, err
 		},
 		SubjectID:     subject,
 		TransactionID: event.TransactionID,
-		SessionID:     event.SessionID, // Include session ID for sandbox isolation
 	}
 
 	// Create and sign token
@@ -220,7 +224,6 @@ func (d *SETDecoder) Decode(tokenString string) (*DecodedSET, error) {
 		IssuedAt:      claims.IssuedAt.Time,
 		Subject:       claims.SubjectID,
 		TransactionID: claims.TransactionID,
-		SessionID:     claims.SessionID, // Extract session ID for sandbox isolation
 		Events:        []DecodedEvent{},
 		RawToken:      tokenString,
 		Header:        token.Header,
@@ -269,7 +272,6 @@ func DecodeWithoutValidation(tokenString string) (*DecodedSET, error) {
 		Audience:      claims.Audience,
 		Subject:       claims.SubjectID,
 		TransactionID: claims.TransactionID,
-		SessionID:     claims.SessionID, // Extract session ID for sandbox isolation
 		Events:        []DecodedEvent{},
 		RawToken:      tokenString,
 		Header:        token.Header,
@@ -311,7 +313,6 @@ type DecodedSET struct {
 	IssuedAt      time.Time              `json:"iat"`
 	Subject       *SETSubject            `json:"sub_id"`
 	TransactionID string                 `json:"txn,omitempty"`
-	SessionID     string                 `json:"ssf_session_id,omitempty"` // For sandbox session isolation
 	Events        []DecodedEvent         `json:"events"`
 	RawToken      string                 `json:"raw_token"`
 	Header        map[string]interface{} `json:"header"`

@@ -104,6 +104,7 @@ func (s *Storage) initSchema() error {
 		event_type TEXT NOT NULL,
 		event_data TEXT NOT NULL,
 		set_token TEXT,
+		session_id TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'pending',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		delivered_at DATETIME,
@@ -134,8 +135,14 @@ func (s *Storage) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_security_states_identifier ON security_states(identifier);
 	`
 
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Migration: add session_id column to events if it doesn't already exist (for pre-existing DBs)
+	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
+
+	return nil
 }
 
 // Stream represents an SSF event stream configuration
@@ -143,7 +150,7 @@ type Stream struct {
 	ID               string    `json:"stream_id"`
 	Issuer           string    `json:"iss"`
 	Audience         []string  `json:"aud"`
-	EventsSupported  []string  `json:"events_supported"`
+	EventsSupported  []string  `json:"events_delivered"`
 	EventsRequested  []string  `json:"events_requested"`
 	DeliveryMethod   string    `json:"delivery_method"`
 	DeliveryEndpoint string    `json:"delivery_endpoint_url,omitempty"`
@@ -153,10 +160,10 @@ type Stream struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// Delivery method constants
+// Delivery method constants per RFC 8935/8936
 const (
-	DeliveryMethodPush = "https://schemas.openid.net/secevent/risc/delivery-method/push"
-	DeliveryMethodPoll = "https://schemas.openid.net/secevent/risc/delivery-method/poll"
+	DeliveryMethodPush = "urn:ietf:rfc:8935"
+	DeliveryMethodPoll = "urn:ietf:rfc:8936"
 )
 
 // Stream status constants
@@ -271,6 +278,7 @@ const (
 	SubjectStatusActive   = "active"
 	SubjectStatusDisabled = "disabled"
 	SubjectStatusPurged   = "purged"
+	SubjectStatusAtRisk   = "at_risk"
 )
 
 // AddSubject adds a subject to a stream
@@ -510,6 +518,7 @@ type StoredEvent struct {
 	EventType      string     `json:"event_type"`
 	EventData      string     `json:"event_data"`
 	SETToken       string     `json:"set_token"`
+	SessionID      string     `json:"session_id,omitempty"`
 	Status         string     `json:"status"`
 	CreatedAt      time.Time  `json:"created_at"`
 	DeliveredAt    *time.Time `json:"delivered_at"`
@@ -528,17 +537,17 @@ const (
 // StoreEvent stores an event for delivery
 func (s *Storage) StoreEvent(ctx context.Context, event StoredEvent) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO events (id, stream_id, subject_id, event_type, event_data, set_token, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO events (id, stream_id, subject_id, event_type, event_data, set_token, session_id, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.ID, event.StreamID, event.SubjectID, event.EventType,
-		event.EventData, event.SETToken, event.Status)
+		event.EventData, event.SETToken, event.SessionID, event.Status)
 	return err
 }
 
 // GetPendingEvents retrieves events pending delivery
 func (s *Storage) GetPendingEvents(ctx context.Context, streamID string, limit int) ([]StoredEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, stream_id, subject_id, event_type, event_data, set_token, status, 
+		SELECT id, stream_id, subject_id, event_type, event_data, set_token, session_id, status, 
 			created_at, delivered_at, acknowledged_at
 		FROM events 
 		WHERE stream_id = ? AND status IN ('pending', 'delivering')
@@ -559,7 +568,7 @@ func (s *Storage) GetEvents(ctx context.Context, streamID string, status string,
 
 	if status != "" {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, stream_id, subject_id, event_type, event_data, set_token, status, 
+			SELECT id, stream_id, subject_id, event_type, event_data, set_token, session_id, status, 
 				created_at, delivered_at, acknowledged_at
 			FROM events 
 			WHERE stream_id = ? AND status = ?
@@ -567,7 +576,7 @@ func (s *Storage) GetEvents(ctx context.Context, streamID string, status string,
 			LIMIT ?`, streamID, status, limit)
 	} else {
 		rows, err = s.db.QueryContext(ctx, `
-			SELECT id, stream_id, subject_id, event_type, event_data, set_token, status, 
+			SELECT id, stream_id, subject_id, event_type, event_data, set_token, session_id, status, 
 				created_at, delivered_at, acknowledged_at
 			FROM events 
 			WHERE stream_id = ?
@@ -624,7 +633,7 @@ func (s *Storage) RecordDeliveryAttempt(ctx context.Context, eventID string, att
 // GetEventHistory retrieves recent events for display
 func (s *Storage) GetEventHistory(ctx context.Context, streamID string, limit int) ([]StoredEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, stream_id, subject_id, event_type, event_data, set_token, status, 
+		SELECT id, stream_id, subject_id, event_type, event_data, set_token, session_id, status, 
 			created_at, delivered_at, acknowledged_at
 		FROM events 
 		WHERE stream_id = ?
@@ -645,7 +654,7 @@ func scanEvents(rows *sql.Rows) ([]StoredEvent, error) {
 		var subjectID sql.NullString
 		var deliveredAt, acknowledgedAt sql.NullTime
 		err := rows.Scan(&event.ID, &event.StreamID, &subjectID, &event.EventType,
-			&event.EventData, &event.SETToken, &event.Status, &event.CreatedAt,
+			&event.EventData, &event.SETToken, &event.SessionID, &event.Status, &event.CreatedAt,
 			&deliveredAt, &acknowledgedAt)
 		if err != nil {
 			return nil, err
@@ -721,25 +730,35 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// GetSessionStream gets or creates a stream for a specific session
-func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer string) (*Stream, error) {
+// GetSessionStream gets or creates a stream for a specific session.
+// deliveryEndpoint and bearerToken configure push delivery to the standalone receiver.
+func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer, deliveryEndpoint, bearerToken string) (*Stream, error) {
 	streamID := "session-" + sessionID
 
 	stream, err := s.GetStream(ctx, streamID)
 	if err == nil {
+		// Ensure the delivery endpoint stays in sync with the current configuration.
+		// Existing session streams may point to a stale endpoint if the backend
+		// was restarted with updated routing.
+		if stream.DeliveryEndpoint != deliveryEndpoint || stream.BearerToken != bearerToken {
+			stream.DeliveryEndpoint = deliveryEndpoint
+			stream.BearerToken = bearerToken
+			_ = s.UpdateStream(ctx, *stream)
+		}
 		return stream, nil
 	}
 
-	// Create session-specific stream
+	// Create session-specific stream pointing to the standalone receiver
 	sessionStream := Stream{
-		ID:              streamID,
-		Issuer:          issuer,
-		Audience:        []string{issuer + "/receiver"},
-		EventsSupported: GetSupportedEventURIs(),
-		EventsRequested: GetSupportedEventURIs(),
-		DeliveryMethod:  DeliveryMethodPush,
-		DeliveryEndpoint: issuer + "/ssf/push",
-		Status:          StreamStatusEnabled,
+		ID:               streamID,
+		Issuer:           issuer,
+		Audience:         []string{issuer + "/receiver"},
+		EventsSupported:  GetSupportedEventURIs(),
+		EventsRequested:  GetSupportedEventURIs(),
+		DeliveryMethod:   DeliveryMethodPush,
+		DeliveryEndpoint: deliveryEndpoint,
+		BearerToken:      bearerToken,
+		Status:           StreamStatusEnabled,
 	}
 
 	if err := s.CreateStream(ctx, sessionStream); err != nil {
@@ -750,8 +769,8 @@ func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer string
 }
 
 // SeedSessionDemoData seeds demo subjects for a specific session
-func (s *Storage) SeedSessionDemoData(ctx context.Context, sessionID, baseURL string) error {
-	stream, err := s.GetSessionStream(ctx, sessionID, baseURL)
+func (s *Storage) SeedSessionDemoData(ctx context.Context, sessionID, baseURL, deliveryEndpoint, bearerToken string) error {
+	stream, err := s.GetSessionStream(ctx, sessionID, baseURL, deliveryEndpoint, bearerToken)
 	if err != nil {
 		return err
 	}

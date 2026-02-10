@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -21,14 +22,26 @@ type Plugin struct {
 	*plugin.BasePlugin
 	storage         *Storage
 	transmitter     *Transmitter
-	receiver        *Receiver
 	receiverService *ReceiverService
 	actionExecutor  *MockIdPActionExecutor
-	lookingGlass    *lookingglass.Engine
-	keySet          *crypto.KeySet
-	baseURL         string
-	receiverPort    int
-	receiverToken   string // Bearer token for authenticated push delivery
+	lookingGlass     *lookingglass.Engine
+	keySet           *crypto.KeySet
+	baseURL          string
+	receiverPort     int
+	receiverToken    string // Bearer token for authenticated push delivery
+	receiverEndpoint string // Standalone receiver push URL (http://localhost:{port}/ssf/push)
+
+	// SSE connection tracking: one active goroutine per session.
+	// When a new SSE connection arrives for a session, the old one is cancelled
+	// to prevent phantom goroutines from consuming broadcast events.
+	sseSessionsMu sync.Mutex
+	sseSessions   map[string]sseConn
+	sseConnIDSeq  uint64
+}
+
+type sseConn struct {
+	id     uint64
+	cancel context.CancelFunc
 }
 
 // NewPlugin creates a new SSF plugin
@@ -42,6 +55,7 @@ func NewPlugin() *Plugin {
 			Tags:        []string{"security", "signals", "events", "caep", "risc", "zero-trust", "set"},
 			RFCs:        []string{"RFC 8417", "OpenID SSF 1.0", "CAEP", "RISC"},
 		}),
+		sseSessions: make(map[string]sseConn),
 	}
 }
 
@@ -71,6 +85,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.keySet = ks
 	}
 
+	// Route push delivery through the standalone receiver (real HTTP, real JWKS fetch, real signature verification)
+	p.receiverEndpoint = fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort)
+
 	// Initialize SQLite storage
 	dataDir := getDataDir()
 	storage, err := NewStorage(dataDir)
@@ -88,22 +105,11 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	}
 	p.transmitter = NewTransmitter(storage, privateKey, keyID, p.baseURL)
 
-	// Initialize action executor for real state changes (shared by both receivers)
-	p.actionExecutor = NewMockIdPActionExecutor(storage, p.baseURL)
+	// Initialize action executor for real state changes
+	p.actionExecutor = NewMockIdPActionExecutor(storage, p.baseURL, p.receiverEndpoint, p.receiverToken)
 
-	// Initialize legacy receiver (main port - used in production)
-	var publicKey *rsa.PublicKey
-	if p.keySet != nil {
-		publicKey = &p.keySet.RSAPrivateKey().PublicKey
-	}
-	p.receiver = NewReceiver(publicKey, p.baseURL, p.baseURL+"/receiver", p.actionExecutor)
-
-	// Initialize standalone receiver service on separate port (for local dev)
+	// Initialize standalone receiver service on separate port
 	p.receiverService = NewReceiverService(p.receiverPort, p.baseURL, p.receiverToken, p.actionExecutor)
-
-	// Use internal endpoint for push delivery (works in both local and production)
-	// In production, localhost:8081 isn't accessible, so use the main server's push endpoint
-	receiverEndpoint := p.baseURL + "/ssf/push"
 
 	// Start the standalone receiver in a goroutine
 	go func() {
@@ -134,11 +140,11 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		log.Printf("Warning: failed to seed SSF demo data: %v", err)
 	}
 
-	// Update default stream to use internal receiver endpoint
+	// Update default stream to use standalone receiver endpoint with authentication
 	stream, err := p.storage.GetDefaultStream(ctx, p.baseURL)
 	if err == nil {
-		stream.DeliveryEndpoint = receiverEndpoint
-		stream.BearerToken = "" // Internal endpoint doesn't need auth
+		stream.DeliveryEndpoint = p.receiverEndpoint
+		stream.BearerToken = p.receiverToken
 		_ = p.storage.UpdateStream(ctx, *stream)
 	}
 
@@ -173,9 +179,18 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/.well-known/ssf-configuration", p.handleSSFConfiguration)
 	router.Get("/jwks", p.handleJWKS)
 
-	// Stream management
+	// Stream management (SSF §4)
+	router.Post("/stream", p.handleCreateStream)
 	router.Get("/stream", p.handleGetStream)
 	router.Patch("/stream", p.handleUpdateStream)
+	router.Delete("/stream", p.handleDeleteStream)
+
+	// Stream status (SSF §6)
+	router.Get("/status", p.handleGetStatus)
+	router.Post("/status", p.handleUpdateStatus)
+
+	// Stream verification (SSF §7)
+	router.Post("/verify", p.handleVerification)
 
 	// Subject management
 	router.Get("/subjects", p.handleListSubjects)
@@ -185,11 +200,14 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// Action triggers (interactive sandbox)
 	router.Post("/actions/{action}", p.handleTriggerAction)
 
-	// Event delivery (legacy same-port receiver)
+	// Event delivery (RFC 8935 push / RFC 8936 poll)
 	router.Post("/push", p.handlePush)
 	router.Get("/poll", p.handlePoll)
 	router.Post("/poll", p.handlePoll)
 	router.Post("/ack", p.handleAcknowledge)
+
+	// SSE event stream (real-time pipeline events for frontend)
+	router.Get("/events/stream", p.handleEventStream)
 
 	// Event history and logs
 	router.Get("/events", p.handleGetEvents)

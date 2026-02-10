@@ -7,7 +7,7 @@
  * Each browser session gets isolated data via session ID.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Radio, ChevronRight, Shield, AlertTriangle, 
@@ -16,7 +16,7 @@ import {
   Lock, UserX, UserCheck, Terminal,
   Sparkles, Play, Key, Book, Info,
   ChevronDown, Code, Copy, Check, Square,
-  XCircle
+  XCircle, Globe
 } from 'lucide-react'
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { SSFSandboxSEO } from '../components/common/SEO'
@@ -68,18 +68,6 @@ interface Subject {
   created_at: string
 }
 
-interface ActionResponse {
-  event_id: string
-  event_type: string
-  event_name: string
-  category: string
-  subject: string
-  status: string
-  delivery_method: string
-  response_actions: string[]
-  zero_trust_impact: string
-}
-
 interface SecurityState {
   email: string
   sessions_active: number
@@ -116,6 +104,272 @@ interface DecodedSET {
 }
 
 // ============================================================================
+// SSE Pipeline Types
+// ============================================================================
+
+interface SSEPipelineEvent {
+  source: 'transmitter' | 'receiver'
+  event: {
+    type: string
+    timestamp: string
+    event_id: string
+    session_id?: string
+    subject_id?: string
+    event_type?: string
+    data: Record<string, unknown>
+  }
+}
+
+interface CapturedHTTPExchange {
+  label: string
+  request: { method: string; url: string; status_code?: number; headers: Record<string, string>; body?: string }
+  response: { method?: string; url?: string; status_code: number; headers: Record<string, string>; body?: string }
+  duration_ms: number
+  timestamp: string
+  session_id?: string
+}
+
+// SSE event type -> FlowEvent mapping.
+// Only events that carry real, observable data are shown.
+// Metadata-only announcements (event_queued, delivery_started, delivery_success)
+// are dropped — the captured http_exchange IS the delivery with real headers/body.
+function mapSSEToFlowEvent(sse: SSEPipelineEvent): FlowEvent | null {
+  const { source, event } = sse
+  const base = {
+    id: crypto.randomUUID(),
+    timestamp: new Date(event.timestamp),
+    data: event.data,
+  }
+
+  // ── Transmitter events ──────────────────────────────────────────────
+  if (source === 'transmitter') {
+    switch (event.type) {
+      case 'action_triggered': {
+        const meta = event.data?.metadata as Record<string, unknown> | undefined
+        return {
+          ...base, type: 'info' as const,
+          title: `Transmitter: ${(meta?.name as string) || 'Event Triggered'}`,
+          description: `Subject: ${event.subject_id || '?'}  |  ${(meta?.category as string) || 'SSF'}`,
+          rfcReference: 'SSF §4',
+        }
+      }
+      case 'set_generated': {
+        const claims = event.data?.claims as Record<string, unknown> | undefined
+        return {
+          ...base, type: 'crypto' as const,
+          title: 'Transmitter: SET Created',
+          description: `JTI: ${(claims?.id as string)?.slice(0, 8) || '?'}…  |  iss: ${(claims?.issuer as string) || '?'}`,
+          rfcReference: 'RFC 8417 §2',
+        }
+      }
+      case 'set_signed':
+        return {
+          ...base, type: 'crypto' as const,
+          title: 'Transmitter: SET Signed (RS256)',
+          description: `${((event.data?.token as string) || '').length} byte JWT`,
+          rfcReference: 'RFC 7515',
+        }
+
+      // HTTP exchanges are routed to the dedicated Traffic panel
+      case 'http_exchange':
+        return null
+
+      case 'event_queued':
+        return {
+          ...base, type: 'info' as const,
+          title: 'Transmitter: Event Queued',
+          description: `Delivery method: ${(event.data?.delivery_method as string) === 'urn:ietf:rfc:8935' ? 'Push (RFC 8935)' : (event.data?.delivery_method as string) || 'push'}`,
+          rfcReference: 'SSF §5',
+        }
+
+      case 'delivery_started': {
+        const endpoint = event.data?.endpoint as string || ''
+        return {
+          ...base, type: 'request' as const,
+          title: 'Transmitter: Push Delivery',
+          description: `${(event.data?.method as string) || 'POST'} → ${endpoint}`,
+          rfcReference: 'RFC 8935 §2',
+        }
+      }
+
+      case 'delivery_success':
+        return {
+          ...base, type: 'response' as const,
+          title: 'Transmitter: Delivery Success',
+          description: `HTTP ${(event.data?.status_code as number) || 202} on attempt ${(event.data?.attempt as number) || 1}`,
+          rfcReference: 'RFC 8935 §2',
+        }
+
+      case 'delivery_failed':
+        return { ...base, type: 'error' as const, title: 'Transmitter: Delivery Failed', description: (event.data?.error as string) || 'Delivery error' }
+
+      default:
+        return null
+    }
+  }
+
+  // ── Receiver events ─────────────────────────────────────────────────
+  if (source === 'receiver') {
+    switch (event.type) {
+      // HTTP exchanges are routed to the dedicated Traffic panel
+      case 'http_exchange':
+        return null
+
+      case 'event_received':
+        return {
+          ...base, type: 'request' as const,
+          title: 'Receiver: SET Received',
+          description: `${(event.data?.token_length as number) || '?'} bytes via ${(event.data?.delivery_method as string) || 'push'}`,
+          rfcReference: 'RFC 8935 §2',
+        }
+      case 'event_verified':
+        return {
+          ...base, type: 'crypto' as const,
+          title: 'Receiver: Signature Verified',
+          description: `${(event.data?.algorithm as string) || 'RS256'} with key ${(event.data?.key_id as string) || '?'}`,
+          rfcReference: 'RFC 7515 §5.2',
+        }
+      case 'event_verify_failed':
+        return { ...base, type: 'error' as const, title: 'Receiver: Verification Failed', description: (event.data?.error as string) || 'Signature verification failed' }
+      case 'event_processed':
+        return {
+          ...base, type: 'security' as const,
+          title: 'Receiver: SET Processed',
+          description: `Completed in ${(event.data?.processing_time_ms as number) || 0}ms`,
+        }
+      case 'response_action':
+        return {
+          ...base, type: 'action' as const,
+          title: `Action: ${(event.data?.action as string) || 'Response'}`,
+          description: `${(event.data?.event_type as string) || ''} (${(event.data?.category as string) || 'SSF'})`,
+        }
+
+      case 'event_processing':
+        return {
+          ...base, type: 'info' as const,
+          title: 'Receiver: Processing SET',
+          description: `Decoding ${(event.data?.event_count as number) || 1} event(s)`,
+          rfcReference: 'RFC 8417 §2',
+        }
+
+      default:
+        return null
+    }
+  }
+
+  return null
+}
+
+// ============================================================================
+// SSE Hook
+// ============================================================================
+
+function useSSFEventStream(sessionId: string) {
+  const [pipelineEvents, setPipelineEvents] = useState<FlowEvent[]>([])
+  const [httpExchanges, setHttpExchanges] = useState<CapturedHTTPExchange[]>([])
+  const [isConnected, setIsConnected] = useState(false)
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mountedRef = useRef(true)
+
+  const connect = useCallback(() => {
+    // Cancel any pending reconnect timer
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+    // Close any existing connection cleanly
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+
+    const url = `/ssf/events/stream?session=${encodeURIComponent(sessionId)}`
+    const es = new EventSource(url)
+    eventSourceRef.current = es
+
+    es.addEventListener('connected', () => {
+      setIsConnected(true)
+    })
+
+    // Pipeline events are delivered reliably through the API response
+    // (ingestResponseEvents). SSE is kept only for connection status.
+    // No 'pipeline' listener — avoids duplicates from the same broadcast
+    // reaching both the action handler's temp channels and the SSE channels.
+
+    es.onerror = () => {
+      // CRITICAL: Close immediately to prevent the browser's built-in
+      // EventSource auto-reconnect from creating duplicate backend
+      // goroutines that consume broadcast events into dead connections.
+      es.close()
+      eventSourceRef.current = null
+      setIsConnected(false)
+
+      // Reconnect on our own schedule (fixed 2s delay).
+      // The backend cancels stale goroutines per-session, so even if
+      // two reconnects overlap, only the latest survives.
+      if (mountedRef.current) {
+        retryTimerRef.current = setTimeout(() => {
+          if (mountedRef.current) connect()
+        }, 2000)
+      }
+    }
+
+    es.onopen = () => {
+      setIsConnected(true)
+    }
+  }, [sessionId])
+
+  const disconnect = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
+    }
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
+    }
+    setIsConnected(false)
+  }, [])
+
+  const clearEvents = useCallback(() => {
+    setPipelineEvents([])
+    setHttpExchanges([])
+  }, [])
+
+  // Process pipeline events returned directly in the action API response.
+  // This is the RELIABLE path — events come through the HTTP response,
+  // not the fragile SSE stream through the Vite proxy.
+  const ingestResponseEvents = useCallback((events: SSEPipelineEvent[]) => {
+    const flowEvents: FlowEvent[] = []
+    const exchanges: CapturedHTTPExchange[] = []
+
+    for (const sse of events) {
+      if (sse.event.type === 'http_exchange' && sse.event.data) {
+        exchanges.push(sse.event.data as unknown as CapturedHTTPExchange)
+        continue
+      }
+      const fe = mapSSEToFlowEvent(sse)
+      if (fe) flowEvents.push(fe)
+    }
+
+    if (flowEvents.length > 0) setPipelineEvents(prev => [...prev, ...flowEvents])
+    if (exchanges.length > 0) setHttpExchanges(prev => [...prev, ...exchanges])
+  }, [])
+
+  useEffect(() => {
+    mountedRef.current = true
+    connect()
+    return () => {
+      mountedRef.current = false
+      disconnect()
+    }
+  }, [connect, disconnect])
+
+  return { pipelineEvents, httpExchanges, isConnected, clearEvents, ingestResponseEvents, connect, disconnect }
+}
+
+// ============================================================================
 // Event Definitions
 // ============================================================================
 
@@ -128,16 +382,24 @@ interface EventDef {
   rfcReference: string
 }
 
-const SSF_EVENTS: EventDef[] = [
-  { id: 'session-revoked', name: 'Session Revoked', icon: Lock, description: 'Terminate user session', category: 'CAEP', rfcReference: 'CAEP §3.1' },
-  { id: 'credential-change', name: 'Credential Change', icon: Key, description: 'Password or credential updated', category: 'CAEP', rfcReference: 'CAEP §3.2' },
-  { id: 'device-compliance-change', name: 'Device Non-Compliance', icon: AlertTriangle, description: 'Device fails security check', category: 'CAEP', rfcReference: 'CAEP §3.3' },
-  { id: 'assurance-level-change', name: 'Auth Level Downgrade', icon: Shield, description: 'Reduced authentication assurance', category: 'CAEP', rfcReference: 'CAEP §3.4' },
-  { id: 'credential-compromise', name: 'Credential Compromise', icon: AlertTriangle, description: 'Credentials potentially exposed', category: 'RISC', rfcReference: 'RISC §2.1' },
-  { id: 'account-disabled', name: 'Account Disabled', icon: UserX, description: 'Suspend user account', category: 'RISC', rfcReference: 'RISC §2.2' },
-  { id: 'account-enabled', name: 'Account Enabled', icon: UserCheck, description: 'Reactivate user account', category: 'RISC', rfcReference: 'RISC §2.3' },
-  { id: 'sessions-revoked', name: 'All Sessions Revoked', icon: RotateCcw, description: 'Global session termination', category: 'RISC', rfcReference: 'RISC §2.4' },
-]
+// Icon mapping for event types
+const EVENT_ICONS: Record<string, React.ElementType> = {
+  'session-revoked': Lock,
+  'token-claims-change': Code,
+  'credential-change': Key,
+  'assurance-level-change': Shield,
+  'device-compliance-change': AlertTriangle,
+  'credential-compromise': AlertTriangle,
+  'account-purged': XCircle,
+  'account-disabled': UserX,
+  'account-enabled': UserCheck,
+  'identifier-changed': User,
+  'identifier-recycled': RotateCcw,
+  'account-credential-change-required': Key,
+  'sessions-revoked': RotateCcw,
+}
+
+// No hardcoded event definitions -- everything comes from the backend's event registry
 
 // ============================================================================
 // Main Component
@@ -148,18 +410,45 @@ export function SSFSandbox() {
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<EventDef | null>(null)
   const [securityStates, setSecurityStates] = useState<Record<string, SecurityState>>({})
+  const [eventDefs, setEventDefs] = useState<EventDef[]>([])
   
   // Execution state
   const [status, setStatus] = useState<'idle' | 'executing' | 'completed' | 'error'>('idle')
-  const [flowEvents, setFlowEvents] = useState<FlowEvent[]>([])
   const [decodedSET, setDecodedSET] = useState<DecodedSET | null>(null)
-  const [activeTab, setActiveTab] = useState<'events' | 'set' | 'state'>('events')
+  const [activeTab, setActiveTab] = useState<'events' | 'traffic' | 'set' | 'state'>('events')
   
   // Manual SET decoder (uses TokenInspector component)
   const [manualSET, setManualSET] = useState('')
 
   // Session ID for this browser tab
   const sessionId = useMemo(() => getOrCreateSessionId(), [])
+
+  // Real-time SSE event stream from the backend
+  const { pipelineEvents, httpExchanges, isConnected, clearEvents, ingestResponseEvents } = useSSFEventStream(sessionId)
+
+  // Fetch event type definitions from backend (real data, not hardcoded)
+  useEffect(() => {
+    ssfFetch('/ssf/event-types').then(r => r.json()).then((grouped: Record<string, Array<Record<string, unknown>>>) => {
+      const defs: EventDef[] = []
+      for (const [category, types] of Object.entries(grouped)) {
+        if (!Array.isArray(types)) continue
+        for (const t of types) {
+          const uri = t.uri as string || ''
+          const id = uri.split('/').pop() || ''
+          if (!id) continue
+          defs.push({
+            id,
+            name: (t.name as string) || id,
+            icon: EVENT_ICONS[id] || Info,
+            description: (t.description as string) || '',
+            category: (category === 'RISC' ? 'RISC' : 'CAEP') as 'CAEP' | 'RISC',
+            rfcReference: category === 'RISC' ? 'RISC §2' : 'CAEP §3',
+          })
+        }
+      }
+      if (defs.length > 0) setEventDefs(defs)
+    }).catch(err => { console.error('[SSF] Failed to fetch event types from backend:', err) })
+  }, [])
 
   // Fetch data function - only fetches, no polling logic here
   const fetchAll = useCallback(async () => {
@@ -220,152 +509,69 @@ export function SSFSandbox() {
     }
   }, [status, fetchAll])
 
-  const addFlowEvent = useCallback((event: Omit<FlowEvent, 'id' | 'timestamp'>) => {
-    setFlowEvents(prev => [...prev, { ...event, id: crypto.randomUUID(), timestamp: new Date() }])
-  }, [])
-
-  // Execute event
+  // Execute event - triggers the real backend flow, SSE stream delivers events in real-time
   const execute = useCallback(async () => {
     if (!selectedSubject || !selectedEvent || status === 'executing') return
 
     setStatus('executing')
-    setFlowEvents([])
+    clearEvents()
     setDecodedSET(null)
-
-    addFlowEvent({ 
-      type: 'info', 
-      title: 'Initiating SSF Event', 
-      description: `Triggering ${selectedEvent.name} for ${selectedSubject.display_name}`,
-      rfcReference: selectedEvent.rfcReference
-    })
+    setActiveTab('events')
 
     try {
-    // Capture protocol flow events while executing real actions
-      await delay(100)
-      addFlowEvent({ 
-        type: 'crypto', 
-        title: 'Generating Security Event Token', 
-        description: 'Creating SET with event payload and signing with RS256',
-        rfcReference: 'RFC 8417 §2'
-      })
-
-      await delay(100)
-      addFlowEvent({ 
-        type: 'request', 
-        title: `POST /ssf/actions/${selectedEvent.id}`, 
-        description: 'Transmitter processing event trigger',
-        rfcReference: 'SSF §4.1',
-        data: { subject_identifier: selectedSubject.identifier, event_type: selectedEvent.id }
-      })
-
+      // Single API call — delivery is synchronous, response includes ALL
+      // pipeline events (transmitter + receiver) captured during execution.
       const res = await ssfFetch(`/ssf/actions/${selectedEvent.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subject_identifier: selectedSubject.identifier }),
       })
-      const data: ActionResponse = await res.json()
 
-      addFlowEvent({ 
-        type: 'response', 
-        title: 'Event Created Successfully', 
-        description: `Event ID: ${data.event_id}`,
-        data: { event_id: data.event_id, category: data.category, status: data.status }
-      })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: 'Request failed' }))
+        throw new Error(errData.error || `HTTP ${res.status}`)
+      }
 
-      await delay(100)
-      addFlowEvent({ 
-        type: 'request', 
-        title: 'Push Delivery to Receiver', 
-        description: 'POST SET to receiver webhook endpoint',
-        rfcReference: 'SSF §5.2.1',
-        data: { endpoint: 'http://localhost:8081/ssf/push', method: 'push' }
-      })
+      const actionData = await res.json()
 
-      await delay(100)
-      addFlowEvent({ 
-        type: 'crypto', 
-        title: 'Receiver Validates SET Signature', 
-        description: 'Fetching JWKS from transmitter and verifying RS256 signature',
-        rfcReference: 'RFC 8417 §3'
-      })
-
-      await delay(100)
-      addFlowEvent({ 
-        type: 'security', 
-        title: `${data.category} Event Processed`, 
-        description: `Receiver processed ${data.event_name}`,
-        rfcReference: data.category === 'CAEP' ? 'CAEP Spec' : 'RISC Spec'
-      })
-
-      // Log response actions
-      for (const action of data.response_actions) {
-        await delay(50)
-        addFlowEvent({ 
-          type: 'action', 
-          title: 'Zero Trust Response Action', 
-          description: action,
-          data: { action, impact: data.zero_trust_impact }
-        })
+      // Ingest pipeline events from the response (reliable, not SSE-dependent)
+      if (actionData.pipeline_events?.length) {
+        ingestResponseEvents(actionData.pipeline_events as SSEPipelineEvent[])
       }
 
       setStatus('completed')
 
-      // Wait for async push delivery and receiver processing
-      await delay(1500)
-      
-      // Decode the SET token - retry a few times in case delivery is slow
-      let decoded = null
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const latestEvents = await ssfFetch('/ssf/events').then(r => r.json())
-        const latestEvent = latestEvents.events?.[0]
-        
-        if (latestEvent?.set_token) {
-          try {
-            decoded = await ssfFetch('/ssf/decode', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: latestEvent.set_token }),
-            }).then(r => r.json())
-            setDecodedSET(decoded)
-            
-            addFlowEvent({
-              type: 'token',
-              title: 'SET Token Captured',
-              description: `Event ${latestEvent.id} - Status: ${latestEvent.status}`,
-              rfcReference: 'RFC 8417',
-              data: { jti: decoded.jti, status: latestEvent.status }
-            })
-            break
-          } catch (e) {
-            console.warn('Failed to decode SET:', e)
-          }
+      // Fetch the decoded SET token
+      const latestEvents = await ssfFetch('/ssf/events').then(r => r.json())
+      const latestEvent = latestEvents.events?.[0]
+
+      if (latestEvent?.set_token) {
+        try {
+          const decoded = await ssfFetch('/ssf/decode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: latestEvent.set_token }),
+          }).then(r => r.json())
+          setDecodedSET(decoded)
+        } catch (e) {
+          console.warn('Failed to decode SET:', e)
         }
-        
-        if (attempt < 2) await delay(1000)
       }
-      
+
       // Fetch updated security state
       await fetchAll()
-      
-      // Auto-switch to State tab to show the changes
-      setActiveTab('state')
 
     } catch (err) {
       console.error('Event failed:', err)
-      addFlowEvent({ 
-        type: 'error', 
-        title: 'Execution Failed', 
-        description: err instanceof Error ? err.message : 'Unknown error'
-      })
       setStatus('error')
     }
-  }, [selectedSubject, selectedEvent, status, addFlowEvent, fetchAll])
+  }, [selectedSubject, selectedEvent, status, clearEvents, ingestResponseEvents, fetchAll])
 
   const reset = useCallback(() => {
     setStatus('idle')
-    setFlowEvents([])
+    clearEvents()
     setDecodedSET(null)
-  }, [])
+  }, [clearEvents])
 
   const resetSecurityState = useCallback(async () => {
     if (!selectedSubject) return
@@ -422,21 +628,21 @@ export function SSFSandbox() {
               label="Session Revoked"
               sublabel="CAEP Event"
               color="blue"
-              onClick={() => setSelectedEvent(SSF_EVENTS[0])}
+              onClick={() => setSelectedEvent(eventDefs.find(e => e.id === 'session-revoked') || eventDefs[0])}
             />
             <QuickButton
               icon={AlertTriangle}
               label="Credential Compromise"
               sublabel="RISC Event"
               color="red"
-              onClick={() => setSelectedEvent(SSF_EVENTS[4])}
+              onClick={() => setSelectedEvent(eventDefs.find(e => e.id === 'credential-compromise') || eventDefs[0])}
             />
             <QuickButton
               icon={RotateCcw}
               label="All Sessions Revoked"
               sublabel="RISC Event"
               color="purple"
-              onClick={() => setSelectedEvent(SSF_EVENTS[7])}
+              onClick={() => setSelectedEvent(eventDefs.find(e => e.id === 'sessions-revoked') || eventDefs[0])}
             />
           </div>
         </section>
@@ -449,7 +655,7 @@ export function SSFSandbox() {
             <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-surface-400" />
             <span className="text-xs sm:text-sm font-medium text-surface-300">Configuration</span>
           </div>
-          {(selectedEvent || flowEvents.length > 0) && (
+          {(selectedEvent || pipelineEvents.length > 0) && (
             <button
               onClick={() => { setSelectedEvent(null); reset(); resetSecurityState() }}
               className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
@@ -488,19 +694,19 @@ export function SSFSandbox() {
               <select
                 value={selectedEvent?.id || ''}
                 onChange={(e) => {
-                  const event = SSF_EVENTS.find(ev => ev.id === e.target.value)
+                  const event = eventDefs.find(ev => ev.id === e.target.value)
                   setSelectedEvent(event || null)
                 }}
                 className="w-full appearance-none px-3 py-2 pr-8 rounded-lg bg-surface-800 border border-white/10 text-sm text-white focus:outline-none focus:border-amber-500/50"
               >
                 <option value="">Select an event...</option>
                 <optgroup label="CAEP Events">
-                  {SSF_EVENTS.filter(e => e.category === 'CAEP').map(e => (
+                  {eventDefs.filter(e => e.category === 'CAEP').map(e => (
                     <option key={e.id} value={e.id}>{e.name}</option>
                   ))}
                 </optgroup>
                 <optgroup label="RISC Events">
-                  {SSF_EVENTS.filter(e => e.category === 'RISC').map(e => (
+                  {eventDefs.filter(e => e.category === 'RISC').map(e => (
                     <option key={e.id} value={e.id}>{e.name}</option>
                   ))}
                 </optgroup>
@@ -573,13 +779,15 @@ export function SSFSandbox() {
           <div className="p-4 sm:p-5">
             <SSFFlowPanel
               status={status}
-              events={flowEvents}
+              events={pipelineEvents}
+              httpExchanges={httpExchanges}
               decodedSET={decodedSET}
               securityState={selectedState}
               activeTab={activeTab}
               onTabChange={setActiveTab}
               onResetState={resetSecurityState}
               selectedEvent={selectedEvent}
+              isSSEConnected={isConnected}
             />
           </div>
         </motion.section>
@@ -662,11 +870,6 @@ export function SSFSandbox() {
   )
 }
 
-// Helper
-function delay(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
 // ============================================================================
 // Sub-Components
 // ============================================================================
@@ -733,23 +936,27 @@ function QuickButton({
 interface SSFFlowPanelProps {
   status: 'idle' | 'executing' | 'completed' | 'error'
   events: FlowEvent[]
+  httpExchanges: CapturedHTTPExchange[]
   decodedSET: DecodedSET | null
   securityState: SecurityState | null
-  activeTab: 'events' | 'set' | 'state'
-  onTabChange: (tab: 'events' | 'set' | 'state') => void
+  activeTab: 'events' | 'traffic' | 'set' | 'state'
+  onTabChange: (tab: 'events' | 'traffic' | 'set' | 'state') => void
   onResetState: () => void
   selectedEvent: EventDef
+  isSSEConnected: boolean
 }
 
 function SSFFlowPanel({ 
   status, 
-  events, 
+  events,
+  httpExchanges,
   decodedSET, 
   securityState,
   activeTab, 
   onTabChange,
   onResetState,
-  selectedEvent 
+  selectedEvent,
+  isSSEConnected
 }: SSFFlowPanelProps) {
   const statusConfig = {
     idle: { icon: Play, color: 'text-surface-400', bg: 'bg-surface-800', label: 'Ready to Execute' },
@@ -793,10 +1000,17 @@ function SSFFlowPanel({
         </div>
       </div>
 
+      {/* SSE Connection Status */}
+      <div className="flex items-center gap-2 text-xs">
+        <div className={`w-2 h-2 rounded-full ${isSSEConnected ? 'bg-green-400 animate-pulse' : 'bg-surface-600'}`} />
+        <span className="text-surface-500">{isSSEConnected ? 'Live stream connected' : 'Connecting...'}</span>
+      </div>
+
       {/* Tab Navigation */}
       <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50 overflow-x-auto scrollbar-hide">
         {[
-          { id: 'events', label: 'Events', count: events.length, icon: Zap },
+          { id: 'events', label: 'Pipeline', count: events.length, icon: Zap },
+          { id: 'traffic', label: 'Traffic', count: httpExchanges.length, icon: Globe },
           { id: 'set', label: 'SET', count: decodedSET ? 1 : 0, icon: Key },
           { id: 'state', label: 'State', count: securityState ? 1 : 0, icon: User },
         ].map(tab => (
@@ -831,6 +1045,16 @@ function SSFFlowPanel({
               exit={{ opacity: 0, y: -10 }}
             >
               <EventsList events={events} />
+            </motion.div>
+          )}
+          {activeTab === 'traffic' && (
+            <motion.div
+              key="traffic"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <TrafficPanel exchanges={httpExchanges} />
             </motion.div>
           )}
           {activeTab === 'set' && (
@@ -1095,6 +1319,146 @@ function StateItem({ label, value, status }: { label: string; value: string; sta
       <div className={`text-sm font-medium ${colors[status]}`}>{value}</div>
     </div>
   )
+}
+
+// ============================================================================
+// Traffic Panel - Real HTTP Exchanges
+// ============================================================================
+
+function TrafficPanel({ exchanges }: { exchanges: CapturedHTTPExchange[] }) {
+  if (exchanges.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <Globe className="w-12 h-12 text-surface-600 mb-3" />
+        <p className="text-surface-400">No HTTP traffic captured</p>
+        <p className="text-surface-500 text-sm mt-1">Execute the flow to see real HTTP exchanges<br />between the transmitter and receiver</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {exchanges.map((exchange, index) => (
+        <HTTPExchangeCard key={index} exchange={exchange} />
+      ))}
+    </div>
+  )
+}
+
+/** Matches the Looking Glass ExchangeCard pattern exactly */
+function HTTPExchangeCard({ exchange }: { exchange: CapturedHTTPExchange }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+
+  const statusCode = exchange.response.status_code
+  const statusBg = statusCode >= 200 && statusCode < 300
+    ? 'bg-green-500/10 text-green-400'
+    : statusCode >= 400
+    ? 'bg-red-500/10 text-red-400'
+    : 'bg-yellow-500/10 text-yellow-400'
+  const statusTextColor = statusCode >= 200 && statusCode < 300
+    ? 'text-green-400' : statusCode >= 400 ? 'text-red-400' : 'text-yellow-400'
+
+  // Extract RFC from label (e.g. "Push Delivery (RFC 8935)" -> "RFC 8935")
+  const rfcMatch = exchange.label.match(/\(([^)]+)\)/)
+  const rfcReference = rfcMatch ? rfcMatch[1] : null
+  const stepLabel = exchange.label.replace(/\s*\([^)]*\)/, '')
+
+  return (
+    <div className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full p-3 flex items-center gap-2 sm:gap-3 hover:bg-white/5 active:bg-white/10 transition-colors text-left"
+      >
+        <div className="p-1.5 rounded bg-cyan-500/10 flex-shrink-0">
+          <Send className="w-4 h-4 text-cyan-400" />
+        </div>
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+            <span className="font-mono text-xs sm:text-sm font-medium text-cyan-400 flex-shrink-0">
+              {exchange.request.method}
+            </span>
+            <span className="text-xs sm:text-sm text-surface-300 truncate max-w-full">
+              {exchange.request.url}
+            </span>
+          </div>
+          <p className="text-xs text-surface-400 mt-0.5 truncate">{stepLabel}</p>
+        </div>
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <span className={`px-1.5 sm:px-2 py-0.5 rounded text-xs font-medium ${statusBg}`}>
+            {statusCode}
+          </span>
+          {rfcReference && (
+            <span className="hidden sm:inline px-1.5 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 font-mono">
+              {rfcReference}
+            </span>
+          )}
+          {isExpanded ? (
+            <ChevronDown className="w-4 h-4 text-surface-400" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-surface-400" />
+          )}
+        </div>
+      </button>
+
+      <AnimatePresence>
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="border-t border-white/5"
+          >
+            <div className="p-3 space-y-3">
+              {/* Request */}
+              <div>
+                <h4 className="text-xs font-medium text-surface-400 mb-2">Request</h4>
+                <pre className="p-2 rounded bg-surface-950 text-xs font-mono overflow-x-auto">
+                  <div className="text-cyan-400">
+                    {exchange.request.method} {exchange.request.url}
+                  </div>
+                  {exchange.request.headers && Object.entries(exchange.request.headers).map(([k, v]) => (
+                    <div key={k} className="text-surface-400">
+                      <span className="text-surface-400">{k}:</span> {v}
+                    </div>
+                  ))}
+                  {exchange.request.body && (
+                    <div className="mt-2 pt-2 border-t border-white/5 text-surface-300">
+                      {tryFormatJSON(exchange.request.body)}
+                    </div>
+                  )}
+                </pre>
+              </div>
+
+              {/* Response */}
+              <div>
+                <h4 className="text-xs font-medium text-surface-400 mb-2">
+                  Response ({exchange.duration_ms}ms)
+                </h4>
+                <pre className="p-2 rounded bg-surface-950 text-xs font-mono overflow-x-auto">
+                  <div className={statusTextColor}>
+                    {statusCode} {statusCode === 202 ? 'OK' : statusCode < 300 ? 'OK' : statusCode < 400 ? 'Redirect' : 'Error'}
+                  </div>
+                  {exchange.response.body && (
+                    <div className="mt-2 text-surface-300">
+                      {tryFormatJSON(exchange.response.body)}
+                    </div>
+                  )}
+                </pre>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function tryFormatJSON(str: string): string {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2)
+  } catch {
+    return str
+  }
 }
 
 // ============================================================================

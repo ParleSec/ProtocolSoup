@@ -51,7 +51,25 @@ export default defineConfig({
       '/saml': { target: 'http://localhost:8080', changeOrigin: true },
       '/spiffe': { target: 'http://localhost:8080', changeOrigin: true },
       '/scim': { target: 'http://localhost:8080', changeOrigin: true },
-      '/ssf': { target: 'http://localhost:8080', changeOrigin: true },
+      '/ssf': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        // Disable response buffering for SSE (/ssf/events/stream)
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.url?.includes('/events/stream')) {
+              proxyReq.setHeader('Accept', 'text/event-stream')
+            }
+          })
+          proxy.on('proxyRes', (proxyRes, req) => {
+            if (req.url?.includes('/events/stream')) {
+              // Prevent buffering/compression of SSE stream
+              proxyRes.headers['cache-control'] = 'no-cache'
+              proxyRes.headers['x-accel-buffering'] = 'no'
+            }
+          })
+        },
+      },
     },
   },
 })

@@ -1,12 +1,16 @@
 package ssf
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
+	"net/url"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -25,7 +29,7 @@ func getSessionID(r *http.Request) string {
 		return cookie.Value
 	}
 
-	// Return empty for legacy behavior (though frontend should always send session)
+	// Return empty if no session header (frontend should always send one)
 	return ""
 }
 
@@ -53,20 +57,22 @@ func (p *Plugin) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
-// handleSSFConfiguration returns the SSF transmitter metadata
+// handleSSFConfiguration returns the SSF transmitter metadata per OpenID SSF 1.0 §3.1
 func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) {
 	config := map[string]interface{}{
-		"issuer":   p.baseURL,
-		"jwks_uri": p.baseURL + "/ssf/jwks",
+		"spec_version": "1_0-ID3",
+		"issuer":       p.baseURL,
+		"jwks_uri":     p.baseURL + "/ssf/jwks",
 		"delivery_methods_supported": []string{
 			DeliveryMethodPush,
 			DeliveryMethodPoll,
 		},
 		"configuration_endpoint":   p.baseURL + "/ssf/stream",
+		"status_endpoint":          p.baseURL + "/ssf/status",
+		"verification_endpoint":    p.baseURL + "/ssf/verify",
 		"add_subject_endpoint":     p.baseURL + "/ssf/subjects",
 		"remove_subject_endpoint":  p.baseURL + "/ssf/subjects",
-		"verification_endpoint":    p.baseURL + "/ssf/verify",
-		"status_endpoint":          p.baseURL + "/ssf/status",
+		"events_supported":         GetSupportedEventURIs(),
 		"critical_subject_members": []string{SubjectFormatEmail, SubjectFormatIssuerSub},
 	}
 	writeJSON(w, http.StatusOK, config)
@@ -92,7 +98,7 @@ func (p *Plugin) handleGetStream(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -118,7 +124,16 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
@@ -146,6 +161,90 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stream)
 }
 
+// handleCreateStream creates a new stream per SSF §4.1
+func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DeliveryMethod   string   `json:"delivery_method"`
+		DeliveryEndpoint string   `json:"delivery_endpoint_url,omitempty"`
+		EventsRequested  []string `json:"events_requested,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate delivery method
+	switch req.DeliveryMethod {
+	case DeliveryMethodPush, DeliveryMethodPoll:
+		// Valid
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("Invalid delivery_method: %q (must be %q or %q)", req.DeliveryMethod, DeliveryMethodPush, DeliveryMethodPoll))
+		return
+	}
+
+	// Push delivery requires an endpoint
+	if req.DeliveryMethod == DeliveryMethodPush && req.DeliveryEndpoint == "" {
+		writeError(w, http.StatusBadRequest, "delivery_endpoint_url is required for push delivery")
+		return
+	}
+
+	sessionID := getSessionID(r)
+	streamID := generateID()
+	if sessionID != "" {
+		streamID = "session-" + sessionID
+	}
+
+	eventsRequested := req.EventsRequested
+	if len(eventsRequested) == 0 {
+		eventsRequested = GetSupportedEventURIs()
+	}
+
+	stream := Stream{
+		ID:               streamID,
+		Issuer:           p.baseURL,
+		Audience:         []string{p.baseURL + "/receiver"},
+		EventsSupported:  GetSupportedEventURIs(),
+		EventsRequested:  eventsRequested,
+		DeliveryMethod:   req.DeliveryMethod,
+		DeliveryEndpoint: req.DeliveryEndpoint,
+		Status:           StreamStatusEnabled,
+	}
+
+	if err := p.storage.CreateStream(r.Context(), stream); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create stream")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, stream)
+}
+
+// handleDeleteStream deletes a stream per SSF §4.1
+func (p *Plugin) handleDeleteStream(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Stream not found")
+		return
+	}
+
+	if err := p.storage.DeleteStream(r.Context(), stream.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to delete stream")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ====================
 // Subject Management
 // ====================
@@ -157,13 +256,13 @@ func (p *Plugin) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to get stream")
 			return
 		}
 		// Ensure demo data exists for this session
-		_ = p.storage.SeedSessionDemoData(r.Context(), sessionID, p.baseURL)
+		_ = p.storage.SeedSessionDemoData(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 		// Initialize user states for this session
 		p.actionExecutor.InitSessionUserStates(sessionID)
 	} else {
@@ -214,7 +313,7 @@ func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -278,6 +377,7 @@ func (p *Plugin) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 
 // handleTriggerAction handles all action triggers
 func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
 	action := chi.URLParam(r, "action")
 	sessionID := getSessionID(r)
 
@@ -296,7 +396,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -305,6 +405,18 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
 	}
+
+	// ── Subscribe temp channels to capture ALL pipeline events ──────────
+	// Delivery is synchronous, so every transmitter and receiver event is
+	// captured in these channels and returned in the API response.
+	// This makes event delivery reliable regardless of SSE connection state.
+	txCapture := make(chan TransmitterEvent, 128)
+	p.transmitter.AddEventListener(txCapture)
+	defer p.transmitter.RemoveEventListener(txCapture)
+
+	rxCapture := make(chan ReceiverEvent, 128)
+	p.receiverService.AddEventListener(rxCapture)
+	defer p.receiverService.RemoveEventListener(rxCapture)
 
 	subject := SubjectIdentifier{
 		Format: SubjectFormatEmail,
@@ -331,7 +443,11 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if credType == "" {
 			credType = CredentialTypePassword
 		}
-		event, err = p.transmitter.TriggerCredentialChangeWithSession(r.Context(), stream.ID, sessionID, subject, credType, initiator)
+		changeType := req.ChangeType
+		if changeType == "" {
+			changeType = "update" // CAEP §3.2 default
+		}
+		event, err = p.transmitter.TriggerCredentialChangeWithSession(r.Context(), stream.ID, sessionID, subject, credType, changeType, initiator)
 
 	case "device-compliance-change":
 		current := req.CurrentStatus
@@ -365,12 +481,13 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		event, err = p.transmitter.TriggerAccountPurgedWithSession(r.Context(), stream.ID, sessionID, subject, initiator)
 
 	case "identifier-changed":
-		if req.NewValue == "" {
-			writeError(w, http.StatusBadRequest, "new_value is required for identifier-changed")
-			return
+		newValue := req.NewValue
+		if newValue == "" {
+			// Default: simulate an email change for the subject
+			newValue = "updated-" + req.SubjectIdentifier
 		}
 		event, err = p.transmitter.TriggerIdentifierChangedWithSession(r.Context(), stream.ID, sessionID, subject,
-			req.SubjectIdentifier, req.NewValue, initiator)
+			req.SubjectIdentifier, newValue, initiator)
 
 	case "assurance-level-change":
 		current := req.CurrentStatus
@@ -382,6 +499,33 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 			previous = "aal2"
 		}
 		event, err = p.transmitter.TriggerAssuranceLevelChangeWithSession(r.Context(), stream.ID, sessionID, subject, current, previous)
+
+	case "token-claims-change":
+		// CAEP §3.2: claims is a JSON object of changed claim names -> new values
+		claims := map[string]interface{}{
+			"role":     "viewer",
+			"group":    []string{"security-team"},
+			"exp":      time.Now().Add(1 * time.Hour).Unix(),
+		}
+		if req.CurrentStatus != "" {
+			claims["role"] = req.CurrentStatus // allow overriding via request
+		}
+		event, err = p.transmitter.TriggerTokenClaimsChangeWithSession(r.Context(), stream.ID, sessionID, subject, claims)
+
+	case "identifier-recycled":
+		oldValue := req.SubjectIdentifier // current subject is the new holder
+		newValue := req.NewValue
+		if newValue == "" {
+			newValue = "recycled-" + req.SubjectIdentifier // show what the identifier was reassigned to
+		}
+		event, err = p.transmitter.TriggerIdentifierRecycledWithSession(r.Context(), stream.ID, sessionID, subject, oldValue, newValue)
+
+	case "account-credential-change-required":
+		reason := req.Reason
+		if reason == "" {
+			reason = "Credential rotation policy triggered"
+		}
+		event, err = p.transmitter.TriggerAccountCredentialChangeRequiredWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
 
 	case "sessions-revoked":
 		reason := req.Reason
@@ -403,6 +547,78 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	// Get event metadata for response
 	metadata := GetEventMetadata(event.EventType)
 
+	// ── Drain captured pipeline events ─────────────────────────────────
+	// Delivery is synchronous, so by this point ALL transmitter + receiver
+	// events have been broadcast and are sitting in our temp channels.
+
+	// Prepend the initiating action request as the first HTTP exchange
+	// so the full chain is visible: action call → transmitter → receiver.
+	reqBody, _ := json.Marshal(req)
+	actionExchange := map[string]interface{}{
+		"source": "transmitter",
+		"event": map[string]interface{}{
+			"type":       "http_exchange",
+			"timestamp":  time.Now(),
+			"event_id":   event.ID,
+			"session_id": sessionID,
+			"data": CapturedHTTPExchange{
+				Label: fmt.Sprintf("Action: %s (SSF §4)", metadata.Name),
+				Request: HTTPCapture{
+					Method: r.Method,
+					URL:    fmt.Sprintf("/ssf/actions/%s", action),
+					Headers: map[string]string{
+						"Content-Type":    "application/json",
+						"X-Ssf-Session":   sessionID,
+					},
+					Body: string(reqBody),
+				},
+				Response: HTTPCapture{
+					StatusCode: http.StatusOK,
+					Headers: map[string]string{
+						"Content-Type": "application/json",
+					},
+				},
+				DurationMs: 0, // filled below
+				Timestamp:  time.Now(),
+				SessionID:  sessionID,
+			},
+		},
+	}
+
+	var pipelineEvents []map[string]interface{}
+	pipelineEvents = append(pipelineEvents, actionExchange)
+	drainDone := false
+	for !drainDone {
+		select {
+		case txEv := <-txCapture:
+			if txEv.SessionID != "" && txEv.SessionID != sessionID {
+				continue
+			}
+			pipelineEvents = append(pipelineEvents, map[string]interface{}{
+				"source": "transmitter",
+				"event":  txEv,
+			})
+		case rxEv := <-rxCapture:
+			if rxEv.SessionID != "" && rxEv.SessionID != sessionID {
+				continue
+			}
+			pipelineEvents = append(pipelineEvents, map[string]interface{}{
+				"source": "receiver",
+				"event":  rxEv,
+			})
+		default:
+			drainDone = true
+		}
+	}
+
+	// Set real duration on the action exchange now that execution is complete
+	if exData, ok := actionExchange["event"].(map[string]interface{}); ok {
+		if capture, ok := exData["data"].(CapturedHTTPExchange); ok {
+			capture.DurationMs = time.Since(startTime).Milliseconds()
+			exData["data"] = capture
+		}
+	}
+
 	writeJSON(w, http.StatusOK, ActionResponse{
 		EventID:         event.ID,
 		EventType:       event.EventType,
@@ -413,6 +629,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		DeliveryMethod:  stream.DeliveryMethod,
 		ResponseActions: metadata.ResponseActions,
 		ZeroTrustImpact: metadata.ZeroTrustImpact,
+		PipelineEvents:  pipelineEvents,
 	})
 }
 
@@ -422,6 +639,7 @@ type ActionRequest struct {
 	Reason            string `json:"reason,omitempty"`
 	Initiator         string `json:"initiator,omitempty"`
 	CredentialType    string `json:"credential_type,omitempty"`
+	ChangeType        string `json:"change_type,omitempty"` // CAEP §3.2: create | revoke | update
 	CurrentStatus     string `json:"current_status,omitempty"`
 	PreviousStatus    string `json:"previous_status,omitempty"`
 	NewValue          string `json:"new_value,omitempty"`
@@ -429,36 +647,44 @@ type ActionRequest struct {
 
 // ActionResponse represents the response after triggering an action
 type ActionResponse struct {
-	EventID         string   `json:"event_id"`
-	EventType       string   `json:"event_type"`
-	EventName       string   `json:"event_name"`
-	Category        string   `json:"category"`
-	Subject         string   `json:"subject"`
-	Status          string   `json:"status"`
-	DeliveryMethod  string   `json:"delivery_method"`
-	ResponseActions []string `json:"response_actions"`
-	ZeroTrustImpact string   `json:"zero_trust_impact"`
+	EventID         string                   `json:"event_id"`
+	EventType       string                   `json:"event_type"`
+	EventName       string                   `json:"event_name"`
+	Category        string                   `json:"category"`
+	Subject         string                   `json:"subject"`
+	Status          string                   `json:"status"`
+	DeliveryMethod  string                   `json:"delivery_method"`
+	ResponseActions []string                 `json:"response_actions"`
+	ZeroTrustImpact string                   `json:"zero_trust_impact"`
+	PipelineEvents  []map[string]interface{} `json:"pipeline_events,omitempty"`
 }
 
 // ====================
 // Event Delivery
 // ====================
 
-// handlePush handles push delivery (webhook endpoint)
+// handlePush handles push delivery per RFC 8935 §2.
+// The request body is the raw compact-serialized SET with Content-Type: application/secevent+jwt.
+// On success returns 202 Accepted with an empty body.
 func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "Failed to read request body")
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "Failed to read request body")
 		return
 	}
 
-	response, err := p.receiver.ProcessPushDelivery(r.Context(), body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	setToken := string(body)
+	sessionID := r.Header.Get("X-SSF-Session")
+
+	// Process through the standalone receiver (same Go process, direct call)
+	result := p.receiverService.processSET(r.Context(), setToken, sessionID)
+	if result.Status == "failed" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", result.Description)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	// RFC 8935 §2.2: 202 Accepted on success
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // handlePoll handles poll requests
@@ -474,21 +700,30 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		req.MaxEvents = 10
 	}
 
-	stream, err := p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
 	}
 
-	sets, moreAvailable, err := p.transmitter.GetPendingEventsForPoll(r.Context(), stream.ID, req.MaxEvents, req.Ack)
+	sets, sessionIDs, moreAvailable, err := p.transmitter.GetPendingEventsForPoll(r.Context(), stream.ID, req.MaxEvents, req.Ack)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// If this is a poll request (not just checking), process the events in receiver
+	// Process polled events through the standalone receiver
 	if len(sets) > 0 {
-		p.receiver.ProcessPollResponse(r.Context(), sets)
+		p.receiverService.ProcessPollResponse(r.Context(), sets, sessionIDs)
 	}
 
 	writeJSON(w, http.StatusOK, PollResponse{
@@ -517,6 +752,133 @@ func (p *Plugin) handleAcknowledge(w http.ResponseWriter, r *http.Request) {
 }
 
 // ====================
+// Stream Verification (SSF §7)
+// ====================
+
+// handleVerification triggers a verification event per SSF §7.
+// The transmitter sends a verification SET containing the provided state value
+// through the configured delivery method, confirming the stream pipeline is healthy.
+func (p *Plugin) handleVerification(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+
+	var req struct {
+		State string `json:"state"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.State == "" {
+		writeError(w, http.StatusBadRequest, "state is required per SSF §7")
+		return
+	}
+
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return
+	}
+
+	event, err := p.transmitter.TriggerVerification(r.Context(), stream.ID, req.State)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "verification_sent",
+		"event_id": event.ID,
+		"state":    req.State,
+		"delivery": stream.DeliveryMethod,
+	})
+}
+
+// ====================
+// Stream Status (SSF §6)
+// ====================
+
+// handleGetStatus returns the current stream status per SSF §6.
+func (p *Plugin) handleGetStatus(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": stream.Status,
+	})
+}
+
+// handleUpdateStatus updates the stream status per SSF §6.
+// Accepts: enabled, paused, disabled.
+func (p *Plugin) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	sessionID := getSessionID(r)
+
+	var req struct {
+		Status string `json:"status"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Validate status value
+	switch req.Status {
+	case StreamStatusEnabled, StreamStatusPaused, StreamStatusDisabled:
+		// Valid
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("Invalid status: %q (must be enabled, paused, or disabled)", req.Status))
+		return
+	}
+
+	var stream *Stream
+	var err error
+
+	if sessionID != "" {
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	} else {
+		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return
+	}
+
+	stream.Status = req.Status
+	if err := p.storage.UpdateStream(r.Context(), *stream); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update stream status")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": stream.Status,
+	})
+}
+
+// ====================
 // Event History & Logs
 // ====================
 
@@ -527,7 +889,7 @@ func (p *Plugin) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -551,47 +913,27 @@ func (p *Plugin) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetReceivedEvents returns events received by both receivers
+// handleGetReceivedEvents returns events received by the receiver
 func (p *Plugin) handleGetReceivedEvents(w http.ResponseWriter, r *http.Request) {
-	// Prefer standalone receiver (production-like)
 	events := p.receiverService.GetReceivedEvents()
-	source := "standalone_receiver"
-
-	// If no events from standalone, fall back to legacy
-	if len(events) == 0 {
-		events = p.receiver.GetReceivedEvents()
-		source = "legacy_receiver"
-	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"events": events,
 		"total":  len(events),
-		"source": source,
 	})
 }
 
 // handleGetResponseActions returns the response actions log
 func (p *Plugin) handleGetResponseActions(w http.ResponseWriter, r *http.Request) {
-	// Prefer standalone receiver (production-like)
 	actions := p.receiverService.GetResponseActions()
-	source := "standalone_receiver"
-
-	// If no actions from standalone, fall back to legacy
-	if len(actions) == 0 {
-		actions = p.receiver.GetResponseActions()
-		source = "legacy_receiver"
-	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"actions": actions,
 		"total":   len(actions),
-		"source":  source,
 	})
 }
 
-// handleClearLogs clears the receiver logs
+// handleClearLogs clears receiver logs
 func (p *Plugin) handleClearLogs(w http.ResponseWriter, r *http.Request) {
-	p.receiver.ClearLogs()
+	p.receiverService.ClearLogs()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -630,6 +972,126 @@ func (p *Plugin) handleDecodeSET(w http.ResponseWriter, r *http.Request) {
 }
 
 // ====================
+// SSE Event Stream
+// ====================
+
+// handleEventStream serves a Server-Sent Events stream that bridges internal
+// transmitter and receiver broadcast channels to the frontend in real time.
+// The session ID is passed via query parameter because EventSource cannot send
+// custom headers.
+func (p *Plugin) handleEventStream(w http.ResponseWriter, r *http.Request) {
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get session ID from query param (EventSource can't send custom headers)
+	sessionID := r.URL.Query().Get("session")
+	if sessionID == "" {
+		sessionID = getSessionID(r)
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// ── Cancel any existing SSE goroutine for this session ──────────────
+	// Without this, reconnects leave phantom goroutines that consume
+	// broadcast events but write to dead proxy connections, causing the
+	// "events randomly stop appearing" symptom.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	p.sseSessionsMu.Lock()
+	if old, exists := p.sseSessions[sessionID]; exists {
+		old.cancel() // kills the old goroutine's select loop
+		log.Printf("[SSF] SSE: replaced stale connection for session %s", sessionID)
+	}
+	p.sseConnIDSeq++
+	connID := p.sseConnIDSeq
+	p.sseSessions[sessionID] = sseConn{id: connID, cancel: cancel}
+	p.sseSessionsMu.Unlock()
+
+	// Clean up tracking on exit (only if we're still the active connection)
+	defer func() {
+		p.sseSessionsMu.Lock()
+		if cur, exists := p.sseSessions[sessionID]; exists && cur.id == connID {
+			delete(p.sseSessions, sessionID)
+		}
+		p.sseSessionsMu.Unlock()
+	}()
+
+	// Subscribe to transmitter events (large buffer to avoid drops during burst flows)
+	txCh := make(chan TransmitterEvent, 512)
+	p.transmitter.AddEventListener(txCh)
+	defer p.transmitter.RemoveEventListener(txCh)
+
+	// Subscribe to receiver events
+	rxCh := make(chan ReceiverEvent, 512)
+	p.receiverService.AddEventListener(rxCh)
+	defer p.receiverService.RemoveEventListener(rxCh)
+
+	// Send initial connected event
+	fmt.Fprintf(w, "event: connected\ndata: {\"session_id\":%q}\n\n", sessionID)
+	flusher.Flush()
+
+	// Keep-alive ticker prevents proxies from closing idle connections
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-keepAlive.C:
+			// SSE comment line — keeps connection alive through proxies
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return // client gone
+			}
+			flusher.Flush()
+
+		case txEvent := <-txCh:
+			// Filter by session ID
+			if sessionID != "" && txEvent.SessionID != "" && txEvent.SessionID != sessionID {
+				continue
+			}
+			data, err := json.Marshal(map[string]interface{}{
+				"source": "transmitter",
+				"event":  txEvent,
+			})
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: pipeline\ndata: %s\n\n", data); err != nil {
+				return // client disconnected
+			}
+			flusher.Flush()
+
+		case rxEvent := <-rxCh:
+			// Filter by session ID
+			if sessionID != "" && rxEvent.SessionID != "" && rxEvent.SessionID != sessionID {
+				continue
+			}
+			data, err := json.Marshal(map[string]interface{}{
+				"source": "receiver",
+				"event":  rxEvent,
+			})
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: pipeline\ndata: %s\n\n", data); err != nil {
+				return // client disconnected
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// ====================
 // Helpers
 // ====================
 
@@ -641,6 +1103,16 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// writeSSFError writes an error response per RFC 8935 §2.3.
+// The wire format is {"err":"<code>","description":"<text>"} with codes:
+// invalid_request, invalid_key, authentication_failed, access_denied.
+func writeSSFError(w http.ResponseWriter, status int, errCode, description string) {
+	writeJSON(w, status, map[string]string{
+		"err":         errCode,
+		"description": description,
+	})
 }
 
 func generateID() string {
@@ -672,7 +1144,7 @@ func (p *Plugin) handleReceiverStatus(w http.ResponseWriter, r *http.Request) {
 		"port":             p.receiverPort,
 		"endpoint":         fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort),
 		"transmitter_url":  p.baseURL,
-		"bearer_token":     p.receiverToken[:10] + "...", // Partial for security
+		"bearer_token":     "configured", // Never expose token material, even partially
 		"events_received":  len(p.receiverService.GetReceivedEvents()),
 		"actions_executed": len(p.receiverService.GetResponseActions()),
 	}
@@ -779,42 +1251,7 @@ func (p *Plugin) handleResetSecurityState(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, state)
 }
 
-// decodeURLParam decodes URL-encoded parameters
+// decodeURLParam decodes URL-encoded parameters using the standard library
 func decodeURLParam(s string) (string, error) {
-	// Simple URL decoding for common characters
-	result := s
-	replacements := map[string]string{
-		"%40": "@",
-		"%2F": "/",
-		"%3A": ":",
-		"%2B": "+",
-		"%20": " ",
-		"%3D": "=",
-		"%26": "&",
-		"%3F": "?",
-	}
-	for encoded, decoded := range replacements {
-		result = stringReplaceAll(result, encoded, decoded)
-	}
-	return result, nil
-}
-
-func stringReplaceAll(s, old, new string) string {
-	for {
-		idx := stringIndex(s, old)
-		if idx < 0 {
-			break
-		}
-		s = s[:idx] + new + s[idx+len(old):]
-	}
-	return s
-}
-
-func stringIndex(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
+	return url.QueryUnescape(s)
 }
