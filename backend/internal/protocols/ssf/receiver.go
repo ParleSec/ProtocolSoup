@@ -151,9 +151,3 @@ func containsAnyOf(sLower string, substrs ...string) bool {
 }
 
 // truncateToken returns a truncated preview of a token
-func truncateToken(token string) string {
-	if len(token) <= 50 {
-		return token
-	}
-	return token[:25] + "..." + token[len(token)-20:]
-}
