@@ -481,12 +481,13 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		event, err = p.transmitter.TriggerAccountPurgedWithSession(r.Context(), stream.ID, sessionID, subject, initiator)
 
 	case "identifier-changed":
-		if req.NewValue == "" {
-			writeError(w, http.StatusBadRequest, "new_value is required for identifier-changed")
-			return
+		newValue := req.NewValue
+		if newValue == "" {
+			// Default: simulate an email change for the subject
+			newValue = "updated-" + req.SubjectIdentifier
 		}
 		event, err = p.transmitter.TriggerIdentifierChangedWithSession(r.Context(), stream.ID, sessionID, subject,
-			req.SubjectIdentifier, req.NewValue, initiator)
+			req.SubjectIdentifier, newValue, initiator)
 
 	case "assurance-level-change":
 		current := req.CurrentStatus
@@ -498,6 +499,33 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 			previous = "aal2"
 		}
 		event, err = p.transmitter.TriggerAssuranceLevelChangeWithSession(r.Context(), stream.ID, sessionID, subject, current, previous)
+
+	case "token-claims-change":
+		// CAEP §3.2: claims is a JSON object of changed claim names -> new values
+		claims := map[string]interface{}{
+			"role":     "viewer",
+			"group":    []string{"security-team"},
+			"exp":      time.Now().Add(1 * time.Hour).Unix(),
+		}
+		if req.CurrentStatus != "" {
+			claims["role"] = req.CurrentStatus // allow overriding via request
+		}
+		event, err = p.transmitter.TriggerTokenClaimsChangeWithSession(r.Context(), stream.ID, sessionID, subject, claims)
+
+	case "identifier-recycled":
+		oldValue := req.SubjectIdentifier // current subject is the new holder
+		newValue := req.NewValue
+		if newValue == "" {
+			newValue = "recycled-" + req.SubjectIdentifier // show what the identifier was reassigned to
+		}
+		event, err = p.transmitter.TriggerIdentifierRecycledWithSession(r.Context(), stream.ID, sessionID, subject, oldValue, newValue)
+
+	case "account-credential-change-required":
+		reason := req.Reason
+		if reason == "" {
+			reason = "Credential rotation policy triggered"
+		}
+		event, err = p.transmitter.TriggerAccountCredentialChangeRequiredWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
 
 	case "sessions-revoked":
 		reason := req.Reason

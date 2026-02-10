@@ -382,16 +382,24 @@ interface EventDef {
   rfcReference: string
 }
 
-const SSF_EVENTS: EventDef[] = [
-  { id: 'session-revoked', name: 'Session Revoked', icon: Lock, description: 'Terminate user session', category: 'CAEP', rfcReference: 'CAEP §3.1' },
-  { id: 'credential-change', name: 'Credential Change', icon: Key, description: 'Password or credential updated', category: 'CAEP', rfcReference: 'CAEP §3.2' },
-  { id: 'device-compliance-change', name: 'Device Non-Compliance', icon: AlertTriangle, description: 'Device fails security check', category: 'CAEP', rfcReference: 'CAEP §3.3' },
-  { id: 'assurance-level-change', name: 'Auth Level Downgrade', icon: Shield, description: 'Reduced authentication assurance', category: 'CAEP', rfcReference: 'CAEP §3.4' },
-  { id: 'credential-compromise', name: 'Credential Compromise', icon: AlertTriangle, description: 'Credentials potentially exposed', category: 'RISC', rfcReference: 'RISC §2.1' },
-  { id: 'account-disabled', name: 'Account Disabled', icon: UserX, description: 'Suspend user account', category: 'RISC', rfcReference: 'RISC §2.2' },
-  { id: 'account-enabled', name: 'Account Enabled', icon: UserCheck, description: 'Reactivate user account', category: 'RISC', rfcReference: 'RISC §2.3' },
-  { id: 'sessions-revoked', name: 'All Sessions Revoked', icon: RotateCcw, description: 'Global session termination', category: 'RISC', rfcReference: 'RISC §2.4' },
-]
+// Icon mapping for event types
+const EVENT_ICONS: Record<string, React.ElementType> = {
+  'session-revoked': Lock,
+  'token-claims-change': Code,
+  'credential-change': Key,
+  'assurance-level-change': Shield,
+  'device-compliance-change': AlertTriangle,
+  'credential-compromise': AlertTriangle,
+  'account-purged': XCircle,
+  'account-disabled': UserX,
+  'account-enabled': UserCheck,
+  'identifier-changed': User,
+  'identifier-recycled': RotateCcw,
+  'account-credential-change-required': Key,
+  'sessions-revoked': RotateCcw,
+}
+
+// No hardcoded event definitions -- everything comes from the backend's event registry
 
 // ============================================================================
 // Main Component
@@ -402,6 +410,7 @@ export function SSFSandbox() {
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<EventDef | null>(null)
   const [securityStates, setSecurityStates] = useState<Record<string, SecurityState>>({})
+  const [eventDefs, setEventDefs] = useState<EventDef[]>([])
   
   // Execution state
   const [status, setStatus] = useState<'idle' | 'executing' | 'completed' | 'error'>('idle')
@@ -416,6 +425,30 @@ export function SSFSandbox() {
 
   // Real-time SSE event stream from the backend
   const { pipelineEvents, httpExchanges, isConnected, clearEvents, ingestResponseEvents } = useSSFEventStream(sessionId)
+
+  // Fetch event type definitions from backend (real data, not hardcoded)
+  useEffect(() => {
+    ssfFetch('/ssf/event-types').then(r => r.json()).then((grouped: Record<string, Array<Record<string, unknown>>>) => {
+      const defs: EventDef[] = []
+      for (const [category, types] of Object.entries(grouped)) {
+        if (!Array.isArray(types)) continue
+        for (const t of types) {
+          const uri = t.uri as string || ''
+          const id = uri.split('/').pop() || ''
+          if (!id) continue
+          defs.push({
+            id,
+            name: (t.name as string) || id,
+            icon: EVENT_ICONS[id] || Info,
+            description: (t.description as string) || '',
+            category: (category === 'RISC' ? 'RISC' : 'CAEP') as 'CAEP' | 'RISC',
+            rfcReference: category === 'RISC' ? 'RISC §2' : 'CAEP §3',
+          })
+        }
+      }
+      if (defs.length > 0) setEventDefs(defs)
+    }).catch(err => { console.error('[SSF] Failed to fetch event types from backend:', err) })
+  }, [])
 
   // Fetch data function - only fetches, no polling logic here
   const fetchAll = useCallback(async () => {
@@ -595,21 +628,21 @@ export function SSFSandbox() {
               label="Session Revoked"
               sublabel="CAEP Event"
               color="blue"
-              onClick={() => setSelectedEvent(SSF_EVENTS[0])}
+              onClick={() => setSelectedEvent(eventDefs.find(e => e.id === 'session-revoked') || eventDefs[0])}
             />
             <QuickButton
               icon={AlertTriangle}
               label="Credential Compromise"
               sublabel="RISC Event"
               color="red"
-              onClick={() => setSelectedEvent(SSF_EVENTS[4])}
+              onClick={() => setSelectedEvent(eventDefs.find(e => e.id === 'credential-compromise') || eventDefs[0])}
             />
             <QuickButton
               icon={RotateCcw}
               label="All Sessions Revoked"
               sublabel="RISC Event"
               color="purple"
-              onClick={() => setSelectedEvent(SSF_EVENTS[7])}
+              onClick={() => setSelectedEvent(eventDefs.find(e => e.id === 'sessions-revoked') || eventDefs[0])}
             />
           </div>
         </section>
@@ -661,19 +694,19 @@ export function SSFSandbox() {
               <select
                 value={selectedEvent?.id || ''}
                 onChange={(e) => {
-                  const event = SSF_EVENTS.find(ev => ev.id === e.target.value)
+                  const event = eventDefs.find(ev => ev.id === e.target.value)
                   setSelectedEvent(event || null)
                 }}
                 className="w-full appearance-none px-3 py-2 pr-8 rounded-lg bg-surface-800 border border-white/10 text-sm text-white focus:outline-none focus:border-amber-500/50"
               >
                 <option value="">Select an event...</option>
                 <optgroup label="CAEP Events">
-                  {SSF_EVENTS.filter(e => e.category === 'CAEP').map(e => (
+                  {eventDefs.filter(e => e.category === 'CAEP').map(e => (
                     <option key={e.id} value={e.id}>{e.name}</option>
                   ))}
                 </optgroup>
                 <optgroup label="RISC Events">
-                  {SSF_EVENTS.filter(e => e.category === 'RISC').map(e => (
+                  {eventDefs.filter(e => e.category === 'RISC').map(e => (
                     <option key={e.id} value={e.id}>{e.name}</option>
                   ))}
                 </optgroup>

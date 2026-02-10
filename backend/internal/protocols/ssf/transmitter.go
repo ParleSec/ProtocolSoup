@@ -679,6 +679,73 @@ func (t *Transmitter) TriggerIdentifierChangedWithSession(ctx context.Context, s
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
+// TriggerTokenClaimsChange triggers a token claims change event (CAEP §3.2)
+func (t *Transmitter) TriggerTokenClaimsChange(ctx context.Context, streamID string, subject SubjectIdentifier, claims map[string]interface{}) (*StoredEvent, error) {
+	return t.TriggerTokenClaimsChangeWithSession(ctx, streamID, "", subject, claims)
+}
+
+// TriggerTokenClaimsChangeWithSession triggers a token claims change event with session context.
+// CAEP §3.2: The "claims" member is a JSON object whose keys are JWT claim names that have changed.
+func (t *Transmitter) TriggerTokenClaimsChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, claims map[string]interface{}) (*StoredEvent, error) {
+	event := SecurityEvent{
+		EventType:        EventTypeTokenClaimsChange,
+		Subject:          subject,
+		SessionID:        sessionID,
+		EventTimestamp:   time.Now(),
+		Claims:           claims,
+		InitiatingEntity: InitiatingEntitySystem,
+	}
+	return t.GenerateEvent(ctx, streamID, event)
+}
+
+// TriggerIdentifierRecycled triggers an identifier recycled event (RISC §2.6)
+func (t *Transmitter) TriggerIdentifierRecycled(ctx context.Context, streamID string, subject SubjectIdentifier, oldValue, newValue string) (*StoredEvent, error) {
+	return t.TriggerIdentifierRecycledWithSession(ctx, streamID, "", subject, oldValue, newValue)
+}
+
+// TriggerIdentifierRecycledWithSession triggers an identifier recycled event with session context.
+// RISC: Includes old-value (previous holder) and new-value (current holder) per the identifier recycling semantics.
+func (t *Transmitter) TriggerIdentifierRecycledWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, oldValue, newValue string) (*StoredEvent, error) {
+	event := SecurityEvent{
+		EventType:        EventTypeIdentifierRecycled,
+		Subject:          subject,
+		SessionID:        sessionID,
+		EventTimestamp:   time.Now(),
+		OldValue:         oldValue,
+		NewValue:         newValue,
+		InitiatingEntity: InitiatingEntitySystem,
+	}
+	return t.GenerateEvent(ctx, streamID, event)
+}
+
+// TriggerAccountCredentialChangeRequired triggers a credential change required event (RISC §2.7)
+func (t *Transmitter) TriggerAccountCredentialChangeRequired(ctx context.Context, streamID string, subject SubjectIdentifier, reason, initiator string) (*StoredEvent, error) {
+	return t.TriggerAccountCredentialChangeRequiredWithSession(ctx, streamID, "", subject, reason, initiator)
+}
+
+// TriggerAccountCredentialChangeRequiredWithSession triggers a credential change required event with session context.
+// RISC: Signals that the subject must change their credentials.
+func (t *Transmitter) TriggerAccountCredentialChangeRequiredWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason, initiator string) (*StoredEvent, error) {
+	event := SecurityEvent{
+		EventType:        EventTypeAccountCredentialChangeRequired,
+		Subject:          subject,
+		SessionID:        sessionID,
+		EventTimestamp:   time.Now(),
+		Reason:           reason,
+		InitiatingEntity: initiator,
+		ReasonAdmin:      &ReasonInfo{EN: reason},
+	}
+
+	// Mark user as needing password reset
+	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
+	if err == nil && subj != nil {
+		subj.Status = SubjectStatusAtRisk
+		_ = t.storage.UpdateSubject(ctx, *subj)
+	}
+
+	return t.GenerateEvent(ctx, streamID, event)
+}
+
 // TriggerAssuranceLevelChange triggers an assurance level change event
 func (t *Transmitter) TriggerAssuranceLevelChange(ctx context.Context, streamID string, subject SubjectIdentifier, currentLevel, previousLevel string) (*StoredEvent, error) {
 	return t.TriggerAssuranceLevelChangeWithSession(ctx, streamID, "", subject, currentLevel, previousLevel)

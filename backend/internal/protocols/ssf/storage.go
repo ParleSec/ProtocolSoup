@@ -278,6 +278,7 @@ const (
 	SubjectStatusActive   = "active"
 	SubjectStatusDisabled = "disabled"
 	SubjectStatusPurged   = "purged"
+	SubjectStatusAtRisk   = "at_risk"
 )
 
 // AddSubject adds a subject to a stream

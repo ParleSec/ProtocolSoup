@@ -328,6 +328,15 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	
+	// RFC 8935 §2: Validate Content-Type
+	ct := r.Header.Get("Content-Type")
+	if ct != "application/secevent+jwt" {
+		log.Printf("[SSF Receiver] Invalid Content-Type: %q (expected application/secevent+jwt)", ct)
+		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_content_type",
+			"Content-Type must be application/secevent+jwt")
+		return
+	}
+
 	// Read raw SET token from request body (RFC 8935 §2)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -464,6 +473,44 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	if !ok {
 		return SetStatus{Status: "failed", Description: "Invalid claims format"}
+	}
+
+	// ── RFC 7519 §4.1.1: Validate issuer ──────────────────────────────
+	if iss, ok := claims["iss"].(string); ok {
+		if iss != rs.transmitterURL {
+			log.Printf("[SSF Receiver] Issuer mismatch: got %q, expected %q", iss, rs.transmitterURL)
+			return SetStatus{Status: "failed", Description: fmt.Sprintf("Issuer mismatch: got %q", iss)}
+		}
+	} else {
+		return SetStatus{Status: "failed", Description: "Missing required 'iss' claim"}
+	}
+
+	// ── RFC 7519 §4.1.3: Validate audience ─────────────────────────────
+	audValid := false
+	if aud, ok := claims["aud"].([]interface{}); ok {
+		for _, a := range aud {
+			if s, _ := a.(string); s != "" {
+				audValid = true
+				break
+			}
+		}
+	} else if _, ok := claims["aud"].(string); ok {
+		audValid = true
+	}
+	if !audValid {
+		return SetStatus{Status: "failed", Description: "Missing or empty 'aud' claim"}
+	}
+
+	// ── RFC 7519 §4.1.6: Validate issued-at (reject tokens > 5 min old) ──
+	if iatFloat, ok := claims["iat"].(float64); ok {
+		iat := time.Unix(int64(iatFloat), 0)
+		maxAge := 5 * time.Minute
+		if time.Since(iat) > maxAge {
+			log.Printf("[SSF Receiver] SET too old: issued at %v (%.0fs ago)", iat, time.Since(iat).Seconds())
+			return SetStatus{Status: "failed", Description: "SET expired: issued-at too old"}
+		}
+	} else {
+		return SetStatus{Status: "failed", Description: "Missing required 'iat' claim"}
 	}
 
 	decoded := buildDecodedSETFromClaims(claims, parsedToken.Header, setToken)

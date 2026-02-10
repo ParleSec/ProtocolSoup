@@ -318,6 +318,9 @@ type SecurityEvent struct {
 	NewValue string `json:"new_value,omitempty"`
 	OldValue string `json:"old_value,omitempty"`
 
+	// For token-claims-change (CAEP §3.2): map of changed claim names to their new values
+	Claims map[string]interface{} `json:"claims,omitempty"`
+
 	// For verification events (SSF §7)
 	State string `json:"state,omitempty"`
 }

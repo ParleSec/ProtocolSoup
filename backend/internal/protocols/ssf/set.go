@@ -42,9 +42,10 @@ type EventPayload struct {
 	PreviousStatus   string      `json:"previous_status,omitempty"`
 	CurrentLevel     string      `json:"current_level,omitempty"`  // For assurance level change (CAEP §3.3)
 	PreviousLevel    string      `json:"previous_level,omitempty"`
-	NewValue         string      `json:"new-value,omitempty"`
-	OldValue         string      `json:"old-value,omitempty"`
-	State            string      `json:"state,omitempty"` // SSF §7: verification event state
+	NewValue         string                 `json:"new-value,omitempty"`
+	OldValue         string                 `json:"old-value,omitempty"`
+	Claims           map[string]interface{} `json:"claims,omitempty"` // CAEP §3.2: changed claims
+	State            string                 `json:"state,omitempty"`  // SSF §7: verification event state
 }
 
 // SETEncoder handles encoding security events into SET tokens
@@ -126,6 +127,9 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) 
 	}
 	if event.OldValue != "" {
 		eventPayload.OldValue = event.OldValue
+	}
+	if len(event.Claims) > 0 {
+		eventPayload.Claims = event.Claims
 	}
 	if event.State != "" {
 		eventPayload.State = event.State
