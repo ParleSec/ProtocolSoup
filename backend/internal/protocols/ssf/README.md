@@ -188,8 +188,9 @@ ssf/
 ├── plugin.go           # Main plugin, registers routes, manages lifecycle
 ├── storage.go          # SQLite persistence for streams, subjects, events
 ├── transmitter.go      # Event generation and delivery
-├── receiver.go         # Legacy in-process receiver
-├── receiver_service.go # Standalone receiver service (production-like)
+├── receiver.go         # Shared receiver types, constants, and event processing
+├── receiver_service.go # Standalone receiver service (real HTTP, JWKS fetch, signature verification)
+├── http_capture.go     # HTTP exchange capture types for traffic visibility
 ├── action_executor.go  # Executes real security state changes
 ├── handlers.go         # HTTP request handlers
 ├── set.go              # SET encoding/decoding (RFC 8417)
