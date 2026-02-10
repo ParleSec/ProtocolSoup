@@ -1,13 +1,16 @@
 package ssf
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -26,7 +29,7 @@ func getSessionID(r *http.Request) string {
 		return cookie.Value
 	}
 
-	// Return empty for legacy behavior (though frontend should always send session)
+	// Return empty if no session header (frontend should always send one)
 	return ""
 }
 
@@ -95,7 +98,7 @@ func (p *Plugin) handleGetStream(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -126,7 +129,7 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -224,7 +227,7 @@ func (p *Plugin) handleDeleteStream(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -253,13 +256,13 @@ func (p *Plugin) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to get stream")
 			return
 		}
 		// Ensure demo data exists for this session
-		_ = p.storage.SeedSessionDemoData(r.Context(), sessionID, p.baseURL)
+		_ = p.storage.SeedSessionDemoData(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 		// Initialize user states for this session
 		p.actionExecutor.InitSessionUserStates(sessionID)
 	} else {
@@ -310,7 +313,7 @@ func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -374,6 +377,7 @@ func (p *Plugin) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
 
 // handleTriggerAction handles all action triggers
 func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
 	action := chi.URLParam(r, "action")
 	sessionID := getSessionID(r)
 
@@ -392,7 +396,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -401,6 +405,18 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
 	}
+
+	// ── Subscribe temp channels to capture ALL pipeline events ──────────
+	// Delivery is synchronous, so every transmitter and receiver event is
+	// captured in these channels and returned in the API response.
+	// This makes event delivery reliable regardless of SSE connection state.
+	txCapture := make(chan TransmitterEvent, 128)
+	p.transmitter.AddEventListener(txCapture)
+	defer p.transmitter.RemoveEventListener(txCapture)
+
+	rxCapture := make(chan ReceiverEvent, 128)
+	p.receiverService.AddEventListener(rxCapture)
+	defer p.receiverService.RemoveEventListener(rxCapture)
 
 	subject := SubjectIdentifier{
 		Format: SubjectFormatEmail,
@@ -503,6 +519,78 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	// Get event metadata for response
 	metadata := GetEventMetadata(event.EventType)
 
+	// ── Drain captured pipeline events ─────────────────────────────────
+	// Delivery is synchronous, so by this point ALL transmitter + receiver
+	// events have been broadcast and are sitting in our temp channels.
+
+	// Prepend the initiating action request as the first HTTP exchange
+	// so the full chain is visible: action call → transmitter → receiver.
+	reqBody, _ := json.Marshal(req)
+	actionExchange := map[string]interface{}{
+		"source": "transmitter",
+		"event": map[string]interface{}{
+			"type":       "http_exchange",
+			"timestamp":  time.Now(),
+			"event_id":   event.ID,
+			"session_id": sessionID,
+			"data": CapturedHTTPExchange{
+				Label: fmt.Sprintf("Action: %s (SSF §4)", metadata.Name),
+				Request: HTTPCapture{
+					Method: r.Method,
+					URL:    fmt.Sprintf("/ssf/actions/%s", action),
+					Headers: map[string]string{
+						"Content-Type":    "application/json",
+						"X-Ssf-Session":   sessionID,
+					},
+					Body: string(reqBody),
+				},
+				Response: HTTPCapture{
+					StatusCode: http.StatusOK,
+					Headers: map[string]string{
+						"Content-Type": "application/json",
+					},
+				},
+				DurationMs: 0, // filled below
+				Timestamp:  time.Now(),
+				SessionID:  sessionID,
+			},
+		},
+	}
+
+	var pipelineEvents []map[string]interface{}
+	pipelineEvents = append(pipelineEvents, actionExchange)
+	drainDone := false
+	for !drainDone {
+		select {
+		case txEv := <-txCapture:
+			if txEv.SessionID != "" && txEv.SessionID != sessionID {
+				continue
+			}
+			pipelineEvents = append(pipelineEvents, map[string]interface{}{
+				"source": "transmitter",
+				"event":  txEv,
+			})
+		case rxEv := <-rxCapture:
+			if rxEv.SessionID != "" && rxEv.SessionID != sessionID {
+				continue
+			}
+			pipelineEvents = append(pipelineEvents, map[string]interface{}{
+				"source": "receiver",
+				"event":  rxEv,
+			})
+		default:
+			drainDone = true
+		}
+	}
+
+	// Set real duration on the action exchange now that execution is complete
+	if exData, ok := actionExchange["event"].(map[string]interface{}); ok {
+		if capture, ok := exData["data"].(CapturedHTTPExchange); ok {
+			capture.DurationMs = time.Since(startTime).Milliseconds()
+			exData["data"] = capture
+		}
+	}
+
 	writeJSON(w, http.StatusOK, ActionResponse{
 		EventID:         event.ID,
 		EventType:       event.EventType,
@@ -513,6 +601,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		DeliveryMethod:  stream.DeliveryMethod,
 		ResponseActions: metadata.ResponseActions,
 		ZeroTrustImpact: metadata.ZeroTrustImpact,
+		PipelineEvents:  pipelineEvents,
 	})
 }
 
@@ -530,15 +619,16 @@ type ActionRequest struct {
 
 // ActionResponse represents the response after triggering an action
 type ActionResponse struct {
-	EventID         string   `json:"event_id"`
-	EventType       string   `json:"event_type"`
-	EventName       string   `json:"event_name"`
-	Category        string   `json:"category"`
-	Subject         string   `json:"subject"`
-	Status          string   `json:"status"`
-	DeliveryMethod  string   `json:"delivery_method"`
-	ResponseActions []string `json:"response_actions"`
-	ZeroTrustImpact string   `json:"zero_trust_impact"`
+	EventID         string                   `json:"event_id"`
+	EventType       string                   `json:"event_type"`
+	EventName       string                   `json:"event_name"`
+	Category        string                   `json:"category"`
+	Subject         string                   `json:"subject"`
+	Status          string                   `json:"status"`
+	DeliveryMethod  string                   `json:"delivery_method"`
+	ResponseActions []string                 `json:"response_actions"`
+	ZeroTrustImpact string                   `json:"zero_trust_impact"`
+	PipelineEvents  []map[string]interface{} `json:"pipeline_events,omitempty"`
 }
 
 // ====================
@@ -557,9 +647,11 @@ func (p *Plugin) handlePush(w http.ResponseWriter, r *http.Request) {
 
 	setToken := string(body)
 	sessionID := r.Header.Get("X-SSF-Session")
-	status, err := p.receiver.ProcessPushDelivery(r.Context(), setToken, sessionID)
-	if err != nil {
-		writeSSFError(w, http.StatusBadRequest, "invalid_request", status.Description)
+
+	// Process through the standalone receiver (same Go process, direct call)
+	result := p.receiverService.processSET(r.Context(), setToken, sessionID)
+	if result.Status == "failed" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", result.Description)
 		return
 	}
 
@@ -585,7 +677,7 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -601,9 +693,9 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If this is a poll request (not just checking), process the events in receiver
+	// Process polled events through the standalone receiver
 	if len(sets) > 0 {
-		p.receiver.ProcessPollResponse(r.Context(), sets, sessionIDs)
+		p.receiverService.ProcessPollResponse(r.Context(), sets, sessionIDs)
 	}
 
 	writeJSON(w, http.StatusOK, PollResponse{
@@ -659,7 +751,7 @@ func (p *Plugin) handleVerification(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -694,7 +786,7 @@ func (p *Plugin) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -737,7 +829,7 @@ func (p *Plugin) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -769,7 +861,7 @@ func (p *Plugin) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL)
+		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
 	} else {
 		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
 	}
@@ -793,47 +885,26 @@ func (p *Plugin) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetReceivedEvents returns events received by both receivers
+// handleGetReceivedEvents returns events received by the receiver
 func (p *Plugin) handleGetReceivedEvents(w http.ResponseWriter, r *http.Request) {
-	// Prefer standalone receiver (production-like)
 	events := p.receiverService.GetReceivedEvents()
-	source := "standalone_receiver"
-
-	// If no events from standalone, fall back to legacy
-	if len(events) == 0 {
-		events = p.receiver.GetReceivedEvents()
-		source = "legacy_receiver"
-	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"events": events,
 		"total":  len(events),
-		"source": source,
 	})
 }
 
 // handleGetResponseActions returns the response actions log
 func (p *Plugin) handleGetResponseActions(w http.ResponseWriter, r *http.Request) {
-	// Prefer standalone receiver (production-like)
 	actions := p.receiverService.GetResponseActions()
-	source := "standalone_receiver"
-
-	// If no actions from standalone, fall back to legacy
-	if len(actions) == 0 {
-		actions = p.receiver.GetResponseActions()
-		source = "legacy_receiver"
-	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"actions": actions,
 		"total":   len(actions),
-		"source":  source,
 	})
 }
 
-// handleClearLogs clears both the legacy and standalone receiver logs
+// handleClearLogs clears receiver logs
 func (p *Plugin) handleClearLogs(w http.ResponseWriter, r *http.Request) {
-	p.receiver.ClearLogs()
 	p.receiverService.ClearLogs()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -870,6 +941,126 @@ func (p *Plugin) handleDecodeSET(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, decoded)
+}
+
+// ====================
+// SSE Event Stream
+// ====================
+
+// handleEventStream serves a Server-Sent Events stream that bridges internal
+// transmitter and receiver broadcast channels to the frontend in real time.
+// The session ID is passed via query parameter because EventSource cannot send
+// custom headers.
+func (p *Plugin) handleEventStream(w http.ResponseWriter, r *http.Request) {
+	// SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Get session ID from query param (EventSource can't send custom headers)
+	sessionID := r.URL.Query().Get("session")
+	if sessionID == "" {
+		sessionID = getSessionID(r)
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	// ── Cancel any existing SSE goroutine for this session ──────────────
+	// Without this, reconnects leave phantom goroutines that consume
+	// broadcast events but write to dead proxy connections, causing the
+	// "events randomly stop appearing" symptom.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	p.sseSessionsMu.Lock()
+	if old, exists := p.sseSessions[sessionID]; exists {
+		old.cancel() // kills the old goroutine's select loop
+		log.Printf("[SSF] SSE: replaced stale connection for session %s", sessionID)
+	}
+	p.sseConnIDSeq++
+	connID := p.sseConnIDSeq
+	p.sseSessions[sessionID] = sseConn{id: connID, cancel: cancel}
+	p.sseSessionsMu.Unlock()
+
+	// Clean up tracking on exit (only if we're still the active connection)
+	defer func() {
+		p.sseSessionsMu.Lock()
+		if cur, exists := p.sseSessions[sessionID]; exists && cur.id == connID {
+			delete(p.sseSessions, sessionID)
+		}
+		p.sseSessionsMu.Unlock()
+	}()
+
+	// Subscribe to transmitter events (large buffer to avoid drops during burst flows)
+	txCh := make(chan TransmitterEvent, 512)
+	p.transmitter.AddEventListener(txCh)
+	defer p.transmitter.RemoveEventListener(txCh)
+
+	// Subscribe to receiver events
+	rxCh := make(chan ReceiverEvent, 512)
+	p.receiverService.AddEventListener(rxCh)
+	defer p.receiverService.RemoveEventListener(rxCh)
+
+	// Send initial connected event
+	fmt.Fprintf(w, "event: connected\ndata: {\"session_id\":%q}\n\n", sessionID)
+	flusher.Flush()
+
+	// Keep-alive ticker prevents proxies from closing idle connections
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-keepAlive.C:
+			// SSE comment line — keeps connection alive through proxies
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return // client gone
+			}
+			flusher.Flush()
+
+		case txEvent := <-txCh:
+			// Filter by session ID
+			if sessionID != "" && txEvent.SessionID != "" && txEvent.SessionID != sessionID {
+				continue
+			}
+			data, err := json.Marshal(map[string]interface{}{
+				"source": "transmitter",
+				"event":  txEvent,
+			})
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: pipeline\ndata: %s\n\n", data); err != nil {
+				return // client disconnected
+			}
+			flusher.Flush()
+
+		case rxEvent := <-rxCh:
+			// Filter by session ID
+			if sessionID != "" && rxEvent.SessionID != "" && rxEvent.SessionID != sessionID {
+				continue
+			}
+			data, err := json.Marshal(map[string]interface{}{
+				"source": "receiver",
+				"event":  rxEvent,
+			})
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "event: pipeline\ndata: %s\n\n", data); err != nil {
+				return // client disconnected
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // ====================

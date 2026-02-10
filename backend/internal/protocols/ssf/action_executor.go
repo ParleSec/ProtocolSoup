@@ -12,8 +12,10 @@ import (
 
 // MockIdPActionExecutor executes SSF response actions against persisted state
 type MockIdPActionExecutor struct {
-	baseURL string
-	storage *Storage
+	baseURL          string
+	storage          *Storage
+	receiverEndpoint string
+	receiverToken    string
 }
 
 // UserSecurityState tracks the security state of a user
@@ -29,16 +31,18 @@ type UserSecurityState struct {
 }
 
 // NewMockIdPActionExecutor creates a new action executor
-func NewMockIdPActionExecutor(storage *Storage, baseURL string) *MockIdPActionExecutor {
+func NewMockIdPActionExecutor(storage *Storage, baseURL, receiverEndpoint, receiverToken string) *MockIdPActionExecutor {
 	return &MockIdPActionExecutor{
-		baseURL: baseURL,
-		storage: storage,
+		baseURL:          baseURL,
+		storage:          storage,
+		receiverEndpoint: receiverEndpoint,
+		receiverToken:    receiverToken,
 	}
 }
 
 func (e *MockIdPActionExecutor) streamForSession(ctx context.Context, sessionID string) (*Stream, error) {
 	if sessionID != "" {
-		return e.storage.GetSessionStream(ctx, sessionID, e.baseURL)
+		return e.storage.GetSessionStream(ctx, sessionID, e.baseURL, e.receiverEndpoint, e.receiverToken)
 	}
 	return e.storage.GetDefaultStream(ctx, e.baseURL)
 }
@@ -264,11 +268,6 @@ func (e *MockIdPActionExecutor) InvalidateTokensForSession(ctx context.Context, 
 	return nil
 }
 
-// GetUserState returns the current security state for a user (legacy, no session)
-func (e *MockIdPActionExecutor) GetUserState(email string) (*UserSecurityState, error) {
-	return e.GetUserStateForSession("", email)
-}
-
 // GetUserStateForSession returns the current security state for a user in a specific session
 func (e *MockIdPActionExecutor) GetUserStateForSession(sessionID, email string) (*UserSecurityState, error) {
 	stream, err := e.streamForSession(context.Background(), sessionID)
@@ -282,11 +281,6 @@ func (e *MockIdPActionExecutor) GetUserStateForSession(sessionID, email string) 
 	}
 	state.SessionID = sessionID
 	return state, nil
-}
-
-// GetAllUserStates returns security states for all tracked users (legacy, all sessions)
-func (e *MockIdPActionExecutor) GetAllUserStates() map[string]*UserSecurityState {
-	return e.GetAllUserStatesForSession("")
 }
 
 // GetAllUserStatesForSession returns security states for users in a specific session
@@ -305,11 +299,6 @@ func (e *MockIdPActionExecutor) GetAllUserStatesForSession(sessionID string) map
 		state.SessionID = sessionID
 	}
 	return states
-}
-
-// ResetUserState resets a user's security state (legacy, no session)
-func (e *MockIdPActionExecutor) ResetUserState(email string, sessions int) {
-	e.ResetUserStateForSession("", email, sessions)
 }
 
 // ResetUserStateForSession resets a user's security state in a specific session

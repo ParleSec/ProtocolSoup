@@ -34,6 +34,7 @@ type TransmitterEvent struct {
 	EventID   string      `json:"event_id"`
 	SubjectID string      `json:"subject_id"`
 	EventType string      `json:"event_type"`
+	SessionID string      `json:"session_id,omitempty"`
 	Data      interface{} `json:"data"`
 }
 
@@ -46,6 +47,7 @@ const (
 	TransmitterEventDeliverySuccess = "delivery_success"
 	TransmitterEventDeliveryFailed  = "delivery_failed"
 	TransmitterEventQueued          = "event_queued"
+	TransmitterEventHTTPExchange    = "http_exchange"
 )
 
 // NewTransmitter creates a new SSF transmitter
@@ -86,7 +88,7 @@ func (t *Transmitter) broadcast(event TransmitterEvent) {
 		select {
 		case listener <- event:
 		default:
-			// Drop if channel is full
+			log.Printf("[SSF] WARNING: transmitter event channel full, dropping %s event for session %s", event.Type, event.SessionID)
 		}
 	}
 }
@@ -142,6 +144,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		EventID:   eventID,
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
+		SessionID: event.SessionID,
 		Data: map[string]interface{}{
 			"subject":  event.Subject,
 			"metadata": GetEventMetadata(event.EventType),
@@ -167,6 +170,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		EventID:   eventID,
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
+		SessionID: event.SessionID,
 		Data: map[string]interface{}{
 			"claims": event,
 		},
@@ -179,6 +183,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		EventID:   eventID,
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
+		SessionID: event.SessionID,
 		Data: map[string]interface{}{
 			"token":     setToken,
 			"algorithm": "RS256",
@@ -216,15 +221,17 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		EventID:   eventID,
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
+		SessionID: event.SessionID,
 		Data: map[string]interface{}{
 			"delivery_method": stream.DeliveryMethod,
 		},
 	})
 
-	// If push delivery, attempt delivery immediately with background context
-	// Use background context to ensure delivery completes even after handler returns
+	// If push delivery, deliver synchronously so the caller can capture all
+	// pipeline events (transmitter + receiver) in the same request cycle.
+	// The receiver is localhost so this adds ~10-20ms, not seconds.
 	if stream.DeliveryMethod == DeliveryMethodPush && stream.DeliveryEndpoint != "" {
-		go t.deliverEvent(context.Background(), stream, &storedEvent)
+		t.deliverEvent(ctx, stream, &storedEvent)
 	}
 
 	return &storedEvent, nil
@@ -246,6 +253,7 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 		Timestamp: time.Now(),
 		EventID:   event.ID,
 		EventType: event.EventType,
+		SessionID: event.SessionID,
 		Data: map[string]interface{}{
 			"endpoint":    stream.DeliveryEndpoint,
 			"method":      "POST",
@@ -259,7 +267,19 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 	backoff := initialRetryBackoff
 
 	for attempt := 1; attempt <= maxDeliveryRetries; attempt++ {
-		statusCode, respBody, err := t.attemptDelivery(ctx, stream, event)
+		statusCode, respBody, exchange, err := t.attemptDelivery(ctx, stream, event)
+
+		// Broadcast HTTP exchange for every delivery attempt (success or failure)
+		if exchange != nil {
+			t.broadcast(TransmitterEvent{
+				Type:      TransmitterEventHTTPExchange,
+				Timestamp: exchange.Timestamp,
+				EventID:   event.ID,
+				EventType: event.EventType,
+				SessionID: event.SessionID,
+				Data:      exchange,
+			})
+		}
 
 		if err == nil && statusCode >= 200 && statusCode < 300 {
 			// Success
@@ -273,6 +293,7 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 				Timestamp: time.Now(),
 				EventID:   event.ID,
 				EventType: event.EventType,
+				SessionID: event.SessionID,
 				Data: map[string]interface{}{
 					"status_code":   statusCode,
 					"response_body": respBody,
@@ -301,6 +322,7 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 				Timestamp: time.Now(),
 				EventID:   event.ID,
 				EventType: event.EventType,
+				SessionID: event.SessionID,
 				Data: map[string]interface{}{
 					"status_code": statusCode,
 					"error":       errorMsg,
@@ -333,11 +355,11 @@ func (t *Transmitter) deliverEvent(ctx context.Context, stream *Stream, event *S
 }
 
 // attemptDelivery makes a single push delivery attempt per RFC 8935 §2.
-// Returns the HTTP status code, response body, and any transport error.
-func (t *Transmitter) attemptDelivery(ctx context.Context, stream *Stream, event *StoredEvent) (int, string, error) {
+// Returns the HTTP status code, response body, captured HTTP exchange, and any transport error.
+func (t *Transmitter) attemptDelivery(ctx context.Context, stream *Stream, event *StoredEvent) (int, string, *CapturedHTTPExchange, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", stream.DeliveryEndpoint, bytes.NewReader([]byte(event.SETToken)))
 	if err != nil {
-		return 0, "", err
+		return 0, "", nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/secevent+jwt")
@@ -353,14 +375,47 @@ func (t *Transmitter) attemptDelivery(ctx context.Context, stream *Stream, event
 		req.Header.Set("X-SSF-Session", event.SessionID)
 	}
 
+	// Capture request details
+	reqHeaders := make(map[string]string)
+	for k := range req.Header {
+		reqHeaders[k] = req.Header.Get(k)
+	}
+
+	exchange := &CapturedHTTPExchange{
+		Label:     "Push Delivery (RFC 8935)",
+		Timestamp: time.Now(),
+		SessionID: event.SessionID,
+		Request: HTTPCapture{
+			Method:  "POST",
+			URL:     stream.DeliveryEndpoint,
+			Headers: reqHeaders,
+			Body:    event.SETToken,
+		},
+		Response: HTTPCapture{
+			Headers: make(map[string]string),
+		},
+	}
+
+	startTime := time.Now()
 	resp, err := t.httpClient.Do(req)
+	exchange.DurationMs = time.Since(startTime).Milliseconds()
+
 	if err != nil {
-		return 0, "", err
+		exchange.Response.Body = fmt.Sprintf("error: %v", err)
+		return 0, "", exchange, err
 	}
 	defer resp.Body.Close()
 
+	// Capture response details
+	exchange.Response.StatusCode = resp.StatusCode
+	for k := range resp.Header {
+		exchange.Response.Headers[k] = resp.Header.Get(k)
+	}
+
 	respBody, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(respBody), nil
+	exchange.Response.Body = string(respBody)
+
+	return resp.StatusCode, string(respBody), exchange, nil
 }
 
 // handleDeliveryFailure handles final delivery failure after all retries are exhausted.
@@ -377,10 +432,11 @@ func (t *Transmitter) handleDeliveryFailure(ctx context.Context, event *StoredEv
 		Timestamp: time.Now(),
 		EventID:   event.ID,
 		EventType: event.EventType,
+		SessionID: event.SessionID,
 		Data: map[string]interface{}{
-			"status_code":    statusCode,
-			"error":          errorMsg,
-			"attempts":       attempts,
+			"status_code":       statusCode,
+			"error":             errorMsg,
+			"attempts":          attempts,
 			"retries_exhausted": true,
 		},
 	})

@@ -729,25 +729,35 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// GetSessionStream gets or creates a stream for a specific session
-func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer string) (*Stream, error) {
+// GetSessionStream gets or creates a stream for a specific session.
+// deliveryEndpoint and bearerToken configure push delivery to the standalone receiver.
+func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer, deliveryEndpoint, bearerToken string) (*Stream, error) {
 	streamID := "session-" + sessionID
 
 	stream, err := s.GetStream(ctx, streamID)
 	if err == nil {
+		// Ensure the delivery endpoint stays in sync with the current configuration.
+		// Existing session streams may point to a stale endpoint if the backend
+		// was restarted with updated routing.
+		if stream.DeliveryEndpoint != deliveryEndpoint || stream.BearerToken != bearerToken {
+			stream.DeliveryEndpoint = deliveryEndpoint
+			stream.BearerToken = bearerToken
+			_ = s.UpdateStream(ctx, *stream)
+		}
 		return stream, nil
 	}
 
-	// Create session-specific stream
+	// Create session-specific stream pointing to the standalone receiver
 	sessionStream := Stream{
-		ID:              streamID,
-		Issuer:          issuer,
-		Audience:        []string{issuer + "/receiver"},
-		EventsSupported: GetSupportedEventURIs(),
-		EventsRequested: GetSupportedEventURIs(),
-		DeliveryMethod:  DeliveryMethodPush,
-		DeliveryEndpoint: issuer + "/ssf/push",
-		Status:          StreamStatusEnabled,
+		ID:               streamID,
+		Issuer:           issuer,
+		Audience:         []string{issuer + "/receiver"},
+		EventsSupported:  GetSupportedEventURIs(),
+		EventsRequested:  GetSupportedEventURIs(),
+		DeliveryMethod:   DeliveryMethodPush,
+		DeliveryEndpoint: deliveryEndpoint,
+		BearerToken:      bearerToken,
+		Status:           StreamStatusEnabled,
 	}
 
 	if err := s.CreateStream(ctx, sessionStream); err != nil {
@@ -758,8 +768,8 @@ func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer string
 }
 
 // SeedSessionDemoData seeds demo subjects for a specific session
-func (s *Storage) SeedSessionDemoData(ctx context.Context, sessionID, baseURL string) error {
-	stream, err := s.GetSessionStream(ctx, sessionID, baseURL)
+func (s *Storage) SeedSessionDemoData(ctx context.Context, sessionID, baseURL, deliveryEndpoint, bearerToken string) error {
+	stream, err := s.GetSessionStream(ctx, sessionID, baseURL, deliveryEndpoint, bearerToken)
 	if err != nil {
 		return err
 	}

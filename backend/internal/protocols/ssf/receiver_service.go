@@ -40,6 +40,10 @@ type ReceiverService struct {
 	// Callback to execute real actions
 	actionExecutor ActionExecutor
 	
+	// Event broadcast channels
+	eventListeners []chan<- ReceiverEvent
+	listenerMu     sync.RWMutex
+	
 	// HTTP server
 	server *http.Server
 }
@@ -78,20 +82,23 @@ func NewJWKSCache(jwksURL string, ttl time.Duration) *JWKSCache {
 	}
 }
 
-// GetKey retrieves a public key by key ID, fetching from JWKS if needed
-func (c *JWKSCache) GetKey(keyID string) (*rsa.PublicKey, error) {
+// GetKey retrieves a public key by key ID, fetching from JWKS if needed.
+// Returns the key, an optional CapturedHTTPExchange (non-nil when a fresh JWKS fetch occurred),
+// and any error.
+func (c *JWKSCache) GetKey(keyID string) (*rsa.PublicKey, *CapturedHTTPExchange, error) {
 	c.mu.RLock()
 	if time.Since(c.fetchedAt) < c.ttl {
 		if key, ok := c.keys[keyID]; ok {
 			c.mu.RUnlock()
-			return key, nil
+			return key, nil, nil // Cache hit, no HTTP exchange
 		}
 	}
 	c.mu.RUnlock()
 	
-	// Fetch fresh JWKS
-	if err := c.refresh(); err != nil {
-		return nil, err
+	// Fetch fresh JWKS (returns captured HTTP exchange)
+	exchange, err := c.refresh()
+	if err != nil {
+		return nil, exchange, err
 	}
 	
 	c.mu.RLock()
@@ -99,34 +106,67 @@ func (c *JWKSCache) GetKey(keyID string) (*rsa.PublicKey, error) {
 	
 	key, ok := c.keys[keyID]
 	if !ok {
-		return nil, fmt.Errorf("key %s not found in JWKS", keyID)
+		return nil, exchange, fmt.Errorf("key %s not found in JWKS", keyID)
 	}
-	return key, nil
+	return key, exchange, nil
 }
 
-// refresh fetches the JWKS from the transmitter
-func (c *JWKSCache) refresh() error {
+// refresh fetches the JWKS from the transmitter and returns a CapturedHTTPExchange
+// with the full request/response details for visibility in the sandbox.
+func (c *JWKSCache) refresh() (*CapturedHTTPExchange, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	
 	log.Printf("[SSF Receiver] Fetching JWKS from %s", c.jwksURL)
 	
+	startTime := time.Now()
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(c.jwksURL)
+	duration := time.Since(startTime)
+
+	// Build captured exchange even on error (partial capture)
+	exchange := &CapturedHTTPExchange{
+		Label:      "JWKS Fetch",
+		Timestamp:  startTime,
+		DurationMs: duration.Milliseconds(),
+		Request: HTTPCapture{
+			Method:  "GET",
+			URL:     c.jwksURL,
+			Headers: map[string]string{"Accept": "application/json"},
+		},
+		Response: HTTPCapture{
+			Headers: make(map[string]string),
+		},
+	}
+
 	if err != nil {
-		return fmt.Errorf("failed to fetch JWKS: %w", err)
+		exchange.Response.Body = fmt.Sprintf("error: %v", err)
+		return exchange, fmt.Errorf("failed to fetch JWKS: %w", err)
 	}
 	defer resp.Body.Close()
+
+	exchange.Response.StatusCode = resp.StatusCode
+	for k := range resp.Header {
+		exchange.Response.Headers[k] = resp.Header.Get(k)
+	}
 	
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("JWKS fetch returned status %d", resp.StatusCode)
+		exchange.Response.Body = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		return exchange, fmt.Errorf("JWKS fetch returned status %d", resp.StatusCode)
 	}
+
+	// Read the full body for capture
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return exchange, fmt.Errorf("failed to read JWKS body: %w", err)
+	}
+	exchange.Response.Body = string(bodyBytes)
 	
 	var jwks struct {
 		Keys []json.RawMessage `json:"keys"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
-		return fmt.Errorf("failed to decode JWKS: %w", err)
+	if err := json.Unmarshal(bodyBytes, &jwks); err != nil {
+		return exchange, fmt.Errorf("failed to decode JWKS: %w", err)
 	}
 	
 	// Parse each key
@@ -161,7 +201,7 @@ func (c *JWKSCache) refresh() error {
 	c.fetchedAt = time.Now()
 	
 	log.Printf("[SSF Receiver] JWKS cache refreshed with %d keys", len(newKeys))
-	return nil
+	return exchange, nil
 }
 
 // parseRSAPublicKeyFromJWK parses an RSA public key from JWK components
@@ -206,6 +246,38 @@ func NewReceiverService(port int, transmitterURL, bearerToken string, executor A
 		receivedEvents:  make([]ReceivedEvent, 0),
 		responseActions: make([]ResponseAction, 0),
 		actionExecutor:  executor,
+	}
+}
+
+// AddEventListener adds a listener for receiver pipeline events
+func (rs *ReceiverService) AddEventListener(ch chan<- ReceiverEvent) {
+	rs.listenerMu.Lock()
+	defer rs.listenerMu.Unlock()
+	rs.eventListeners = append(rs.eventListeners, ch)
+}
+
+// RemoveEventListener removes an event listener
+func (rs *ReceiverService) RemoveEventListener(ch chan<- ReceiverEvent) {
+	rs.listenerMu.Lock()
+	defer rs.listenerMu.Unlock()
+	for i, listener := range rs.eventListeners {
+		if listener == ch {
+			rs.eventListeners = append(rs.eventListeners[:i], rs.eventListeners[i+1:]...)
+			return
+		}
+	}
+}
+
+// broadcast sends an event to all listeners
+func (rs *ReceiverService) broadcast(event ReceiverEvent) {
+	rs.listenerMu.RLock()
+	defer rs.listenerMu.RUnlock()
+	for _, listener := range rs.eventListeners {
+		select {
+		case listener <- event:
+		default:
+			log.Printf("[SSF] WARNING: receiver event channel full, dropping %s event for session %s", event.Type, event.SessionID)
+		}
 	}
 }
 
@@ -286,11 +358,42 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// ProcessPollResponse handles events retrieved via poll delivery (RFC 8936).
+// sessionIDs maps JTI -> session ID (from the stored event metadata, not from the SET).
+func (rs *ReceiverService) ProcessPollResponse(ctx context.Context, sets map[string]string, sessionIDs map[string]string) []SetStatus {
+	var statuses []SetStatus
+	for _, setToken := range sets {
+		// For poll, we pass the token directly; session ID comes from stored metadata
+		jti := ""
+		for k, v := range sets {
+			if v == setToken {
+				jti = k
+				break
+			}
+		}
+		sessionID := sessionIDs[jti]
+		status := rs.processSET(ctx, setToken, sessionID)
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
 // processSET processes a single raw SET token.
 // The JTI is extracted from the decoded token per RFC 8935 (push delivers a single raw SET).
 // sessionID is passed via the X-SSF-Session delivery header, not from the SET itself.
 func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID string) SetStatus {
 	receivedAt := time.Now()
+
+	// Broadcast: Event Received
+	rs.broadcast(ReceiverEvent{
+		Type:      ReceiverEventReceived,
+		Timestamp: receivedAt,
+		SessionID: sessionID,
+		Data: map[string]interface{}{
+			"delivery_method": "push",
+			"token_length":    len(setToken),
+		},
+	})
 	
 	// Decode the SET header to get the key ID
 	token, _, err := new(jwt.Parser).ParseUnverified(setToken, jwt.MapClaims{})
@@ -305,11 +408,22 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		return SetStatus{Status: "failed", Description: "Missing key ID"}
 	}
 	
-	// Fetch the public key from JWKS
-	publicKey, err := rs.jwksCache.GetKey(keyID)
+	// Fetch the public key from JWKS (may trigger a real HTTP fetch to the transmitter)
+	publicKey, jwksExchange, err := rs.jwksCache.GetKey(keyID)
 	if err != nil {
 		log.Printf("[SSF Receiver] Failed to get public key: %v", err)
 		return SetStatus{Status: "failed", Description: fmt.Sprintf("Key fetch failed: %v", err)}
+	}
+
+	// Broadcast JWKS fetch as an HTTP exchange if a real fetch occurred
+	if jwksExchange != nil {
+		jwksExchange.SessionID = sessionID
+		rs.broadcast(ReceiverEvent{
+			Type:      ReceiverEventHTTPExchange,
+			Timestamp: jwksExchange.Timestamp,
+			SessionID: sessionID,
+			Data:      jwksExchange,
+		})
 	}
 	
 	// Verify the SET signature
@@ -329,6 +443,17 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 			Verified:       false,
 			VerifyError:    err.Error(),
 		})
+
+		// Broadcast: Verify Failed
+		rs.broadcast(ReceiverEvent{
+			Type:      ReceiverEventVerifyFailed,
+			Timestamp: time.Now(),
+			SessionID: sessionID,
+			Data: map[string]interface{}{
+				"error": err.Error(),
+			},
+		})
+
 		return SetStatus{Status: "failed", Description: fmt.Sprintf("Signature verification failed: %v", err)}
 	}
 	
@@ -347,6 +472,21 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	jti := decoded.JTI
 	log.Printf("[SSF Receiver] Processing SET: %s", jti)
 
+	// Broadcast: Event Verified
+	rs.broadcast(ReceiverEvent{
+		Type:      ReceiverEventVerified,
+		Timestamp: time.Now(),
+		EventID:   jti,
+		SessionID: sessionID,
+		Data: map[string]interface{}{
+			"issuer":    decoded.Issuer,
+			"subject":   decoded.Subject,
+			"events":    len(decoded.Events),
+			"algorithm": "RS256",
+			"key_id":    keyID,
+		},
+	})
+
 	// RFC 8935 §2 step 4 / RFC 8417 §2.2: Reject replayed SETs by tracking seen JTIs
 	if jti != "" {
 		rs.seenJTIsMu.RLock()
@@ -357,6 +497,17 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 			return SetStatus{Status: "failed", Description: fmt.Sprintf("duplicate SET rejected (jti %s already processed)", jti)}
 		}
 	}
+
+	// Broadcast: Processing
+	rs.broadcast(ReceiverEvent{
+		Type:      ReceiverEventProcessing,
+		Timestamp: time.Now(),
+		EventID:   jti,
+		SessionID: sessionID,
+		Data: map[string]interface{}{
+			"event_count": len(decoded.Events),
+		},
+	})
 	
 	// Record the received event
 	processedAt := time.Now()
@@ -399,6 +550,18 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		rs.seenJTIsMu.Unlock()
 	}
 
+	// Broadcast: Event Processed
+	finalAt := time.Now()
+	rs.broadcast(ReceiverEvent{
+		Type:      ReceiverEventProcessed,
+		Timestamp: finalAt,
+		EventID:   jti,
+		SessionID: sessionID,
+		Data: map[string]interface{}{
+			"processing_time_ms": finalAt.Sub(receivedAt).Milliseconds(),
+		},
+	})
+
 	log.Printf("[SSF Receiver] SET processed successfully: %s", jti)
 	return SetStatus{Status: "success", Description: "Event processed and actions executed"}
 }
@@ -409,6 +572,20 @@ func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID str
 	for _, action := range actions {
 		rs.addResponseAction(action)
 		log.Printf("[SSF Receiver] Action recorded: %s - %s (session: %s)", action.Action, action.Status, sessionID)
+
+		// Broadcast: Response Action
+		rs.broadcast(ReceiverEvent{
+			Type:      ReceiverEventResponseAction,
+			Timestamp: action.ExecutedAt,
+			EventID:   eventID,
+			SessionID: sessionID,
+			Data: map[string]interface{}{
+				"action":     action.Action,
+				"event_type": event.Metadata.Name,
+				"category":   event.Metadata.Category,
+				"zero_trust": event.Metadata.ZeroTrustImpact,
+			},
+		})
 	}
 }
 
