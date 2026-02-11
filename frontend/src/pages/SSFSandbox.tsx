@@ -174,31 +174,15 @@ function mapSSEToFlowEvent(sse: SSEPipelineEvent): FlowEvent | null {
       case 'http_exchange':
         return null
 
+      // event_queued, delivery_started, delivery_success are metadata-only
+      // announcements. The real delivery data (headers, body, timing) is in
+      // the http_exchange event shown in the Traffic tab. Showing these here
+      // would display config data (endpoint, retries) that looks like real
+      // traffic but isn't.
       case 'event_queued':
-        return {
-          ...base, type: 'info' as const,
-          title: 'Transmitter: Event Queued',
-          description: `Delivery method: ${(event.data?.delivery_method as string) === 'urn:ietf:rfc:8935' ? 'Push (RFC 8935)' : (event.data?.delivery_method as string) || 'push'}`,
-          rfcReference: 'SSF §5',
-        }
-
-      case 'delivery_started': {
-        const endpoint = event.data?.endpoint as string || ''
-        return {
-          ...base, type: 'request' as const,
-          title: 'Transmitter: Push Delivery',
-          description: `${(event.data?.method as string) || 'POST'} → ${endpoint}`,
-          rfcReference: 'RFC 8935 §2',
-        }
-      }
-
+      case 'delivery_started':
       case 'delivery_success':
-        return {
-          ...base, type: 'response' as const,
-          title: 'Transmitter: Delivery Success',
-          description: `HTTP ${(event.data?.status_code as number) || 202} on attempt ${(event.data?.attempt as number) || 1}`,
-          rfcReference: 'RFC 8935 §2',
-        }
+        return null
 
       case 'delivery_failed':
         return { ...base, type: 'error' as const, title: 'Transmitter: Delivery Failed', description: (event.data?.error as string) || 'Delivery error' }

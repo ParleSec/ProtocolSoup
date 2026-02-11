@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +30,7 @@ type Plugin struct {
 	baseURL          string
 	receiverPort     int
 	receiverToken    string // Bearer token for authenticated push delivery
-	receiverEndpoint string // Standalone receiver push URL (http://localhost:{port}/ssf/push)
+	receiverEndpoint string // Public-facing receiver push URL (baseURL/ssf/receiver/push)
 
 	// SSE connection tracking: one active goroutine per session.
 	// When a new SSE connection arrives for a session, the old one is cancelled
@@ -85,8 +86,13 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.keySet = ks
 	}
 
-	// Route push delivery through the standalone receiver (real HTTP, real JWKS fetch, real signature verification)
-	p.receiverEndpoint = fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort)
+	// Route push delivery through the receiver proxy on the main server.
+	// The transmitter POSTs to baseURL/ssf/receiver/push, which the main server
+	// proxies to the standalone receiver on localhost:{receiverPort}. This ensures:
+	// 1. Only port 8080 needs to be exposed in production
+	// 2. No localhost URLs leak into event data shown to users
+	// 3. Real HTTP traffic still flows between transmitter and receiver
+	p.receiverEndpoint = strings.TrimRight(p.baseURL, "/") + "/ssf/receiver/push"
 
 	// Initialize SQLite storage
 	dataDir := getDataDir()
@@ -222,6 +228,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/decode", p.handleDecodeSET)
 
 	// Standalone Receiver endpoints (proxy to the separate service)
+	router.Post("/receiver/push", p.handleReceiverPushProxy) // Proxies push delivery to standalone receiver
 	router.Get("/receiver/status", p.handleReceiverStatus)
 	router.Get("/receiver/events", p.handleReceiverEvents)
 	router.Get("/receiver/actions", p.handleReceiverActions)

@@ -1,6 +1,7 @@
 package ssf
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -1142,13 +1143,57 @@ func (p *Plugin) handleReceiverStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
 		"status":           "running",
 		"port":             p.receiverPort,
-		"endpoint":         fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort),
+		"endpoint":         p.receiverEndpoint,
 		"transmitter_url":  p.baseURL,
 		"bearer_token":     "configured", // Never expose token material, even partially
 		"events_received":  len(p.receiverService.GetReceivedEvents()),
 		"actions_executed": len(p.receiverService.GetResponseActions()),
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+// handleReceiverPushProxy proxies push delivery requests from the transmitter
+// to the standalone receiver service running on localhost:{receiverPort}.
+// This keeps only port 8080 exposed in production while maintaining real HTTP
+// traffic between transmitter and receiver.
+func (p *Plugin) handleReceiverPushProxy(w http.ResponseWriter, r *http.Request) {
+	targetURL := fmt.Sprintf("http://localhost:%d/ssf/push", p.receiverPort)
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Failed to read request body")
+		return
+	}
+
+	proxyReq, err := http.NewRequestWithContext(r.Context(), "POST", targetURL, bytes.NewReader(body))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Failed to create proxy request")
+		return
+	}
+
+	// Forward all headers from the original request
+	for k, vv := range r.Header {
+		for _, v := range vv {
+			proxyReq.Header.Add(k, v)
+		}
+	}
+
+	resp, err := http.DefaultClient.Do(proxyReq)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("Receiver unreachable: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	// Forward response headers and status
+	for k, vv := range resp.Header {
+		for _, v := range vv {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	respBody, _ := io.ReadAll(resp.Body)
+	_, _ = w.Write(respBody)
 }
 
 // handleReceiverEvents returns events received by the standalone receiver
