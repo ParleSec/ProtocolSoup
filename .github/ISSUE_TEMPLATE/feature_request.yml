@@ -1,0 +1,76 @@
+name: Feature Request
+description: Suggest an improvement or new feature for ProtocolSoup
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea that would make ProtocolSoup better? We'd love to hear it. Please describe the problem you're trying to solve and your proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What problem does this feature solve? Why is it needed?
+      placeholder: "When learning about token revocation, there's no way to see what happens on the IdP side when a token is revoked..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change you'd like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you considered other approaches? What are the trade-offs?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Which part of ProtocolSoup would this affect?
+      multiple: true
+      options:
+        - Looking Glass (flow execution/visualization)
+        - OAuth 2.0
+        - OpenID Connect
+        - SAML 2.0
+        - SCIM 2.0
+        - SSF (Shared Signals Framework)
+        - SPIFFE/SPIRE
+        - Mock IdP
+        - Frontend UI
+        - Backend API
+        - Documentation
+        - Docker/Deployment
+        - New protocol
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: willingness
+    attributes:
+      label: Would you be willing to contribute this?
+      description: We welcome pull requests! Let us know if you'd like to work on this.
+      options:
+        - "Yes, I'd like to implement this"
+        - "I could help with guidance"
+        - "No, just suggesting"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and discussions to make sure this hasn't been requested already
+          required: true
