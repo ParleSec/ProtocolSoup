@@ -1,0 +1,12 @@
+# Default owner for everything in the repo
+* @ParleSec
+
+# Backend protocol implementations
+/backend/internal/protocols/ @ParleSec
+
+# Frontend
+/frontend/ @ParleSec
+
+# Infrastructure and deployment
+/docker/ @ParleSec
+/.github/ @ParleSec

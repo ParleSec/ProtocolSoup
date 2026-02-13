@@ -1,0 +1,89 @@
+name: Protocol Proposal
+description: Propose a new identity/security protocol to add to ProtocolSoup
+title: "[Protocol]: "
+labels: ["protocol-proposal", "discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ProtocolSoup uses a plugin architecture to support new protocols. Before implementing, please describe the protocol and its value so we can discuss scope and approach.
+
+        See [ADDING_PROTOCOLS.md](https://github.com/ParleSec/ProtocolSoup/blob/master/docs/ADDING_PROTOCOLS.md) for the technical guide on how protocols are implemented.
+
+  - type: input
+    id: protocol-name
+    attributes:
+      label: Protocol name
+      description: The name of the protocol or standard.
+      placeholder: "e.g., WebAuthn / FIDO2, RADIUS, Kerberos, WS-Federation"
+    validations:
+      required: true
+
+  - type: textarea
+    id: specifications
+    attributes:
+      label: Specification references
+      description: Link to the RFC(s), spec documents, or standards this protocol is defined by.
+      placeholder: |
+        - RFC 8152: CBOR Object Signing and Encryption (COSE)
+        - W3C Web Authentication: https://www.w3.org/TR/webauthn-3/
+    validations:
+      required: true
+
+  - type: textarea
+    id: value
+    attributes:
+      label: Educational value
+      description: Why would this protocol be valuable for ProtocolSoup users? What do practitioners struggle to understand about it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: flows
+    attributes:
+      label: Key flows to implement
+      description: Which protocol flows or operations should be included? Start with the most important.
+      placeholder: |
+        1. Registration ceremony (create credential)
+        2. Authentication ceremony (get assertion)
+        3. Attestation verification
+    validations:
+      required: true
+
+  - type: textarea
+    id: infrastructure
+    attributes:
+      label: Infrastructure requirements
+      description: Does this protocol need additional infrastructure beyond the existing backend? (e.g., special servers, hardware simulation, external services)
+      placeholder: "Needs a simulated authenticator for WebAuthn, could use a software-based virtual authenticator..."
+
+  - type: textarea
+    id: looking-glass
+    attributes:
+      label: Looking Glass visualization ideas
+      description: What would be most valuable to show in the real-time protocol inspection view?
+      placeholder: |
+        - Challenge/response exchange
+        - Credential creation internals (public key, attestation object)
+        - Signature verification steps
+
+  - type: dropdown
+    id: willingness
+    attributes:
+      label: Would you be willing to implement this?
+      options:
+        - "Yes, I'd like to build this protocol plugin"
+        - "I can help with the specification/design"
+        - "No, just proposing the idea"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to make sure this protocol hasn't been proposed already
+          required: true
+        - label: I have read [ADDING_PROTOCOLS.md](https://github.com/ParleSec/ProtocolSoup/blob/master/docs/ADDING_PROTOCOLS.md)
+          required: false
