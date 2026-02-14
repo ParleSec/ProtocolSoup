@@ -165,24 +165,30 @@ export function ProtocolDemo() {
   
   if (!protocol) {
     return (
-      <div className="text-center py-20">
-        <h1 className="text-2xl font-bold text-white mb-4">Protocol Not Found</h1>
-        <Link to="/" className="text-accent-orange hover:underline">
-          Back to Dashboard
-        </Link>
-      </div>
+      <>
+        <SEO title="Protocol Not Found" noIndex={true} />
+        <div className="text-center py-20">
+          <h1 className="text-2xl font-bold text-white mb-4">Protocol Not Found</h1>
+          <Link to="/" className="text-accent-orange hover:underline">
+            Back to Dashboard
+          </Link>
+        </div>
+      </>
     )
   }
 
   if (flowsError) {
     return (
-      <div className="text-center py-20">
-        <h1 className="text-2xl font-bold text-white mb-4">Protocol Data Unavailable</h1>
-        <p className="text-surface-400 mb-6">{flowsError.message}</p>
-        <Link to="/" className="text-accent-orange hover:underline">
-          Back to Dashboard
-        </Link>
-      </div>
+      <>
+        <SEO title="Protocol Data Unavailable" noIndex={true} />
+        <div className="text-center py-20">
+          <h1 className="text-2xl font-bold text-white mb-4">Protocol Data Unavailable</h1>
+          <p className="text-surface-400 mb-6">{flowsError.message}</p>
+          <Link to="/" className="text-accent-orange hover:underline">
+            Back to Dashboard
+          </Link>
+        </div>
+      </>
     )
   }
 

@@ -9,7 +9,12 @@
 User-agent: *
 Allow: /
 
-# Only block backend API/protocol endpoints (not web pages)
+# Allow frontend data APIs so Googlebot can render protocol pages
+# (more specific rules take precedence over the broader Disallow)
+Allow: /api/protocols/
+Allow: /api/protocols$
+
+# Block all other backend API/protocol endpoints
 Disallow: /api/
 Disallow: /ws/
 Disallow: /oauth2/

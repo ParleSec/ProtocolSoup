@@ -69,13 +69,16 @@ export function FlowDetail() {
 
   if (error) {
     return (
-      <div className="text-center py-20">
-        <h1 className="text-xl font-semibold text-white mb-3">Flow Data Unavailable</h1>
-        <p className="text-sm text-surface-400 mb-6">{error.message}</p>
-        <Link to={`/protocol/${protocolId}`} className="text-cyan-400 hover:underline">
-          Back to {getProtocolName(protocolId)}
-        </Link>
-      </div>
+      <>
+        <SEO title="Flow Data Unavailable" noIndex={true} />
+        <div className="text-center py-20">
+          <h1 className="text-xl font-semibold text-white mb-3">Flow Data Unavailable</h1>
+          <p className="text-sm text-surface-400 mb-6">{error.message}</p>
+          <Link to={`/protocol/${protocolId}`} className="text-cyan-400 hover:underline">
+            Back to {getProtocolName(protocolId)}
+          </Link>
+        </div>
+      </>
     )
   }
 
@@ -193,12 +196,15 @@ export function FlowDetail() {
 
   if (!flow) {
     return (
-      <div className="text-center py-20">
-        <h1 className="text-xl font-semibold text-white mb-4">Flow Not Found</h1>
-        <Link to={`/protocol/${protocolId}`} className="text-cyan-400 hover:underline">
-          Back to {getProtocolName(protocolId)}
-        </Link>
-      </div>
+      <>
+        <SEO title="Flow Not Found" noIndex={true} />
+        <div className="text-center py-20">
+          <h1 className="text-xl font-semibold text-white mb-4">Flow Not Found</h1>
+          <Link to={`/protocol/${protocolId}`} className="text-cyan-400 hover:underline">
+            Back to {getProtocolName(protocolId)}
+          </Link>
+        </div>
+      </>
     )
   }
 
