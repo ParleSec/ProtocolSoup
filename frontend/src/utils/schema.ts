@@ -292,12 +292,15 @@ export function generateProtocolPageSchema(
  * Flow detail page schema generator
  */
 export function generateFlowPageSchema(
+  protocolId: string,
   protocolName: string,
   flowName: string,
   description: string,
   url: string,
   steps: Array<{ name: string; description: string }>
 ) {
+  const protocolSlug = protocolId || protocolName.toLowerCase().replace(/[^a-z0-9]/g, '')
+
   const howTo = generateHowToSchema({
     name: `How to implement ${flowName} in ${protocolName}`,
     description,
@@ -320,7 +323,7 @@ export function generateFlowPageSchema(
   const breadcrumbs = generateBreadcrumbSchema([
     { name: 'Home', url: SITE_CONFIG.baseUrl },
     { name: 'Protocols', url: `${SITE_CONFIG.baseUrl}/protocols` },
-    { name: protocolName, url: `${SITE_CONFIG.baseUrl}/protocol/${protocolName.toLowerCase().replace(/[^a-z0-9]/g, '')}` },
+    { name: protocolName, url: `${SITE_CONFIG.baseUrl}/protocol/${protocolSlug}` },
     { name: flowName, url },
   ])
 

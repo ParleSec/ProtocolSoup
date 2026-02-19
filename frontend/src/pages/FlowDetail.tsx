@@ -214,6 +214,7 @@ export function FlowDetail() {
   const protocolName = getProtocolName(protocolId)
   const seoData = getFlowSEO(protocolId || '', flowId || '', flow.title)
   const structuredData = generateFlowPageSchema(
+    protocolId || '',
     protocolName,
     flow.title,
     flow.description,

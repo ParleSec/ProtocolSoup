@@ -9,7 +9,7 @@ import { Helmet } from 'react-helmet-async'
 import { SITE_CONFIG, PageSEO } from '../../config/seo'
 
 export interface SEOProps extends Partial<PageSEO> {
-  /** Page title - will be appended with site name */
+  /** Page title */
   title?: string
   /** Meta description */
   description?: string
@@ -40,9 +40,13 @@ export function SEO({
   noIndex = false,
   meta = [],
 }: SEOProps) {
-  // Construct full title with site name
-  const fullTitle = title 
-    ? `${title} | ${SITE_CONFIG.name}`
+  // Construct full title with site name while avoiding duplicate brand suffixes.
+  const trimmedTitle = title?.trim()
+  const titleHasSiteName = trimmedTitle
+    ? trimmedTitle.toLowerCase().includes(SITE_CONFIG.name.toLowerCase())
+    : false
+  const fullTitle = trimmedTitle
+    ? (titleHasSiteName ? trimmedTitle : `${trimmedTitle} | ${SITE_CONFIG.name}`)
     : `${SITE_CONFIG.name} - ${SITE_CONFIG.tagline}`
 
   // Use provided description or default

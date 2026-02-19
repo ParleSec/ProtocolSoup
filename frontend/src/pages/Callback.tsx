@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useLocation, Link } from 'react-router-dom'
 import { CheckCircle, XCircle, Loader2, ArrowLeft, AlertTriangle } from 'lucide-react'
+import { SEO } from '../components/common/SEO'
 
 type CallbackType = 'authorization_code' | 'implicit' | 'hybrid' | 'error' | 'unknown'
 
@@ -69,81 +70,84 @@ export function Callback() {
   }, [searchParams, location.hash])
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center">
-      <div className="glass rounded-xl p-8 max-w-lg w-full">
-        {status === 'processing' && (
-          <div className="text-center">
-            <Loader2 className="w-16 h-16 mx-auto text-accent-cyan animate-spin mb-4" />
-            <h1 className="text-xl font-bold text-white mb-2">Processing...</h1>
-            <p className="text-surface-400">Handling authorization callback</p>
-          </div>
-        )}
-
-        {status === 'success' && callbackData && (
-          <div className="text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
-              <CheckCircle className="w-10 h-10 text-green-400" />
+    <>
+      <SEO title="OAuth Callback" noIndex={true} canonical="/callback" />
+      <div className="min-h-[80vh] flex items-center justify-center">
+        <div className="glass rounded-xl p-8 max-w-lg w-full">
+          {status === 'processing' && (
+            <div className="text-center">
+              <Loader2 className="w-16 h-16 mx-auto text-accent-cyan animate-spin mb-4" />
+              <h1 className="text-xl font-bold text-white mb-2">Processing...</h1>
+              <p className="text-surface-400">Handling authorization callback</p>
             </div>
-            <h1 className="text-xl font-bold text-white mb-2">Authorization Successful!</h1>
-            <p className="text-surface-400 mb-4">
-              {window.opener 
-                ? 'This window will close automatically.' 
-                : 'Authorization complete.'}
-            </p>
+          )}
 
-            {/* Callback Details */}
-            <CallbackDetails data={callbackData} />
+          {status === 'success' && callbackData && (
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto rounded-full bg-green-500/10 flex items-center justify-center mb-4">
+                <CheckCircle className="w-10 h-10 text-green-400" />
+              </div>
+              <h1 className="text-xl font-bold text-white mb-2">Authorization Successful!</h1>
+              <p className="text-surface-400 mb-4">
+                {window.opener 
+                  ? 'This window will close automatically.' 
+                  : 'Authorization complete.'}
+              </p>
 
-            {!window.opener && (
+              {/* Callback Details */}
+              <CallbackDetails data={callbackData} />
+
+              {!window.opener && (
+                <Link
+                  to="/looking-glass"
+                  className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  Back to Looking Glass
+                </Link>
+              )}
+            </div>
+          )}
+
+          {status === 'error' && callbackData && (
+            <div className="text-center">
+              <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 flex items-center justify-center mb-4">
+                <XCircle className="w-10 h-10 text-red-400" />
+              </div>
+              <h1 className="text-xl font-bold text-white mb-2">Authorization Failed</h1>
+              <p className="text-red-400 mb-4">
+                {callbackData.error_description || callbackData.error || 'Unknown error'}
+              </p>
+
+              {callbackData.error && (
+                <div className="text-left mt-6 p-4 rounded-lg bg-red-500/5 border border-red-500/20">
+                  <h3 className="text-sm font-medium text-red-300 mb-2">Error Details:</h3>
+                  <div className="space-y-1 text-xs font-mono text-red-400">
+                    <div>
+                      <span className="text-red-300">error:</span> {callbackData.error}
+                    </div>
+                    {callbackData.error_description && (
+                      <div>
+                        <span className="text-red-300">description:</span>{' '}
+                        {callbackData.error_description}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <Link
                 to="/looking-glass"
-                className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
+                className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-surface-800 border border-white/10 text-surface-300 hover:text-white hover:bg-surface-700 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Back to Looking Glass
               </Link>
-            )}
-          </div>
-        )}
-
-        {status === 'error' && callbackData && (
-          <div className="text-center">
-            <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 flex items-center justify-center mb-4">
-              <XCircle className="w-10 h-10 text-red-400" />
             </div>
-            <h1 className="text-xl font-bold text-white mb-2">Authorization Failed</h1>
-            <p className="text-red-400 mb-4">
-              {callbackData.error_description || callbackData.error || 'Unknown error'}
-            </p>
-
-            {callbackData.error && (
-              <div className="text-left mt-6 p-4 rounded-lg bg-red-500/5 border border-red-500/20">
-                <h3 className="text-sm font-medium text-red-300 mb-2">Error Details:</h3>
-                <div className="space-y-1 text-xs font-mono text-red-400">
-                  <div>
-                    <span className="text-red-300">error:</span> {callbackData.error}
-                  </div>
-                  {callbackData.error_description && (
-                    <div>
-                      <span className="text-red-300">description:</span>{' '}
-                      {callbackData.error_description}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <Link
-              to="/looking-glass"
-              className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-surface-800 border border-white/10 text-surface-300 hover:text-white hover:bg-surface-700 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Back to Looking Glass
-            </Link>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
