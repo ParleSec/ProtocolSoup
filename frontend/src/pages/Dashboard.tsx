@@ -13,8 +13,8 @@ export function Dashboard() {
   return (
     <>
       <SEO
-        title="Interactive OAuth 2.0, OIDC & SAML Testing Playground"
-        description="Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows."
+        title="Protocol Soup - Interactive Authentication Protocol Playground"
+        description="Protocol Soup helps you learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against working infrastructure."
         canonical="/"
         ogType="website"
         keywords={[
@@ -110,7 +110,7 @@ export function Dashboard() {
             description="Authorization framework for delegated access"
             color="blue"
             flows={['authorization_code', 'client_credentials', 'pkce', 'refresh_token']}
-            to="/looking-glass"
+            to="/protocol/oauth2"
           />
           <ProtocolCard
             icon={Fingerprint}
@@ -118,7 +118,7 @@ export function Dashboard() {
             description="Authentication layer built on OAuth 2.0"
             color="orange"
             flows={['oidc_code', 'hybrid', 'userinfo', 'discovery']}
-            to="/looking-glass"
+            to="/protocol/oidc"
           />
           <ProtocolCard
             icon={FileKey}
@@ -126,7 +126,7 @@ export function Dashboard() {
             description="XML-based federated identity and SSO"
             color="cyan"
             flows={['sp_initiated_sso', 'idp_initiated_sso', 'single_logout']}
-            to="/looking-glass"
+            to="/protocol/saml"
           />
           <ProtocolCard
             icon={Shield}
@@ -134,7 +134,7 @@ export function Dashboard() {
             description="Zero-trust workload identity framework"
             color="green"
             flows={['x509_svid', 'jwt_svid', 'mtls', 'cert_rotation']}
-            to="/looking-glass"
+            to="/protocol/spiffe"
           />
           <ProtocolCard
             icon={Users}
@@ -142,7 +142,7 @@ export function Dashboard() {
             description="Cross-domain identity provisioning"
             color="purple"
             flows={['user_lifecycle', 'group_mgmt', 'filters', 'bulk_ops']}
-            to="/looking-glass"
+            to="/protocol/scim"
           />
           <ProtocolCard
             icon={Radio}
@@ -150,7 +150,7 @@ export function Dashboard() {
             description="Real-time security event sharing framework"
             color="amber"
             flows={['caep_events', 'risc_events', 'set_tokens', 'zero_trust']}
-            to="/ssf-sandbox"
+            to="/protocol/ssf"
           />
         </div>
       </section>

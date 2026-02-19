@@ -81,6 +81,19 @@ export function generateSoftwareApplicationSchema() {
 }
 
 /**
+ * WebSite schema for brand/entity clarity in search
+ */
+export function generateWebsiteSchema() {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'WebSite',
+    name: SITE_CONFIG.name,
+    url: SITE_CONFIG.baseUrl,
+    inLanguage: 'en-US',
+  }
+}
+
+/**
  * TechArticle schema for protocol documentation pages
  */
 export interface TechArticleParams {
@@ -216,6 +229,7 @@ export function generateFAQSchema(faqs: FAQItem[]) {
  */
 export function generateHomepageSchema() {
   return [
+    generateWebsiteSchema(),
     generateWebApplicationSchema(),
     generateOrganizationSchema(),
     generateFAQSchema([
