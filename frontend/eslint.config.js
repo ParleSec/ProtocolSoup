@@ -19,6 +19,11 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // Keep current project lint behavior after upgrading to ESLint 10 and the newer hooks plugin.
+      'react-hooks/immutability': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/static-components': 'off',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
