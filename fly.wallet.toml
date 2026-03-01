@@ -1,0 +1,36 @@
+app = "protocolsoup-wallet"
+primary_region = "syd"
+
+[build]
+  dockerfile = "docker/Dockerfile.wallet-harness"
+
+[env]
+  WALLET_LISTEN_ADDR = ":8080"
+  WALLET_TARGET_BASE_URL = "https://protocolsoup.com"
+  WALLET_DEFAULT_SUBJECT = "did:example:wallet:alice"
+  WALLET_ALLOWED_CORS_ORIGINS = "https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 100
+    soft_limit = 80
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

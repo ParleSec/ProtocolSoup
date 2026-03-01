@@ -1,0 +1,24 @@
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+
+COPY backend/go.mod backend/go.sum ./
+RUN go mod download
+
+COPY backend/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o wallet-harness ./cmd/walletharness
+
+FROM alpine:3.21
+
+WORKDIR /app
+RUN apk --no-cache add ca-certificates
+
+COPY --from=builder /app/wallet-harness /app/wallet-harness
+
+ENV WALLET_LISTEN_ADDR=:8080
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["/app/wallet-harness"]
