@@ -18,6 +18,8 @@ import { TokenIntrospectionExecutor, type TokenIntrospectionConfig } from './tok
 import { TokenRevocationExecutor, type TokenRevocationConfig } from './token-revocation'
 import { OIDCUserInfoExecutor, type OIDCUserInfoConfig } from './oidc-userinfo'
 import { OIDCDiscoveryExecutor } from './oidc-discovery'
+import { OID4VCIPreAuthorizedExecutor, type OID4VCIPreAuthorizedConfig } from './oid4vci-pre-authorized'
+import { OID4VPDirectPostExecutor } from './oid4vp-direct-post'
 import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
 import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
 import { X509SVIDExecutor, JWTSVIDExecutor, MTLSExecutor, CertRotationExecutor, type SPIFFESVIDConfig } from './spiffe-svid'
@@ -188,6 +190,45 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: false,
   },
 
+  // OID4VCI flows
+  'oid4vci-pre-authorized': {
+    executorClass: OID4VCIPreAuthorizedExecutor,
+    description: 'Pre-authorized credential issuance with proof + c_nonce',
+    rfcReference: 'OpenID4VCI 1.0',
+    requiresUserInteraction: false,
+    additionalConfig: { txCodeRequired: false, deferred: false },
+  },
+  'oid4vci-pre-authorized-tx-code': {
+    executorClass: OID4VCIPreAuthorizedExecutor,
+    description: 'Pre-authorized issuance with tx_code enforcement',
+    rfcReference: 'OpenID4VCI 1.0 Section 6.1',
+    requiresUserInteraction: true,
+    additionalConfig: { txCodeRequired: true, deferred: false },
+  },
+  'oid4vci-deferred-issuance': {
+    executorClass: OID4VCIPreAuthorizedExecutor,
+    description: 'Deferred issuance polling flow',
+    rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
+    requiresUserInteraction: false,
+    additionalConfig: { txCodeRequired: false, deferred: true },
+  },
+
+  // OID4VP flows
+  'oid4vp-direct-post': {
+    executorClass: OID4VPDirectPostExecutor,
+    description: 'Verifier request + wallet direct_post response',
+    rfcReference: 'OpenID4VP 1.0 Section 8.2',
+    requiresUserInteraction: true,
+    additionalConfig: { responseMode: 'direct_post' as const },
+  },
+  'oid4vp-direct-post-jwt': {
+    executorClass: OID4VPDirectPostExecutor,
+    description: 'Verifier request + encrypted direct_post.jwt response',
+    rfcReference: 'OpenID4VP 1.0 Section 8.2',
+    requiresUserInteraction: true,
+    additionalConfig: { responseMode: 'direct_post.jwt' as const },
+  },
+
   // SAML 2.0 Flows
   'saml-sp-sso': {
     executorClass: SPInitiatedSSOExecutor,
@@ -342,6 +383,8 @@ export interface ExecutorFactoryConfig {
   tokenTypeHint?: 'access_token' | 'refresh_token'
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
+  /** OID4VCI transaction code for tx_code flow variants */
+  txCodeValue?: string
 }
 
 /**
@@ -422,6 +465,11 @@ export function createFlowExecutor(
     if (config.bearerToken) {
       (fullConfig as SCIMProvisioningConfig).bearerToken = config.bearerToken
     }
+  }
+
+  // Handle OID4VCI tx_code flow variants
+  if (flowId.startsWith('oid4vci-') && config.txCodeValue) {
+    (fullConfig as OID4VCIPreAuthorizedConfig).txCodeValue = config.txCodeValue
   }
 
   // Handle Token Introspection flow

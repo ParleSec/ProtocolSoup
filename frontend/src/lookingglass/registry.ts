@@ -56,6 +56,8 @@ interface BackendFlowStep {
 const PROTOCOL_COLORS: Record<string, string> = {
   oauth2: 'blue',
   oidc: 'orange',
+  oid4vci: 'emerald',
+  oid4vp: 'indigo',
   saml: 'purple',
   webauthn: 'green',
   fido2: 'cyan',
@@ -69,6 +71,8 @@ const PROTOCOL_COLORS: Record<string, string> = {
 const PROTOCOL_ICONS: Record<string, string> = {
   oauth2: 'key',
   oidc: 'fingerprint',
+  oid4vci: 'wallet',
+  oid4vp: 'scan-search',
   saml: 'shield',
   webauthn: 'smartphone',
   fido2: 'lock',
@@ -345,6 +349,13 @@ export function getActorsForFlow(flow: LookingGlassFlow): LookingGlassActor[] {
       'openid_provider': 'idp',
       'identity_provider': 'idp',
       'idp': 'idp',
+      'credential_issuer': 'credential_issuer',
+      'issuer': 'credential_issuer',
+      'wallet': 'wallet',
+      'wallet_emulator': 'wallet',
+      'verifier': 'verifier',
+      'holder_device': 'holder_device',
+      'holder': 'holder_device',
       'resource_server': 'resource_server',
       'api': 'resource_server',
       // SCIM actors

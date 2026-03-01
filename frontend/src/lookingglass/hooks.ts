@@ -479,6 +479,8 @@ export interface UseRealFlowExecutorOptions {
   token?: string
   /** Access token (for UserInfo endpoint) */
   accessToken?: string
+  /** OID4VCI transaction code (for tx_code constrained issuance) */
+  txCodeValue?: string
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
 }
@@ -735,6 +737,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       bearerToken: options.bearerToken,
       token: options.token,
       accessToken: options.accessToken,
+      txCodeValue: options.txCodeValue,
       lookingGlassSessionId: options.lookingGlassSessionId,
     }
 
@@ -779,6 +782,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.flowId,
     options.token,
     options.accessToken,
+    options.txCodeValue,
     options.lookingGlassSessionId,
   ])
 
