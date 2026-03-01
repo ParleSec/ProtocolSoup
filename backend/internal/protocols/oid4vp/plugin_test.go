@@ -27,6 +27,11 @@ type combinedServer struct {
 	KeySet *crypto.KeySet
 }
 
+type combinedServerOptions struct {
+	DataDir string
+	KeySet  *crypto.KeySet
+}
+
 type walletFixture struct {
 	Subject       string
 	KeySet        *crypto.KeySet
@@ -34,6 +39,7 @@ type walletFixture struct {
 }
 
 const testIssuerAudience = "http://localhost:8080/oid4vci"
+const testCredentialVCT = "https://protocolsoup.com/credentials/university_degree"
 
 func TestDirectPostFlowEndToEnd(t *testing.T) {
 	env := newCombinedVCServer(t)
@@ -102,6 +108,181 @@ func TestDirectPostPolicyDenialForNonceMismatch(t *testing.T) {
 	}
 }
 
+func TestDirectPostPolicyDenialForNonceFromDifferentRequest(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	requestA := createVPRequest(t, env.Server.URL, "direct_post")
+	requestB := createVPRequest(t, env.Server.URL, "direct_post")
+	postWalletResponse(t, env.Server.URL, env.KeySet, requestA, wallet, asVPString(requestB["nonce"]))
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(requestA["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "nonce_mismatch") {
+		t.Fatalf("expected nonce_mismatch reason code, got %v", reasonCodes)
+	}
+}
+
+func TestDirectPostPolicyDenialForExpiredVPToken(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	expiredVPToken := createVPTokenWithExpiry(t, createPayload, wallet, time.Now().UTC().Add(-1*time.Minute))
+
+	formResp, err := http.PostForm(env.Server.URL+"/oid4vp/response", url.Values{
+		"state":    {asVPString(createPayload["state"])},
+		"vp_token": {expiredVPToken},
+	})
+	if err != nil {
+		t.Fatalf("post wallet response failed: %v", err)
+	}
+	assertVPStatus(t, formResp, http.StatusOK)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "vp_token_expired") {
+		t.Fatalf("expected vp_token_expired reason code, got %v", reasonCodes)
+	}
+}
+
+func TestWalletResponseRejectsReplayAfterCompletion(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	replayToken := createVPToken(t, createPayload, wallet, "")
+	replayResp, err := http.PostForm(env.Server.URL+"/oid4vp/response", url.Values{
+		"state":    {asVPString(createPayload["state"])},
+		"vp_token": {replayToken},
+	})
+	if err != nil {
+		t.Fatalf("post replay wallet response failed: %v", err)
+	}
+	assertVPStatus(t, replayResp, http.StatusBadRequest)
+	replayPayload := decodeVPJSONMap(t, replayResp)
+	if asVPString(replayPayload["error"]) != "invalid_request" {
+		t.Fatalf("expected invalid_request, got %v", replayPayload["error"])
+	}
+	if !strings.Contains(strings.ToLower(asVPString(replayPayload["error_description"])), "already completed") {
+		t.Fatalf("expected replay error_description to mention completion, got %v", replayPayload["error_description"])
+	}
+}
+
+func TestDirectPostPolicyAllowsSelectiveDisclosureSubsetForMatchingDCQL(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	degreeOnlyCredential := filterCredentialDisclosures(t, wallet.CredentialJWT, []string{"degree"})
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id": "degree_only",
+				"meta": map[string]interface{}{
+					"vct_values": []string{testCredentialVCT},
+				},
+				"claims": []map[string]interface{}{
+					{
+						"path": []string{"degree"},
+					},
+				},
+			},
+		},
+	})
+
+	wallet.CredentialJWT = degreeOnlyCredential
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	assertPolicyAllowed(t, resultPayload)
+
+	resultObj := extractVPResult(t, resultPayload)
+	credentialEvidence, ok := resultObj["credential_evidence"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected credential evidence in verification result")
+	}
+	disclosedClaims, _ := credentialEvidence["disclosed_claims"].(map[string]interface{})
+	if _, exists := disclosedClaims["degree"]; !exists {
+		t.Fatalf("expected degree in disclosed_claims, got %v", disclosedClaims)
+	}
+	if _, exists := disclosedClaims["graduation_year"]; exists {
+		t.Fatalf("expected graduation_year to remain undisclosed, got %v", disclosedClaims)
+	}
+}
+
+func TestDirectPostPolicyDeniesMissingRequiredDisclosureClaim(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	wallet.CredentialJWT = filterCredentialDisclosures(t, wallet.CredentialJWT, []string{"degree"})
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "missing_required_claim") {
+		t.Fatalf("expected missing_required_claim reason code, got %v", reasonCodes)
+	}
+}
+
+func TestDirectPostPolicyDeniesMissingLineageWithExplicitCode(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	wallet.CredentialJWT = createUntrackedCredentialJWT(t, wallet)
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "missing_lineage") {
+		t.Fatalf("expected missing_lineage reason code, got %v", reasonCodes)
+	}
+}
+
+func TestDirectPostFlowSurvivesVerifierRestartWithPersistentState(t *testing.T) {
+	dataDir := t.TempDir()
+	env1 := newCombinedVCServerWithOptions(t, combinedServerOptions{
+		DataDir: dataDir,
+	})
+	wallet := issueCredentialForWallet(t, env1.Server.URL, "alice")
+	createPayload := createVPRequest(t, env1.Server.URL, "direct_post")
+	env1.Server.Close()
+
+	env2 := newCombinedVCServerWithOptions(t, combinedServerOptions{
+		DataDir: dataDir,
+	})
+	defer env2.Server.Close()
+
+	postWalletResponse(t, env2.Server.URL, env2.KeySet, createPayload, wallet, "")
+	resultPayload := fetchVerificationResult(t, env2.Server.URL, asVPString(createPayload["request_id"]))
+	assertPolicyAllowed(t, resultPayload)
+}
+
 func TestDirectPostJWTRejectsInvalidEncryptedResponse(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -162,10 +343,29 @@ func TestExternalInteropConformance(t *testing.T) {
 
 func createVPRequest(t *testing.T, serverURL string, responseMode string) map[string]interface{} {
 	t.Helper()
-	createResp := postVPJSON(t, serverURL+"/oid4vp/request/create", map[string]interface{}{
+	return createVPRequestPayload(t, serverURL, map[string]interface{}{
 		"response_mode": responseMode,
 		"response_uri":  serverURL + "/oid4vp/response",
 	})
+}
+
+func createVPRequestWithDCQL(
+	t *testing.T,
+	serverURL string,
+	responseMode string,
+	dcqlQuery map[string]interface{},
+) map[string]interface{} {
+	t.Helper()
+	return createVPRequestPayload(t, serverURL, map[string]interface{}{
+		"response_mode": responseMode,
+		"response_uri":  serverURL + "/oid4vp/response",
+		"dcql_query":    dcqlQuery,
+	})
+}
+
+func createVPRequestPayload(t *testing.T, serverURL string, payload map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	createResp := postVPJSON(t, serverURL+"/oid4vp/request/create", payload)
 	assertVPStatus(t, createResp, http.StatusCreated)
 	createPayload := decodeVPJSONMap(t, createResp)
 	if asVPString(createPayload["request_id"]) == "" {
@@ -434,6 +634,44 @@ func createVPToken(t *testing.T, createPayload map[string]interface{}, wallet *w
 	return signed
 }
 
+func createVPTokenWithExpiry(
+	t *testing.T,
+	createPayload map[string]interface{},
+	wallet *walletFixture,
+	expiry time.Time,
+) string {
+	t.Helper()
+	pubJWK, found := wallet.KeySet.GetJWKByID(wallet.KeySet.RSAKeyID())
+	if !found {
+		t.Fatalf("wallet public jwk is unavailable")
+	}
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"iss":   wallet.Subject,
+		"sub":   wallet.Subject,
+		"aud":   asVPString(createPayload["client_id"]),
+		"nonce": asVPString(createPayload["nonce"]),
+		"iat":   now.Add(-2 * time.Minute).Unix(),
+		"exp":   expiry.Unix(),
+		"jti":   "vp-expired-" + wallet.Subject,
+		"cnf": map[string]interface{}{
+			"jwk": pubJWK,
+			"jkt": pubJWK.Thumbprint(),
+		},
+		"vp": map[string]interface{}{
+			"credential_jwt": wallet.CredentialJWT,
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["typ"] = "vp+jwt"
+	token.Header["kid"] = wallet.KeySet.RSAKeyID()
+	signed, err := token.SignedString(wallet.KeySet.RSAPrivateKey())
+	if err != nil {
+		t.Fatalf("sign vp token: %v", err)
+	}
+	return signed
+}
+
 func createEncryptedResponseJWT(
 	t *testing.T,
 	verifierKeySet *crypto.KeySet,
@@ -491,6 +729,67 @@ func createEncryptedResponseJWT(
 	return serialized
 }
 
+func filterCredentialDisclosures(t *testing.T, credentialJWT string, requestedClaims []string) string {
+	t.Helper()
+	envelope, err := vc.ParseSDJWTEnvelope(credentialJWT)
+	if err != nil {
+		t.Fatalf("parse sd-jwt envelope: %v", err)
+	}
+	if len(envelope.Disclosures) == 0 {
+		t.Fatalf("expected sd-jwt disclosures in issued credential")
+	}
+	allow := make(map[string]struct{}, len(requestedClaims))
+	for _, claim := range requestedClaims {
+		normalized := strings.TrimSpace(claim)
+		if normalized == "" {
+			continue
+		}
+		allow[normalized] = struct{}{}
+	}
+	selected := make([]string, 0, len(envelope.Disclosures))
+	for _, encodedDisclosure := range envelope.Disclosures {
+		disclosure, err := vc.DecodeSDJWTDisclosure(encodedDisclosure)
+		if err != nil {
+			t.Fatalf("decode disclosure: %v", err)
+		}
+		if len(allow) == 0 {
+			selected = append(selected, disclosure.Encoded)
+			continue
+		}
+		if _, ok := allow[strings.TrimSpace(disclosure.ClaimName)]; ok {
+			selected = append(selected, disclosure.Encoded)
+		}
+	}
+	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, selected, envelope.KeyBindingJWT)
+}
+
+func createUntrackedCredentialJWT(t *testing.T, wallet *walletFixture) string {
+	t.Helper()
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"iss": "https://example.org/untracked-issuer",
+		"sub": wallet.Subject,
+		"iat": now.Unix(),
+		"exp": now.Add(5 * time.Minute).Unix(),
+		"jti": "untracked-" + wallet.Subject,
+		"vct": "https://protocolsoup.com/credentials/untracked",
+		"vc": map[string]interface{}{
+			"credentialSubject": map[string]interface{}{
+				"id":     wallet.Subject,
+				"degree": "Untracked Credential",
+			},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["typ"] = "vc+sd-jwt"
+	token.Header["kid"] = wallet.KeySet.RSAKeyID()
+	signed, err := token.SignedString(wallet.KeySet.RSAPrivateKey())
+	if err != nil {
+		t.Fatalf("sign untracked credential: %v", err)
+	}
+	return vc.BuildSDJWTSerialization(signed, nil, "")
+}
+
 func fetchVerificationResult(t *testing.T, serverURL string, requestID string) map[string]interface{} {
 	t.Helper()
 	resultResp, err := http.Get(serverURL + "/oid4vp/result/" + requestID)
@@ -529,32 +828,56 @@ func fetchVerificationResultWithTimeout(t *testing.T, baseURL string, requestID 
 
 func assertPolicyAllowed(t *testing.T, resultPayload map[string]interface{}) {
 	t.Helper()
-	resultObj, ok := resultPayload["result"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected result object")
-	}
-	policyObj, ok := resultObj["policy"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected policy object")
-	}
+	policyObj := extractVPPolicy(t, resultPayload)
 	if allowed, ok := policyObj["allowed"].(bool); !ok || !allowed {
 		t.Fatalf("expected allowed policy decision")
 	}
 }
 
+func extractVPResult(t *testing.T, resultPayload map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	resultObj, ok := resultPayload["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected result object")
+	}
+	return resultObj
+}
+
+func extractVPPolicy(t *testing.T, resultPayload map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	resultObj := extractVPResult(t, resultPayload)
+	policyObj, ok := resultObj["policy"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected policy object")
+	}
+	return policyObj
+}
+
 func newCombinedVCServer(t *testing.T) *combinedServer {
 	t.Helper()
-	vc.DefaultWalletCredentialStore().Reset()
+	return newCombinedVCServerWithOptions(t, combinedServerOptions{})
+}
 
-	keySet, err := crypto.NewKeySet()
-	if err != nil {
-		t.Fatalf("new key set: %v", err)
+func newCombinedVCServerWithOptions(t *testing.T, options combinedServerOptions) *combinedServer {
+	t.Helper()
+	store := vc.DefaultWalletCredentialStore()
+	store.DisablePersistence()
+	store.Reset()
+
+	keySet := options.KeySet
+	if keySet == nil {
+		var err error
+		keySet, err = crypto.NewKeySet()
+		if err != nil {
+			t.Fatalf("new key set: %v", err)
+		}
 	}
 	idp := mockidp.NewMockIdP(keySet)
 
 	vciPlugin := oid4vci.NewPlugin()
 	if err := vciPlugin.Initialize(context.Background(), plugin.PluginConfig{
 		BaseURL: "http://localhost:8080",
+		DataDir: strings.TrimSpace(options.DataDir),
 		KeySet:  keySet,
 		MockIdP: idp,
 	}); err != nil {
@@ -564,6 +887,7 @@ func newCombinedVCServer(t *testing.T) *combinedServer {
 	vpPlugin := NewPlugin()
 	if err := vpPlugin.Initialize(context.Background(), plugin.PluginConfig{
 		BaseURL: "http://localhost:8080",
+		DataDir: strings.TrimSpace(options.DataDir),
 		KeySet:  keySet,
 		MockIdP: idp,
 	}); err != nil {
@@ -634,6 +958,15 @@ func asVPString(value interface{}) string {
 func containsVPReason(reasons []interface{}, expected string) bool {
 	for _, reason := range reasons {
 		if strings.EqualFold(strings.TrimSpace(asVPString(reason)), expected) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsVPReasonCode(codes []interface{}, expected string) bool {
+	for _, code := range codes {
+		if strings.EqualFold(strings.TrimSpace(asVPString(code)), expected) {
 			return true
 		}
 	}
