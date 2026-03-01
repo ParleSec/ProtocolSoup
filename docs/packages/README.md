@@ -8,14 +8,16 @@ Documentation for all ProtocolSoup container images available on GitHub Containe
 |-------|-------------|------|
 | [protocolsoup-gateway](https://ghcr.io/parlesec/protocolsoup-gateway) | API Gateway | [gateway.md](gateway.md) |
 | [protocolsoup-federation](https://ghcr.io/parlesec/protocolsoup-federation) | OAuth/OIDC/SAML | [federation.md](federation.md) |
+| [protocolsoup-vc](https://ghcr.io/parlesec/protocolsoup-vc) | OID4VCI + OID4VP APIs | [vc.md](vc.md) |
 | [protocolsoup-scim](https://ghcr.io/parlesec/protocolsoup-scim) | SCIM 2.0 | [scim.md](scim.md) |
 | [protocolsoup-ssf](https://ghcr.io/parlesec/protocolsoup-ssf) | Shared Signals | [ssf.md](ssf.md) |
 | [protocolsoup-spiffe](https://ghcr.io/parlesec/protocolsoup-spiffe) | SPIFFE/SPIRE | [spiffe.md](spiffe.md) |
 | [protocolsoup-frontend](https://ghcr.io/parlesec/protocolsoup-frontend) | React UI | [frontend.md](frontend.md) |
+| [protocolsoup-wallet](https://ghcr.io/parlesec/protocolsoup-wallet) | OID4VP wallet harness | [wallet.md](wallet.md) |
 
-## Federation Protocol Modules
+## VC Protocol Modules
 
-The federation image contains multiple protocol modules. Use these docs for module-level endpoint and flow behavior.
+The federation and VC images expose these module-level protocol docs.
 
 | Module | Description | Docs |
 |--------|-------------|------|
@@ -42,6 +44,14 @@ docker run -p 8080:8080 ghcr.io/parlesec/protocolsoup-scim
 
 # Run Federation server (OAuth/OIDC/SAML)
 docker run -p 8080:8080 ghcr.io/parlesec/protocolsoup-federation
+
+# Run standalone VC API server (OID4VCI + OID4VP)
+docker run -p 8080:8080 ghcr.io/parlesec/protocolsoup-vc
+
+# Run wallet harness against local VC API server
+docker run -p 8081:8080 \
+  -e WALLET_TARGET_BASE_URL=http://host.docker.internal:8080 \
+  ghcr.io/parlesec/protocolsoup-wallet
 
 # Run SSF server (Shared Signals)
 docker run -p 8080:8080 -p 8081:8081 ghcr.io/parlesec/protocolsoup-ssf
