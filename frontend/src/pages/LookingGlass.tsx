@@ -25,6 +25,65 @@ import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { LookingGlassSEO } from '../components/common/SEO'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
+const OID4VP_DEFAULT_DISCLOSURE_HINTS = ['degree', 'graduation_year', 'department', 'given_name', 'family_name']
+const OID4VP_DCQL_PRESETS: Array<{ id: string; label: string; description: string; query: string }> = [
+  {
+    id: 'degree-core',
+    label: 'Degree core',
+    description: 'Requests degree + graduation year from UniversityDegreeCredential.',
+    query: JSON.stringify({
+      credentials: [
+        {
+          id: 'university_degree',
+          meta: {
+            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+          },
+          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
+        },
+      ],
+    }, null, 2),
+  },
+  {
+    id: 'degree-and-department',
+    label: 'Degree + department',
+    description: 'Requests academic credential plus department for employer verification.',
+    query: JSON.stringify({
+      credentials: [
+        {
+          id: 'university_degree',
+          meta: {
+            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+          },
+          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }, { path: ['department'] }],
+        },
+      ],
+    }, null, 2),
+  },
+  {
+    id: 'multi-credential',
+    label: 'Multi-credential query',
+    description: 'Demonstrates DCQL with two credential slots and constrained claims.',
+    query: JSON.stringify({
+      credentials: [
+        {
+          id: 'degree_credential',
+          meta: {
+            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+          },
+          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
+        },
+        {
+          id: 'employment_credential',
+          meta: {
+            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+          },
+          claims: [{ path: ['department'] }],
+        },
+      ],
+    }, null, 2),
+  },
+]
+const DEFAULT_OID4VP_DCQL_PRESET_ID = OID4VP_DCQL_PRESETS[0]?.id || 'degree-core'
 
 export function LookingGlass() {
   useParams<{ sessionId?: string }>()
@@ -57,6 +116,16 @@ export function LookingGlass() {
   const [oid4vpWalletSubmitError, setOID4VPWalletSubmitError] = useState<string | null>(null)
   const [oid4vpWalletSubmitMessage, setOID4VPWalletSubmitMessage] = useState<string | null>(null)
   const [oid4vpLastPromptedRequestID, setOID4VPLastPromptedRequestID] = useState('')
+  const [oid4vpQueryMode, setOID4VPQueryMode] = useState<'dcql' | 'scope'>('dcql')
+  const [oid4vpDCQLPresetId, setOID4VPDCQLPresetID] = useState(DEFAULT_OID4VP_DCQL_PRESET_ID)
+  const [oid4vpDCQLInput, setOID4VPDCQLInput] = useState(
+    OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
+  )
+  const [oid4vpScopeAliasInput, setOID4VPScopeAliasInput] = useState('')
+  const [oid4vpWalletMode, setOID4VPWalletMode] = useState<'one_click' | 'stepwise'>('one_click')
+  const [oid4vpStepwiseVPToken, setOID4VPStepwiseVPToken] = useState('')
+  const [oid4vpStepwiseLastStep, setOID4VPStepwiseLastStep] = useState('')
+  const [oid4vpDisclosureClaims, setOID4VPDisclosureClaims] = useState<string[]>([])
 
   const { protocols, loading: protocolsLoading } = useProtocols()
   const {
@@ -117,6 +186,7 @@ export function LookingGlass() {
   const isTokenBasedFlow = isTokenIntrospectionFlow || isTokenRevocationFlow || isUserInfoFlow
   const isSCIMFlow = selectedProtocol?.id === 'scim'
   const isOID4VCITxCodeFlow = selectedProtocol?.id === 'oid4vci' && flowId === 'oid4vci-pre-authorized-tx-code'
+  const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
 
   // Use stored token or user input for flows that need a token
@@ -166,6 +236,44 @@ export function LookingGlass() {
 
   // Use stored token, input, or empty
   const activeRefreshToken = refreshTokenInput || storedRefreshToken || ''
+  const selectedOID4VPPreset = useMemo(
+    () => OID4VP_DCQL_PRESETS.find((preset) => preset.id === oid4vpDCQLPresetId) || OID4VP_DCQL_PRESETS[0],
+    [oid4vpDCQLPresetId],
+  )
+  const oid4vpDCQLValidationError = useMemo(() => {
+    if (!isOID4VPFlow || oid4vpQueryMode !== 'dcql') {
+      return ''
+    }
+    const normalized = oid4vpDCQLInput.trim()
+    if (!normalized) {
+      return 'dcql_query JSON is required in DCQL mode.'
+    }
+    try {
+      const parsed = JSON.parse(normalized)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return 'dcql_query must be a JSON object.'
+      }
+      return ''
+    } catch {
+      return 'dcql_query contains invalid JSON.'
+    }
+  }, [isOID4VPFlow, oid4vpQueryMode, oid4vpDCQLInput])
+  const oid4vpScopeAliasValidationError = useMemo(() => {
+    if (!isOID4VPFlow || oid4vpQueryMode !== 'scope') {
+      return ''
+    }
+    if (!oid4vpScopeAliasInput.trim()) {
+      return 'scope alias is required in scope mode.'
+    }
+    return ''
+  }, [isOID4VPFlow, oid4vpQueryMode, oid4vpScopeAliasInput])
+  const canExecuteOID4VPRequest = !isOID4VPFlow || (!oid4vpDCQLValidationError && !oid4vpScopeAliasValidationError)
+  const oid4vpDCQLQueryForExecutor = isOID4VPFlow && oid4vpQueryMode === 'dcql'
+    ? oid4vpDCQLInput.trim()
+    : undefined
+  const oid4vpScopeAliasForExecutor = isOID4VPFlow && oid4vpQueryMode === 'scope'
+    ? oid4vpScopeAliasInput.trim()
+    : undefined
 
   const realExecutor = useRealFlowExecutor({
     protocolId: selectedProtocol?.id || null,
@@ -179,6 +287,8 @@ export function LookingGlass() {
     accessToken: isUserInfoFlow ? activeToken : undefined,
     bearerToken: isSCIMFlow ? scimBearerToken : undefined,
     txCodeValue: isOID4VCITxCodeFlow ? vciTxCodeInput : undefined,
+    oid4vpDCQLQueryJSON: oid4vpDCQLQueryForExecutor,
+    oid4vpScopeAlias: oid4vpScopeAliasForExecutor,
     lookingGlassSessionId: wireSessionId || undefined,
   })
   const status = realExecutor.state?.status || 'idle'
@@ -232,9 +342,26 @@ export function LookingGlass() {
   }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
 
   const normalizedOID4VPCredentialJWTInput = useMemo(
-    () => extractIssuerJWTFromCredential(oid4vpCredentialJWTInput),
+    () => oid4vpCredentialJWTInput.trim(),
     [oid4vpCredentialJWTInput],
   )
+  const oid4vpTrustMode = useMemo(() => {
+    const metadata = (oid4vpRequestObjectArtifact?.metadata || walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
+    return String(metadata.trustMode || '').trim()
+  }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
+  const oid4vpDidWebAllowedHosts = useMemo(() => {
+    const metadata = (oid4vpRequestObjectArtifact?.metadata || walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
+    const hosts = metadata.didWebAllowedHosts
+    if (!Array.isArray(hosts)) {
+      return [] as string[]
+    }
+    return hosts.map((host) => String(host).trim()).filter(Boolean)
+  }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
+  const oid4vpCredentialDisclosureOptions = useMemo(() => {
+    const claimsFromCredential = parseSDJWTDisclosureClaimNames(normalizedOID4VPCredentialJWTInput)
+    const merged = [...claimsFromCredential, ...OID4VP_DEFAULT_DISCLOSURE_HINTS]
+    return Array.from(new Set(merged))
+  }, [normalizedOID4VPCredentialJWTInput])
 
   const canSubmitOID4VPWalletInteraction =
     !!oid4vpRequestID &&
@@ -352,7 +479,7 @@ export function LookingGlass() {
         }
       }
       if (!latestCredentialJWT && artifact.type === 'credential' && typeof artifact.raw === 'string') {
-        const normalized = extractIssuerJWTFromCredential(artifact.raw)
+        const normalized = artifact.raw.trim()
         if (normalized) {
           latestCredentialJWT = normalized
         }
@@ -385,6 +512,20 @@ export function LookingGlass() {
   }, [capturedVCCredentialJWT, oid4vpCredentialJWTInput])
 
   useEffect(() => {
+    if (oid4vpCredentialDisclosureOptions.length === 0) {
+      return
+    }
+    setOID4VPDisclosureClaims((previous) => {
+      const allowedSet = new Set(oid4vpCredentialDisclosureOptions)
+      const retained = previous.filter((claimName) => allowedSet.has(claimName))
+      if (retained.length > 0) {
+        return retained
+      }
+      return oid4vpCredentialDisclosureOptions
+    })
+  }, [oid4vpCredentialDisclosureOptions])
+
+  useEffect(() => {
     if (!isOID4VPAwaitingResult || !oid4vpRequestID) {
       return
     }
@@ -394,6 +535,9 @@ export function LookingGlass() {
     setOID4VPLastPromptedRequestID(oid4vpRequestID)
     setOID4VPWalletSubmitError(null)
     setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletMode('one_click')
+    setOID4VPStepwiseVPToken('')
+    setOID4VPStepwiseLastStep('')
     setOID4VPWalletModalOpen(true)
   }, [isOID4VPAwaitingResult, oid4vpRequestID, oid4vpLastPromptedRequestID])
 
@@ -406,6 +550,9 @@ export function LookingGlass() {
     setOID4VPWalletSubmitPending(false)
     setOID4VPWalletSubmitError(null)
     setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletMode('one_click')
+    setOID4VPStepwiseVPToken('')
+    setOID4VPStepwiseLastStep('')
   }, [selectedProtocol?.id])
 
   const openOID4VPWalletModal = useCallback(() => {
@@ -441,12 +588,15 @@ export function LookingGlass() {
 
     try {
       const payload = {
+        mode: 'one_click',
         request_id: oid4vpRequestID,
         request: oid4vpRequestJWT,
         request_uri: oid4vpRequestURI || undefined,
         response_mode: oid4vpResponseMode || undefined,
         wallet_subject: walletSubject || undefined,
         credential_jwt: credentialJWT || undefined,
+        disclosure_claims: oid4vpDisclosureClaims,
+        looking_glass_session_id: wireSessionId || undefined,
       }
 
       const response = await fetch(OID4VP_WALLET_SUBMIT_URL, {
@@ -470,8 +620,13 @@ export function LookingGlass() {
       const upstreamStatus = Number(responsePayload?.upstream_status || 0)
       const credentialSource = String(responsePayload?.credential_source || '').trim()
       const effectiveWalletSubject = String(responsePayload?.wallet_subject || walletSubject || '').trim()
+      const disclosureClaims = Array.isArray(responsePayload?.disclosure_claims)
+        ? responsePayload?.disclosure_claims.map((claimName) => String(claimName).trim()).filter(Boolean)
+        : []
       const sourceMessage = credentialSource === 'auto_issued_oid4vci'
         ? 'Auto-issued a fresh OID4VCI credential in the wallet bootstrap step.'
+        : credentialSource === 'auto_refreshed_oid4vci'
+          ? 'Auto-refreshed a stale credential via OID4VCI before presentation.'
         : credentialSource === 'cached_wallet_store'
           ? 'Used existing wallet credential from wallet harness state.'
           : credentialSource === 'provided'
@@ -485,6 +640,7 @@ export function LookingGlass() {
             ? `Wallet response accepted (upstream ${upstreamStatus}).`
             : 'Wallet response accepted.',
           effectiveWalletSubject ? `Wallet subject: ${effectiveWalletSubject}.` : '',
+          disclosureClaims.length > 0 ? `Disclosed claims: ${disclosureClaims.join(', ')}.` : '',
           sourceMessage,
           'Checking verifier result...',
         ].filter(Boolean).join(' '),
@@ -505,6 +661,113 @@ export function LookingGlass() {
     oid4vpRequestJWT,
     oid4vpRequestURI,
     oid4vpResponseMode,
+    oid4vpDisclosureClaims,
+    wireSessionId,
+    executeFlow,
+  ])
+
+  const executeOID4VPWalletStep = useCallback(async (
+    step: 'bootstrap' | 'issue_credential' | 'build_presentation' | 'submit_response',
+  ) => {
+    const walletSubject = oid4vpWalletSubjectInput.trim()
+    const credentialJWT = normalizedOID4VPCredentialJWTInput
+
+    if ((step === 'build_presentation' || step === 'submit_response') && (!oid4vpRequestID || !oid4vpRequestJWT)) {
+      setOID4VPWalletSubmitError('Missing request context. Re-run OID4VP request creation.')
+      return
+    }
+
+    setOID4VPWalletSubmitPending(true)
+    setOID4VPWalletSubmitError(null)
+
+    try {
+      const payload: Record<string, unknown> = {
+        mode: 'stepwise',
+        step,
+        wallet_subject: walletSubject || undefined,
+        credential_jwt: credentialJWT || undefined,
+        disclosure_claims: oid4vpDisclosureClaims,
+        looking_glass_session_id: wireSessionId || undefined,
+      }
+      if (oid4vpRequestID) {
+        payload.request_id = oid4vpRequestID
+      }
+      if (oid4vpRequestJWT) {
+        payload.request = oid4vpRequestJWT
+      }
+      if (oid4vpRequestURI) {
+        payload.request_uri = oid4vpRequestURI
+      }
+      if (oid4vpResponseMode) {
+        payload.response_mode = oid4vpResponseMode
+      }
+      if (step === 'submit_response' && oid4vpStepwiseVPToken.trim()) {
+        payload.vp_token = oid4vpStepwiseVPToken.trim()
+      }
+
+      const response = await fetch(OID4VP_WALLET_SUBMIT_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+      const responsePayload = await response.json().catch(() => null) as Record<string, unknown> | null
+      if (!response.ok) {
+        throw new Error(
+          String(
+            responsePayload?.error_description
+              || responsePayload?.error
+              || `Wallet step "${step}" failed (${response.status})`,
+          ),
+        )
+      }
+
+      const nextVPToken = String(responsePayload?.vp_token || '').trim()
+      if (step === 'build_presentation' && nextVPToken) {
+        setOID4VPStepwiseVPToken(nextVPToken)
+      }
+      setOID4VPStepwiseLastStep(step)
+
+      const upstreamStatus = Number(responsePayload?.upstream_status || 0)
+      const credentialSource = String(responsePayload?.credential_source || '').trim()
+      const disclosureClaims = Array.isArray(responsePayload?.disclosure_claims)
+        ? responsePayload?.disclosure_claims.map((claimName) => String(claimName).trim()).filter(Boolean)
+        : []
+
+      setOID4VPWalletSubmitMessage(
+        [
+          `Step "${step}" completed.`,
+          credentialSource ? `Credential source: ${credentialSource}.` : '',
+          disclosureClaims.length > 0 ? `Disclosed claims: ${disclosureClaims.join(', ')}.` : '',
+          step === 'build_presentation' && nextVPToken ? 'vp_token generated and cached for submit step.' : '',
+          step === 'submit_response' && upstreamStatus > 0 ? `Verifier callback accepted (upstream ${upstreamStatus}).` : '',
+        ].filter(Boolean).join(' '),
+      )
+
+      if (step === 'submit_response') {
+        setOID4VPWalletModalOpen(false)
+        setTimeout(() => {
+          executeFlow()
+        }, 1200)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Wallet step "${step}" failed`
+      setOID4VPWalletSubmitError(message)
+    } finally {
+      setOID4VPWalletSubmitPending(false)
+    }
+  }, [
+    oid4vpWalletSubjectInput,
+    normalizedOID4VPCredentialJWTInput,
+    oid4vpDisclosureClaims,
+    wireSessionId,
+    oid4vpRequestID,
+    oid4vpRequestJWT,
+    oid4vpRequestURI,
+    oid4vpResponseMode,
+    oid4vpStepwiseVPToken,
     executeFlow,
   ])
 
@@ -530,6 +793,16 @@ export function LookingGlass() {
     setOID4VPWalletSubmitPending(false)
     setOID4VPWalletSubmitError(null)
     setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletMode('one_click')
+    setOID4VPStepwiseVPToken('')
+    setOID4VPStepwiseLastStep('')
+    setOID4VPDisclosureClaims([])
+    setOID4VPQueryMode('dcql')
+    setOID4VPDCQLPresetID(DEFAULT_OID4VP_DCQL_PRESET_ID)
+    setOID4VPDCQLInput(
+      OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
+    )
+    setOID4VPScopeAliasInput('')
   }, [resetFlow, clearWireEvents, navigate])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
@@ -553,6 +826,16 @@ export function LookingGlass() {
     setOID4VPWalletSubmitPending(false)
     setOID4VPWalletSubmitError(null)
     setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletMode('one_click')
+    setOID4VPStepwiseVPToken('')
+    setOID4VPStepwiseLastStep('')
+    setOID4VPDisclosureClaims([])
+    setOID4VPQueryMode('dcql')
+    setOID4VPDCQLPresetID(DEFAULT_OID4VP_DCQL_PRESET_ID)
+    setOID4VPDCQLInput(
+      OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
+    )
+    setOID4VPScopeAliasInput('')
   }, [resetFlow, clearWireEvents, selectedProtocol, navigate])
 
   const handleReset = useCallback(() => {
@@ -568,6 +851,10 @@ export function LookingGlass() {
     setOID4VPWalletSubmitPending(false)
     setOID4VPWalletSubmitError(null)
     setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletMode('one_click')
+    setOID4VPStepwiseVPToken('')
+    setOID4VPStepwiseLastStep('')
+    setOID4VPDisclosureClaims([])
   }, [resetFlow, clearWireEvents])
 
   const copyWalletHandoff = useCallback(async () => {
@@ -608,6 +895,11 @@ export function LookingGlass() {
   }, [selectedProtocol, selectedFlow, clearWireEvents])
 
   const handleExecute = useCallback(async () => {
+    if (isOID4VPFlow && !canExecuteOID4VPRequest) {
+      const message = oid4vpDCQLValidationError || oid4vpScopeAliasValidationError || 'OID4VP request configuration is invalid.'
+      setOID4VPWalletSubmitError(message)
+      return
+    }
     if (!wireSessionId) {
       setPendingExecute(true)
       const created = await startWireSession()
@@ -617,7 +909,15 @@ export function LookingGlass() {
       return
     }
     executeFlow()
-  }, [wireSessionId, startWireSession, executeFlow])
+  }, [
+    isOID4VPFlow,
+    canExecuteOID4VPRequest,
+    oid4vpDCQLValidationError,
+    oid4vpScopeAliasValidationError,
+    wireSessionId,
+    startWireSession,
+    executeFlow,
+  ])
 
   useEffect(() => {
     if (pendingExecute && wireSessionId) {
@@ -653,6 +953,10 @@ export function LookingGlass() {
         setOID4VPWalletSubmitPending(false)
         setOID4VPWalletSubmitError(null)
         setOID4VPWalletSubmitMessage(null)
+        setOID4VPWalletMode('one_click')
+        setOID4VPStepwiseVPToken('')
+        setOID4VPStepwiseLastStep('')
+        setOID4VPDisclosureClaims([])
       }
     }
   }, [protocols, resetFlow, clearWireEvents, navigate])
@@ -962,6 +1266,98 @@ export function LookingGlass() {
             )}
           </motion.div>
         )}
+
+        {isOID4VPFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              <Workflow className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-400" />
+              <span className="text-xs sm:text-sm font-medium text-surface-300">OID4VP request contract</span>
+            </div>
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+              Configure either <code className="text-violet-300">dcql_query</code> or a scope alias (mutually exclusive per OpenID4VP).
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setOID4VPQueryMode('dcql')}
+                className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                  oid4vpQueryMode === 'dcql'
+                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
+                    : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                }`}
+              >
+                Use DCQL
+              </button>
+              <button
+                type="button"
+                onClick={() => setOID4VPQueryMode('scope')}
+                className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                  oid4vpQueryMode === 'scope'
+                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
+                    : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                }`}
+              >
+                Use scope alias
+              </button>
+            </div>
+
+            {oid4vpQueryMode === 'dcql' && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-[11px] sm:text-xs text-surface-400">Preset</label>
+                  <select
+                    value={oid4vpDCQLPresetId}
+                    onChange={(event) => {
+                      const nextPresetId = event.target.value
+                      const preset = OID4VP_DCQL_PRESETS.find((item) => item.id === nextPresetId)
+                      setOID4VPDCQLPresetID(nextPresetId)
+                      if (preset) {
+                        setOID4VPDCQLInput(preset.query)
+                      }
+                    }}
+                    className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
+                  >
+                    {OID4VP_DCQL_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>{preset.label}</option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] sm:text-xs text-cyan-300">{selectedOID4VPPreset?.description}</span>
+                </div>
+                <textarea
+                  value={oid4vpDCQLInput}
+                  onChange={(event) => setOID4VPDCQLInput(event.target.value)}
+                  rows={7}
+                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
+                  placeholder="Paste dcql_query JSON"
+                />
+                {!!oid4vpDCQLValidationError && (
+                  <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpDCQLValidationError}</p>
+                )}
+              </div>
+            )}
+
+            {oid4vpQueryMode === 'scope' && (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={oid4vpScopeAliasInput}
+                  onChange={(event) => setOID4VPScopeAliasInput(event.target.value)}
+                  placeholder="e.g. openid profile degree_verification"
+                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                />
+                {!!oid4vpScopeAliasValidationError && (
+                  <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpScopeAliasValidationError}</p>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
       </section>
 
       {/* Execution */}
@@ -993,8 +1389,13 @@ export function LookingGlass() {
               <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
                 {status === 'idle' && (
                   <button
-                  onClick={handleExecute}
-                    className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-500/30 text-green-400 text-xs sm:text-sm font-medium hover:from-green-500/30 hover:to-emerald-500/30 transition-all"
+                    onClick={handleExecute}
+                    disabled={isOID4VPFlow && !canExecuteOID4VPRequest}
+                    className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
+                      isOID4VPFlow && !canExecuteOID4VPRequest
+                        ? 'bg-surface-800/70 border-white/10 text-surface-500 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30 text-green-400 hover:from-green-500/30 hover:to-emerald-500/30'
+                    }`}
                   >
                     <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <span className="hidden sm:inline">Execute</span>
@@ -1070,6 +1471,19 @@ export function LookingGlass() {
                 </pre>
               </div>
             )}
+            {isOID4VPFlow && !!oid4vpTrustMode && (
+              <div className="mb-3 p-3 rounded-lg border border-violet-500/30 bg-violet-500/5 text-[11px] sm:text-xs text-violet-200">
+                <div className="font-medium mb-1">Verifier trust mode: {humanizeTrustMode(oid4vpTrustMode)}</div>
+                {oid4vpDidWebAllowedHosts.length > 0 && (
+                  <div className="text-surface-300">
+                    did:web host allowlist: <code>{oid4vpDidWebAllowedHosts.join(', ')}</code>
+                  </div>
+                )}
+                {oid4vpDidWebAllowedHosts.length === 0 && (
+                  <div className="text-surface-300">No did:web host allowlist is active for this request.</div>
+                )}
+              </div>
+            )}
             {selectedProtocol?.id === 'oid4vp' && (oid4vpWalletSubmitMessage || oid4vpWalletSubmitError) && (
               <div className={`mb-3 p-3 rounded-lg border text-xs ${
                 oid4vpWalletSubmitError
@@ -1138,9 +1552,19 @@ export function LookingGlass() {
                   <div className="grid gap-1 text-[11px] sm:text-xs text-surface-300">
                     <div><span className="text-surface-400">request_id:</span> <code>{oid4vpRequestID || 'missing'}</code></div>
                     <div><span className="text-surface-400">response_mode:</span> <code>{oid4vpResponseMode || 'direct_post'}</code></div>
+                    {oid4vpTrustMode && (
+                      <div>
+                        <span className="text-surface-400">trust_mode:</span> <code>{humanizeTrustMode(oid4vpTrustMode)}</code>
+                      </div>
+                    )}
                     {oid4vpRequestURI && (
                       <div className="break-all">
                         <span className="text-surface-400">request_uri:</span> <code>{oid4vpRequestURI}</code>
+                      </div>
+                    )}
+                    {oid4vpDidWebAllowedHosts.length > 0 && (
+                      <div className="break-all">
+                        <span className="text-surface-400">did:web allowlist:</span> <code>{oid4vpDidWebAllowedHosts.join(', ')}</code>
                       </div>
                     )}
                   </div>
@@ -1195,21 +1619,126 @@ export function LookingGlass() {
                     placeholder="Paste SD-JWT VC or issuer credential JWT (or leave blank to auto-issue one)"
                     className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
                   />
-                  {oid4vpCredentialJWTInput.trim() && normalizedOID4VPCredentialJWTInput !== oid4vpCredentialJWTInput.trim() && (
-                    <p className="text-[11px] sm:text-xs text-cyan-400">
-                      SD-JWT detected: issuer JWT segment will be used for wallet submission.
-                    </p>
-                  )}
                 </div>
 
-                {!canSubmitOID4VPWalletInteraction && (
+                <div className="space-y-1.5">
+                  <div className="text-xs sm:text-sm font-medium text-surface-300">Selective disclosure claims</div>
+                  <p className="text-[11px] sm:text-xs text-surface-400">
+                    Choose which SD-JWT disclosures to include in the VP response.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {oid4vpCredentialDisclosureOptions.map((claimName) => {
+                      const selected = oid4vpDisclosureClaims.includes(claimName)
+                      return (
+                        <button
+                          key={claimName}
+                          type="button"
+                          onClick={() => {
+                            setOID4VPDisclosureClaims((previous) => {
+                              if (previous.includes(claimName)) {
+                                return previous.filter((item) => item !== claimName)
+                              }
+                              return [...previous, claimName].sort()
+                            })
+                          }}
+                          className={`px-2 py-1 rounded border text-[11px] sm:text-xs transition-colors ${
+                            selected
+                              ? 'border-violet-500/40 bg-violet-500/20 text-violet-200'
+                              : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                          }`}
+                        >
+                          {claimName}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-xs sm:text-sm font-medium text-surface-300">Wallet execution mode</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOID4VPWalletMode('one_click')}
+                      className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                        oid4vpWalletMode === 'one_click'
+                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
+                          : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                      }`}
+                    >
+                      One-click mode
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOID4VPWalletMode('stepwise')}
+                      className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                        oid4vpWalletMode === 'stepwise'
+                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
+                          : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                      }`}
+                    >
+                      Stepwise mode
+                    </button>
+                  </div>
+                </div>
+
+                {oid4vpWalletMode === 'stepwise' && (
+                  <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3 space-y-2">
+                    <div className="text-[11px] sm:text-xs text-violet-200 font-medium">Expert stepwise ceremony</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => executeOID4VPWalletStep('bootstrap')}
+                        disabled={oid4vpWalletSubmitPending}
+                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
+                      >
+                        1) Bootstrap wallet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => executeOID4VPWalletStep('issue_credential')}
+                        disabled={oid4vpWalletSubmitPending}
+                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
+                      >
+                        2) Issue credential
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => executeOID4VPWalletStep('build_presentation')}
+                        disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
+                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
+                      >
+                        3) Build vp_token
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => executeOID4VPWalletStep('submit_response')}
+                        disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
+                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
+                      >
+                        4) Submit response
+                      </button>
+                    </div>
+                    <div className="text-[11px] sm:text-xs text-surface-300">
+                      Last step: <code>{oid4vpStepwiseLastStep || 'none'}</code>
+                      {oid4vpStepwiseVPToken && ' • vp_token cached'}
+                    </div>
+                  </div>
+                )}
+
+                {oid4vpWalletMode === 'one_click' && !canSubmitOID4VPWalletInteraction && (
                   <p className="text-[11px] sm:text-xs text-amber-400">
                     Missing request context. Re-run OID4VP request creation.
                   </p>
                 )}
-                {canSubmitOID4VPWalletInteraction && (
+                {oid4vpWalletMode === 'one_click' && canSubmitOID4VPWalletInteraction && (
                   <p className="text-[11px] sm:text-xs text-cyan-300">
                     This modal can complete OID4VP-only runs end-to-end. If credential_jwt is empty, wallet bootstrap will run a real OID4VCI issuance to obtain one before submission.
+                  </p>
+                )}
+                {oid4vpWalletMode === 'stepwise' && (
+                  <p className="text-[11px] sm:text-xs text-cyan-300">
+                    Stepwise mode exposes wallet key/bootstrap, credential issuance, presentation build, and verifier callback as separate actions.
                   </p>
                 )}
                 {!!oid4vpWalletSubmitError && (
@@ -1225,14 +1754,16 @@ export function LookingGlass() {
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={submitOID4VPWalletInteraction}
-                  disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs sm:text-sm font-medium hover:bg-violet-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {oid4vpWalletSubmitPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                  <span>{oid4vpWalletSubmitPending ? 'Submitting...' : 'Submit Wallet Response'}</span>
-                </button>
+                {oid4vpWalletMode === 'one_click' && (
+                  <button
+                    onClick={submitOID4VPWalletInteraction}
+                    disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs sm:text-sm font-medium hover:bg-violet-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {oid4vpWalletSubmitPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                    <span>{oid4vpWalletSubmitPending ? 'Submitting...' : 'Submit Wallet Response'}</span>
+                  </button>
+                )}
               </div>
             </motion.div>
           </motion.div>
@@ -1414,12 +1945,60 @@ function TokenButton({
   )
 }
 
-function extractIssuerJWTFromCredential(rawCredential: string): string {
+function parseSDJWTDisclosureClaimNames(rawCredential: string): string[] {
   const normalized = rawCredential.trim()
   if (!normalized) {
+    return []
+  }
+
+  const parts = normalized
+    .split('~')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  if (parts.length < 2) {
+    return []
+  }
+
+  const claimNames = new Set<string>()
+  for (const encodedDisclosure of parts.slice(1)) {
+    const decodedDisclosure = decodeBase64URLSegment(encodedDisclosure)
+    if (!decodedDisclosure) {
+      continue
+    }
+    try {
+      const parsedDisclosure = JSON.parse(decodedDisclosure) as unknown
+      if (
+        Array.isArray(parsedDisclosure) &&
+        parsedDisclosure.length >= 3 &&
+        typeof parsedDisclosure[1] === 'string'
+      ) {
+        claimNames.add(parsedDisclosure[1])
+      }
+    } catch {
+      // Ignore malformed segments (for example optional KB-JWT segment).
+    }
+  }
+
+  return Array.from(claimNames).sort()
+}
+
+function decodeBase64URLSegment(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+  try {
+    return atob(padded)
+  } catch {
     return ''
   }
-  const parts = normalized.split('~')
-  const issuerJWT = parts[0]?.trim() || ''
-  return issuerJWT || normalized
+}
+
+function humanizeTrustMode(mode: string): string {
+  const normalized = mode.trim().toLowerCase()
+  if (normalized === 'controlled_trust_mode') {
+    return 'controlled trust mode'
+  }
+  if (normalized === 'interop_mode') {
+    return 'interop mode'
+  }
+  return mode
 }
