@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -554,25 +553,6 @@ func (p *Plugin) decryptAndExtractDirectPostJWT(compactJWE string, session *requ
 		return "", "", fmt.Errorf("direct_post.jwt payload must contain vp_token and state")
 	}
 	return vpToken, state, nil
-}
-
-func (p *Plugin) resolveResponseURI(raw string) (string, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return "", fmt.Errorf("response_uri is required")
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil {
-		return "", fmt.Errorf("invalid response_uri: %w", err)
-	}
-	if parsed.IsAbs() {
-		return parsed.String(), nil
-	}
-	base, err := url.Parse(p.baseURL)
-	if err != nil {
-		return "", fmt.Errorf("invalid base URL: %w", err)
-	}
-	return base.ResolveReference(parsed).String(), nil
 }
 
 func validateRequestObjectTyp(requestJWT string) error {
