@@ -470,7 +470,7 @@ jobs:
       - name: Deploy wallet harness to Fly.io
         run: flyctl deploy --config fly.wallet.toml --app protocolsoup-wallet --remote-only
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
       
       - name: Smoke test wallet health
         run: |
