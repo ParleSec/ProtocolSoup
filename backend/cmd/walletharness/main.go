@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -41,11 +43,16 @@ type walletMaterial struct {
 }
 
 type walletSubmitRequest struct {
-	RequestID     string `json:"request_id"`
-	Request       string `json:"request,omitempty"`
-	WalletSubject string `json:"wallet_subject,omitempty"`
-	Subject       string `json:"subject,omitempty"`
-	CredentialJWT string `json:"credential_jwt,omitempty"`
+	RequestID             string   `json:"request_id"`
+	Request               string   `json:"request,omitempty"`
+	WalletSubject         string   `json:"wallet_subject,omitempty"`
+	Subject               string   `json:"subject,omitempty"`
+	CredentialJWT         string   `json:"credential_jwt,omitempty"`
+	Mode                  string   `json:"mode,omitempty"`
+	Step                  string   `json:"step,omitempty"`
+	VPToken               string   `json:"vp_token,omitempty"`
+	DisclosureClaims      []string `json:"disclosure_claims,omitempty"`
+	LookingGlassSessionID string   `json:"looking_glass_session_id,omitempty"`
 }
 
 type resolvedRequestContext struct {
@@ -141,19 +148,13 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	req.WalletSubject = strings.TrimSpace(req.WalletSubject)
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.CredentialJWT = strings.TrimSpace(req.CredentialJWT)
-	if req.RequestID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":             "invalid_request",
-			"error_description": "request_id is required",
-		})
-		return
-	}
-	if req.Request == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":             "invalid_request",
-			"error_description": "request is required",
-		})
-		return
+	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
+	req.Step = strings.ToLower(strings.TrimSpace(req.Step))
+	req.VPToken = strings.TrimSpace(req.VPToken)
+	req.LookingGlassSessionID = strings.TrimSpace(req.LookingGlassSessionID)
+	req.DisclosureClaims = normalizeDisclosureClaims(req.DisclosureClaims)
+	if req.Mode == "" {
+		req.Mode = "one_click"
 	}
 
 	subject := req.WalletSubject
@@ -171,43 +172,33 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	credentialSource := ""
+	switch req.Mode {
+	case "stepwise":
+		s.handleStepwiseSubmit(w, r, req, wallet)
+		return
+	case "one_click":
+		// continue to one-click mode below
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": fmt.Sprintf("unsupported mode %q", req.Mode),
+		})
+		return
+	}
 
-	if req.CredentialJWT != "" {
-		if err := s.bindCredential(wallet, req.CredentialJWT); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":             "invalid_request",
-				"error_description": err.Error(),
-			})
-			return
-		}
-		credentialSource = "provided"
+	if req.RequestID == "" || req.Request == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": "request_id and request are required for one_click mode",
+		})
+		return
 	}
-	if strings.TrimSpace(wallet.CredentialJWT) == "" {
-		autoIssuedCredentialJWT, err := s.issueCredentialForWallet(r.Context(), wallet)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": fmt.Sprintf("issue credential via oid4vci: %v", err),
-			})
-			return
-		}
-		if err := s.bindCredential(wallet, autoIssuedCredentialJWT); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": fmt.Sprintf("bind auto-issued credential: %v", err),
-			})
-			return
-		}
-		credentialSource = "auto_issued_oid4vci"
-	}
-	if credentialSource == "" {
-		credentialSource = "cached_wallet_store"
-	}
-	if strings.TrimSpace(wallet.CredentialJWT) == "" {
+
+	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, req.CredentialJWT, req.LookingGlassSessionID)
+	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error":             "wallet_submission_failed",
-			"error_description": "wallet credential is unavailable after bootstrap",
+			"error_description": err.Error(),
 		})
 		return
 	}
@@ -221,57 +212,370 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	vpToken, err := s.createVPToken(wallet, requestContext)
+	vpToken := req.VPToken
+	disclosureClaims := req.DisclosureClaims
+	if vpToken == "" {
+		presentedCredential, selectedDisclosureClaims, err := buildPresentedCredential(wallet.CredentialJWT, req.DisclosureClaims)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		disclosureClaims = selectedDisclosureClaims
+		vpToken, err = s.createVPToken(wallet, requestContext, presentedCredential)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": fmt.Sprintf("create vp_token: %v", err),
+			})
+			return
+		}
+	}
+
+	upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, req.LookingGlassSessionID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error":             "wallet_submission_failed",
-			"error_description": fmt.Sprintf("create vp_token: %v", err),
+			"error_description": err.Error(),
 		})
 		return
+	}
+
+	writeJSON(w, upstreamStatus, map[string]interface{}{
+		"mode":                "one_click",
+		"request_id":          requestContext.RequestID,
+		"response_mode":       requestContext.ResponseMode,
+		"response_uri":        s.targetResponseURI,
+		"wallet_subject":      wallet.Subject,
+		"credential_source":   credentialSource,
+		"disclosure_claims":   disclosureClaims,
+		"upstream_status":     upstreamStatus,
+		"upstream_body":       upstreamBody,
+		"wallet_stepwise_hint": "use mode=stepwise for keygen/issuance/presentation ceremony controls",
+	})
+}
+
+func normalizeDisclosureClaims(raw []string) []string {
+	unique := make(map[string]struct{}, len(raw))
+	claims := make([]string, 0, len(raw))
+	for _, item := range raw {
+		normalized := strings.TrimSpace(item)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := unique[normalized]; exists {
+			continue
+		}
+		unique[normalized] = struct{}{}
+		claims = append(claims, normalized)
+	}
+	sort.Strings(claims)
+	return claims
+}
+
+func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *http.Request, req walletSubmitRequest, wallet *walletMaterial) {
+	step := strings.TrimSpace(req.Step)
+	if step == "" {
+		step = "bootstrap"
+	}
+
+	switch step {
+	case "bootstrap":
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"mode":             "stepwise",
+			"step":             "bootstrap",
+			"wallet_subject":   wallet.Subject,
+			"wallet_key_id":    wallet.KeySet.RSAKeyID(),
+			"credential_cached": strings.TrimSpace(wallet.CredentialJWT) != "",
+		})
+		return
+
+	case "issue_credential":
+		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, req.CredentialJWT, req.LookingGlassSessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"mode":              "stepwise",
+			"step":              "issue_credential",
+			"wallet_subject":    wallet.Subject,
+			"credential_source": credentialSource,
+			"credential_cached": strings.TrimSpace(wallet.CredentialJWT) != "",
+		})
+		return
+
+	case "build_presentation":
+		if req.RequestID == "" || req.Request == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": "request_id and request are required for build_presentation",
+			})
+			return
+		}
+		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, req.CredentialJWT, req.LookingGlassSessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		requestContext, err := s.resolveRequestContext(req.RequestID, req.Request)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		presentedCredential, disclosureClaims, err := buildPresentedCredential(wallet.CredentialJWT, req.DisclosureClaims)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		vpToken, err := s.createVPToken(wallet, requestContext, presentedCredential)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": fmt.Sprintf("create vp_token: %v", err),
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"mode":              "stepwise",
+			"step":              "build_presentation",
+			"request_id":        requestContext.RequestID,
+			"response_mode":     requestContext.ResponseMode,
+			"wallet_subject":    wallet.Subject,
+			"credential_source": credentialSource,
+			"disclosure_claims": disclosureClaims,
+			"vp_token":          vpToken,
+		})
+		return
+
+	case "submit_response":
+		if req.RequestID == "" || req.Request == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": "request_id and request are required for submit_response",
+			})
+			return
+		}
+		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, req.CredentialJWT, req.LookingGlassSessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		requestContext, err := s.resolveRequestContext(req.RequestID, req.Request)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		vpToken := strings.TrimSpace(req.VPToken)
+		disclosureClaims := req.DisclosureClaims
+		if vpToken == "" {
+			presentedCredential, selectedClaims, err := buildPresentedCredential(wallet.CredentialJWT, req.DisclosureClaims)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{
+					"error":             "invalid_request",
+					"error_description": err.Error(),
+				})
+				return
+			}
+			disclosureClaims = selectedClaims
+			vpToken, err = s.createVPToken(wallet, requestContext, presentedCredential)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{
+					"error":             "wallet_submission_failed",
+					"error_description": fmt.Sprintf("create vp_token: %v", err),
+				})
+				return
+			}
+		}
+		upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, req.LookingGlassSessionID)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, upstreamStatus, map[string]interface{}{
+			"mode":              "stepwise",
+			"step":              "submit_response",
+			"request_id":        requestContext.RequestID,
+			"response_mode":     requestContext.ResponseMode,
+			"response_uri":      s.targetResponseURI,
+			"wallet_subject":    wallet.Subject,
+			"credential_source": credentialSource,
+			"disclosure_claims": disclosureClaims,
+			"upstream_status":   upstreamStatus,
+			"upstream_body":     upstreamBody,
+		})
+		return
+
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": fmt.Sprintf("unsupported step %q", step),
+		})
+		return
+	}
+}
+
+func (s *walletHarnessServer) ensureWalletCredential(
+	ctx context.Context,
+	wallet *walletMaterial,
+	providedCredentialJWT string,
+	lookingGlassSessionID string,
+) (string, error) {
+	if wallet == nil {
+		return "", fmt.Errorf("wallet context is required")
+	}
+
+	credentialSource := ""
+	if strings.TrimSpace(providedCredentialJWT) != "" {
+		if err := s.bindCredential(wallet, providedCredentialJWT); err != nil {
+			return "", fmt.Errorf("bind provided credential_jwt: %w", err)
+		}
+		credentialSource = "provided"
+	}
+
+	needsCredentialBootstrap := strings.TrimSpace(wallet.CredentialJWT) == ""
+	needsCredentialRefresh := false
+	if !needsCredentialBootstrap {
+		refreshRequired, err := credentialRefreshRequired(wallet.CredentialJWT, 90*time.Second)
+		if err != nil {
+			needsCredentialRefresh = true
+			log.Printf("wallet harness: credential pre-check failed for subject %q, refreshing via oid4vci (%v)", wallet.Subject, err)
+		} else if refreshRequired {
+			needsCredentialRefresh = true
+		}
+	}
+
+	if needsCredentialBootstrap || needsCredentialRefresh {
+		autoIssuedCredentialJWT, err := s.issueCredentialForWallet(ctx, wallet, lookingGlassSessionID)
+		if err != nil {
+			return "", fmt.Errorf("issue credential via oid4vci: %w", err)
+		}
+		if err := s.bindCredential(wallet, autoIssuedCredentialJWT); err != nil {
+			return "", fmt.Errorf("bind auto-issued credential: %w", err)
+		}
+		if needsCredentialBootstrap {
+			credentialSource = "auto_issued_oid4vci"
+		} else {
+			credentialSource = "auto_refreshed_oid4vci"
+		}
+	}
+	if credentialSource == "" {
+		credentialSource = "cached_wallet_store"
+	}
+	if strings.TrimSpace(wallet.CredentialJWT) == "" {
+		return "", fmt.Errorf("wallet credential is unavailable after bootstrap")
+	}
+	return credentialSource, nil
+}
+
+func buildPresentedCredential(rawCredential string, requestedClaims []string) (string, []string, error) {
+	normalized := strings.TrimSpace(rawCredential)
+	if normalized == "" {
+		return "", nil, fmt.Errorf("wallet credential is required")
+	}
+	envelope, err := vc.ParseSDJWTEnvelope(normalized)
+	if err != nil {
+		return "", nil, fmt.Errorf("parse wallet credential as sd-jwt: %w", err)
+	}
+	if len(envelope.Disclosures) == 0 {
+		return normalized, nil, nil
+	}
+
+	selectedDisclosures := make([]string, 0, len(envelope.Disclosures))
+	selectedClaims := make([]string, 0, len(envelope.Disclosures))
+	requestedSet := make(map[string]struct{}, len(requestedClaims))
+	for _, claimName := range normalizeDisclosureClaims(requestedClaims) {
+		requestedSet[claimName] = struct{}{}
+	}
+
+	for _, disclosure := range envelope.Disclosures {
+		decodedDisclosure, err := vc.DecodeSDJWTDisclosure(disclosure)
+		if err != nil {
+			return "", nil, fmt.Errorf("decode sd-jwt disclosure: %w", err)
+		}
+		claimName := strings.TrimSpace(decodedDisclosure.ClaimName)
+		if len(requestedSet) > 0 {
+			if _, ok := requestedSet[claimName]; !ok {
+				continue
+			}
+		}
+		selectedDisclosures = append(selectedDisclosures, strings.TrimSpace(disclosure))
+		selectedClaims = append(selectedClaims, claimName)
+	}
+	if len(requestedSet) > 0 && len(selectedDisclosures) == 0 {
+		return "", nil, fmt.Errorf("none of the requested disclosure_claims are available in the credential")
+	}
+	sort.Strings(selectedClaims)
+	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, selectedDisclosures, envelope.KeyBindingJWT), selectedClaims, nil
+}
+
+func (s *walletHarnessServer) submitToVerifier(
+	ctx context.Context,
+	wallet *walletMaterial,
+	requestContext *resolvedRequestContext,
+	vpToken string,
+	lookingGlassSessionID string,
+) (int, interface{}, error) {
+	if requestContext == nil {
+		return 0, nil, fmt.Errorf("request context is required")
+	}
+	normalizedVPToken := strings.TrimSpace(vpToken)
+	if normalizedVPToken == "" {
+		return 0, nil, fmt.Errorf("vp_token is required")
 	}
 
 	form := url.Values{}
 	form.Set("state", requestContext.State)
 	if requestContext.ResponseMode == "direct_post.jwt" {
-		responseJWT, err := s.createDirectPostResponseJWT(wallet, requestContext, vpToken)
+		responseJWT, err := s.createDirectPostResponseJWT(wallet, requestContext, normalizedVPToken)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": fmt.Sprintf("create direct_post.jwt response: %v", err),
-			})
-			return
+			return 0, nil, fmt.Errorf("create direct_post.jwt response: %w", err)
 		}
 		encryptedResponse, err := s.encryptForVerifier(responseJWT)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": fmt.Sprintf("encrypt direct_post.jwt response: %v", err),
-			})
-			return
+			return 0, nil, fmt.Errorf("encrypt direct_post.jwt response: %w", err)
 		}
 		form.Set("response", encryptedResponse)
 	} else {
-		form.Set("vp_token", vpToken)
+		form.Set("vp_token", normalizedVPToken)
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, s.targetResponseURI, strings.NewReader(form.Encode()))
+	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.targetResponseURI, strings.NewReader(form.Encode()))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":             "wallet_submission_failed",
-			"error_description": fmt.Sprintf("build upstream request: %v", err),
-		})
-		return
+		return 0, nil, fmt.Errorf("build upstream request: %w", err)
 	}
 	upstreamReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	upstreamReq.Header.Set("Accept", "application/json")
+	if lookingGlassSessionID != "" {
+		upstreamReq.Header.Set("X-Looking-Glass-Session", lookingGlassSessionID)
+	}
 
 	upstreamResp, err := s.httpClient.Do(upstreamReq)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":             "wallet_submission_failed",
-			"error_description": fmt.Sprintf("upstream request failed: %v", err),
-		})
-		return
+		return 0, nil, fmt.Errorf("upstream request failed: %w", err)
 	}
 	defer upstreamResp.Body.Close()
 	upstreamBody, _ := io.ReadAll(upstreamResp.Body)
@@ -281,16 +585,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 			decodedBody = string(upstreamBody)
 		}
 	}
-
-	writeJSON(w, upstreamResp.StatusCode, map[string]interface{}{
-		"request_id":        requestContext.RequestID,
-		"response_mode":     requestContext.ResponseMode,
-		"response_uri":      s.targetResponseURI,
-		"wallet_subject":    wallet.Subject,
-		"credential_source": credentialSource,
-		"upstream_status":   upstreamResp.StatusCode,
-		"upstream_body":     decodedBody,
-	})
+	return upstreamResp.StatusCode, decodedBody, nil
 }
 
 func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT string) (*resolvedRequestContext, error) {
@@ -331,7 +626,7 @@ func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT
 	}, nil
 }
 
-func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestContext *resolvedRequestContext) (string, error) {
+func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestContext *resolvedRequestContext, presentedCredentialJWT string) (string, error) {
 	if wallet == nil || wallet.KeySet == nil {
 		return "", fmt.Errorf("wallet key material is unavailable")
 	}
@@ -344,8 +639,20 @@ func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestConte
 		return "", fmt.Errorf("wallet jwk thumbprint is unavailable")
 	}
 
+	presentedCredential := strings.TrimSpace(presentedCredentialJWT)
+	if presentedCredential == "" {
+		presentedCredential = strings.TrimSpace(wallet.CredentialJWT)
+	}
+
 	vct := "https://protocolsoup.com/credentials/university_degree"
-	if decodedCredential, err := intcrypto.DecodeTokenWithoutValidation(wallet.CredentialJWT); err == nil {
+	credentialForVCT := presentedCredential
+	if credentialEnvelope, err := vc.ParseSDJWTEnvelope(credentialForVCT); err == nil {
+		credentialForVCT = strings.TrimSpace(credentialEnvelope.IssuerSignedJWT)
+	}
+	if credentialForVCT == "" {
+		credentialForVCT = strings.TrimSpace(wallet.CredentialJWT)
+	}
+	if decodedCredential, err := intcrypto.DecodeTokenWithoutValidation(credentialForVCT); err == nil {
 		if tokenVCT, ok := decodedCredential.Payload["vct"].(string); ok && strings.TrimSpace(tokenVCT) != "" {
 			vct = strings.TrimSpace(tokenVCT)
 		}
@@ -366,7 +673,7 @@ func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestConte
 		},
 		"vp": map[string]interface{}{
 			"vct":            vct,
-			"credential_jwt": wallet.CredentialJWT,
+			"credential_jwt": presentedCredential,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -375,7 +682,7 @@ func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestConte
 	return token.SignedString(wallet.KeySet.RSAPrivateKey())
 }
 
-func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wallet *walletMaterial) (string, error) {
+func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wallet *walletMaterial, lookingGlassSessionID string) (string, error) {
 	if wallet == nil || wallet.KeySet == nil {
 		return "", fmt.Errorf("wallet key material is unavailable")
 	}
@@ -395,6 +702,9 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/json")
+		if lookingGlassSessionID != "" {
+			req.Header.Set("X-Looking-Glass-Session", lookingGlassSessionID)
+		}
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("offer request failed: %w", err)
@@ -437,6 +747,9 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if lookingGlassSessionID != "" {
+			req.Header.Set("X-Looking-Glass-Session", lookingGlassSessionID)
+		}
 		resp, err := s.httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("token request failed: %w", err)
@@ -488,6 +801,9 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	credentialReq.Header.Set("Accept", "application/json")
 	credentialReq.Header.Set("Content-Type", "application/json")
 	credentialReq.Header.Set("Authorization", "Bearer "+accessToken)
+	if lookingGlassSessionID != "" {
+		credentialReq.Header.Set("X-Looking-Glass-Session", lookingGlassSessionID)
+	}
 	credentialResp, err := s.httpClient.Do(credentialReq)
 	if err != nil {
 		return "", fmt.Errorf("credential request failed: %w", err)
@@ -682,6 +998,42 @@ func (s *walletHarnessServer) bindCredential(wallet *walletMaterial, credentialJ
 	}
 	wallet.CredentialJWT = strings.TrimSpace(credentialJWT)
 	return nil
+}
+
+func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration) (bool, error) {
+	envelope, err := vc.ParseSDJWTEnvelope(strings.TrimSpace(credentialJWT))
+	if err != nil {
+		return true, fmt.Errorf("parse credential_jwt: %w", err)
+	}
+	decodedCredential, err := intcrypto.DecodeTokenWithoutValidation(strings.TrimSpace(envelope.IssuerSignedJWT))
+	if err != nil {
+		return true, fmt.Errorf("decode credential_jwt: %w", err)
+	}
+	expRaw, ok := decodedCredential.Payload["exp"]
+	if !ok {
+		return true, fmt.Errorf("credential_jwt missing exp claim")
+	}
+	expUnix, err := toUnixTimestamp(expRaw)
+	if err != nil {
+		return true, fmt.Errorf("parse credential_jwt exp claim: %w", err)
+	}
+	expiry := time.Unix(expUnix, 0).UTC()
+	return time.Until(expiry) <= minRemaining, nil
+}
+
+func toUnixTimestamp(raw interface{}) (int64, error) {
+	switch value := raw.(type) {
+	case float64:
+		return int64(value), nil
+	case int64:
+		return value, nil
+	case int:
+		return int64(value), nil
+	case json.Number:
+		return value.Int64()
+	default:
+		return 0, fmt.Errorf("unsupported numeric timestamp type %T", raw)
+	}
 }
 
 func walletUserIDFromSubject(subject string) string {
