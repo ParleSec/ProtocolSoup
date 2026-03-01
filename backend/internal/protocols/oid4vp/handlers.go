@@ -720,8 +720,11 @@ func (p *Plugin) validatePresentedCredential(vpClaims jwt.MapClaims, walletSubje
 			return nil, fmt.Errorf("credential kid mismatch")
 		}
 		return verificationKey, nil
-	})
-	if err != nil || !parsedCredential.Valid {
+	}, jwt.WithoutClaimsValidation())
+	if err != nil {
+		return fmt.Errorf("presented credential signature validation failed: %w", err)
+	}
+	if !parsedCredential.Valid {
 		return fmt.Errorf("presented credential signature validation failed")
 	}
 

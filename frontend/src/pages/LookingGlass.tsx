@@ -238,9 +238,7 @@ export function LookingGlass() {
 
   const canSubmitOID4VPWalletInteraction =
     !!oid4vpRequestID &&
-    !!oid4vpRequestJWT &&
-    !!oid4vpWalletSubjectInput.trim() &&
-    !!normalizedOID4VPCredentialJWTInput
+    !!oid4vpRequestJWT
 
   const oid4vpWalletHandoffPayload = useMemo(
     () => String(walletHandoffArtifact?.metadata?.qrPayload || walletHandoffArtifact?.metadata?.deepLink || walletHandoffArtifact?.raw || '').trim(),
@@ -436,14 +434,6 @@ export function LookingGlass() {
       setOID4VPWalletSubmitError('Missing request context. Re-run OID4VP request creation.')
       return
     }
-    if (!walletSubject) {
-      setOID4VPWalletSubmitError('wallet_subject is required.')
-      return
-    }
-    if (!credentialJWT) {
-      setOID4VPWalletSubmitError('credential_jwt is required.')
-      return
-    }
 
     setOID4VPWalletSubmitPending(true)
     setOID4VPWalletSubmitError(null)
@@ -455,8 +445,8 @@ export function LookingGlass() {
         request: oid4vpRequestJWT,
         request_uri: oid4vpRequestURI || undefined,
         response_mode: oid4vpResponseMode || undefined,
-        wallet_subject: walletSubject,
-        credential_jwt: credentialJWT,
+        wallet_subject: walletSubject || undefined,
+        credential_jwt: credentialJWT || undefined,
       }
 
       const response = await fetch(OID4VP_WALLET_SUBMIT_URL, {
@@ -478,12 +468,26 @@ export function LookingGlass() {
         )
       }
       const upstreamStatus = Number(responsePayload?.upstream_status || 0)
+      const credentialSource = String(responsePayload?.credential_source || '').trim()
+      const effectiveWalletSubject = String(responsePayload?.wallet_subject || walletSubject || '').trim()
+      const sourceMessage = credentialSource === 'auto_issued_oid4vci'
+        ? 'Auto-issued a fresh OID4VCI credential in the wallet bootstrap step.'
+        : credentialSource === 'cached_wallet_store'
+          ? 'Used existing wallet credential from wallet harness state.'
+          : credentialSource === 'provided'
+            ? 'Used credential_jwt provided in the modal.'
+            : ''
 
       setOID4VPWalletModalOpen(false)
       setOID4VPWalletSubmitMessage(
-        upstreamStatus > 0
-          ? `Wallet response accepted (upstream ${upstreamStatus}). Checking verifier result...`
-          : 'Wallet response accepted. Checking verifier result...',
+        [
+          upstreamStatus > 0
+            ? `Wallet response accepted (upstream ${upstreamStatus}).`
+            : 'Wallet response accepted.',
+          effectiveWalletSubject ? `Wallet subject: ${effectiveWalletSubject}.` : '',
+          sourceMessage,
+          'Checking verifier result...',
+        ].filter(Boolean).join(' '),
       )
       setTimeout(() => {
         executeFlow()
@@ -1140,19 +1144,6 @@ export function LookingGlass() {
                       </div>
                     )}
                   </div>
-                  {oid4vpRequestURI && (
-                    <div className="pt-1">
-                      <a
-                        href={oid4vpRequestURI}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-surface-900 border border-cyan-500/30 text-cyan-300 text-[11px] sm:text-xs hover:bg-surface-800 transition-colors"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open request_uri
-                      </a>
-                    </div>
-                  )}
                 </div>
 
                 {!!oid4vpWalletHandoffPayload && (
@@ -1166,7 +1157,7 @@ export function LookingGlass() {
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs sm:text-sm font-medium text-surface-300">wallet_subject</label>
+                    <label className="text-xs sm:text-sm font-medium text-surface-300">wallet_subject (optional)</label>
                     {capturedVCWalletSubject && (
                       <button
                         onClick={() => setOID4VPWalletSubjectInput(capturedVCWalletSubject)}
@@ -1180,14 +1171,14 @@ export function LookingGlass() {
                     type="text"
                     value={oid4vpWalletSubjectInput}
                     onChange={(event) => setOID4VPWalletSubjectInput(event.target.value)}
-                    placeholder="did:example:wallet:holder"
+                    placeholder="Leave blank to use wallet harness default subject"
                     className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                   />
                 </div>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs sm:text-sm font-medium text-surface-300">credential_jwt</label>
+                    <label className="text-xs sm:text-sm font-medium text-surface-300">credential_jwt (optional)</label>
                     {capturedVCCredentialJWT && (
                       <button
                         onClick={() => setOID4VPCredentialJWTInput(capturedVCCredentialJWT)}
@@ -1201,7 +1192,7 @@ export function LookingGlass() {
                     value={oid4vpCredentialJWTInput}
                     onChange={(event) => setOID4VPCredentialJWTInput(event.target.value)}
                     rows={5}
-                    placeholder="Paste SD-JWT VC or issuer credential JWT"
+                    placeholder="Paste SD-JWT VC or issuer credential JWT (or leave blank to auto-issue one)"
                     className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
                   />
                   {oid4vpCredentialJWTInput.trim() && normalizedOID4VPCredentialJWTInput !== oid4vpCredentialJWTInput.trim() && (
@@ -1213,7 +1204,12 @@ export function LookingGlass() {
 
                 {!canSubmitOID4VPWalletInteraction && (
                   <p className="text-[11px] sm:text-xs text-amber-400">
-                    Provide request context, wallet_subject, and credential_jwt to submit wallet interaction.
+                    Missing request context. Re-run OID4VP request creation.
+                  </p>
+                )}
+                {canSubmitOID4VPWalletInteraction && (
+                  <p className="text-[11px] sm:text-xs text-cyan-300">
+                    This modal can complete OID4VP-only runs end-to-end. If credential_jwt is empty, wallet bootstrap will run a real OID4VCI issuance to obtain one before submission.
                   </p>
                 )}
                 {!!oid4vpWalletSubmitError && (
