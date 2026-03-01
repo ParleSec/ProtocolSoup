@@ -1,0 +1,124 @@
+{
+  "protocol": "oid4vci",
+  "spec_version": "1.0-final",
+  "requirements": [
+    {
+      "id": "oid4vci-metadata-well-known-path",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Section 12.2.2",
+      "description": "Credential issuer metadata is served at the issuer-derived .well-known path, and non-derived metadata paths are rejected for path-bound issuer identifiers.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/plugin.go",
+        "backend/internal/protocols/oid4vci/handlers.go",
+        "backend/internal/core/server.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.metadata_discovery"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vci-credential-endpoint-required",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Section 8",
+      "description": "Credential endpoint support is implemented and exercised with real HTTP requests.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/plugin.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.credential_endpoint"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vci-preauth-tx-code-required-when-offered",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Section 6.1",
+      "description": "Token request includes tx_code when the pre-authorized grant in the credential offer includes a tx_code object.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/contracts.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.pre_authorized_code"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vci-proofs-required-when-proof-types-declared",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Section 8.2",
+      "description": "Credential request includes proofs when proof_types_supported exists for the requested credential configuration.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/contracts.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.proof_validation"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vci-c-nonce-freshness",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Sections 7 and 8.2",
+      "description": "Nonce endpoint and credential proof processing enforce c_nonce freshness checks and expected nonce-related errors.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/plugin.go",
+        "backend/internal/protocols/oid4vci/handlers.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.c_nonce"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vci-proof-key-binding",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Section 8.2",
+      "description": "Credential proof JWT is verified against the wallet proof key, including issuer/subject binding and expected proof JWT type.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/handlers.go",
+        "backend/internal/protocols/oid4vci/plugin.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.proof_validation",
+        "oid4vci.c_nonce"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vci-proof-jwt-typ-required",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VCI 1.0 Section 8.2",
+      "description": "Credential proof JWT header typ is validated as openid4vci-proof+jwt.",
+      "implementation": [
+        "backend/internal/protocols/oid4vci/contracts.go",
+        "backend/internal/protocols/oid4vci/handlers.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vci/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vci.proof_validation"
+      ],
+      "status": "verified"
+    }
+  ]
+}

@@ -10,10 +10,10 @@ import {
   Play, Square, RotateCcw, CheckCircle, XCircle, Clock,
   Send, ArrowDownLeft, Key, Shield, AlertTriangle, Info,
   Lock, Eye, EyeOff, Copy, Check, ChevronDown,
-  ChevronRight, Fingerprint, Code, Book, User, Server,
+  ChevronRight, Fingerprint, Code, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { 
   FlowExecutorState, 
   FlowEvent, 
@@ -22,6 +22,7 @@ import type {
 } from '../flows'
 import type { WireCapturedExchange } from '../types'
 import { TLSInspector } from '../../components/lookingglass/TLSInspector'
+import { VCInspector } from '../../components/lookingglass/VCInspector'
 
 // ============================================================================
 // Main Panel Component
@@ -49,6 +50,7 @@ interface RealFlowPanelProps {
   wireConnected?: boolean
   wireSessionError?: string | null
   showTLSContext?: boolean
+  showVCTab?: boolean
 }
 
 export function RealFlowPanel({
@@ -64,8 +66,23 @@ export function RealFlowPanel({
   wireConnected = false,
   wireSessionError = null,
   showTLSContext = false,
+  showVCTab = false,
 }: RealFlowPanelProps) {
-  const [activeTab, setActiveTab] = useState<'events' | 'http' | 'wire' | 'tokens'>('events')
+  const [activeTab, setActiveTab] = useState<'events' | 'http' | 'wire' | 'tokens' | 'vc'>('events')
+  const latestVerificationArtifact = state?.vcArtifacts
+    ? [...state.vcArtifacts].reverse().find((artifact) => artifact.type === 'verification_result')
+    : null
+  const verificationMetadata = (latestVerificationArtifact?.metadata || {}) as Record<string, unknown>
+  const verificationChecks = (verificationMetadata.checks || {}) as Record<string, unknown>
+  const verificationReasons = Array.isArray(verificationMetadata.reasons)
+    ? verificationMetadata.reasons.map((reason) => String(reason))
+    : []
+  const diagnosticChecks = [
+    { label: 'Nonce binding', ok: Boolean(verificationChecks.nonceValidated) },
+    { label: 'Audience', ok: Boolean(verificationChecks.audienceValidated) },
+    { label: 'Expiry', ok: Boolean(verificationChecks.expiryValidated) },
+    { label: 'Holder binding', ok: Boolean(verificationChecks.holderBindingVerified) },
+  ]
 
   const statusConfig = {
     idle: { icon: Play, color: 'text-surface-400', bg: 'bg-surface-800', label: 'Ready to Execute' },
@@ -82,6 +99,22 @@ export function RealFlowPanel({
   // Specific flows that need extra config (client_secret, refresh_token, username/password) 
   // will show an error when executed if the config is missing
   const hasUnmetRequirements = false
+  const tabs = [
+    { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
+    { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
+    { id: 'http', label: 'Client', count: state?.exchanges.length || 0, icon: ArrowDownLeft },
+    { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
+  ]
+
+  if (showVCTab) {
+    tabs.push({ id: 'vc', label: 'VC', count: state?.vcArtifacts.length || 0, icon: FileText })
+  }
+
+  useEffect(() => {
+    if (!showVCTab && activeTab === 'vc') {
+      setActiveTab('events')
+    }
+  }, [activeTab, showVCTab])
 
   if (error) {
     return (
@@ -195,14 +228,32 @@ export function RealFlowPanel({
         </div>
       )}
 
+      {latestVerificationArtifact && (
+        <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/20 space-y-2">
+          <div className="text-sm text-violet-300 font-medium">Verifier diagnostics</div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {diagnosticChecks.map((check) => (
+              <div key={check.label} className="flex items-center gap-1.5 text-surface-300">
+                {check.ok ? (
+                  <CheckCircle className="w-3.5 h-3.5 text-green-400" />
+                ) : (
+                  <XCircle className="w-3.5 h-3.5 text-red-400" />
+                )}
+                {check.label}
+              </div>
+            ))}
+          </div>
+          {verificationReasons.length > 0 && (
+            <div className="text-xs text-red-300">
+              Failure reasons: {verificationReasons.join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tab Navigation - always shown */}
       <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50 overflow-x-auto scrollbar-hide">
-        {[
-          { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
-          { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
-          { id: 'http', label: 'Client', count: state?.exchanges.length || 0, icon: ArrowDownLeft },
-          { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
-        ].map(tab => (
+        {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as typeof activeTab)}
@@ -272,6 +323,16 @@ export function RealFlowPanel({
               exit={{ opacity: 0, y: -10 }}
             >
               <TokensList tokens={state?.decodedTokens || []} />
+            </motion.div>
+          )}
+          {showVCTab && activeTab === 'vc' && (
+            <motion.div
+              key="vc"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              <VCInspector artifacts={state?.vcArtifacts || []} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -720,12 +781,12 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      {tokens.map(token => {
+      {tokens.map((token, idx) => {
         const config = tokenConfig[token.type]
         const Icon = config.icon
 
         return (
-          <div key={token.type} className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
+          <div key={`${token.type}-${idx}`} className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
             <div className="p-2.5 sm:p-3 border-b border-white/5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">

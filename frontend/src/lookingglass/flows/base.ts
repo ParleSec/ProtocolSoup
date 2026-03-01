@@ -50,10 +50,13 @@ export interface FlowExecutorState {
   }
   /** Decoded token payloads */
   decodedTokens: DecodedToken[]
+  /** VC-specific artifacts captured during execution */
+  vcArtifacts: VCArtifact[]
   /** Security parameters used */
   securityParams: {
     state?: string
     nonce?: string
+    requestId?: string
     codeVerifier?: string
     codeChallenge?: string
     deviceCode?: string
@@ -109,6 +112,28 @@ export interface DecodedToken {
   validationErrors?: string[]
 }
 
+export type VCArtifactType =
+  | 'credential_offer'
+  | 'credential_offer_reference'
+  | 'proof_jwt'
+  | 'credential'
+  | 'request_object'
+  | 'wallet_handoff'
+  | 'vp_token'
+  | 'verification_result'
+
+export interface VCArtifact {
+  id: string
+  type: VCArtifactType
+  title: string
+  format?: string
+  rfcReference?: string
+  raw?: string
+  json?: Record<string, unknown> | unknown[]
+  metadata?: Record<string, unknown>
+  timestamp: Date
+}
+
 export type FlowStateListener = (state: FlowExecutorState) => void
 
 // ============================================================================
@@ -143,6 +168,7 @@ export abstract class FlowExecutorBase {
       events: [],
       tokens: {},
       decodedTokens: [],
+      vcArtifacts: [],
       securityParams: {},
     }
   }
@@ -183,6 +209,19 @@ export abstract class FlowExecutorBase {
       exchanges: [...this.state.exchanges, fullExchange],
     })
     return fullExchange
+  }
+
+  /** Add a VC artifact (request objects, credentials, handoff payloads, policy evidence). */
+  protected addVCArtifact(artifact: Omit<VCArtifact, 'id' | 'timestamp'>): VCArtifact {
+    const fullArtifact: VCArtifact = {
+      ...artifact,
+      id: crypto.randomUUID(),
+      timestamp: new Date(),
+    }
+    this.updateState({
+      vcArtifacts: [...this.state.vcArtifacts, fullArtifact],
+    })
+    return fullArtifact
   }
 
   protected withCaptureHeaders(headers?: Record<string, string>): Record<string, string> {

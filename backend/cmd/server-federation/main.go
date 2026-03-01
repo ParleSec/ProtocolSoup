@@ -13,6 +13,8 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oidc"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/oid4vci"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/oid4vp"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml"
 )
 
@@ -37,6 +39,16 @@ func main() {
 	oidcPlugin := oidc.NewPlugin(oauth2Plugin)
 	if err := registry.Register(oidcPlugin); err != nil {
 		log.Fatalf("Failed to register OIDC plugin: %v", err)
+	}
+
+	oid4vciPlugin := oid4vci.NewPlugin()
+	if err := registry.Register(oid4vciPlugin); err != nil {
+		log.Fatalf("Failed to register OID4VCI plugin: %v", err)
+	}
+
+	oid4vpPlugin := oid4vp.NewPlugin()
+	if err := registry.Register(oid4vpPlugin); err != nil {
+		log.Fatalf("Failed to register OID4VP plugin: %v", err)
 	}
 
 	samlPlugin := saml.NewPlugin()

@@ -48,6 +48,8 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:8080', ws: true },
       '/oauth2': { target: 'http://localhost:8080', changeOrigin: true },
       '/oidc': { target: 'http://localhost:8080', changeOrigin: true },
+      '/oid4vci': { target: 'http://localhost:8080', changeOrigin: true },
+      '/oid4vp': { target: 'http://localhost:8080', changeOrigin: true },
       '/saml': { target: 'http://localhost:8080', changeOrigin: true },
       '/spiffe': { target: 'http://localhost:8080', changeOrigin: true },
       '/scim': { target: 'http://localhost:8080', changeOrigin: true },

@@ -2,8 +2,8 @@ import { useParams, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   ArrowLeft, ArrowRight, Shield, Lock, Key, 
-  Unlock, Fingerprint, Zap, Eye, Loader2, Radio, 
-  Users, AlertTriangle, Send
+  Unlock, Fingerprint, Zap, Eye, Loader2, Radio,
+  Users, AlertTriangle, Send, KeyRound, RefreshCw
 } from 'lucide-react'
 import { useProtocol, useProtocolFlows } from '../protocols'
 import { protocolMeta } from '../protocols/registry'
@@ -52,6 +52,35 @@ const flowMeta: Record<string, {
     icon: Unlock,
     color: 'from-amber-500 to-orange-600',
     features: ['Legacy Flow', 'Direct Token Response', 'Not Recommended'],
+  },
+  // OID4VCI flows
+  'oid4vci-pre-authorized': {
+    icon: KeyRound,
+    color: 'from-emerald-500 to-teal-600',
+    features: ['Pre-Authorized Code', 'Proof JWT', 'c_nonce Binding'],
+    recommended: true,
+  },
+  'oid4vci-pre-authorized-tx-code': {
+    icon: Lock,
+    color: 'from-teal-500 to-cyan-600',
+    features: ['tx_code Required', 'Pre-Authorized Flow', 'Nonce Freshness'],
+  },
+  'oid4vci-deferred-issuance': {
+    icon: RefreshCw,
+    color: 'from-green-500 to-emerald-600',
+    features: ['Deferred Polling', 'transaction_id', 'Issued Credential'],
+  },
+  // OID4VP flows
+  'oid4vp-direct-post': {
+    icon: Eye,
+    color: 'from-indigo-500 to-violet-600',
+    features: ['DCQL Query', 'direct_post', 'Verifier Policy'],
+    recommended: true,
+  },
+  'oid4vp-direct-post-jwt': {
+    icon: Shield,
+    color: 'from-violet-500 to-purple-600',
+    features: ['Encrypted Response', 'direct_post.jwt', 'Nonce + State'],
   },
   // SPIFFE/SPIRE flows
   'x509-svid-issuance': {
@@ -196,6 +225,8 @@ export function ProtocolDemo() {
   const getProtocolIcon = (id: string | undefined) => {
     switch (id) {
       case 'oidc': return Fingerprint
+      case 'oid4vci': return KeyRound
+      case 'oid4vp': return Eye
       case 'spiffe': return Shield
       case 'saml': return Key
       case 'scim': return Users

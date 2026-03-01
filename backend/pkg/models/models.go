@@ -15,13 +15,13 @@ type User struct {
 
 // Client represents an OAuth client application
 type Client struct {
-	ID           string   `json:"client_id"`
-	Secret       string   `json:"-"` // Never serialized in responses
-	Name         string   `json:"name"`
-	RedirectURIs []string `json:"redirect_uris"`
-	GrantTypes   []string `json:"grant_types"`
-	Scopes       []string `json:"scopes"`
-	Public       bool     `json:"public"` // Public clients (no secret)
+	ID           string    `json:"client_id"`
+	Secret       string    `json:"-"` // Never serialized in responses
+	Name         string    `json:"name"`
+	RedirectURIs []string  `json:"redirect_uris"`
+	GrantTypes   []string  `json:"grant_types"`
+	Scopes       []string  `json:"scopes"`
+	Public       bool      `json:"public"` // Public clients (no secret)
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -111,22 +111,97 @@ type OIDCClaims struct {
 
 // DiscoveryDocument represents OIDC discovery document
 type DiscoveryDocument struct {
-	Issuer                           string   `json:"issuer"`
-	AuthorizationEndpoint            string   `json:"authorization_endpoint"`
-	TokenEndpoint                    string   `json:"token_endpoint"`
-	UserinfoEndpoint                 string   `json:"userinfo_endpoint"`
-	JwksURI                          string   `json:"jwks_uri"`
-	RegistrationEndpoint             string   `json:"registration_endpoint,omitempty"`
-	RevocationEndpoint               string   `json:"revocation_endpoint,omitempty"`
-	IntrospectionEndpoint            string   `json:"introspection_endpoint,omitempty"`
-	ScopesSupported                  []string `json:"scopes_supported"`
-	ResponseTypesSupported           []string `json:"response_types_supported"`
-	ResponseModesSupported           []string `json:"response_modes_supported,omitempty"`
-	GrantTypesSupported              []string `json:"grant_types_supported"`
-	SubjectTypesSupported            []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
+	JwksURI                           string   `json:"jwks_uri"`
+	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`
+	RevocationEndpoint                string   `json:"revocation_endpoint,omitempty"`
+	IntrospectionEndpoint             string   `json:"introspection_endpoint,omitempty"`
+	ScopesSupported                   []string `json:"scopes_supported"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	ResponseModesSupported            []string `json:"response_modes_supported,omitempty"`
+	GrantTypesSupported               []string `json:"grant_types_supported"`
+	SubjectTypesSupported             []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
-	ClaimsSupported                  []string `json:"claims_supported,omitempty"`
-	CodeChallengeMethodsSupported    []string `json:"code_challenge_methods_supported,omitempty"`
+	ClaimsSupported                   []string `json:"claims_supported,omitempty"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
 }
 
+// VCCredentialOffer represents an OpenID4VCI credential offer envelope.
+type VCCredentialOffer struct {
+	CredentialIssuer           string                  `json:"credential_issuer"`
+	CredentialConfigurationIDs []string                `json:"credential_configuration_ids"`
+	Grants                     VCCredentialOfferGrants `json:"grants,omitempty"`
+	CreatedAt                  time.Time               `json:"created_at"`
+}
+
+// VCCredentialOfferGrants describes supported grant options in a credential offer.
+type VCCredentialOfferGrants struct {
+	AuthorizationCode *VCAuthorizationCodeGrant `json:"authorization_code,omitempty"`
+	PreAuthorizedCode *VCPreAuthorizedCodeGrant `json:"urn:ietf:params:oauth:grant-type:pre-authorized_code,omitempty"`
+}
+
+// VCAuthorizationCodeGrant models credential offer parameters for authorization_code.
+type VCAuthorizationCodeGrant struct {
+	IssuerState         string `json:"issuer_state,omitempty"`
+	AuthorizationServer string `json:"authorization_server,omitempty"`
+}
+
+// VCPreAuthorizedCodeGrant models credential offer parameters for pre-authorized code flow.
+type VCPreAuthorizedCodeGrant struct {
+	PreAuthorizedCode string    `json:"pre-authorized_code"`
+	TxCode            *VCTxCode `json:"tx_code,omitempty"`
+}
+
+// VCTxCode describes transaction code constraints in pre-authorized issuance.
+type VCTxCode struct {
+	Description string `json:"description,omitempty"`
+	Length      int    `json:"length,omitempty"`
+	InputMode   string `json:"input_mode,omitempty"`
+}
+
+// VCNonce represents a c_nonce challenge lifecycle.
+type VCNonce struct {
+	Value     string    `json:"value"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// VCIssuanceTransaction tracks issuance and deferred issuance state.
+type VCIssuanceTransaction struct {
+	TransactionID             string    `json:"transaction_id"`
+	CredentialConfigurationID string    `json:"credential_configuration_id"`
+	AccessTokenID             string    `json:"access_token_id"`
+	Deferred                  bool      `json:"deferred"`
+	Status                    string    `json:"status"`
+	CreatedAt                 time.Time `json:"created_at"`
+	UpdatedAt                 time.Time `json:"updated_at"`
+}
+
+// OID4VPRequestContract captures query contract inputs for OID4VP authorization requests.
+type OID4VPRequestContract struct {
+	DCQLQuery  string `json:"dcql_query,omitempty"`
+	ScopeAlias string `json:"scope_alias,omitempty"`
+	Nonce      string `json:"nonce"`
+}
+
+// OID4VPPolicyDecision stores verifier policy outcomes for Looking Glass visibility.
+type OID4VPPolicyDecision struct {
+	Allowed     bool      `json:"allowed"`
+	Code        string    `json:"code,omitempty"`
+	Message     string    `json:"message,omitempty"`
+	Reasons     []string  `json:"reasons,omitempty"`
+	EvaluatedAt time.Time `json:"evaluated_at"`
+}
+
+// OID4VPVerificationResult stores structured verification output for VP processing.
+type OID4VPVerificationResult struct {
+	NonceValidated        bool                 `json:"nonce_validated"`
+	AudienceValidated     bool                 `json:"audience_validated"`
+	ExpiryValidated       bool                 `json:"expiry_validated"`
+	HolderBindingVerified bool                 `json:"holder_binding_verified"`
+	Policy                OID4VPPolicyDecision `json:"policy"`
+}

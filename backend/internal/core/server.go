@@ -109,9 +109,18 @@ func (s *Server) setupRouter() {
 	// Mount protocol-specific routes
 	for _, p := range s.registry.List() {
 		info := p.Info()
-		r.Route("/"+info.ID, func(r chi.Router) {
-			p.RegisterRoutes(r)
-		})
+		protocolRouter := chi.NewRouter()
+		p.RegisterRoutes(protocolRouter)
+		r.Mount("/"+info.ID, protocolRouter)
+
+		// OID4VCI metadata discovery must also be reachable at canonical well-known paths.
+		if info.ID == "oid4vci" {
+			// Non-root issuers must not serve metadata on the bare well-known path.
+			r.Get("/.well-known/openid-credential-issuer", func(w http.ResponseWriter, r *http.Request) {
+				http.NotFound(w, r)
+			})
+			r.Method(http.MethodGet, "/.well-known/openid-credential-issuer/*", protocolRouter)
+		}
 	}
 
 	// Serve static files if configured (for combined frontend+backend deployment)

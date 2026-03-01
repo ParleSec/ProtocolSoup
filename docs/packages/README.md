@@ -13,6 +13,15 @@ Documentation for all ProtocolSoup container images available on GitHub Containe
 | [protocolsoup-spiffe](https://ghcr.io/parlesec/protocolsoup-spiffe) | SPIFFE/SPIRE | [spiffe.md](spiffe.md) |
 | [protocolsoup-frontend](https://ghcr.io/parlesec/protocolsoup-frontend) | React UI | [frontend.md](frontend.md) |
 
+## Federation Protocol Modules
+
+The federation image contains multiple protocol modules. Use these docs for module-level endpoint and flow behavior.
+
+| Module | Description | Docs |
+|--------|-------------|------|
+| OID4VCI | Verifiable credential issuance (pre-authorized, `tx_code`, deferred) | [oid4vci.md](oid4vci.md) |
+| OID4VP | Verifiable presentation verification (`direct_post`, `direct_post.jwt`) | [oid4vp.md](oid4vp.md) |
+
 ## SPIRE Infrastructure
 
 | Image | Description | Docs |

@@ -167,6 +167,97 @@ func (l *AnnotationLibrary) OIDCAnnotations() map[string][]Annotation {
 	}
 }
 
+// OID4VCIAnnotations returns annotations for OpenID4VCI protocol elements.
+func (l *AnnotationLibrary) OID4VCIAnnotations() map[string][]Annotation {
+	return map[string][]Annotation{
+		"metadata_discovery": {
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "Credential Issuer Metadata Discovery",
+				Description: "Wallets retrieve credential issuer metadata from the openid-credential-issuer well-known endpoint derived from the issuer identifier.",
+				Reference:   "OpenID4VCI 1.0 Section 12.2.2",
+			},
+		},
+		"credential_endpoint": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Credential Endpoint Requirement",
+				Description: "Credential endpoint support is mandatory and must process access token and proof validation over TLS.",
+				Reference:   "OpenID4VCI 1.0 Section 8",
+				Severity:    "warning",
+			},
+		},
+		"proof_validation": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Proof Requirement",
+				Description: "When proof_types_supported is declared for a credential configuration, the credential request must include proofs.",
+				Reference:   "OpenID4VCI 1.0 Section 8.2",
+				Severity:    "warning",
+			},
+		},
+		"c_nonce": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "c_nonce Freshness",
+				Description: "Proof inputs must bind to a fresh c_nonce challenge when nonce-based freshness checks are enforced.",
+				Reference:   "OpenID4VCI 1.0 Sections 7 and 8.2",
+				Severity:    "warning",
+			},
+		},
+	}
+}
+
+// OID4VPAnnotations returns annotations for OpenID4VP protocol elements.
+func (l *AnnotationLibrary) OID4VPAnnotations() map[string][]Annotation {
+	return map[string][]Annotation{
+		"dcql_contract": {
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "DCQL Request Contract",
+				Description: "Authorization requests must include either dcql_query or a scope alias representing DCQL, but never both.",
+				Reference:   "OpenID4VP 1.0 Section 5.1",
+			},
+		},
+		"direct_post": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "direct_post Response Constraints",
+				Description: "For direct_post and direct_post.jwt, response_uri is required and redirect_uri must not be present.",
+				Reference:   "OpenID4VP 1.0 Section 8.2",
+				Severity:    "warning",
+			},
+		},
+		"request_object_typ": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Request Object Type Validation",
+				Description: "Wallets must reject request objects that do not use typ=oauth-authz-req+jwt.",
+				Reference:   "OpenID4VP 1.0 Section 5",
+				Severity:    "warning",
+			},
+		},
+		"client_id_scheme": {
+			{
+				Type:        AnnotationTypeBestPractice,
+				Title:       "MVP Client ID Scheme Matrix",
+				Description: "MVP currently supports redirect_uri and decentralized_identifier client_id schemes with explicit rejects for unsupported schemes.",
+				Reference:   "OpenID4VP 1.0 Section 5.9",
+				Severity:    "info",
+			},
+		},
+		"nonce_binding": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Nonce Binding",
+				Description: "Nonce values must be fresh per transaction and bound to verifier session state for replay resistance.",
+				Reference:   "OpenID4VP 1.0 Section 5.2",
+				Severity:    "warning",
+			},
+		},
+	}
+}
+
 // VulnerabilityAnnotations returns annotations for common security vulnerabilities
 func (l *AnnotationLibrary) VulnerabilityAnnotations() map[string]Annotation {
 	return map[string]Annotation{
@@ -289,4 +380,3 @@ func (l *AnnotationLibrary) GetAnnotationsForClaim(claim string) []Annotation {
 	}
 	return nil
 }
-

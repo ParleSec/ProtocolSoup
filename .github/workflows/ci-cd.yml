@@ -269,7 +269,7 @@ jobs:
       - name: Download Go dependencies
         working-directory: backend
         run: go mod download
-      
+
       - name: Run go vet
         working-directory: backend
         run: go vet ./...
