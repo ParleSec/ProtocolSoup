@@ -13,7 +13,7 @@ import {
   ChevronRight, Fingerprint, Code, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { 
   FlowExecutorState, 
   FlowEvent, 
@@ -50,6 +50,7 @@ interface RealFlowPanelProps {
   wireConnected?: boolean
   wireSessionError?: string | null
   showTLSContext?: boolean
+  showVCTab?: boolean
 }
 
 export function RealFlowPanel({
@@ -65,6 +66,7 @@ export function RealFlowPanel({
   wireConnected = false,
   wireSessionError = null,
   showTLSContext = false,
+  showVCTab = false,
 }: RealFlowPanelProps) {
   const [activeTab, setActiveTab] = useState<'events' | 'http' | 'wire' | 'tokens' | 'vc'>('events')
   const latestVerificationArtifact = state?.vcArtifacts
@@ -97,6 +99,22 @@ export function RealFlowPanel({
   // Specific flows that need extra config (client_secret, refresh_token, username/password) 
   // will show an error when executed if the config is missing
   const hasUnmetRequirements = false
+  const tabs = [
+    { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
+    { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
+    { id: 'http', label: 'Client', count: state?.exchanges.length || 0, icon: ArrowDownLeft },
+    { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
+  ]
+
+  if (showVCTab) {
+    tabs.push({ id: 'vc', label: 'VC', count: state?.vcArtifacts.length || 0, icon: FileText })
+  }
+
+  useEffect(() => {
+    if (!showVCTab && activeTab === 'vc') {
+      setActiveTab('events')
+    }
+  }, [activeTab, showVCTab])
 
   if (error) {
     return (
@@ -235,13 +253,7 @@ export function RealFlowPanel({
 
       {/* Tab Navigation - always shown */}
       <div className="flex gap-1 p-1 rounded-lg bg-surface-900/50 overflow-x-auto scrollbar-hide">
-        {[
-          { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
-          { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
-          { id: 'http', label: 'Client', count: state?.exchanges.length || 0, icon: ArrowDownLeft },
-          { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
-          { id: 'vc', label: 'VC', count: state?.vcArtifacts.length || 0, icon: FileText },
-        ].map(tab => (
+        {tabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as typeof activeTab)}
@@ -313,7 +325,7 @@ export function RealFlowPanel({
               <TokensList tokens={state?.decodedTokens || []} />
             </motion.div>
           )}
-          {activeTab === 'vc' && (
+          {showVCTab && activeTab === 'vc' && (
             <motion.div
               key="vc"
               initial={{ opacity: 0, y: 10 }}

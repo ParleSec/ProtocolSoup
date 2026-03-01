@@ -117,6 +117,7 @@ export function LookingGlass() {
   const isTokenBasedFlow = isTokenIntrospectionFlow || isTokenRevocationFlow || isUserInfoFlow
   const isSCIMFlow = selectedProtocol?.id === 'scim'
   const isOID4VCITxCodeFlow = selectedProtocol?.id === 'oid4vci' && flowId === 'oid4vci-pre-authorized-tx-code'
+  const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
 
   // Use stored token or user input for flows that need a token
   const activeToken = tokenInput || storedAccessToken || ''
@@ -1087,6 +1088,7 @@ export function LookingGlass() {
               wireConnected={wireConnected}
               wireSessionError={wireSessionError}
               showTLSContext={showTLSContext}
+              showVCTab={showVCTab}
             />
           </div>
         </motion.section>
