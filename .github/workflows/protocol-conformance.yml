@@ -1,0 +1,92 @@
+name: Protocol Conformance
+
+on:
+  push:
+    branches: [ '**' ]
+  pull_request:
+    branches: [ master, develop ]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  local-conformance:
+    name: Local Runtime Conformance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Download Go dependencies
+        working-directory: backend
+        run: go mod download
+
+      - name: Run OID4VCI/OID4VP runtime conformance tests
+        working-directory: backend
+        run: go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
+
+  external-interop-conformance:
+    name: External Interop Conformance
+    runs-on: ubuntu-latest
+    needs: [local-conformance]
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check external conformance configuration
+        id: external_ready
+        env:
+          CONFORMANCE_BASE_URL: ${{ secrets.CONFORMANCE_BASE_URL }}
+          CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL: ${{ secrets.CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL }}
+        run: |
+          if [ -n "${CONFORMANCE_BASE_URL}" ] && [ -n "${CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL}" ]; then
+            echo "ready=true" >> $GITHUB_OUTPUT
+          else
+            echo "ready=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout code
+        if: steps.external_ready.outputs.ready == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: steps.external_ready.outputs.ready == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Download Go dependencies
+        if: steps.external_ready.outputs.ready == 'true'
+        working-directory: backend
+        run: go mod download
+
+      - name: Run external interop conformance
+        if: steps.external_ready.outputs.ready == 'true'
+        working-directory: backend
+        env:
+          CONFORMANCE_BASE_URL: ${{ secrets.CONFORMANCE_BASE_URL }}
+          CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL: ${{ secrets.CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL }}
+          CONFORMANCE_WALLET_USER_ID: ${{ secrets.CONFORMANCE_WALLET_USER_ID }}
+          RUN_EXTERNAL_INTEROP_CONFORMANCE: "1"
+        run: go test ./internal/protocols/oid4vp -run TestExternalInteropConformance -count=1 -v
+
+      - name: Skip external interop (secrets not configured)
+        if: steps.external_ready.outputs.ready != 'true'
+        run: echo "Skipping external interop conformance because required secrets are not configured."

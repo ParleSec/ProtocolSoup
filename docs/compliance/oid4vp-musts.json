@@ -1,0 +1,140 @@
+{
+  "protocol": "oid4vp",
+  "spec_version": "1.0-final",
+  "requirements": [
+    {
+      "id": "oid4vp-dcql-xor-scope-alias",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 5.1",
+      "description": "Authorization request accepts dcql_query xor scope value representing a DCQL query, but never both.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/contracts.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.dcql_contract"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-direct-post-response-uri-required",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 8.2",
+      "description": "response_uri is required for direct_post and redirect_uri is rejected when direct_post is used.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/contracts.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.direct_post"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-request-object-typ-required",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 5",
+      "description": "Request Objects include typ=oauth-authz-req+jwt and requests with other typ values are rejected.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/contracts.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.request_object_typ"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-nonce-required",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 5.2",
+      "description": "Verifier generates and validates nonce per transaction for replay protection and session binding.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/contracts.go",
+        "backend/internal/protocols/oid4vp/handlers.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.nonce_binding"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-client-id-scheme-matrix",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 5.9",
+      "description": "MVP supports redirect_uri and decentralized_identifier schemes, fetches/validates did:web trust material for decentralized_identifier, and explicitly rejects unsupported schemes.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/contracts.go",
+        "backend/internal/protocols/oid4vp/trust.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.client_id_scheme"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-direct-post-jwt-wallet-signature-and-audience-binding",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 8.3",
+      "description": "direct_post.jwt responses are decrypted by the verifier, signed by wallet keys, and validated for typ, subject binding, audience, and expiry before vp_token extraction.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/handlers.go",
+        "backend/internal/protocols/oid4vp/contracts.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.direct_post"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-vp-token-typ-required",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 8",
+      "description": "vp_token JWT header typ is validated as vp+jwt before verifier policy evaluation.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/contracts.go",
+        "backend/internal/protocols/oid4vp/handlers.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.nonce_binding"
+      ],
+      "status": "verified"
+    },
+    {
+      "id": "oid4vp-holder-binding-cryptographic-verification",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID4VP 1.0 Section 11",
+      "description": "vp_token validation enforces wallet key ownership and holder-binding through subject checks, cnf thumbprint verification, and wallet-held credential verification.",
+      "implementation": [
+        "backend/internal/protocols/oid4vp/handlers.go",
+        "backend/internal/protocols/oid4vp/plugin.go",
+        "backend/internal/vc/wallet_store.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oid4vp/plugin_test.go"
+      ],
+      "annotations": [
+        "oid4vp.nonce_binding"
+      ],
+      "status": "verified"
+    }
+  ]
+}

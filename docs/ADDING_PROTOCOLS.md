@@ -258,6 +258,58 @@ Add `backend/internal/protocols/<id>/README.md`:
 - RFC/spec references
 - Any config knobs or special behavior
 
+## Compliance manifest mapping (required)
+
+Protocol implementations must map normative requirements to code, tests, and Looking Glass annotations.
+
+1) Add or update the protocol manifest in `docs/compliance/` (JSON):
+
+- `protocol`: protocol id
+- `spec_version`: pinned spec version
+- `requirements[]`: each requirement includes:
+  - `id`
+  - `normative_level` (`MUST`, `SHALL`, `SHOULD`, `MAY`)
+  - `spec_reference`
+  - `description`
+  - `implementation` (one or more code paths)
+  - `tests` (one or more test paths)
+  - `annotations` (annotation keys used in Looking Glass)
+  - `status` (`planned`, `implemented`, `verified`)
+
+2) Keep manifest mappings synchronized with file moves and refactors:
+
+- Update `implementation` and `tests` paths whenever protocol files are relocated.
+- Keep `MUST`/`SHALL` entries tied to concrete tests and annotations.
+
+3) Run runtime conformance checks from `backend/`:
+
+```bash
+go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
+```
+
+This command executes real end-to-end OID4VCI and OID4VP HTTP flows, including issuance-to-presentation lineage checks.
+
+4) External interoperability checks:
+
+- Configure `CONFORMANCE_BASE_URL` and `CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL` GitHub secrets.
+- The `Protocol Conformance` workflow runs nightly/manual external interop checks via `TestExternalInteropConformance`.
+- For local/manual external checks, run:
+  `RUN_EXTERNAL_INTEROP_CONFORMANCE=1 CONFORMANCE_BASE_URL=https://<verifier-base> CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL=https://<wallet-harness>/submit go test ./internal/protocols/oid4vp -run TestExternalInteropConformance -count=1 -v`
+
+## VC plugin patterns (OID4VCI/OID4VP)
+
+When adding Verifiable Credential flows, follow these additional constraints:
+
+- Keep flow execution real: no placeholder credentials, proofs, or verifier outcomes in UI paths.
+- Capture VC artifacts explicitly in executor state (`vcArtifacts`) for request objects, proofs, credentials, wallet handoff payloads, and policy evidence.
+- For wallet-mediated flows, expose deep-link/QR payloads and support an external wallet agent that performs real HTTP + signing operations.
+- Enforce actor key separation: issuer, verifier, and wallet roles must use distinct key material, and validators must reject cross-role signatures.
+- Maintain credential lineage: credentials presented in OID4VP should come from wallet-held issuance state (or explicit documented fallback), not ad hoc hardcoded claims.
+- For OID4VCI metadata, serve the issuer-derived canonical `.well-known` path from the root router (for path-bound issuer identifiers).
+- Emit parameter-level denial diagnostics (nonce/audience/expiry/holder-binding plus policy reasons) so failures are teachable, not opaque.
+- Keep negative/replay validation in handler logic, tests, and conformance checks; avoid exposing diagnostic-only failure scenarios as primary executable flow catalog entries.
+- Promote compliance manifest statuses from `planned` to `implemented`/`verified` only when tests and Looking Glass evidence exist.
+
 ## Acceptance criteria
 
 - Real HTTP requests and real tokens (no placeholders)
