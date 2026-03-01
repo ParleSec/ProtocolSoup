@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Terminal, Square,
   ChevronRight, Fingerprint, Shield, Lock, Sparkles,
-  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User
+  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, X, ExternalLink, Loader2
 } from 'lucide-react'
 
 import {
@@ -23,6 +23,8 @@ import {
 
 import { TokenInspector } from '../components/lookingglass/TokenInspector'
 import { LookingGlassSEO } from '../components/common/SEO'
+
+const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
 
 export function LookingGlass() {
   useParams<{ sessionId?: string }>()
@@ -39,9 +41,22 @@ export function LookingGlass() {
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
+  const [vciTxCodeInput, setVciTxCodeInput] = useState('')
+  const [vciTxCodeLoading, setVciTxCodeLoading] = useState(false)
+  const [vciTxCodeSource, setVciTxCodeSource] = useState<string | null>(null)
   const [wireSessionId, setWireSessionId] = useState<string | null>(null)
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
   const [pendingExecute, setPendingExecute] = useState(false)
+  const [handoffCopied, setHandoffCopied] = useState(false)
+  const [capturedVCWalletSubject, setCapturedVCWalletSubject] = useState('')
+  const [capturedVCCredentialJWT, setCapturedVCCredentialJWT] = useState('')
+  const [oid4vpWalletModalOpen, setOID4VPWalletModalOpen] = useState(false)
+  const [oid4vpWalletSubjectInput, setOID4VPWalletSubjectInput] = useState('')
+  const [oid4vpCredentialJWTInput, setOID4VPCredentialJWTInput] = useState('')
+  const [oid4vpWalletSubmitPending, setOID4VPWalletSubmitPending] = useState(false)
+  const [oid4vpWalletSubmitError, setOID4VPWalletSubmitError] = useState<string | null>(null)
+  const [oid4vpWalletSubmitMessage, setOID4VPWalletSubmitMessage] = useState<string | null>(null)
+  const [oid4vpLastPromptedRequestID, setOID4VPLastPromptedRequestID] = useState('')
 
   const { protocols, loading: protocolsLoading } = useProtocols()
   const {
@@ -101,7 +116,8 @@ export function LookingGlass() {
   const isUserInfoFlow = flowId === 'oidc-userinfo'
   const isTokenBasedFlow = isTokenIntrospectionFlow || isTokenRevocationFlow || isUserInfoFlow
   const isSCIMFlow = selectedProtocol?.id === 'scim'
-  
+  const isOID4VCITxCodeFlow = selectedProtocol?.id === 'oid4vci' && flowId === 'oid4vci-pre-authorized-tx-code'
+
   // Use stored token or user input for flows that need a token
   const activeToken = tokenInput || storedAccessToken || ''
 
@@ -161,8 +177,151 @@ export function LookingGlass() {
     token: (isTokenIntrospectionFlow || isTokenRevocationFlow) ? activeToken : undefined,
     accessToken: isUserInfoFlow ? activeToken : undefined,
     bearerToken: isSCIMFlow ? scimBearerToken : undefined,
+    txCodeValue: isOID4VCITxCodeFlow ? vciTxCodeInput : undefined,
     lookingGlassSessionId: wireSessionId || undefined,
   })
+  const status = realExecutor.state?.status || 'idle'
+  const isOID4VPAwaitingResult =
+    selectedProtocol?.id === 'oid4vp' &&
+    status === 'awaiting_user'
+
+  const executeFlow = realExecutor.execute
+  const resetFlow = realExecutor.reset
+
+  const walletHandoffArtifact = useMemo(() => {
+    const artifacts = realExecutor.state?.vcArtifacts || []
+    for (let i = artifacts.length - 1; i >= 0; i -= 1) {
+      if (artifacts[i].type === 'wallet_handoff') {
+        return artifacts[i]
+      }
+    }
+    return null
+  }, [realExecutor.state?.vcArtifacts])
+
+  const oid4vpRequestObjectArtifact = useMemo(() => {
+    const artifacts = realExecutor.state?.vcArtifacts || []
+    for (let i = artifacts.length - 1; i >= 0; i -= 1) {
+      if (artifacts[i].type === 'request_object') {
+        return artifacts[i]
+      }
+    }
+    return null
+  }, [realExecutor.state?.vcArtifacts])
+
+  const oid4vpRequestID = useMemo(
+    () => String(realExecutor.state?.securityParams.requestId || '').trim(),
+    [realExecutor.state?.securityParams.requestId],
+  )
+
+  const oid4vpRequestJWT = useMemo(
+    () => String(oid4vpRequestObjectArtifact?.raw || '').trim(),
+    [oid4vpRequestObjectArtifact],
+  )
+
+  const oid4vpRequestURI = useMemo(() => {
+    const requestMetadata = (oid4vpRequestObjectArtifact?.metadata || {}) as Record<string, unknown>
+    const handoffMetadata = (walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
+    return String(requestMetadata.requestURI || handoffMetadata.requestURI || '').trim()
+  }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
+
+  const oid4vpResponseMode = useMemo(() => {
+    const requestMetadata = (oid4vpRequestObjectArtifact?.metadata || {}) as Record<string, unknown>
+    const handoffMetadata = (walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
+    return String(requestMetadata.responseMode || handoffMetadata.responseMode || 'direct_post').trim()
+  }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
+
+  const normalizedOID4VPCredentialJWTInput = useMemo(
+    () => extractIssuerJWTFromCredential(oid4vpCredentialJWTInput),
+    [oid4vpCredentialJWTInput],
+  )
+
+  const canSubmitOID4VPWalletInteraction =
+    !!oid4vpRequestID &&
+    !!oid4vpRequestJWT &&
+    !!oid4vpWalletSubjectInput.trim() &&
+    !!normalizedOID4VPCredentialJWTInput
+
+  const oid4vpWalletHandoffPayload = useMemo(
+    () => String(walletHandoffArtifact?.metadata?.qrPayload || walletHandoffArtifact?.metadata?.deepLink || walletHandoffArtifact?.raw || '').trim(),
+    [walletHandoffArtifact],
+  )
+
+  const latestCapturedOID4VCITxCode = useMemo(() => {
+    const artifacts = realExecutor.state?.vcArtifacts || []
+    for (let i = artifacts.length - 1; i >= 0; i -= 1) {
+      const metadata = artifacts[i].metadata || {}
+      const txCode = String(metadata.txCodeOOBValue || metadata.txCodeValue || '').trim()
+      if (txCode) {
+        return txCode
+      }
+    }
+    return ''
+  }, [realExecutor.state?.vcArtifacts])
+
+  useEffect(() => {
+    if (!isOID4VCITxCodeFlow || vciTxCodeInput.trim() || !latestCapturedOID4VCITxCode) {
+      return
+    }
+    setVciTxCodeInput(latestCapturedOID4VCITxCode)
+    setVciTxCodeSource('captured from a previous issuer offer step in this session')
+  }, [isOID4VCITxCodeFlow, latestCapturedOID4VCITxCode, vciTxCodeInput])
+
+  useEffect(() => {
+    if (!isOID4VCITxCodeFlow || vciTxCodeInput.trim()) {
+      return
+    }
+
+    let cancelled = false
+    setVciTxCodeLoading(true)
+    setVciTxCodeSource(null)
+
+    fetch('/oid4vci/offers/pre-authorized', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        tx_code_required: true,
+      }),
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null) as Record<string, unknown> | null
+        if (!response.ok) {
+          throw new Error(String(payload?.error_description || payload?.error || `Prefill request failed (${response.status})`))
+        }
+        return payload || {}
+      })
+      .then((payload) => {
+        if (cancelled) return
+        const txCode = String(payload.tx_code_oob_value || payload.tx_code_value || '').trim()
+        if (!txCode) {
+          setVciTxCodeSource('issuer pre-step did not return a tx_code value')
+          return
+        }
+        setVciTxCodeInput(txCode)
+        const offerID = String(payload.offer_id || '').trim()
+        setVciTxCodeSource(
+          offerID
+            ? `prefilled from issuer offer pre-step (${offerID})`
+            : 'prefilled from issuer offer pre-step',
+        )
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : 'Automatic tx_code prefill failed'
+        setVciTxCodeSource(message)
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setVciTxCodeLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isOID4VCITxCodeFlow, vciTxCodeInput])
 
   // Store tokens from completed flows
   useEffect(() => {
@@ -176,6 +335,174 @@ export function LookingGlass() {
     }
   }, [realExecutor.state?.status, realExecutor.state?.tokens.refreshToken, realExecutor.state?.tokens.accessToken])
 
+  useEffect(() => {
+    const artifacts = realExecutor.state?.vcArtifacts || []
+    if (artifacts.length === 0) {
+      return
+    }
+    let latestWalletSubject = ''
+    let latestCredentialJWT = ''
+
+    for (let i = artifacts.length - 1; i >= 0; i -= 1) {
+      const artifact = artifacts[i]
+      const metadata = (artifact.metadata || {}) as Record<string, unknown>
+      if (!latestWalletSubject) {
+        const metadataSubject = String(metadata.walletSubject || metadata.wallet_subject || '').trim()
+        if (metadataSubject) {
+          latestWalletSubject = metadataSubject
+        }
+      }
+      if (!latestCredentialJWT && artifact.type === 'credential' && typeof artifact.raw === 'string') {
+        const normalized = extractIssuerJWTFromCredential(artifact.raw)
+        if (normalized) {
+          latestCredentialJWT = normalized
+        }
+      }
+      if (latestWalletSubject && latestCredentialJWT) {
+        break
+      }
+    }
+
+    if (latestWalletSubject) {
+      setCapturedVCWalletSubject(prev => (prev === latestWalletSubject ? prev : latestWalletSubject))
+    }
+    if (latestCredentialJWT) {
+      setCapturedVCCredentialJWT(prev => (prev === latestCredentialJWT ? prev : latestCredentialJWT))
+    }
+  }, [realExecutor.state?.vcArtifacts])
+
+  useEffect(() => {
+    if (oid4vpWalletSubjectInput.trim() || !capturedVCWalletSubject) {
+      return
+    }
+    setOID4VPWalletSubjectInput(capturedVCWalletSubject)
+  }, [capturedVCWalletSubject, oid4vpWalletSubjectInput])
+
+  useEffect(() => {
+    if (oid4vpCredentialJWTInput.trim() || !capturedVCCredentialJWT) {
+      return
+    }
+    setOID4VPCredentialJWTInput(capturedVCCredentialJWT)
+  }, [capturedVCCredentialJWT, oid4vpCredentialJWTInput])
+
+  useEffect(() => {
+    if (!isOID4VPAwaitingResult || !oid4vpRequestID) {
+      return
+    }
+    if (oid4vpRequestID === oid4vpLastPromptedRequestID) {
+      return
+    }
+    setOID4VPLastPromptedRequestID(oid4vpRequestID)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletModalOpen(true)
+  }, [isOID4VPAwaitingResult, oid4vpRequestID, oid4vpLastPromptedRequestID])
+
+  useEffect(() => {
+    if (selectedProtocol?.id === 'oid4vp') {
+      return
+    }
+    setOID4VPWalletModalOpen(false)
+    setOID4VPLastPromptedRequestID('')
+    setOID4VPWalletSubmitPending(false)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+  }, [selectedProtocol?.id])
+
+  const openOID4VPWalletModal = useCallback(() => {
+    if (!oid4vpWalletSubjectInput.trim() && capturedVCWalletSubject) {
+      setOID4VPWalletSubjectInput(capturedVCWalletSubject)
+    }
+    if (!oid4vpCredentialJWTInput.trim() && capturedVCCredentialJWT) {
+      setOID4VPCredentialJWTInput(capturedVCCredentialJWT)
+    }
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletModalOpen(true)
+  }, [oid4vpWalletSubjectInput, capturedVCWalletSubject, oid4vpCredentialJWTInput, capturedVCCredentialJWT])
+
+  const closeOID4VPWalletModal = useCallback(() => {
+    if (oid4vpWalletSubmitPending) {
+      return
+    }
+    setOID4VPWalletModalOpen(false)
+  }, [oid4vpWalletSubmitPending])
+
+  const submitOID4VPWalletInteraction = useCallback(async () => {
+    const walletSubject = oid4vpWalletSubjectInput.trim()
+    const credentialJWT = normalizedOID4VPCredentialJWTInput
+    if (!oid4vpRequestID || !oid4vpRequestJWT) {
+      setOID4VPWalletSubmitError('Missing request context. Re-run OID4VP request creation.')
+      return
+    }
+    if (!walletSubject) {
+      setOID4VPWalletSubmitError('wallet_subject is required.')
+      return
+    }
+    if (!credentialJWT) {
+      setOID4VPWalletSubmitError('credential_jwt is required.')
+      return
+    }
+
+    setOID4VPWalletSubmitPending(true)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+
+    try {
+      const payload = {
+        request_id: oid4vpRequestID,
+        request: oid4vpRequestJWT,
+        request_uri: oid4vpRequestURI || undefined,
+        response_mode: oid4vpResponseMode || undefined,
+        wallet_subject: walletSubject,
+        credential_jwt: credentialJWT,
+      }
+
+      const response = await fetch(OID4VP_WALLET_SUBMIT_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+      const responsePayload = await response.json().catch(() => null) as Record<string, unknown> | null
+      if (!response.ok) {
+        throw new Error(
+          String(
+            responsePayload?.error_description
+              || responsePayload?.error
+              || `Wallet submission failed (${response.status})`,
+          ),
+        )
+      }
+      const upstreamStatus = Number(responsePayload?.upstream_status || 0)
+
+      setOID4VPWalletModalOpen(false)
+      setOID4VPWalletSubmitMessage(
+        upstreamStatus > 0
+          ? `Wallet response accepted (upstream ${upstreamStatus}). Checking verifier result...`
+          : 'Wallet response accepted. Checking verifier result...',
+      )
+      setTimeout(() => {
+        executeFlow()
+      }, 1200)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Wallet submission failed'
+      setOID4VPWalletSubmitError(message)
+    } finally {
+      setOID4VPWalletSubmitPending(false)
+    }
+  }, [
+    oid4vpWalletSubjectInput,
+    normalizedOID4VPCredentialJWTInput,
+    oid4vpRequestID,
+    oid4vpRequestJWT,
+    oid4vpRequestURI,
+    oid4vpResponseMode,
+    executeFlow,
+  ])
+
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
     // SSF has its own dedicated sandbox - redirect there
     if (protocol.id === 'ssf') {
@@ -184,13 +511,21 @@ export function LookingGlass() {
     }
     setSelectedProtocol(protocol)
     setSelectedFlow(null)
-    realExecutor.reset()
+    resetFlow()
     setWireSessionId(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor, clearWireEvents, navigate])
+    setVciTxCodeInput('')
+    setVciTxCodeLoading(false)
+    setVciTxCodeSource(null)
+    setOID4VPWalletModalOpen(false)
+    setOID4VPLastPromptedRequestID('')
+    setOID4VPWalletSubmitPending(false)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+  }, [resetFlow, clearWireEvents, navigate])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
     // SSF flows should redirect to the SSF Sandbox
@@ -199,22 +534,46 @@ export function LookingGlass() {
       return
     }
     setSelectedFlow(flow)
-    realExecutor.reset()
+    resetFlow()
     setWireSessionId(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor, clearWireEvents, selectedProtocol, navigate])
+    setVciTxCodeInput('')
+    setVciTxCodeLoading(false)
+    setVciTxCodeSource(null)
+    setOID4VPWalletModalOpen(false)
+    setOID4VPLastPromptedRequestID('')
+    setOID4VPWalletSubmitPending(false)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+  }, [resetFlow, clearWireEvents, selectedProtocol, navigate])
 
   const handleReset = useCallback(() => {
-    realExecutor.reset()
+    resetFlow()
     setWireSessionId(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-  }, [realExecutor, clearWireEvents])
+    setVciTxCodeLoading(false)
+    setOID4VPWalletModalOpen(false)
+    setOID4VPLastPromptedRequestID('')
+    setOID4VPWalletSubmitPending(false)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+  }, [resetFlow, clearWireEvents])
+
+  const copyWalletHandoff = useCallback(async () => {
+    if (!walletHandoffArtifact) return
+    const metadata = walletHandoffArtifact.metadata || {}
+    const payload = String(metadata.qrPayload || metadata.deepLink || walletHandoffArtifact.raw || '')
+    if (!payload) return
+    await navigator.clipboard.writeText(payload)
+    setHandoffCopied(true)
+    setTimeout(() => setHandoffCopied(false), 1200)
+  }, [walletHandoffArtifact])
 
   const startWireSession = useCallback(async () => {
     if (!selectedProtocol || !selectedFlow) {
@@ -252,15 +611,15 @@ export function LookingGlass() {
       }
       return
     }
-    realExecutor.execute()
-  }, [wireSessionId, startWireSession, realExecutor])
+    executeFlow()
+  }, [wireSessionId, startWireSession, executeFlow])
 
   useEffect(() => {
     if (pendingExecute && wireSessionId) {
-      realExecutor.execute()
+      executeFlow()
       setPendingExecute(false)
     }
-  }, [pendingExecute, wireSessionId, realExecutor])
+  }, [pendingExecute, wireSessionId, executeFlow])
 
   const handleQuickSelect = useCallback((protocolId: string, flowId: string) => {
     const normalizeFlowId = (id: string) => id.toLowerCase().replace(/_/g, '-')
@@ -277,18 +636,23 @@ export function LookingGlass() {
       const flow = (protocol.flows || []).find(f => normalizeFlowId(f.id) === normalizedTarget)
       if (flow) {
         setSelectedFlow(flow)
-        realExecutor.reset()
+        resetFlow()
         setWireSessionId(null)
         clearWireEvents()
         setWireSessionError(null)
         setPendingExecute(false)
         setInspectedToken('')
+        setVciTxCodeInput('')
+        setOID4VPWalletModalOpen(false)
+        setOID4VPLastPromptedRequestID('')
+        setOID4VPWalletSubmitPending(false)
+        setOID4VPWalletSubmitError(null)
+        setOID4VPWalletSubmitMessage(null)
       }
     }
-  }, [protocols, realExecutor, clearWireEvents, navigate])
+  }, [protocols, resetFlow, clearWireEvents, navigate])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
-  const status = realExecutor.state?.status || 'idle'
 
   return (
     <>
@@ -558,6 +922,41 @@ export function LookingGlass() {
             )}
           </motion.div>
         )}
+
+        {isOID4VCITxCodeFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+              <span className="text-xs sm:text-sm font-medium text-surface-300">OID4VCI tx_code</span>
+            </div>
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+              This value is prefilled from the issuer out-of-band offer step and reused from prior flow capture when available.
+            </p>
+            <input
+              type="text"
+              value={vciTxCodeInput}
+              onChange={(e) => setVciTxCodeInput(e.target.value)}
+              placeholder={vciTxCodeLoading ? 'Prefilling tx_code from issuer offer...' : 'e.g. 123456'}
+              disabled={vciTxCodeLoading}
+              className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 transition-all"
+            />
+            {!!vciTxCodeSource && (
+              <p className="mt-2 text-[10px] sm:text-xs text-cyan-400 leading-relaxed">
+                {vciTxCodeSource}
+              </p>
+            )}
+            {!vciTxCodeLoading && !vciTxCodeInput.trim() && (
+              <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
+                ⚠️ tx_code is required before token exchange for this flow.
+              </p>
+            )}
+          </motion.div>
+        )}
       </section>
 
       {/* Execution */}
@@ -597,6 +996,26 @@ export function LookingGlass() {
                     <span className="sm:hidden">Run</span>
                   </button>
                 )}
+                {isOID4VPAwaitingResult && (
+                  <button
+                    onClick={openOID4VPWalletModal}
+                    className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-violet-500/10 border border-violet-500/30 text-violet-300 text-xs sm:text-sm font-medium hover:bg-violet-500/20 transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden sm:inline">Wallet Action</span>
+                    <span className="sm:hidden">Wallet</span>
+                  </button>
+                )}
+                {isOID4VPAwaitingResult && (
+                  <button
+                    onClick={handleExecute}
+                    className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-500/30 text-blue-300 text-xs sm:text-sm font-medium hover:from-blue-500/30 hover:to-cyan-500/30 transition-all"
+                  >
+                    <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden sm:inline">Check Result</span>
+                    <span className="sm:hidden">Check</span>
+                  </button>
+                )}
                 {(status === 'executing' || status === 'awaiting_user') && (
                   <button
                     onClick={realExecutor.abort}
@@ -621,6 +1040,40 @@ export function LookingGlass() {
 
           {/* Execution Panel */}
           <div className="p-4 sm:p-5">
+            {walletHandoffArtifact && (
+              <div className="mb-3 p-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-cyan-300 mb-1">
+                      <QrCode className="w-4 h-4 flex-shrink-0" />
+                      <span className="text-sm font-medium">Wallet Handoff Ready</span>
+                    </div>
+                    <p className="text-xs text-surface-300">
+                      Deep-link/QR payload is generated from the live request object and can be used with an external wallet agent.
+                    </p>
+                  </div>
+                  <button
+                    onClick={copyWalletHandoff}
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-surface-900 text-xs text-surface-300 hover:text-white border border-white/10"
+                  >
+                    {handoffCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    {handoffCopied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <pre className="mt-2 p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
+                  {String(walletHandoffArtifact.metadata?.qrPayload || walletHandoffArtifact.metadata?.deepLink || walletHandoffArtifact.raw || '')}
+                </pre>
+              </div>
+            )}
+            {selectedProtocol?.id === 'oid4vp' && (oid4vpWalletSubmitMessage || oid4vpWalletSubmitError) && (
+              <div className={`mb-3 p-3 rounded-lg border text-xs ${
+                oid4vpWalletSubmitError
+                  ? 'border-red-500/30 bg-red-500/5 text-red-300'
+                  : 'border-green-500/30 bg-green-500/5 text-green-300'
+              }`}>
+                {oid4vpWalletSubmitError || oid4vpWalletSubmitMessage}
+              </div>
+            )}
             <RealFlowPanel
               state={realExecutor.state}
               onExecute={handleExecute}
@@ -638,6 +1091,155 @@ export function LookingGlass() {
           </div>
         </motion.section>
       )}
+
+      <AnimatePresence>
+        {oid4vpWalletModalOpen && isOID4VPAwaitingResult && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-3 sm:p-6 flex items-center justify-center"
+            onClick={closeOID4VPWalletModal}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ duration: 0.16 }}
+              className="w-full max-w-2xl rounded-xl border border-white/10 bg-surface-900 shadow-2xl overflow-hidden"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-white/10 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white text-sm sm:text-base font-medium">OID4VP Wallet Interaction</h3>
+                  <p className="text-[11px] sm:text-xs text-surface-400 mt-0.5">
+                    Fulfill the wallet step and submit a real presentation callback.
+                  </p>
+                </div>
+                <button
+                  onClick={closeOID4VPWalletModal}
+                  disabled={oid4vpWalletSubmitPending}
+                  className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-white/5 disabled:opacity-50 transition-colors"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-4 sm:p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
+                  <div className="text-xs text-cyan-300 font-medium">Request Context</div>
+                  <div className="grid gap-1 text-[11px] sm:text-xs text-surface-300">
+                    <div><span className="text-surface-400">request_id:</span> <code>{oid4vpRequestID || 'missing'}</code></div>
+                    <div><span className="text-surface-400">response_mode:</span> <code>{oid4vpResponseMode || 'direct_post'}</code></div>
+                    {oid4vpRequestURI && (
+                      <div className="break-all">
+                        <span className="text-surface-400">request_uri:</span> <code>{oid4vpRequestURI}</code>
+                      </div>
+                    )}
+                  </div>
+                  {oid4vpRequestURI && (
+                    <div className="pt-1">
+                      <a
+                        href={oid4vpRequestURI}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-surface-900 border border-cyan-500/30 text-cyan-300 text-[11px] sm:text-xs hover:bg-surface-800 transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Open request_uri
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                {!!oid4vpWalletHandoffPayload && (
+                  <div className="space-y-1">
+                    <div className="text-[11px] sm:text-xs text-surface-400">Wallet handoff payload</div>
+                    <pre className="p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
+                      {oid4vpWalletHandoffPayload}
+                    </pre>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs sm:text-sm font-medium text-surface-300">wallet_subject</label>
+                    {capturedVCWalletSubject && (
+                      <button
+                        onClick={() => setOID4VPWalletSubjectInput(capturedVCWalletSubject)}
+                        className="text-[11px] sm:text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                      >
+                        Use captured value
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={oid4vpWalletSubjectInput}
+                    onChange={(event) => setOID4VPWalletSubjectInput(event.target.value)}
+                    placeholder="did:example:wallet:holder"
+                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs sm:text-sm font-medium text-surface-300">credential_jwt</label>
+                    {capturedVCCredentialJWT && (
+                      <button
+                        onClick={() => setOID4VPCredentialJWTInput(capturedVCCredentialJWT)}
+                        className="text-[11px] sm:text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
+                      >
+                        Use captured value
+                      </button>
+                    )}
+                  </div>
+                  <textarea
+                    value={oid4vpCredentialJWTInput}
+                    onChange={(event) => setOID4VPCredentialJWTInput(event.target.value)}
+                    rows={5}
+                    placeholder="Paste SD-JWT VC or issuer credential JWT"
+                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
+                  />
+                  {oid4vpCredentialJWTInput.trim() && normalizedOID4VPCredentialJWTInput !== oid4vpCredentialJWTInput.trim() && (
+                    <p className="text-[11px] sm:text-xs text-cyan-400">
+                      SD-JWT detected: issuer JWT segment will be used for wallet submission.
+                    </p>
+                  )}
+                </div>
+
+                {!canSubmitOID4VPWalletInteraction && (
+                  <p className="text-[11px] sm:text-xs text-amber-400">
+                    Provide request context, wallet_subject, and credential_jwt to submit wallet interaction.
+                  </p>
+                )}
+                {!!oid4vpWalletSubmitError && (
+                  <p className="text-[11px] sm:text-xs text-red-300">{oid4vpWalletSubmitError}</p>
+                )}
+              </div>
+
+              <div className="px-4 sm:px-5 py-3 border-t border-white/10 flex items-center justify-end gap-2">
+                <button
+                  onClick={closeOID4VPWalletModal}
+                  disabled={oid4vpWalletSubmitPending}
+                  className="px-3 py-2 rounded-lg bg-surface-800 border border-white/10 text-surface-300 text-xs sm:text-sm hover:text-white disabled:opacity-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitOID4VPWalletInteraction}
+                  disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs sm:text-sm font-medium hover:bg-violet-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {oid4vpWalletSubmitPending && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>{oid4vpWalletSubmitPending ? 'Submitting...' : 'Submit Wallet Response'}</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Token Inspector */}
       <AnimatePresence>
@@ -812,4 +1414,14 @@ function TokenButton({
       {label}
     </button>
   )
+}
+
+function extractIssuerJWTFromCredential(rawCredential: string): string {
+  const normalized = rawCredential.trim()
+  if (!normalized) {
+    return ''
+  }
+  const parts = normalized.split('~')
+  const issuerJWT = parts[0]?.trim() || ''
+  return issuerJWT || normalized
 }
