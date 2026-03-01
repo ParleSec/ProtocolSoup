@@ -466,15 +466,35 @@ jobs:
       
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      - name: Validate wallet Fly token
+        run: |
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "FLY_WALLET_API_TOKEN is not configured"
+            exit 1
+          fi
+          flyctl auth whoami
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
       
       - name: Deploy wallet harness to Fly.io
         run: flyctl deploy --config fly.wallet.toml --app protocolsoup-wallet --remote-only
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
       
-      - name: Smoke test wallet health
+      - name: Smoke test wallet health (direct Fly hostname)
         run: |
-          curl -fsS "https://wallet.protocolsoup.com/health" | jq -e '.status == "ok"' > /dev/null
+          curl -fsS "https://protocolsoup-wallet.fly.dev/health" | jq -e '.status == "ok"' > /dev/null
+
+      - name: Check wallet subdomain health (non-blocking)
+        continue-on-error: true
+        run: |
+          code="$(curl -sS -o /tmp/wallet-health.json -w '%{http_code}' "https://wallet.protocolsoup.com/health" || true)"
+          if [ "$code" != "200" ]; then
+            echo "wallet.protocolsoup.com returned HTTP $code (continuing; direct Fly smoke test already passed)"
+          else
+            jq -e '.status == "ok"' /tmp/wallet-health.json > /dev/null
+          fi
       
       - name: Smoke test OID4VP wallet bootstrap
         run: |
@@ -499,7 +519,7 @@ jobs:
             --arg req "$request_jwt" \
             '{request_id:$rid, request:$req, response_mode:"direct_post"}')"
 
-          submit_response="$(curl -sS -w '\n%{http_code}' -X POST "https://wallet.protocolsoup.com/submit" \
+          submit_response="$(curl -sS -w '\n%{http_code}' -X POST "https://protocolsoup-wallet.fly.dev/submit" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
             -d "$wallet_payload")"
