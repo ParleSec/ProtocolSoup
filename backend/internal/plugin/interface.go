@@ -39,6 +39,7 @@ type PluginInfo struct {
 // PluginConfig provides configuration to plugins during initialization
 type PluginConfig struct {
 	BaseURL      string      // Base URL of the server
+	DataDir      string      // Optional durable state directory shared across plugins
 	KeySet       interface{} // Crypto key set
 	MockIdP      interface{} // Mock identity provider
 	LookingGlass interface{} // Looking glass engine
