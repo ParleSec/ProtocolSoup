@@ -420,9 +420,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Job 10: Deploy to Fly.io (only on master branch)
+  # Job 10: Deploy main app to Fly.io (only on master branch)
   deploy:
-    name: Deploy to Fly.io
+    name: Deploy Main App to Fly.io
     runs-on: ubuntu-latest
     needs: [docker-build-test, code-security-scan]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
@@ -446,13 +446,115 @@ jobs:
       
       - name: Deployment notification
         if: success()
-        run: echo "✅ Deployment to Fly.io successful!"
+        run: echo "✅ Main app deployment to Fly.io successful!"
 
-  # Job 11: Lighthouse Performance Test (runs after deploy)
+  # Job 11: Deploy wallet harness to Fly.io (only on master branch)
+  deploy-wallet:
+    name: Deploy Wallet Harness to Fly.io
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      - name: Validate wallet Fly token
+        run: |
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "FLY_WALLET_API_TOKEN is not configured"
+            exit 1
+          fi
+          flyctl auth whoami
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
+      
+      - name: Deploy wallet harness to Fly.io
+        run: flyctl deploy --config fly.wallet.toml --app protocolsoup-wallet --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
+      
+      - name: Smoke test wallet health (direct Fly hostname)
+        run: |
+          curl -fsS "https://protocolsoup-wallet.fly.dev/health" | jq -e '.status == "ok"' > /dev/null
+
+      - name: Check wallet subdomain health (non-blocking)
+        continue-on-error: true
+        run: |
+          code="$(curl -sS -o /tmp/wallet-health.json -w '%{http_code}' "https://wallet.protocolsoup.com/health" || true)"
+          if [ "$code" != "200" ]; then
+            echo "wallet.protocolsoup.com returned HTTP $code (continuing; direct Fly smoke test already passed)"
+          else
+            jq -e '.status == "ok"' /tmp/wallet-health.json > /dev/null
+          fi
+      
+      - name: Smoke test OID4VP wallet bootstrap
+        run: |
+          set -euo pipefail
+
+          CREATE_PAYLOAD='{"response_mode":"direct_post","response_uri":"https://protocolsoup.com/oid4vp/response"}'
+          create_response="$(curl -fsS -X POST "https://protocolsoup.com/oid4vp/request/create" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "$CREATE_PAYLOAD")"
+
+          request_id="$(echo "$create_response" | jq -r '.request_id // empty')"
+          request_jwt="$(echo "$create_response" | jq -r '.request // empty')"
+          if [ -z "$request_id" ] || [ -z "$request_jwt" ]; then
+            echo "OID4VP create request missing request_id or request JWT"
+            echo "$create_response"
+            exit 1
+          fi
+
+          wallet_payload="$(jq -n \
+            --arg rid "$request_id" \
+            --arg req "$request_jwt" \
+            '{request_id:$rid, request:$req, response_mode:"direct_post"}')"
+
+          submit_response="$(curl -sS -w '\n%{http_code}' -X POST "https://protocolsoup-wallet.fly.dev/submit" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d "$wallet_payload")"
+          submit_body="$(echo "$submit_response" | sed '$d')"
+          submit_status="$(echo "$submit_response" | tail -n1)"
+
+          if [ "${submit_status}" -lt 200 ] || [ "${submit_status}" -ge 300 ]; then
+            echo "Wallet submit failed with HTTP ${submit_status}"
+            echo "$submit_body"
+            exit 1
+          fi
+
+          old_error="$(echo "$submit_body" | jq -r '.error_description // empty')"
+          if [ "$old_error" = "credential_jwt is required for wallet submission" ]; then
+            echo "Wallet harness is still serving old behavior requiring credential_jwt"
+            echo "$submit_body"
+            exit 1
+          fi
+
+          credential_source="$(echo "$submit_body" | jq -r '.credential_source // empty')"
+          if [ "$credential_source" != "auto_issued_oid4vci" ] && [ "$credential_source" != "cached_wallet_store" ]; then
+            echo "Unexpected credential source: '$credential_source'"
+            echo "$submit_body"
+            exit 1
+          fi
+      
+      - name: Wallet deployment notification
+        if: success()
+        run: echo "✅ Wallet harness deployment + smoke checks successful!"
+
+  # Job 12: Lighthouse Performance Test (runs after deploy)
   lighthouse:
     name: Lighthouse Performance Audit
     runs-on: ubuntu-latest
-    needs: [deploy]
+    needs: [deploy, deploy-wallet]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: read
@@ -473,7 +575,7 @@ jobs:
           uploadArtifacts: true
           temporaryPublicStorage: true
 
-  # Job 12: Cleanup artifacts on PR close
+  # Job 13: Cleanup artifacts on PR close
   cleanup:
     name: Cleanup
     runs-on: ubuntu-latest

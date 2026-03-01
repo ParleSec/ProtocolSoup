@@ -626,7 +626,7 @@ export function LookingGlass() {
       const sourceMessage = credentialSource === 'auto_issued_oid4vci'
         ? 'Auto-issued a fresh OID4VCI credential in the wallet bootstrap step.'
         : credentialSource === 'auto_refreshed_oid4vci'
-          ? 'Auto-refreshed a stale credential via OID4VCI before presentation.'
+          ? 'Refreshed a stale wallet credential via OID4VCI before submission.'
         : credentialSource === 'cached_wallet_store'
           ? 'Used existing wallet credential from wallet harness state.'
           : credentialSource === 'provided'
