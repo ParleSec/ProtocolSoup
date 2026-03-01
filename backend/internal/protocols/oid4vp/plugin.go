@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -68,10 +71,12 @@ type Plugin struct {
 
 	trustResolver            TrustResolver
 	supportedClientIDSchemes map[ClientIDScheme]struct{}
+	didWebAllowedHosts       []string
 
 	mu              sync.RWMutex
 	requests        map[string]*requestSession
 	requestsByState map[string]string
+	requestDataPath string
 }
 
 // NewPlugin creates a new OID4VP plugin instance.
@@ -107,7 +112,21 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.lookingGlass = lg
 	}
 	p.walletStore = vc.DefaultWalletCredentialStore()
-	p.trustResolver = NewDIDWebResolver(p.allowedDIDWebHosts())
+	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
+		storePath := filepath.Join(dataDir, "vc", "wallet_credentials.json")
+		if err := p.walletStore.EnablePersistence(storePath); err != nil {
+			return fmt.Errorf("initialize wallet credential store persistence: %w", err)
+		}
+	}
+	p.didWebAllowedHosts = p.allowedDIDWebHosts()
+	p.trustResolver = NewDIDWebResolver(p.didWebAllowedHosts)
+	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
+		requestPath := filepath.Join(dataDir, "vc", "oid4vp_request_sessions.json")
+		if err := p.loadRequestState(requestPath); err != nil {
+			return fmt.Errorf("load oid4vp request state: %w", err)
+		}
+		p.requestDataPath = requestPath
+	}
 	return nil
 }
 
@@ -288,7 +307,97 @@ func (p *Plugin) allowedDIDWebHosts() []string {
 			hosts = append(hosts, host)
 		}
 	}
-	return hosts
+	unique := make(map[string]struct{}, len(hosts))
+	normalizedHosts := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		normalized := strings.ToLower(strings.TrimSpace(host))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := unique[normalized]; exists {
+			continue
+		}
+		unique[normalized] = struct{}{}
+		normalizedHosts = append(normalizedHosts, normalized)
+	}
+	sort.Strings(normalizedHosts)
+	return normalizedHosts
+}
+
+type requestStateSnapshot struct {
+	Requests  map[string]*requestSession `json:"requests"`
+	UpdatedAt time.Time                  `json:"updated_at"`
+}
+
+func (p *Plugin) trustMode() string {
+	if len(p.didWebAllowedHosts) == 0 {
+		return "interop_mode"
+	}
+	return "controlled_trust_mode"
+}
+
+func (p *Plugin) loadRequestState(path string) error {
+	normalized := strings.TrimSpace(path)
+	if normalized == "" {
+		return nil
+	}
+	normalized = filepath.Clean(normalized)
+	if err := os.MkdirAll(filepath.Dir(normalized), 0o755); err != nil {
+		return err
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.requestDataPath = normalized
+
+	raw, err := os.ReadFile(normalized)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return nil
+	}
+	var snapshot requestStateSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return err
+	}
+	if snapshot.Requests != nil {
+		p.requests = snapshot.Requests
+	}
+	p.requestsByState = make(map[string]string, len(p.requests))
+	for requestID, session := range p.requests {
+		if session == nil {
+			continue
+		}
+		state := strings.TrimSpace(session.State)
+		if state == "" {
+			continue
+		}
+		p.requestsByState[state] = requestID
+	}
+	return nil
+}
+
+func (p *Plugin) persistRequestStateLocked() error {
+	if strings.TrimSpace(p.requestDataPath) == "" {
+		return nil
+	}
+	snapshot := requestStateSnapshot{
+		Requests:  p.requests,
+		UpdatedAt: time.Now().UTC(),
+	}
+	serialized, err := json.Marshal(snapshot)
+	if err != nil {
+		return err
+	}
+	tempPath := p.requestDataPath + ".tmp"
+	if err := os.WriteFile(tempPath, serialized, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, p.requestDataPath)
 }
 
 func (p *Plugin) randomValue(size int) string {
