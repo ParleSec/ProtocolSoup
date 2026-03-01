@@ -415,7 +415,9 @@ func createWalletProofJWT(t *testing.T, nonce string, subject string, audience s
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	vc.DefaultWalletCredentialStore().Reset()
+	store := vc.DefaultWalletCredentialStore()
+	store.DisablePersistence()
+	store.Reset()
 	keySet, err := crypto.NewKeySet()
 	if err != nil {
 		t.Fatalf("new key set: %v", err)

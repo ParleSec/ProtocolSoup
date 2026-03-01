@@ -11,6 +11,8 @@ import { FlowExecutorBase, type FlowExecutorConfig } from './base'
 
 export interface OID4VPDirectPostConfig extends FlowExecutorConfig {
   responseMode?: 'direct_post' | 'direct_post.jwt'
+  dcqlQueryJSON?: string
+  scopeAlias?: string
 }
 
 export class OID4VPDirectPostExecutor extends FlowExecutorBase {
@@ -130,7 +132,7 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     this.updateState({ currentStep: 'Creating verifier authorization request' })
 
     const responseMode = this.flowConfig.responseMode || 'direct_post'
-    const dcqlQuery = {
+    const defaultDCQLQuery = {
       credentials: [
         {
           id: 'university_degree',
@@ -141,17 +143,37 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         },
       ],
     }
+    const configuredScopeAlias = String(this.flowConfig.scopeAlias || '').trim()
+    const configuredDCQLRaw = String(this.flowConfig.dcqlQueryJSON || '').trim()
+    let dcqlQuery: Record<string, unknown> | null = null
+    if (configuredDCQLRaw) {
+      try {
+        dcqlQuery = JSON.parse(configuredDCQLRaw) as Record<string, unknown>
+      } catch {
+        throw new Error('Configured dcql_query is not valid JSON')
+      }
+    }
+    if (!dcqlQuery && !configuredScopeAlias) {
+      dcqlQuery = defaultDCQLQuery
+    }
+
+    const requestPayload: Record<string, unknown> = {
+      response_mode: responseMode,
+      response_uri: `${window.location.origin}${this.config.baseUrl}/response`,
+    }
+    if (configuredScopeAlias) {
+      requestPayload.scope = configuredScopeAlias
+    }
+    if (dcqlQuery) {
+      requestPayload.dcql_query = dcqlQuery
+    }
 
     const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/request/create`, {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        response_mode: responseMode,
-        response_uri: `${window.location.origin}${this.config.baseUrl}/response`,
-        dcql_query: dcqlQuery,
-      }),
+      body: JSON.stringify(requestPayload),
       step: 'Create OID4VP request object',
       rfcReference: 'OpenID4VP 1.0 Section 5',
     })
@@ -168,6 +190,10 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     }
     const requestURI = String(requestData.request_uri || '')
     const requestJWT = String(requestData.request || '')
+    const trustMode = String(requestData.trust_mode || '').trim()
+    const didWebAllowedHosts = Array.isArray(requestData.did_web_allowed_hosts)
+      ? requestData.did_web_allowed_hosts.map(host => String(host).trim()).filter(Boolean)
+      : []
     const deepLink = requestURI
       ? `openid4vp://authorize?request_uri=${encodeURIComponent(requestURI)}`
       : ''
@@ -183,6 +209,10 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         metadata: {
           responseMode,
           requestURI,
+          trustMode,
+          didWebAllowedHosts,
+          scopeAlias: configuredScopeAlias || undefined,
+          dcqlQueryConfigured: Boolean(dcqlQuery),
         },
       })
     }
@@ -198,6 +228,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
           qrPayload: deepLink || requestURI,
           requestURI,
           responseMode,
+          trustMode,
+          didWebAllowedHosts,
         },
       })
     }
@@ -211,6 +243,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         request_uri: requestURI,
         deep_link: deepLink,
         qr_payload: deepLink || requestURI,
+        trust_mode: trustMode || undefined,
+        did_web_allowed_hosts: didWebAllowedHosts,
       },
     })
     this.updateState({
@@ -233,6 +267,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         responseMode,
         state: requestData.state,
         nonce: requestData.nonce,
+        trustMode: trustMode || undefined,
+        didWebAllowedHosts,
       },
     })
 
@@ -262,6 +298,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     const policy = (result.policy || {}) as Record<string, unknown>
     const allowed = Boolean(policy.allowed)
     const reasons = Array.isArray(policy.reasons) ? policy.reasons : []
+    const reasonCodes = Array.isArray(policy.reason_codes) ? policy.reason_codes : []
+    const credentialEvidence = (result.credential_evidence || {}) as Record<string, unknown>
     const checks = {
       nonceValidated: Boolean(result.nonce_validated),
       audienceValidated: Boolean(result.audience_validated),
@@ -282,7 +320,9 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         allowed,
         policyCode: String(policy.code || ''),
         reasons,
+        reasonCodes,
         checks,
+        credentialEvidence,
       },
     })
 
@@ -294,6 +334,7 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         requestId: requestID,
         policyCode: policy.code,
         reasons,
+        reasonCodes,
         nonceValidated: checks.nonceValidated,
         audienceValidated: checks.audienceValidated,
         expiryValidated: checks.expiryValidated,

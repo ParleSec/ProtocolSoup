@@ -457,6 +457,8 @@ Pre-built container images are available from GitHub Container Registry. Use the
 | `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework | [ssf.md](docs/packages/ssf.md) |
 | `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity | [spiffe.md](docs/packages/spiffe.md) |
 | `ghcr.io/parlesec/protocolsoup-frontend` | React frontend UI | [frontend.md](docs/packages/frontend.md) |
+| `ghcr.io/parlesec/protocolsoup-vc` | OID4VCI + OID4VP verifiable credentials APIs | [vc.md](docs/packages/vc.md) |
+| `ghcr.io/parlesec/protocolsoup-wallet` | OID4VP wallet harness | [wallet.md](docs/packages/wallet.md) |
 | `ghcr.io/parlesec/protocolsoup-spire-server` | SPIRE Server (CA) | [spire-server.md](docs/packages/spire-server.md) |
 | `ghcr.io/parlesec/protocolsoup-spire-agent` | SPIRE Agent | [spire-agent.md](docs/packages/spire-agent.md) |
 | `ghcr.io/parlesec/protocolsoup-spire-registration` | SPIRE registration | [spire-registration.md](docs/packages/spire-registration.md) |
@@ -469,6 +471,12 @@ docker pull ghcr.io/parlesec/protocolsoup-federation:latest
 docker run -p 8080:8080 \
   -e SHOWCASE_BASE_URL=http://localhost:8080 \
   ghcr.io/parlesec/protocolsoup-federation:latest
+
+# Standalone VC APIs + wallet harness
+docker run -p 8080:8080 ghcr.io/parlesec/protocolsoup-vc:latest
+docker run -p 8081:8080 \
+  -e WALLET_TARGET_BASE_URL=http://host.docker.internal:8080 \
+  ghcr.io/parlesec/protocolsoup-wallet:latest
 ```
 
 **Using with docker-compose:**

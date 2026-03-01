@@ -27,6 +27,9 @@ type Config struct {
 
 	// Static files directory (for serving frontend in combined deployment)
 	StaticDir string
+
+	// Data directory for durable protocol state (wallet lineage, verifier sessions)
+	DataDir string
 }
 
 // LoadConfig loads configuration from environment variables with sensible defaults
@@ -39,6 +42,7 @@ func LoadConfig() *Config {
 		CORSOrigins:    getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
 		Debug:          getEnvBool("SHOWCASE_DEBUG", false),
 		StaticDir:      getEnv("SHOWCASE_STATIC_DIR", ""),
+		DataDir:        getEnv("SHOWCASE_DATA_DIR", ""),
 	}
 
 	return cfg

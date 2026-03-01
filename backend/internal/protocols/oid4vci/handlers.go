@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -943,6 +944,34 @@ func (p *Plugin) issueCredentialJWT(subject string, credentialConfigurationID st
 		return "", fmt.Errorf("wallet context is required")
 	}
 	now := time.Now().UTC()
+	credentialSubject := map[string]interface{}{
+		"id": subject,
+	}
+	selectiveClaims := map[string]interface{}{
+		"department":      wallet.Department,
+		"degree":          wallet.Degree,
+		"family_name":     wallet.FamilyName,
+		"given_name":      wallet.GivenName,
+		"graduation_year": wallet.GraduationYear,
+	}
+	claimNames := make([]string, 0, len(selectiveClaims))
+	for claimName := range selectiveClaims {
+		claimNames = append(claimNames, claimName)
+	}
+	sort.Strings(claimNames)
+	disclosureDigests := make([]string, 0, len(claimNames))
+	disclosureSegments := make([]string, 0, len(claimNames))
+	for _, claimName := range claimNames {
+		disclosure, err := vc.CreateSDJWTDisclosure(claimName, selectiveClaims[claimName], "")
+		if err != nil {
+			return "", fmt.Errorf("create sd-jwt disclosure for %q: %w", claimName, err)
+		}
+		disclosureDigests = append(disclosureDigests, disclosure.Digest)
+		disclosureSegments = append(disclosureSegments, disclosure.Encoded)
+	}
+	credentialSubject["_sd"] = disclosureDigests
+	credentialSubject["_sd_alg"] = "sha-256"
+
 	claims := jwt.MapClaims{
 		"iss": nowIssuer(p.issuerID()),
 		"sub": subject,
@@ -951,19 +980,13 @@ func (p *Plugin) issueCredentialJWT(subject string, credentialConfigurationID st
 		"exp": now.Add(20 * time.Minute).Unix(),
 		"jti": p.randomValue(24),
 		"vct": defaultCredentialVCT,
+		"_sd_alg": "sha-256",
 		"vc": map[string]interface{}{
 			"type": []string{
 				"VerifiableCredential",
 				credentialConfigurationID,
 			},
-			"credentialSubject": map[string]interface{}{
-				"id":              subject,
-				"given_name":      wallet.GivenName,
-				"family_name":     wallet.FamilyName,
-				"department":      wallet.Department,
-				"degree":          wallet.Degree,
-				"graduation_year": wallet.GraduationYear,
-			},
+			"credentialSubject": credentialSubject,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -981,17 +1004,20 @@ func (p *Plugin) issueCredentialJWT(subject string, credentialConfigurationID st
 	if !ok {
 		return "", fmt.Errorf("issuer jwk is unavailable")
 	}
+	serializedCredential := vc.BuildSDJWTSerialization(signed, disclosureSegments, "")
+
 	if !p.walletStore.Put(vc.WalletCredentialRecord{
-		Subject:       subject,
-		VCT:           defaultCredentialVCT,
-		CredentialJWT: signed,
-		Issuer:        p.issuerID(),
-		IssuerJWK:     issuerJWK,
-		IssuedAt:      now,
+		Subject:         subject,
+		VCT:             defaultCredentialVCT,
+		CredentialJWT:   serializedCredential,
+		IssuerSignedJWT: signed,
+		Issuer:          p.issuerID(),
+		IssuerJWK:       issuerJWK,
+		IssuedAt:        now,
 	}) {
 		return "", fmt.Errorf("failed to persist issued credential in wallet store")
 	}
-	return signed, nil
+	return serializedCredential, nil
 }
 
 func nowIssuer(issuer string) string {

@@ -481,6 +481,10 @@ export interface UseRealFlowExecutorOptions {
   accessToken?: string
   /** OID4VCI transaction code (for tx_code constrained issuance) */
   txCodeValue?: string
+  /** OID4VP dcql_query JSON override (advanced editor) */
+  oid4vpDCQLQueryJSON?: string
+  /** OID4VP scope alias override (mutually exclusive with dcql_query) */
+  oid4vpScopeAlias?: string
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
 }
@@ -738,6 +742,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       token: options.token,
       accessToken: options.accessToken,
       txCodeValue: options.txCodeValue,
+      oid4vpDCQLQueryJSON: options.oid4vpDCQLQueryJSON,
+      oid4vpScopeAlias: options.oid4vpScopeAlias,
       lookingGlassSessionId: options.lookingGlassSessionId,
     }
 
@@ -783,6 +789,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.token,
     options.accessToken,
     options.txCodeValue,
+    options.oid4vpDCQLQueryJSON,
+    options.oid4vpScopeAlias,
     options.lookingGlassSessionId,
   ])
 

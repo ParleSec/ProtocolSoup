@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -131,6 +132,12 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.lookingGlass = lg
 	}
 	p.walletStore = vc.DefaultWalletCredentialStore()
+	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
+		storePath := filepath.Join(dataDir, "vc", "wallet_credentials.json")
+		if err := p.walletStore.EnablePersistence(storePath); err != nil {
+			return fmt.Errorf("initialize wallet credential store persistence: %w", err)
+		}
+	}
 	return nil
 }
 

@@ -48,6 +48,8 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
         const jwtDecoded = artifact.raw ? decodeJWTWithoutValidation(artifact.raw) : null
         const checks = getCheckList(metadata)
         const reasons = getReasonList(metadata)
+        const reasonCodes = getReasonCodeList(metadata)
+        const credentialEvidence = getCredentialEvidence(metadata)
 
         return (
           <div key={artifact.id} className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
@@ -95,6 +97,58 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
               {reasons.length > 0 && (
                 <div className="p-2 rounded bg-red-500/5 border border-red-500/20">
                   <div className="text-xs text-red-300">Policy reasons: {reasons.join(', ')}</div>
+                </div>
+              )}
+
+              {reasonCodes.length > 0 && (
+                <div className="p-2 rounded bg-amber-500/5 border border-amber-500/20">
+                  <div className="text-xs text-amber-200">Reason codes: {reasonCodes.join(', ')}</div>
+                </div>
+              )}
+
+              {credentialEvidence && (
+                <div className="p-2 rounded bg-surface-950 border border-white/5 space-y-2">
+                  <div className="text-xs text-surface-300">Credential evidence (full vs disclosed)</div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+                    <div className="p-2 rounded bg-surface-900 border border-white/5">
+                      <div className="text-surface-400 mb-1">Subject</div>
+                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.subject || 'n/a'}</div>
+                    </div>
+                    <div className="p-2 rounded bg-surface-900 border border-white/5">
+                      <div className="text-surface-400 mb-1">Credential Type</div>
+                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.vct || 'n/a'}</div>
+                    </div>
+                    <div className="p-2 rounded bg-surface-900 border border-white/5">
+                      <div className="text-surface-400 mb-1">Issuer</div>
+                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.issuer || 'n/a'}</div>
+                    </div>
+                  </div>
+                  {credentialEvidence.requiredClaimPaths.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-surface-400">Required claim paths</div>
+                      <div className="flex flex-wrap gap-1">
+                        {credentialEvidence.requiredClaimPaths.map((path) => (
+                          <code key={path} className="px-1.5 py-0.5 rounded bg-surface-900 border border-white/10 text-[10px] text-surface-300">
+                            {path}
+                          </code>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-cyan-300">Disclosed claims</div>
+                      <pre className="p-2 rounded bg-surface-900 text-[11px] text-surface-300 overflow-x-auto">
+                        {JSON.stringify(credentialEvidence.disclosedClaims, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[11px] text-violet-300">Full reconstructed claims</div>
+                      <pre className="p-2 rounded bg-surface-900 text-[11px] text-surface-300 overflow-x-auto">
+                        {JSON.stringify(credentialEvidence.fullClaims, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -192,4 +246,50 @@ function getReasonList(metadata: Record<string, unknown>): string[] {
     return []
   }
   return reasons.map((reason) => String(reason))
+}
+
+function getReasonCodeList(metadata: Record<string, unknown>): string[] {
+  const reasonCodes = metadata.reasonCodes
+  if (!Array.isArray(reasonCodes)) {
+    return []
+  }
+  return reasonCodes.map((code) => String(code))
+}
+
+interface CredentialEvidenceView {
+  subject: string
+  vct: string
+  issuer: string
+  requiredClaimPaths: string[]
+  disclosedClaims: Record<string, unknown>
+  fullClaims: Record<string, unknown>
+}
+
+function getCredentialEvidence(metadata: Record<string, unknown>): CredentialEvidenceView | null {
+  const evidence = metadata.credentialEvidence
+  if (!evidence || typeof evidence !== 'object') {
+    return null
+  }
+
+  const evidenceMap = evidence as Record<string, unknown>
+  const requiredClaimPaths = Array.isArray(evidenceMap.required_claim_paths)
+    ? evidenceMap.required_claim_paths.map((path) => String(path))
+    : []
+  const disclosedClaims =
+    evidenceMap.disclosed_claims && typeof evidenceMap.disclosed_claims === 'object'
+      ? (evidenceMap.disclosed_claims as Record<string, unknown>)
+      : {}
+  const fullClaims =
+    evidenceMap.full_claims && typeof evidenceMap.full_claims === 'object'
+      ? (evidenceMap.full_claims as Record<string, unknown>)
+      : {}
+
+  return {
+    subject: typeof evidenceMap.subject === 'string' ? evidenceMap.subject : '',
+    vct: typeof evidenceMap.vct === 'string' ? evidenceMap.vct : '',
+    issuer: typeof evidenceMap.issuer === 'string' ? evidenceMap.issuer : '',
+    requiredClaimPaths,
+    disclosedClaims,
+    fullClaims,
+  }
 }

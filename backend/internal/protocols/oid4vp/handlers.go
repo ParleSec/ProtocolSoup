@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 	"github.com/go-chi/chi/v5"
 	jose "github.com/go-jose/go-jose/v4"
@@ -34,6 +36,12 @@ type walletResponsePayload struct {
 
 func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
+	if strings.TrimSpace(p.requestDataPath) != "" {
+		if err := p.loadRequestState(p.requestDataPath); err != nil {
+			writeServerError(w, "load request state", err)
+			return
+		}
+	}
 
 	if p.keySet == nil {
 		writeOID4VPError(w, http.StatusServiceUnavailable, "server_error", "keyset is unavailable")
@@ -157,6 +165,11 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	p.mu.Lock()
 	p.requests[requestID] = session
 	p.requestsByState[state] = requestID
+	if err := p.persistRequestStateLocked(); err != nil {
+		p.mu.Unlock()
+		writeServerError(w, "persist request session", err)
+		return
+	}
 	p.mu.Unlock()
 
 	p.emitEvent(
@@ -164,15 +177,17 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		lookingglass.EventTypeFlowStep,
 		"OID4VP Authorization Request Created",
 		map[string]interface{}{
-			"request_id":       requestID,
-			"client_id":        req.ClientID,
-			"client_id_scheme": string(clientIDScheme),
-			"response_mode":    req.ResponseMode,
-			"response_uri":     req.ResponseURI,
-			"has_dcql_query":   dcqlQuery != "",
-			"scope_alias":      req.Scope,
-			"nonce":            nonce,
-			"state":            state,
+			"request_id":            requestID,
+			"client_id":             req.ClientID,
+			"client_id_scheme":      string(clientIDScheme),
+			"response_mode":         req.ResponseMode,
+			"response_uri":          req.ResponseURI,
+			"has_dcql_query":        dcqlQuery != "",
+			"scope_alias":           req.Scope,
+			"nonce":                 nonce,
+			"state":                 state,
+			"trust_mode":            p.trustMode(),
+			"did_web_allowed_hosts": p.didWebAllowedHosts,
 		},
 		append(
 			append(
@@ -187,22 +202,30 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	)
 
 	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"request_id":          requestID,
-		"request_uri":         p.verifierBaseURL() + "/request/" + requestID,
-		"request_uri_method":  "get",
-		"request":             requestJWT,
-		"response_mode":       req.ResponseMode,
-		"response_uri":        req.ResponseURI,
-		"state":               state,
-		"nonce":               nonce,
-		"client_id":           req.ClientID,
-		"client_id_scheme":    string(clientIDScheme),
-		"expires_in_seconds":  int(requestObjectTTL.Seconds()),
-		"dcql_query_supplied": dcqlQuery != "",
+		"request_id":            requestID,
+		"request_uri":           p.verifierBaseURL() + "/request/" + requestID,
+		"request_uri_method":    "get",
+		"request":               requestJWT,
+		"response_mode":         req.ResponseMode,
+		"response_uri":          req.ResponseURI,
+		"state":                 state,
+		"nonce":                 nonce,
+		"client_id":             req.ClientID,
+		"client_id_scheme":      string(clientIDScheme),
+		"expires_in_seconds":    int(requestObjectTTL.Seconds()),
+		"dcql_query_supplied":   dcqlQuery != "",
+		"trust_mode":            p.trustMode(),
+		"did_web_allowed_hosts": p.didWebAllowedHosts,
 	})
 }
 
 func (p *Plugin) handleGetAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(p.requestDataPath) != "" {
+		if err := p.loadRequestState(p.requestDataPath); err != nil {
+			writeServerError(w, "load request state", err)
+			return
+		}
+	}
 	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
 	if requestID == "" {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "requestID is required")
@@ -233,6 +256,12 @@ func (p *Plugin) handleGetAuthorizationRequest(w http.ResponseWriter, r *http.Re
 }
 
 func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(p.requestDataPath) != "" {
+		if err := p.loadRequestState(p.requestDataPath); err != nil {
+			writeServerError(w, "load request state", err)
+			return
+		}
+	}
 	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
 	if requestID == "" {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "requestID is required")
@@ -261,6 +290,12 @@ func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.R
 
 func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
+	if strings.TrimSpace(p.requestDataPath) != "" {
+		if err := p.loadRequestState(p.requestDataPath); err != nil {
+			writeServerError(w, "load request state", err)
+			return
+		}
+	}
 
 	payload, err := parseWalletResponsePayload(r)
 	if err != nil {
@@ -309,7 +344,17 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 
 	result := p.evaluateVPToken(session, vpToken)
 	p.mu.Lock()
+	if session.Result != nil {
+		p.mu.Unlock()
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "request session already completed")
+		return
+	}
 	session.Result = result
+	if err := p.persistRequestStateLocked(); err != nil {
+		p.mu.Unlock()
+		writeServerError(w, "persist request result", err)
+		return
+	}
 	p.mu.Unlock()
 
 	eventType := lookingglass.EventTypeFlowStep
@@ -333,6 +378,7 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 			"policy_allowed":            result.Policy.Allowed,
 			"policy_code":               result.Policy.Code,
 			"policy_reasons":            result.Policy.Reasons,
+			"policy_reason_codes":       result.Policy.ReasonCodes,
 			"vp_token_present":          vpToken != "",
 			"direct_post_jwt_encrypted": session.ResponseMode == "direct_post.jwt",
 		},
@@ -350,6 +396,12 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleGetVerificationResult(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(p.requestDataPath) != "" {
+		if err := p.loadRequestState(p.requestDataPath); err != nil {
+			writeServerError(w, "load request state", err)
+			return
+		}
+	}
 	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
 	if requestID == "" {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "requestID is required")
@@ -388,12 +440,15 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 			Code:        "verification_failed",
 			Message:     "Presentation failed verifier policy checks",
 			Reasons:     []string{},
+			ReasonCodes: []string{},
 			EvaluatedAt: time.Now().UTC(),
 		},
 	}
+
 	walletContext, err := p.resolvePresentedWalletContext(vpToken, "")
 	if err != nil {
-		result.Policy.Reasons = append(result.Policy.Reasons, err.Error())
+		addPolicyReason(result, "vp_token_invalid", err.Error())
+		finalizePolicyDecision(result)
 		return result
 	}
 
@@ -408,31 +463,34 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 			}
 		}
 		return walletContext.VerificationKey, nil
-	})
+	}, jwt.WithoutClaimsValidation())
 	if err != nil || !parsed.Valid {
-		result.Policy.Reasons = append(result.Policy.Reasons, "vp_token signature validation failed")
+		addPolicyReason(result, "vp_token_signature_invalid", "vp_token signature validation failed")
+		finalizePolicyDecision(result)
 		return result
 	}
 	if err := ValidateVPTokenType(fmt.Sprint(parsed.Header["typ"])); err != nil {
-		result.Policy.Reasons = append(result.Policy.Reasons, err.Error())
+		addPolicyReason(result, "vp_token_type_invalid", err.Error())
+		finalizePolicyDecision(result)
 		return result
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		result.Policy.Reasons = append(result.Policy.Reasons, "vp_token claims are invalid")
+		addPolicyReason(result, "vp_token_claims_invalid", "vp_token claims are invalid")
+		finalizePolicyDecision(result)
 		return result
 	}
 
 	issuer, _ := claims["iss"].(string)
 	subject, _ := claims["sub"].(string)
-	if strings.TrimSpace(issuer) != walletContext.Subject || strings.TrimSpace(subject) != walletContext.Subject {
-		result.Policy.Reasons = append(result.Policy.Reasons, "holder subject does not match wallet identity")
-	}
 	cnfMap, _ := claims["cnf"].(map[string]interface{})
 	cnfJKT, _ := cnfMap["jkt"].(string)
+	if strings.TrimSpace(issuer) != walletContext.Subject || strings.TrimSpace(subject) != walletContext.Subject {
+		addPolicyReason(result, "holder_binding_mismatch", "holder subject does not match wallet identity")
+	}
 	if strings.TrimSpace(cnfJKT) != walletContext.BindingThumbprint {
-		result.Policy.Reasons = append(result.Policy.Reasons, "holder key thumbprint mismatch")
+		addPolicyReason(result, "holder_binding_mismatch", "holder key thumbprint mismatch")
 	}
 	if strings.TrimSpace(issuer) == walletContext.Subject && strings.TrimSpace(subject) == walletContext.Subject && strings.TrimSpace(cnfJKT) == walletContext.BindingThumbprint {
 		result.HolderBindingVerified = true
@@ -441,32 +499,46 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 	if nonceClaim, _ := claims["nonce"].(string); nonceClaim == session.Nonce {
 		result.NonceValidated = true
 	} else {
-		result.Policy.Reasons = append(result.Policy.Reasons, "nonce mismatch")
+		addPolicyReason(result, "nonce_mismatch", "nonce mismatch")
 	}
 
 	if audienceIncludes(claims["aud"], session.ClientID) {
 		result.AudienceValidated = true
 	} else {
-		result.Policy.Reasons = append(result.Policy.Reasons, "audience mismatch")
+		addPolicyReason(result, "audience_mismatch", "audience mismatch")
 	}
 
 	expiryValid := claimExpiryIsValid(claims["exp"])
 	result.ExpiryValidated = expiryValid
 	if !expiryValid {
-		result.Policy.Reasons = append(result.Policy.Reasons, "vp_token expired")
+		addPolicyReason(result, "vp_token_expired", "vp_token expired")
 	}
 
-	if err := p.validatePresentedCredential(claims, walletContext.Subject); err != nil {
-		result.Policy.Reasons = append(result.Policy.Reasons, err.Error())
+	credentialEvidence, credentialErr := p.validatePresentedCredential(claims, walletContext.Subject, session)
+	if credentialErr != nil {
+		if policyErr, ok := asVerifierPolicyError(credentialErr); ok {
+			addPolicyReason(result, policyErr.Code, policyErr.Message)
+		} else {
+			addPolicyReason(result, "credential_validation_failed", credentialErr.Error())
+		}
 		result.HolderBindingVerified = false
+	} else {
+		result.CredentialEvidence = credentialEvidence
 	}
 
-	result.Policy.Allowed = result.NonceValidated && result.AudienceValidated && result.ExpiryValidated && result.HolderBindingVerified
+	result.Policy.Allowed = result.NonceValidated &&
+		result.AudienceValidated &&
+		result.ExpiryValidated &&
+		result.HolderBindingVerified &&
+		len(result.Policy.ReasonCodes) == 0
 	if result.Policy.Allowed {
 		result.Policy.Code = "allowed"
 		result.Policy.Message = "Presentation accepted"
 		result.Policy.Reasons = nil
+		result.Policy.ReasonCodes = nil
+		return result
 	}
+	finalizePolicyDecision(result)
 	return result
 }
 
@@ -522,7 +594,7 @@ func (p *Plugin) decryptAndExtractDirectPostJWT(compactJWE string, session *requ
 			}
 		}
 		return walletContext.VerificationKey, nil
-	})
+	}, jwt.WithoutClaimsValidation())
 	if err != nil || !parsed.Valid {
 		return "", "", fmt.Errorf("invalid direct_post.jwt response signature")
 	}
@@ -668,50 +740,66 @@ func (p *Plugin) resolvePresentedWalletContext(token string, subjectHint string)
 	}, nil
 }
 
-func (p *Plugin) validatePresentedCredential(vpClaims jwt.MapClaims, walletSubject string) error {
+func (p *Plugin) validatePresentedCredential(
+	vpClaims jwt.MapClaims,
+	walletSubject string,
+	session *requestSession,
+) (*models.OID4VPCredentialEvidence, error) {
 	normalizedSubject := strings.TrimSpace(walletSubject)
 	if normalizedSubject == "" {
-		return fmt.Errorf("wallet subject is missing")
+		return nil, newVerifierPolicyError("holder_binding_mismatch", "wallet subject is missing", nil)
 	}
 	vpObject, ok := vpClaims["vp"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("vp claim is missing")
+		return nil, newVerifierPolicyError("credential_missing", "vp claim is missing", nil)
 	}
 	credentialJWT, _ := vpObject["credential_jwt"].(string)
-	if strings.TrimSpace(credentialJWT) == "" {
-		return fmt.Errorf("presented credential is missing")
+	credentialJWT = strings.TrimSpace(credentialJWT)
+	if credentialJWT == "" {
+		return nil, newVerifierPolicyError("credential_missing", "presented credential is missing", nil)
 	}
 
-	decodedCredential, err := crypto.DecodeTokenWithoutValidation(credentialJWT)
+	envelope, err := vc.ParseSDJWTEnvelope(credentialJWT)
 	if err != nil {
-		return fmt.Errorf("presented credential decode failed: %w", err)
+		return nil, newVerifierPolicyError("credential_malformed", "presented credential serialization is invalid", err)
+	}
+	issuerSignedJWT := strings.TrimSpace(envelope.IssuerSignedJWT)
+	decodedCredential, err := crypto.DecodeTokenWithoutValidation(issuerSignedJWT)
+	if err != nil {
+		return nil, newVerifierPolicyError("credential_malformed", "presented credential decode failed", err)
 	}
 	credentialSub, _ := decodedCredential.Payload["sub"].(string)
 	if strings.TrimSpace(credentialSub) != normalizedSubject {
-		return fmt.Errorf("presented credential subject mismatch")
+		return nil, newVerifierPolicyError("credential_subject_mismatch", "presented credential subject mismatch", nil)
 	}
 	credentialVCT, _ := decodedCredential.Payload["vct"].(string)
 	credentialVCT = strings.TrimSpace(credentialVCT)
 	if credentialVCT == "" {
-		return fmt.Errorf("presented credential vct is missing")
+		return nil, newVerifierPolicyError("credential_missing_vct", "presented credential vct is missing", nil)
 	}
 	if p.walletStore == nil {
-		return fmt.Errorf("wallet credential store is unavailable")
+		return nil, newVerifierPolicyError("missing_lineage", "wallet credential lineage store is unavailable", nil)
 	}
 	storedRecord, found := p.walletStore.Get(normalizedSubject, credentialVCT)
 	if !found {
-		return fmt.Errorf("presented credential is not available in wallet store")
+		return nil, newVerifierPolicyError("missing_lineage", "presented credential lineage was not found", nil)
 	}
-	if strings.TrimSpace(storedRecord.CredentialJWT) != strings.TrimSpace(credentialJWT) {
-		return fmt.Errorf("presented credential does not match wallet store record")
+	storedIssuerJWT := strings.TrimSpace(storedRecord.IssuerSignedJWT)
+	if storedIssuerJWT == "" {
+		if parsedStored, err := vc.ParseSDJWTEnvelope(storedRecord.CredentialJWT); err == nil {
+			storedIssuerJWT = strings.TrimSpace(parsedStored.IssuerSignedJWT)
+		}
+	}
+	if storedIssuerJWT != "" && issuerSignedJWT != storedIssuerJWT {
+		return nil, newVerifierPolicyError("missing_lineage", "presented credential does not match stored issuance lineage", nil)
 	}
 
 	verificationKey, expectedAlgPrefix, err := credentialVerificationKeyFromJWK(storedRecord.IssuerJWK)
 	if err != nil {
-		return err
+		return nil, newVerifierPolicyError("credential_signature_invalid", "issuer verification key is invalid", err)
 	}
 
-	parsedCredential, err := jwt.Parse(credentialJWT, func(token *jwt.Token) (interface{}, error) {
+	parsedCredential, err := jwt.Parse(issuerSignedJWT, func(token *jwt.Token) (interface{}, error) {
 		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
 			return nil, fmt.Errorf("credential jwt uses unexpected algorithm")
 		}
@@ -722,24 +810,226 @@ func (p *Plugin) validatePresentedCredential(vpClaims jwt.MapClaims, walletSubje
 		return verificationKey, nil
 	}, jwt.WithoutClaimsValidation())
 	if err != nil {
-		return fmt.Errorf("presented credential signature validation failed: %w", err)
+		return nil, newVerifierPolicyError("credential_signature_invalid", "presented credential signature validation failed", err)
 	}
 	if !parsedCredential.Valid {
-		return fmt.Errorf("presented credential signature validation failed")
+		return nil, newVerifierPolicyError("credential_signature_invalid", "presented credential signature validation failed", nil)
 	}
 
 	credentialClaims, ok := parsedCredential.Claims.(jwt.MapClaims)
 	if !ok {
-		return fmt.Errorf("presented credential claims are invalid")
+		return nil, newVerifierPolicyError("credential_malformed", "presented credential claims are invalid", nil)
 	}
 	issuer, _ := credentialClaims["iss"].(string)
 	if strings.TrimSpace(storedRecord.Issuer) != "" && strings.TrimSpace(issuer) != strings.TrimSpace(storedRecord.Issuer) {
-		return fmt.Errorf("presented credential issuer mismatch")
+		return nil, newVerifierPolicyError("credential_issuer_mismatch", "presented credential issuer mismatch", nil)
 	}
 	if !claimExpiryIsValid(credentialClaims["exp"]) {
-		return fmt.Errorf("presented credential expired")
+		return nil, newVerifierPolicyError("credential_expired", "presented credential expired", nil)
 	}
-	return nil
+
+	digestAllowList := credentialDigestAllowList(credentialClaims)
+	decodedDisclosures, err := vc.DecodeAndVerifyDisclosures(envelope.Disclosures, digestAllowList)
+	if err != nil {
+		return nil, newVerifierPolicyError("disclosure_invalid", "presented disclosures failed validation", err)
+	}
+	disclosedClaims := vc.DisclosedClaimMap(decodedDisclosures)
+
+	fullClaims := extractCredentialSubjectClaims(credentialClaims)
+	for claimName, claimValue := range disclosedClaims {
+		fullClaims[claimName] = claimValue
+	}
+
+	requiredClaimPaths := extractRequiredDCQLClaimPaths("")
+	if session != nil {
+		requiredClaimPaths = extractRequiredDCQLClaimPaths(session.DCQLQuery)
+	}
+	for _, claimPath := range requiredClaimPaths {
+		if !hasClaimPath(fullClaims, claimPath) {
+			return nil, newVerifierPolicyError(
+				"missing_required_claim",
+				fmt.Sprintf("required claim %q is missing from disclosed credential data", claimPath),
+				nil,
+			)
+		}
+	}
+
+	return &models.OID4VPCredentialEvidence{
+		Subject:            normalizedSubject,
+		VCT:                credentialVCT,
+		Issuer:             strings.TrimSpace(issuer),
+		RequiredClaimPaths: requiredClaimPaths,
+		DisclosedClaims:    disclosedClaims,
+		FullClaims:         fullClaims,
+	}, nil
+}
+
+type verifierPolicyError struct {
+	Code    string
+	Message string
+	Cause   error
+}
+
+func (e *verifierPolicyError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %v", e.Message, e.Cause)
+	}
+	return e.Message
+}
+
+func (e *verifierPolicyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func newVerifierPolicyError(code string, message string, cause error) error {
+	return &verifierPolicyError{
+		Code:    strings.TrimSpace(code),
+		Message: strings.TrimSpace(message),
+		Cause:   cause,
+	}
+}
+
+func asVerifierPolicyError(err error) (*verifierPolicyError, bool) {
+	var policyErr *verifierPolicyError
+	if errors.As(err, &policyErr) {
+		return policyErr, true
+	}
+	return nil, false
+}
+
+func addPolicyReason(result *models.OID4VPVerificationResult, code string, message string) {
+	if result == nil {
+		return
+	}
+	normalizedCode := strings.TrimSpace(code)
+	normalizedMessage := strings.TrimSpace(message)
+	if normalizedCode == "" || normalizedMessage == "" {
+		return
+	}
+	for idx := range result.Policy.ReasonCodes {
+		if result.Policy.ReasonCodes[idx] == normalizedCode {
+			return
+		}
+	}
+	result.Policy.ReasonCodes = append(result.Policy.ReasonCodes, normalizedCode)
+	result.Policy.Reasons = append(result.Policy.Reasons, normalizedMessage)
+}
+
+func finalizePolicyDecision(result *models.OID4VPVerificationResult) {
+	if result == nil {
+		return
+	}
+	if len(result.Policy.ReasonCodes) == 0 || len(result.Policy.Reasons) == 0 {
+		result.Policy.Code = "verification_failed"
+		result.Policy.Message = "Presentation failed verifier policy checks"
+		return
+	}
+	result.Policy.Code = result.Policy.ReasonCodes[0]
+	result.Policy.Message = "Presentation denied: " + result.Policy.Reasons[0]
+}
+
+func credentialDigestAllowList(credentialClaims jwt.MapClaims) []string {
+	allowList := make([]string, 0)
+	vcObject, _ := credentialClaims["vc"].(map[string]interface{})
+	credentialSubject, _ := vcObject["credentialSubject"].(map[string]interface{})
+	rawDigests, _ := credentialSubject["_sd"].([]interface{})
+	for _, item := range rawDigests {
+		if digest, ok := item.(string); ok {
+			normalized := strings.TrimSpace(digest)
+			if normalized != "" {
+				allowList = append(allowList, normalized)
+			}
+		}
+	}
+	return allowList
+}
+
+func extractCredentialSubjectClaims(credentialClaims jwt.MapClaims) map[string]interface{} {
+	claims := make(map[string]interface{})
+	vcObject, _ := credentialClaims["vc"].(map[string]interface{})
+	credentialSubject, _ := vcObject["credentialSubject"].(map[string]interface{})
+	for claimName, claimValue := range credentialSubject {
+		if claimName == "_sd" || claimName == "_sd_alg" {
+			continue
+		}
+		claims[claimName] = claimValue
+	}
+	return claims
+}
+
+func extractRequiredDCQLClaimPaths(rawDCQLQuery string) []string {
+	trimmed := strings.TrimSpace(rawDCQLQuery)
+	if trimmed == "" {
+		return nil
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil
+	}
+	rawCredentials, _ := payload["credentials"].([]interface{})
+	required := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, rawCredential := range rawCredentials {
+		credentialObject, _ := rawCredential.(map[string]interface{})
+		rawClaims, _ := credentialObject["claims"].([]interface{})
+		for _, rawClaim := range rawClaims {
+			claimObject, _ := rawClaim.(map[string]interface{})
+			rawPath, _ := claimObject["path"].([]interface{})
+			segments := make([]string, 0, len(rawPath))
+			for _, rawSegment := range rawPath {
+				segment, _ := rawSegment.(string)
+				segment = strings.TrimSpace(segment)
+				if segment == "" {
+					continue
+				}
+				segments = append(segments, segment)
+			}
+			if len(segments) == 0 {
+				continue
+			}
+			path := strings.Join(segments, ".")
+			if _, exists := seen[path]; exists {
+				continue
+			}
+			seen[path] = struct{}{}
+			required = append(required, path)
+		}
+	}
+	sort.Strings(required)
+	return required
+}
+
+func hasClaimPath(claims map[string]interface{}, claimPath string) bool {
+	segments := strings.Split(strings.TrimSpace(claimPath), ".")
+	if len(segments) == 0 {
+		return false
+	}
+	var current interface{} = claims
+	for idx, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return false
+		}
+		object, ok := current.(map[string]interface{})
+		if !ok {
+			return false
+		}
+		value, exists := object[segment]
+		if !exists {
+			return false
+		}
+		if idx == len(segments)-1 {
+			return true
+		}
+		current = value
+	}
+	return false
 }
 
 func credentialVerificationKeyFromJWK(jwk crypto.JWK) (interface{}, string, error) {

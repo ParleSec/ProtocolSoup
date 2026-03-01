@@ -44,6 +44,13 @@ jobs:
             build_args: |
               SERVICE_CMD=./cmd/server-federation
             description: OAuth 2.0, OpenID Connect, SAML 2.0 Identity Provider
+          - name: vc
+            image: protocolsoup-vc
+            dockerfile: docker/Dockerfile.backend
+            context: .
+            build_args: |
+              SERVICE_CMD=./cmd/server-vc
+            description: OpenID4VCI and OpenID4VP verifiable credentials service
           - name: scim
             image: protocolsoup-scim
             dockerfile: docker/Dockerfile.backend
@@ -73,6 +80,12 @@ jobs:
             context: .
             build_args: ""
             description: React UI for ProtocolSoup
+          - name: wallet
+            image: protocolsoup-wallet
+            dockerfile: docker/Dockerfile.wallet-harness
+            context: .
+            build_args: ""
+            description: OID4VP wallet harness and callback submission service
           # SPIRE infrastructure
           - name: spire-server
             image: protocolsoup-spire-server
@@ -205,10 +218,12 @@ jobs:
             echo "Published images:"
             echo "  - ghcr.io/${OWNER}/protocolsoup-gateway"
             echo "  - ghcr.io/${OWNER}/protocolsoup-federation"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-vc"
             echo "  - ghcr.io/${OWNER}/protocolsoup-scim"
             echo "  - ghcr.io/${OWNER}/protocolsoup-ssf"
             echo "  - ghcr.io/${OWNER}/protocolsoup-spiffe"
             echo "  - ghcr.io/${OWNER}/protocolsoup-frontend"
+            echo "  - ghcr.io/${OWNER}/protocolsoup-wallet"
             echo "  - ghcr.io/${OWNER}/protocolsoup-spire-server"
             echo "  - ghcr.io/${OWNER}/protocolsoup-spire-agent"
             echo "  - ghcr.io/${OWNER}/protocolsoup-spire-registration"

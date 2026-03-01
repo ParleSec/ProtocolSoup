@@ -385,6 +385,10 @@ export interface ExecutorFactoryConfig {
   lookingGlassSessionId?: string
   /** OID4VCI transaction code for tx_code flow variants */
   txCodeValue?: string
+  /** OID4VP dcql_query JSON override */
+  oid4vpDCQLQueryJSON?: string
+  /** OID4VP scope alias override */
+  oid4vpScopeAlias?: string
 }
 
 /**
@@ -413,6 +417,16 @@ export function createFlowExecutor(
     redirectUri: config.redirectUri,
     scopes: config.scopes,
     captureSessionId: config.lookingGlassSessionId,
+  }
+  const extraParams: Record<string, string> = {}
+  if (typeof config.oid4vpDCQLQueryJSON === 'string' && config.oid4vpDCQLQueryJSON.trim().length > 0) {
+    extraParams.oid4vp_dcql_query = config.oid4vpDCQLQueryJSON.trim()
+  }
+  if (typeof config.oid4vpScopeAlias === 'string' && config.oid4vpScopeAlias.trim().length > 0) {
+    extraParams.oid4vp_scope_alias = config.oid4vpScopeAlias.trim()
+  }
+  if (Object.keys(extraParams).length > 0) {
+    baseConfig.extraParams = extraParams
   }
 
   // Merge additional config for the flow
@@ -470,6 +484,20 @@ export function createFlowExecutor(
   // Handle OID4VCI tx_code flow variants
   if (flowId.startsWith('oid4vci-') && config.txCodeValue) {
     (fullConfig as OID4VCIPreAuthorizedConfig).txCodeValue = config.txCodeValue
+  }
+
+  // Handle OID4VP dcql_query/scope alias overrides
+  if (flowId.startsWith('oid4vp-')) {
+    const dcqlQueryJSON = baseConfig.extraParams?.oid4vp_dcql_query
+    const scopeAlias = baseConfig.extraParams?.oid4vp_scope_alias
+    ;(fullConfig as {
+      dcqlQueryJSON?: string
+      scopeAlias?: string
+    }).dcqlQueryJSON = dcqlQueryJSON
+    ;(fullConfig as {
+      dcqlQueryJSON?: string
+      scopeAlias?: string
+    }).scopeAlias = scopeAlias
   }
 
   // Handle Token Introspection flow

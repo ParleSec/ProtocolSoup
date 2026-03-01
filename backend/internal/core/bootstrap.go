@@ -58,6 +58,7 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 
 	pluginConfig := plugin.PluginConfig{
 		BaseURL:      cfg.BaseURL,
+		DataDir:      cfg.DataDir,
 		KeySet:       keySet,
 		MockIdP:      idp,
 		LookingGlass: lg,

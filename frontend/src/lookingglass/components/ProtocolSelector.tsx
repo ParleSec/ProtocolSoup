@@ -26,6 +26,8 @@ interface DropdownPosition {
   width: number
 }
 
+const WIP_PROTOCOL_IDS = new Set(['oid4vci', 'oid4vp'])
+
 export function ProtocolSelector({
   protocols,
   selectedProtocol,
@@ -166,9 +168,16 @@ export function ProtocolSelector({
           }}
           className="flex items-center gap-2 px-3 py-2 sm:py-1.5 rounded bg-surface-900 border border-white/10 hover:border-white/20 active:border-white/30 text-sm font-mono transition-colors w-full sm:flex-initial sm:min-w-[140px] touch-manipulation"
         >
-          <span className={`truncate ${selectedProtocol ? 'text-white' : 'text-surface-400'}`}>
-            {selectedProtocol?.id || 'select'}
-          </span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={`truncate ${selectedProtocol ? 'text-white' : 'text-surface-400'}`}>
+              {selectedProtocol?.id || 'select'}
+            </span>
+            {selectedProtocol && WIP_PROTOCOL_IDS.has(selectedProtocol.id) && (
+              <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-[10px] font-semibold tracking-wide text-amber-300">
+                WIP
+              </span>
+            )}
+          </div>
           <ChevronDown className={`w-3.5 h-3.5 text-surface-400 ml-auto flex-shrink-0 transition-transform ${isProtocolOpen ? 'rotate-180' : ''}`} />
         </button>
       </div>
@@ -226,7 +235,14 @@ export function ProtocolSelector({
                       : 'text-surface-300 hover:bg-white/5 active:bg-white/10 hover:text-white'
                   }`}
                 >
-                  <span>{protocol.id}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="truncate">{protocol.id}</span>
+                    {WIP_PROTOCOL_IDS.has(protocol.id) && (
+                      <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-[10px] font-semibold tracking-wide text-amber-300">
+                        WIP
+                      </span>
+                    )}
+                  </div>
                   {selectedProtocol?.id === protocol.id && (
                     <Check className="w-3.5 h-3.5" />
                   )}
