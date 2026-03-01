@@ -244,15 +244,15 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, upstreamStatus, map[string]interface{}{
-		"mode":                "one_click",
-		"request_id":          requestContext.RequestID,
-		"response_mode":       requestContext.ResponseMode,
-		"response_uri":        s.targetResponseURI,
-		"wallet_subject":      wallet.Subject,
-		"credential_source":   credentialSource,
-		"disclosure_claims":   disclosureClaims,
-		"upstream_status":     upstreamStatus,
-		"upstream_body":       upstreamBody,
+		"mode":                 "one_click",
+		"request_id":           requestContext.RequestID,
+		"response_mode":        requestContext.ResponseMode,
+		"response_uri":         s.targetResponseURI,
+		"wallet_subject":       wallet.Subject,
+		"credential_source":    credentialSource,
+		"disclosure_claims":    disclosureClaims,
+		"upstream_status":      upstreamStatus,
+		"upstream_body":        upstreamBody,
 		"wallet_stepwise_hint": "use mode=stepwise for keygen/issuance/presentation ceremony controls",
 	})
 }
@@ -284,30 +284,16 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 	switch step {
 	case "bootstrap":
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"mode":             "stepwise",
-			"step":             "bootstrap",
-			"wallet_subject":   wallet.Subject,
-			"wallet_key_id":    wallet.KeySet.RSAKeyID(),
+			"mode":              "stepwise",
+			"step":              "bootstrap",
+			"wallet_subject":    wallet.Subject,
+			"wallet_key_id":     wallet.KeySet.RSAKeyID(),
 			"credential_cached": strings.TrimSpace(wallet.CredentialJWT) != "",
 		})
 		return
 
 	case "issue_credential":
 		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, req.CredentialJWT, req.LookingGlassSessionID)
-	needsCredentialBootstrap := strings.TrimSpace(wallet.CredentialJWT) == ""
-	needsCredentialRefresh := false
-	if !needsCredentialBootstrap {
-		refreshRequired, err := credentialRefreshRequired(wallet.CredentialJWT, 90*time.Second)
-		if err != nil {
-			needsCredentialRefresh = true
-			log.Printf("wallet harness: credential pre-check failed for subject %q, refreshing via oid4vci (%v)", wallet.Subject, err)
-		} else if refreshRequired {
-			needsCredentialRefresh = true
-		}
-	}
-
-	if needsCredentialBootstrap || needsCredentialRefresh {
-		autoIssuedCredentialJWT, err := s.issueCredentialForWallet(r.Context(), wallet)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
@@ -373,19 +359,6 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"credential_source": credentialSource,
 			"disclosure_claims": disclosureClaims,
 			"vp_token":          vpToken,
-		if needsCredentialBootstrap {
-			credentialSource = "auto_issued_oid4vci"
-		} else {
-			credentialSource = "auto_refreshed_oid4vci"
-		}
-	}
-	if credentialSource == "" {
-		credentialSource = "cached_wallet_store"
-	}
-	if strings.TrimSpace(wallet.CredentialJWT) == "" {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":             "wallet_submission_failed",
-			"error_description": "wallet credential is unavailable after bootstrap",
 		})
 		return
 
@@ -1077,38 +1050,6 @@ func walletUserIDFromSubject(subject string) string {
 		return strings.TrimSpace(normalized[idx+1:])
 	}
 	return normalized
-}
-
-func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration) (bool, error) {
-	decodedCredential, err := intcrypto.DecodeTokenWithoutValidation(strings.TrimSpace(credentialJWT))
-	if err != nil {
-		return true, fmt.Errorf("decode credential_jwt: %w", err)
-	}
-	expRaw, ok := decodedCredential.Payload["exp"]
-	if !ok {
-		return true, fmt.Errorf("credential_jwt missing exp claim")
-	}
-	expUnix, err := toUnixTimestamp(expRaw)
-	if err != nil {
-		return true, fmt.Errorf("parse credential_jwt exp claim: %w", err)
-	}
-	expiry := time.Unix(expUnix, 0).UTC()
-	return time.Until(expiry) <= minRemaining, nil
-}
-
-func toUnixTimestamp(raw interface{}) (int64, error) {
-	switch value := raw.(type) {
-	case float64:
-		return int64(value), nil
-	case int64:
-		return value, nil
-	case int:
-		return int64(value), nil
-	case json.Number:
-		return value.Int64()
-	default:
-		return 0, fmt.Errorf("unsupported numeric timestamp type %T", raw)
-	}
 }
 
 func (s *walletHarnessServer) validateAllowedURL(raw string) (string, error) {
