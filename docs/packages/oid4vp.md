@@ -2,6 +2,10 @@
 
 OpenID for Verifiable Presentations (OID4VP 1.0) verifier endpoints exposed by the federation service.
 
+## Implementation Docs
+
+- Backend protocol README: [`backend/internal/protocols/oid4vp/README.md`](../../backend/internal/protocols/oid4vp/README.md)
+
 ## Scope
 
 - DCQL-first request contract (`dcql_query` xor scope alias)
