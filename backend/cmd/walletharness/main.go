@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +32,8 @@ type walletHarnessServer struct {
 	targetResponseURI string
 
 	defaultWalletSubject string
+	walletSessionTTL     time.Duration
+	strictIsolation      bool
 	allowedCORSOrigins   map[string]struct{}
 
 	mu      sync.Mutex
@@ -37,9 +41,12 @@ type walletHarnessServer struct {
 }
 
 type walletMaterial struct {
+	ScopeKey      string
 	Subject       string
 	KeySet        *intcrypto.KeySet
 	CredentialJWT string
+	CreatedAt     time.Time
+	LastAccess    time.Time
 }
 
 type walletSubmitRequest struct {
@@ -68,6 +75,15 @@ func main() {
 	listenAddr := envOrDefault("WALLET_LISTEN_ADDR", ":8080")
 	targetBaseURL := strings.TrimRight(strings.TrimSpace(envOrDefault("WALLET_TARGET_BASE_URL", "https://protocolsoup.com")), "/")
 	defaultWalletSubject := strings.TrimSpace(envOrDefault("WALLET_DEFAULT_SUBJECT", "did:example:wallet:alice"))
+	walletSessionTTL := 20 * time.Minute
+	if ttlRaw := strings.TrimSpace(os.Getenv("WALLET_SESSION_TTL")); ttlRaw != "" {
+		ttl, err := time.ParseDuration(ttlRaw)
+		if err != nil {
+			log.Fatalf("invalid WALLET_SESSION_TTL %q: %v", ttlRaw, err)
+		}
+		walletSessionTTL = ttl
+	}
+	strictIsolation := parseBoolEnv("WALLET_STRICT_SESSION_ISOLATION", true)
 	allowedCORSOrigins := parseOriginAllowList(envOrDefault("WALLET_ALLOWED_CORS_ORIGINS", "https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev"))
 
 	parsedBaseURL, err := url.ParseRequestURI(targetBaseURL)
@@ -99,6 +115,8 @@ func main() {
 		targetHost:           targetHost,
 		targetResponseURI:    targetBaseURL + "/oid4vp/response",
 		defaultWalletSubject: defaultWalletSubject,
+		walletSessionTTL:     walletSessionTTL,
+		strictIsolation:      strictIsolation,
 		allowedCORSOrigins:   allowedCORSOrigins,
 		wallets:              make(map[string]*walletMaterial),
 	}
@@ -115,6 +133,8 @@ func main() {
 
 	log.Printf("wallet harness listening on %s", listenAddr)
 	log.Printf("wallet harness target base URL: %s", targetBaseURL)
+	log.Printf("wallet harness strict session isolation: %t", strictIsolation)
+	log.Printf("wallet harness wallet session ttl: %s", walletSessionTTL)
 	log.Printf("wallet harness CORS origins: %d configured", len(allowedCORSOrigins))
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("wallet harness server failed: %v", err)
@@ -157,14 +177,23 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		req.Mode = "one_click"
 	}
 
+	scopeKey, err := s.resolveWalletScopeKey(req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
 	subject := req.WalletSubject
 	if subject == "" {
 		subject = req.Subject
 	}
 	if subject == "" {
-		subject = s.defaultWalletSubject
+		subject = scopedWalletSubject(s.defaultWalletSubject, scopeKey)
 	}
-	wallet, err := s.getOrCreateWallet(subject)
+	wallet, err := s.getOrCreateWallet(scopeKey, subject)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error":             "server_error",
@@ -249,6 +278,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		"response_mode":        requestContext.ResponseMode,
 		"response_uri":         s.targetResponseURI,
 		"wallet_subject":       wallet.Subject,
+		"wallet_scope":         wallet.ScopeKey,
 		"credential_source":    credentialSource,
 		"disclosure_claims":    disclosureClaims,
 		"upstream_status":      upstreamStatus,
@@ -287,6 +317,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"mode":              "stepwise",
 			"step":              "bootstrap",
 			"wallet_subject":    wallet.Subject,
+			"wallet_scope":      wallet.ScopeKey,
 			"wallet_key_id":     wallet.KeySet.RSAKeyID(),
 			"credential_cached": strings.TrimSpace(wallet.CredentialJWT) != "",
 		})
@@ -305,6 +336,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"mode":              "stepwise",
 			"step":              "issue_credential",
 			"wallet_subject":    wallet.Subject,
+			"wallet_scope":      wallet.ScopeKey,
 			"credential_source": credentialSource,
 			"credential_cached": strings.TrimSpace(wallet.CredentialJWT) != "",
 		})
@@ -356,6 +388,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"request_id":        requestContext.RequestID,
 			"response_mode":     requestContext.ResponseMode,
 			"wallet_subject":    wallet.Subject,
+			"wallet_scope":      wallet.ScopeKey,
 			"credential_source": credentialSource,
 			"disclosure_claims": disclosureClaims,
 			"vp_token":          vpToken,
@@ -422,6 +455,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"response_mode":     requestContext.ResponseMode,
 			"response_uri":      s.targetResponseURI,
 			"wallet_subject":    wallet.Subject,
+			"wallet_scope":      wallet.ScopeKey,
 			"credential_source": credentialSource,
 			"disclosure_claims": disclosureClaims,
 			"upstream_status":   upstreamStatus,
@@ -593,6 +627,17 @@ func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT
 	if err != nil {
 		return nil, fmt.Errorf("decode request object jwt: %w", err)
 	}
+	normalizedRequestID := strings.TrimSpace(requestID)
+	requestObjectID := strings.TrimSpace(asString(decodedRequest.Payload["jti"]))
+	if requestObjectID == "" {
+		return nil, fmt.Errorf("request object is missing jti")
+	}
+	if normalizedRequestID == "" {
+		normalizedRequestID = requestObjectID
+	}
+	if normalizedRequestID != requestObjectID {
+		return nil, fmt.Errorf("request_id does not match request object jti")
+	}
 
 	responseMode := strings.TrimSpace(asString(decodedRequest.Payload["response_mode"]))
 	if responseMode == "" {
@@ -617,7 +662,7 @@ func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT
 	}
 
 	return &resolvedRequestContext{
-		RequestID:    requestID,
+		RequestID:    normalizedRequestID,
 		State:        state,
 		Nonce:        nonce,
 		ClientID:     clientID,
@@ -962,14 +1007,91 @@ func (s *walletHarnessServer) fetchVerifierRSAJWK(ctx context.Context) (intcrypt
 	return intcrypto.JWK{}, fmt.Errorf("verifier jwks does not contain an RSA key")
 }
 
-func (s *walletHarnessServer) getOrCreateWallet(subject string) (*walletMaterial, error) {
+func (s *walletHarnessServer) resolveWalletScopeKey(req walletSubmitRequest) (string, error) {
+	lookingGlassSessionID := strings.TrimSpace(req.LookingGlassSessionID)
+	if lookingGlassSessionID != "" {
+		return "lg:" + lookingGlassSessionID, nil
+	}
+
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID != "" {
+		return "req:" + requestID, nil
+	}
+
+	requestJWT := strings.TrimSpace(req.Request)
+	if requestJWT != "" {
+		decodedRequest, err := intcrypto.DecodeTokenWithoutValidation(requestJWT)
+		if err == nil {
+			if requestObjectID := strings.TrimSpace(asString(decodedRequest.Payload["jti"])); requestObjectID != "" {
+				return "req:" + requestObjectID, nil
+			}
+		}
+	}
+
+	if s.strictIsolation {
+		return "", fmt.Errorf("session isolation key is required provide looking_glass_session_id or request_id")
+	}
+	return "legacy:shared", nil
+}
+
+func scopedWalletSubject(defaultSubject string, scopeKey string) string {
+	baseSubject := strings.TrimSpace(defaultSubject)
+	if baseSubject == "" {
+		baseSubject = "did:example:wallet:holder"
+	}
+	normalizedScope := strings.TrimSpace(scopeKey)
+	if normalizedScope == "" {
+		return baseSubject
+	}
+	return baseSubject + "-" + scopeKeyFingerprint(normalizedScope)
+}
+
+func scopeKeyFingerprint(scopeKey string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(scopeKey)))
+	encoded := hex.EncodeToString(digest[:])
+	if len(encoded) < 12 {
+		return encoded
+	}
+	return encoded[:12]
+}
+
+func (s *walletHarnessServer) pruneExpiredWalletsLocked(now time.Time) {
+	if s.walletSessionTTL <= 0 {
+		return
+	}
+	for walletID, wallet := range s.wallets {
+		if wallet == nil {
+			delete(s.wallets, walletID)
+			continue
+		}
+		if now.Sub(wallet.LastAccess) > s.walletSessionTTL {
+			delete(s.wallets, walletID)
+		}
+	}
+}
+
+func (s *walletHarnessServer) getOrCreateWallet(scopeKey string, subject string) (*walletMaterial, error) {
 	normalizedSubject := strings.TrimSpace(subject)
 	if normalizedSubject == "" {
 		return nil, fmt.Errorf("wallet subject is required")
 	}
+	normalizedScope := strings.TrimSpace(scopeKey)
+	if normalizedScope == "" {
+		if s.strictIsolation {
+			return nil, fmt.Errorf("session isolation key is required")
+		}
+		normalizedScope = "legacy:shared"
+	}
+
+	now := time.Now().UTC()
+	walletID := normalizedScope + "|" + normalizedSubject
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, ok := s.wallets[normalizedSubject]; ok {
+	s.pruneExpiredWalletsLocked(now)
+
+	if existing, ok := s.wallets[walletID]; ok {
+		existing.LastAccess = now
 		return existing, nil
 	}
 	keySet, err := intcrypto.NewKeySet()
@@ -977,10 +1099,13 @@ func (s *walletHarnessServer) getOrCreateWallet(subject string) (*walletMaterial
 		return nil, fmt.Errorf("create wallet keyset: %w", err)
 	}
 	wallet := &walletMaterial{
-		Subject: normalizedSubject,
-		KeySet:  keySet,
+		ScopeKey:   normalizedScope,
+		Subject:    normalizedSubject,
+		KeySet:     keySet,
+		CreatedAt:  now,
+		LastAccess: now,
 	}
-	s.wallets[normalizedSubject] = wallet
+	s.wallets[walletID] = wallet
 	return wallet, nil
 }
 
@@ -1138,6 +1263,21 @@ func envOrDefault(key string, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func parseBoolEnv(key string, fallback bool) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if raw == "" {
+		return fallback
+	}
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func asString(value interface{}) string {

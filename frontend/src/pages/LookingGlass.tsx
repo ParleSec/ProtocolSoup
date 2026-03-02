@@ -626,7 +626,7 @@ export function LookingGlass() {
       const sourceMessage = credentialSource === 'auto_issued_oid4vci'
         ? 'Auto-issued a fresh OID4VCI credential in the wallet bootstrap step.'
         : credentialSource === 'auto_refreshed_oid4vci'
-          ? 'Refreshed a stale wallet credential via OID4VCI before submission.'
+          ? 'Auto-refreshed a stale credential via OID4VCI before presentation.'
         : credentialSource === 'cached_wallet_store'
           ? 'Used existing wallet credential from wallet harness state.'
           : credentialSource === 'provided'
@@ -830,12 +830,6 @@ export function LookingGlass() {
     setOID4VPStepwiseVPToken('')
     setOID4VPStepwiseLastStep('')
     setOID4VPDisclosureClaims([])
-    setOID4VPQueryMode('dcql')
-    setOID4VPDCQLPresetID(DEFAULT_OID4VP_DCQL_PRESET_ID)
-    setOID4VPDCQLInput(
-      OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
-    )
-    setOID4VPScopeAliasInput('')
   }, [resetFlow, clearWireEvents, selectedProtocol, navigate])
 
   const handleReset = useCallback(() => {
