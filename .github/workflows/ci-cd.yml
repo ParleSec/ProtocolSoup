@@ -501,10 +501,33 @@ jobs:
           set -euo pipefail
 
           CREATE_PAYLOAD='{"response_mode":"direct_post","response_uri":"https://protocolsoup.com/oid4vp/response"}'
-          create_response="$(curl -fsS -X POST "https://protocolsoup.com/oid4vp/request/create" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            -d "$CREATE_PAYLOAD")"
+          create_response=""
+          create_status=""
+          create_endpoint=""
+          for endpoint in \
+            "https://protocolsoup.fly.dev/oid4vp/request/create" \
+            "https://protocolsoup.com/oid4vp/request/create"
+          do
+            create_attempt="$(curl -sS -w '\n%{http_code}' -X POST "$endpoint" \
+              -H "Accept: application/json" \
+              -H "Content-Type: application/json" \
+              -d "$CREATE_PAYLOAD" || true)"
+            attempt_body="$(echo "$create_attempt" | sed '$d')"
+            attempt_status="$(echo "$create_attempt" | tail -n1)"
+            if [ "${attempt_status}" -ge 200 ] && [ "${attempt_status}" -lt 300 ]; then
+              create_response="$attempt_body"
+              create_status="$attempt_status"
+              create_endpoint="$endpoint"
+              break
+            fi
+            echo "OID4VP create request via ${endpoint} failed with HTTP ${attempt_status}"
+            echo "$attempt_body"
+          done
+          if [ -z "$create_response" ]; then
+            echo "OID4VP create request failed across all endpoints"
+            exit 1
+          fi
+          echo "OID4VP create request succeeded via ${create_endpoint} (HTTP ${create_status})"
 
           request_id="$(echo "$create_response" | jq -r '.request_id // empty')"
           request_jwt="$(echo "$create_response" | jq -r '.request // empty')"

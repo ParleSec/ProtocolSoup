@@ -2,6 +2,10 @@
 
 OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the federation service.
 
+## Implementation Docs
+
+- Backend protocol README: [`backend/internal/protocols/oid4vci/README.md`](../../backend/internal/protocols/oid4vci/README.md)
+
 ## Scope
 
 - Pre-authorized code issuance
