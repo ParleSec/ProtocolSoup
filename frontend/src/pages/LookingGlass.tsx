@@ -2,13 +2,13 @@
  * Looking Glass - Protocol Execution & Inspection
  */
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Terminal, Square,
-  ChevronRight, Fingerprint, Shield, Lock, Sparkles,
-  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, X, ExternalLink, Loader2
+  Fingerprint, Shield, Lock, Sparkles,
+  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink
 } from 'lucide-react'
 
 import {
@@ -21,69 +21,26 @@ import {
   type LookingGlassFlow,
 } from '../lookingglass'
 
-import { TokenInspector } from '../components/lookingglass/TokenInspector'
+import { TokenInspector } from '../lookingglass/components/inspectors/TokenInspector'
 import { LookingGlassSEO } from '../components/common/SEO'
+import { StatusBadge as SharedStatusBadge, type StatusBadgeVariant } from '../lookingglass/components/shared'
+import { FlowButton, TokenButton } from '../lookingglass/components/ActionButtons'
+import { OID4VPWalletModal } from '../lookingglass/components/OID4VPWalletModal'
+import {
+  DEFAULT_OID4VP_DCQL_PRESET_ID,
+  OID4VP_DCQL_PRESETS,
+  OID4VP_DEFAULT_DISCLOSURE_HINTS,
+  parseSDJWTDisclosureClaimNames,
+  humanizeOID4VPTrustMode,
+} from '../protocols/config/oid4vp'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
-const OID4VP_DEFAULT_DISCLOSURE_HINTS = ['degree', 'graduation_year', 'department', 'given_name', 'family_name']
-const OID4VP_DCQL_PRESETS: Array<{ id: string; label: string; description: string; query: string }> = [
-  {
-    id: 'degree-core',
-    label: 'Degree core',
-    description: 'Requests degree + graduation year from UniversityDegreeCredential.',
-    query: JSON.stringify({
-      credentials: [
-        {
-          id: 'university_degree',
-          meta: {
-            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
-          },
-          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
-        },
-      ],
-    }, null, 2),
-  },
-  {
-    id: 'degree-and-department',
-    label: 'Degree + department',
-    description: 'Requests academic credential plus department for employer verification.',
-    query: JSON.stringify({
-      credentials: [
-        {
-          id: 'university_degree',
-          meta: {
-            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
-          },
-          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }, { path: ['department'] }],
-        },
-      ],
-    }, null, 2),
-  },
-  {
-    id: 'multi-credential',
-    label: 'Multi-credential query',
-    description: 'Demonstrates DCQL with two credential slots and constrained claims.',
-    query: JSON.stringify({
-      credentials: [
-        {
-          id: 'degree_credential',
-          meta: {
-            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
-          },
-          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
-        },
-        {
-          id: 'employment_credential',
-          meta: {
-            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
-          },
-          claims: [{ path: ['department'] }],
-        },
-      ],
-    }, null, 2),
-  },
-]
-const DEFAULT_OID4VP_DCQL_PRESET_ID = OID4VP_DCQL_PRESETS[0]?.id || 'degree-core'
+const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
+  completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
+  executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
+  awaiting_user: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', label: 'Awaiting input', shortLabel: 'Waiting' },
+  error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'Error', shortLabel: 'Error' },
+}
 
 export function LookingGlass() {
   useParams<{ sessionId?: string }>()
@@ -972,7 +929,7 @@ export function LookingGlass() {
               <span className="truncate">Looking Glass</span>
             </h1>
             {status !== 'idle' && (
-              <StatusBadge status={status} />
+              <SharedStatusBadge status={status} variants={STATUS_BADGE_VARIANTS} />
             )}
           </div>
           <p className="text-surface-400 text-xs sm:text-base ml-10 sm:ml-[52px] leading-relaxed">
@@ -1467,7 +1424,7 @@ export function LookingGlass() {
             )}
             {isOID4VPFlow && !!oid4vpTrustMode && (
               <div className="mb-3 p-3 rounded-lg border border-violet-500/30 bg-violet-500/5 text-[11px] sm:text-xs text-violet-200">
-                <div className="font-medium mb-1">Verifier trust mode: {humanizeTrustMode(oid4vpTrustMode)}</div>
+                <div className="font-medium mb-1">Verifier trust mode: {humanizeOID4VPTrustMode(oid4vpTrustMode)}</div>
                 {oid4vpDidWebAllowedHosts.length > 0 && (
                   <div className="text-surface-300">
                     did:web host allowlist: <code>{oid4vpDidWebAllowedHosts.join(', ')}</code>
@@ -1508,259 +1465,43 @@ export function LookingGlass() {
 
       <AnimatePresence>
         {oid4vpWalletModalOpen && isOID4VPAwaitingResult && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm p-3 sm:p-6 flex items-center justify-center"
-            onClick={closeOID4VPWalletModal}
-          >
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.98 }}
-              transition={{ duration: 0.16 }}
-              className="w-full max-w-2xl rounded-xl border border-white/10 bg-surface-900 shadow-2xl overflow-hidden"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-white/10 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-white text-sm sm:text-base font-medium">OID4VP Wallet Interaction</h3>
-                  <p className="text-[11px] sm:text-xs text-surface-400 mt-0.5">
-                    Fulfill the wallet step and submit a real presentation callback.
-                  </p>
-                </div>
-                <button
-                  onClick={closeOID4VPWalletModal}
-                  disabled={oid4vpWalletSubmitPending}
-                  className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-white/5 disabled:opacity-50 transition-colors"
-                  title="Close"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="p-4 sm:p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-                <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
-                  <div className="text-xs text-cyan-300 font-medium">Request Context</div>
-                  <div className="grid gap-1 text-[11px] sm:text-xs text-surface-300">
-                    <div><span className="text-surface-400">request_id:</span> <code>{oid4vpRequestID || 'missing'}</code></div>
-                    <div><span className="text-surface-400">response_mode:</span> <code>{oid4vpResponseMode || 'direct_post'}</code></div>
-                    {oid4vpTrustMode && (
-                      <div>
-                        <span className="text-surface-400">trust_mode:</span> <code>{humanizeTrustMode(oid4vpTrustMode)}</code>
-                      </div>
-                    )}
-                    {oid4vpRequestURI && (
-                      <div className="break-all">
-                        <span className="text-surface-400">request_uri:</span> <code>{oid4vpRequestURI}</code>
-                      </div>
-                    )}
-                    {oid4vpDidWebAllowedHosts.length > 0 && (
-                      <div className="break-all">
-                        <span className="text-surface-400">did:web allowlist:</span> <code>{oid4vpDidWebAllowedHosts.join(', ')}</code>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {!!oid4vpWalletHandoffPayload && (
-                  <div className="space-y-1">
-                    <div className="text-[11px] sm:text-xs text-surface-400">Wallet handoff payload</div>
-                    <pre className="p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
-                      {oid4vpWalletHandoffPayload}
-                    </pre>
-                  </div>
-                )}
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs sm:text-sm font-medium text-surface-300">wallet_subject (optional)</label>
-                    {capturedVCWalletSubject && (
-                      <button
-                        onClick={() => setOID4VPWalletSubjectInput(capturedVCWalletSubject)}
-                        className="text-[11px] sm:text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
-                      >
-                        Use captured value
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    value={oid4vpWalletSubjectInput}
-                    onChange={(event) => setOID4VPWalletSubjectInput(event.target.value)}
-                    placeholder="Leave blank to use wallet harness default subject"
-                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs sm:text-sm font-medium text-surface-300">credential_jwt (optional)</label>
-                    {capturedVCCredentialJWT && (
-                      <button
-                        onClick={() => setOID4VPCredentialJWTInput(capturedVCCredentialJWT)}
-                        className="text-[11px] sm:text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
-                      >
-                        Use captured value
-                      </button>
-                    )}
-                  </div>
-                  <textarea
-                    value={oid4vpCredentialJWTInput}
-                    onChange={(event) => setOID4VPCredentialJWTInput(event.target.value)}
-                    rows={5}
-                    placeholder="Paste SD-JWT VC or issuer credential JWT (or leave blank to auto-issue one)"
-                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <div className="text-xs sm:text-sm font-medium text-surface-300">Selective disclosure claims</div>
-                  <p className="text-[11px] sm:text-xs text-surface-400">
-                    Choose which SD-JWT disclosures to include in the VP response.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {oid4vpCredentialDisclosureOptions.map((claimName) => {
-                      const selected = oid4vpDisclosureClaims.includes(claimName)
-                      return (
-                        <button
-                          key={claimName}
-                          type="button"
-                          onClick={() => {
-                            setOID4VPDisclosureClaims((previous) => {
-                              if (previous.includes(claimName)) {
-                                return previous.filter((item) => item !== claimName)
-                              }
-                              return [...previous, claimName].sort()
-                            })
-                          }}
-                          className={`px-2 py-1 rounded border text-[11px] sm:text-xs transition-colors ${
-                            selected
-                              ? 'border-violet-500/40 bg-violet-500/20 text-violet-200'
-                              : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                          }`}
-                        >
-                          {claimName}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-xs sm:text-sm font-medium text-surface-300">Wallet execution mode</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setOID4VPWalletMode('one_click')}
-                      className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
-                        oid4vpWalletMode === 'one_click'
-                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
-                          : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                      }`}
-                    >
-                      One-click mode
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOID4VPWalletMode('stepwise')}
-                      className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
-                        oid4vpWalletMode === 'stepwise'
-                          ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
-                          : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                      }`}
-                    >
-                      Stepwise mode
-                    </button>
-                  </div>
-                </div>
-
-                {oid4vpWalletMode === 'stepwise' && (
-                  <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-3 space-y-2">
-                    <div className="text-[11px] sm:text-xs text-violet-200 font-medium">Expert stepwise ceremony</div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => executeOID4VPWalletStep('bootstrap')}
-                        disabled={oid4vpWalletSubmitPending}
-                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
-                      >
-                        1) Bootstrap wallet
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => executeOID4VPWalletStep('issue_credential')}
-                        disabled={oid4vpWalletSubmitPending}
-                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
-                      >
-                        2) Issue credential
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => executeOID4VPWalletStep('build_presentation')}
-                        disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
-                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
-                      >
-                        3) Build vp_token
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => executeOID4VPWalletStep('submit_response')}
-                        disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
-                        className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50"
-                      >
-                        4) Submit response
-                      </button>
-                    </div>
-                    <div className="text-[11px] sm:text-xs text-surface-300">
-                      Last step: <code>{oid4vpStepwiseLastStep || 'none'}</code>
-                      {oid4vpStepwiseVPToken && ' • vp_token cached'}
-                    </div>
-                  </div>
-                )}
-
-                {oid4vpWalletMode === 'one_click' && !canSubmitOID4VPWalletInteraction && (
-                  <p className="text-[11px] sm:text-xs text-amber-400">
-                    Missing request context. Re-run OID4VP request creation.
-                  </p>
-                )}
-                {oid4vpWalletMode === 'one_click' && canSubmitOID4VPWalletInteraction && (
-                  <p className="text-[11px] sm:text-xs text-cyan-300">
-                    This modal can complete OID4VP-only runs end-to-end. If credential_jwt is empty, wallet bootstrap will run a real OID4VCI issuance to obtain one before submission.
-                  </p>
-                )}
-                {oid4vpWalletMode === 'stepwise' && (
-                  <p className="text-[11px] sm:text-xs text-cyan-300">
-                    Stepwise mode exposes wallet key/bootstrap, credential issuance, presentation build, and verifier callback as separate actions.
-                  </p>
-                )}
-                {!!oid4vpWalletSubmitError && (
-                  <p className="text-[11px] sm:text-xs text-red-300">{oid4vpWalletSubmitError}</p>
-                )}
-              </div>
-
-              <div className="px-4 sm:px-5 py-3 border-t border-white/10 flex items-center justify-end gap-2">
-                <button
-                  onClick={closeOID4VPWalletModal}
-                  disabled={oid4vpWalletSubmitPending}
-                  className="px-3 py-2 rounded-lg bg-surface-800 border border-white/10 text-surface-300 text-xs sm:text-sm hover:text-white disabled:opacity-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                {oid4vpWalletMode === 'one_click' && (
-                  <button
-                    onClick={submitOID4VPWalletInteraction}
-                    disabled={!canSubmitOID4VPWalletInteraction || oid4vpWalletSubmitPending}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs sm:text-sm font-medium hover:bg-violet-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {oid4vpWalletSubmitPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                    <span>{oid4vpWalletSubmitPending ? 'Submitting...' : 'Submit Wallet Response'}</span>
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
+          <OID4VPWalletModal
+            onClose={closeOID4VPWalletModal}
+            submitPending={oid4vpWalletSubmitPending}
+            requestID={oid4vpRequestID}
+            responseMode={oid4vpResponseMode}
+            trustMode={oid4vpTrustMode}
+            requestURI={oid4vpRequestURI}
+            didWebAllowedHosts={oid4vpDidWebAllowedHosts}
+            walletHandoffPayload={oid4vpWalletHandoffPayload}
+            capturedWalletSubject={capturedVCWalletSubject}
+            walletSubjectInput={oid4vpWalletSubjectInput}
+            onWalletSubjectInputChange={setOID4VPWalletSubjectInput}
+            onUseCapturedWalletSubject={() => setOID4VPWalletSubjectInput(capturedVCWalletSubject)}
+            capturedCredentialJWT={capturedVCCredentialJWT}
+            credentialJWTInput={oid4vpCredentialJWTInput}
+            onCredentialJWTInputChange={setOID4VPCredentialJWTInput}
+            onUseCapturedCredentialJWT={() => setOID4VPCredentialJWTInput(capturedVCCredentialJWT)}
+            disclosureOptions={oid4vpCredentialDisclosureOptions}
+            selectedDisclosureClaims={oid4vpDisclosureClaims}
+            onToggleDisclosureClaim={(claimName) => {
+              setOID4VPDisclosureClaims((previous) => {
+                if (previous.includes(claimName)) {
+                  return previous.filter((item) => item !== claimName)
+                }
+                return [...previous, claimName].sort()
+              })
+            }}
+            walletMode={oid4vpWalletMode}
+            onWalletModeChange={setOID4VPWalletMode}
+            onExecuteWalletStep={executeOID4VPWalletStep}
+            canSubmitWalletInteraction={canSubmitOID4VPWalletInteraction}
+            stepwiseLastStep={oid4vpStepwiseLastStep}
+            stepwiseVPToken={oid4vpStepwiseVPToken}
+            submitError={oid4vpWalletSubmitError}
+            submitMessage={oid4vpWalletSubmitMessage}
+            onSubmitWalletResponse={submitOID4VPWalletInteraction}
+          />
         )}
       </AnimatePresence>
 
@@ -1855,144 +1596,3 @@ export function LookingGlass() {
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const config = {
-    completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
-    executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
-    awaiting_user: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', label: 'Awaiting input', shortLabel: 'Waiting' },
-    error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'Error', shortLabel: 'Error' },
-  }[status] || { bg: 'bg-surface-800', border: 'border-white/10', text: 'text-surface-400', label: status, shortLabel: status }
-
-  return (
-    <div className={`px-2 sm:px-3 py-1 sm:py-1.5 rounded-full ${config.bg} border ${config.border} flex-shrink-0`}>
-      <span className={`text-xs sm:text-sm font-medium ${config.text} whitespace-nowrap`}>
-        <span className="hidden sm:inline">{config.label}</span>
-        <span className="sm:hidden">{config.shortLabel}</span>
-      </span>
-    </div>
-  )
-}
-
-function FlowButton({ 
-  icon: Icon, 
-  label, 
-  sublabel, 
-  color,
-  onClick 
-}: {
-  icon: React.ElementType
-  label: string
-  sublabel: string
-  color: 'blue' | 'green' | 'orange' | 'purple' | 'cyan'
-  onClick: () => void
-}) {
-  const colors = {
-    blue: { border: 'border-blue-500/20 hover:border-blue-500/40 active:border-blue-500/60', bg: 'bg-blue-500/10', text: 'text-blue-400' },
-    green: { border: 'border-green-500/20 hover:border-green-500/40 active:border-green-500/60', bg: 'bg-green-500/10', text: 'text-green-400' },
-    orange: { border: 'border-orange-500/20 hover:border-orange-500/40 active:border-orange-500/60', bg: 'bg-orange-500/10', text: 'text-orange-400' },
-    purple: { border: 'border-purple-500/20 hover:border-purple-500/40 active:border-purple-500/60', bg: 'bg-purple-500/10', text: 'text-purple-400' },
-    cyan: { border: 'border-cyan-500/20 hover:border-cyan-500/40 active:border-cyan-500/60', bg: 'bg-cyan-500/10', text: 'text-cyan-400' },
-  }
-  const c = colors[color]
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2.5 sm:gap-4 p-2.5 sm:p-4 rounded-xl border ${c.border} bg-gradient-to-br from-white/[0.02] to-transparent hover:from-white/[0.04] active:from-white/[0.06] transition-all text-left group touch-manipulation`}
-    >
-      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg ${c.bg} flex items-center justify-center flex-shrink-0`}>
-        <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${c.text}`} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="font-medium text-white text-xs sm:text-base truncate">{label}</div>
-        <div className="text-[10px] sm:text-sm text-surface-400">{sublabel}</div>
-      </div>
-      <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5 text-surface-600 group-hover:text-surface-400 transition-colors flex-shrink-0" />
-    </button>
-  )
-}
-
-function TokenButton({ 
-  label, 
-  color,
-  active, 
-  onClick 
-}: {
-  label: string
-  color: 'green' | 'orange' | 'blue'
-  active: boolean
-  onClick: () => void
-}) {
-  const colors = {
-    green: active ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-green-400',
-    orange: active ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-orange-400',
-    blue: active ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-blue-400',
-  }
-
-  return (
-    <button
-      onClick={onClick}
-      className={`px-2.5 py-1.5 rounded-md text-xs font-mono border transition-all whitespace-nowrap flex-shrink-0 ${colors[color]}`}
-    >
-      {label}
-    </button>
-  )
-}
-
-function parseSDJWTDisclosureClaimNames(rawCredential: string): string[] {
-  const normalized = rawCredential.trim()
-  if (!normalized) {
-    return []
-  }
-
-  const parts = normalized
-    .split('~')
-    .map((part) => part.trim())
-    .filter(Boolean)
-  if (parts.length < 2) {
-    return []
-  }
-
-  const claimNames = new Set<string>()
-  for (const encodedDisclosure of parts.slice(1)) {
-    const decodedDisclosure = decodeBase64URLSegment(encodedDisclosure)
-    if (!decodedDisclosure) {
-      continue
-    }
-    try {
-      const parsedDisclosure = JSON.parse(decodedDisclosure) as unknown
-      if (
-        Array.isArray(parsedDisclosure) &&
-        parsedDisclosure.length >= 3 &&
-        typeof parsedDisclosure[1] === 'string'
-      ) {
-        claimNames.add(parsedDisclosure[1])
-      }
-    } catch {
-      // Ignore malformed segments (for example optional KB-JWT segment).
-    }
-  }
-
-  return Array.from(claimNames).sort()
-}
-
-function decodeBase64URLSegment(value: string): string {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-  try {
-    return atob(padded)
-  } catch {
-    return ''
-  }
-}
-
-function humanizeTrustMode(mode: string): string {
-  const normalized = mode.trim().toLowerCase()
-  if (normalized === 'controlled_trust_mode') {
-    return 'controlled trust mode'
-  }
-  if (normalized === 'interop_mode') {
-    return 'interop mode'
-  }
-  return mode
-}
