@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ElementType, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  Shield, AlertTriangle, CheckCircle, XCircle, Clock, 
+import {
+  Shield, AlertTriangle, CheckCircle, XCircle, Clock,
   User, Key, Lock, Globe, Info, ChevronDown, Copy, Check,
   FileText, Fingerprint, Calendar
 } from 'lucide-react'
+import { decodeJWTWithoutValidation } from '../../../utils/crypto'
 
 interface TokenInspectorProps {
   token: string
@@ -19,7 +20,7 @@ interface DecodedToken {
 }
 
 // Standard JWT claim explanations
-const claimInfo: Record<string, { label: string; description: string; icon: React.ElementType }> = {
+const claimInfo: Record<string, { label: string; description: string; icon: ElementType }> = {
   iss: { label: 'Issuer', description: 'Entity that issued the token', icon: Globe },
   sub: { label: 'Subject', description: 'Unique identifier of the user', icon: User },
   aud: { label: 'Audience', description: 'Intended recipient (your app)', icon: FileText },
@@ -30,9 +31,9 @@ const claimInfo: Record<string, { label: string; description: string; icon: Reac
   nonce: { label: 'Nonce', description: 'Replay attack prevention (OIDC)', icon: Lock },
   azp: { label: 'Authorized Party', description: 'Client ID the token was issued to', icon: Key },
   scope: { label: 'Scope', description: 'Permissions granted to this token', icon: Shield },
-  email: { label: 'Email', description: 'User\'s email address', icon: User },
-  name: { label: 'Name', description: 'User\'s full name', icon: User },
-  preferred_username: { label: 'Username', description: 'User\'s preferred username', icon: User },
+  email: { label: 'Email', description: "User's email address", icon: User },
+  name: { label: 'Name', description: "User's full name", icon: User },
+  preferred_username: { label: 'Username', description: "User's preferred username", icon: User },
   email_verified: { label: 'Email Verified', description: 'Whether email has been verified', icon: CheckCircle },
 }
 
@@ -55,20 +56,19 @@ export function TokenInspector({ token }: TokenInspectorProps) {
         }
       }
 
-      const [headerB64, payloadB64, signature] = parts
-
-      const decodeBase64Url = (str: string): string => {
-        const base64 = str.replace(/-/g, '+').replace(/_/g, '/')
-        const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-        return atob(base64 + padding)
+      const decodedToken = decodeJWTWithoutValidation(token)
+      if (!decodedToken) {
+        throw new Error('Invalid base64url segments in JWT')
       }
-
-      const header = JSON.parse(decodeBase64Url(headerB64))
-      const payload = JSON.parse(decodeBase64Url(payloadB64))
+      const header = decodedToken.header
+      const payload = decodedToken.payload
+      const { signature } = decodedToken
 
       // Check expiration
-      const isExpired = payload.exp && Date.now() / 1000 > payload.exp
-      const isNotYetValid = payload.nbf && Date.now() / 1000 < payload.nbf
+      const exp = typeof payload.exp === 'number' ? payload.exp : undefined
+      const nbf = typeof payload.nbf === 'number' ? payload.nbf : undefined
+      const isExpired = exp !== undefined && Date.now() / 1000 > exp
+      const isNotYetValid = nbf !== undefined && Date.now() / 1000 < nbf
 
       return {
         header,
@@ -116,8 +116,8 @@ export function TokenInspector({ token }: TokenInspectorProps) {
 
   // Get time until expiration
   const getExpirationStatus = () => {
-    if (!decoded.payload.exp) return null
-    const exp = decoded.payload.exp as number
+    const exp = decoded.payload.exp
+    if (typeof exp !== 'number') return null
     const now = Date.now() / 1000
     const diff = exp - now
 
@@ -178,7 +178,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
       <div className="p-3 sm:p-4 rounded-xl bg-surface-900/50 border border-white/5">
         <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider mb-3">Token Structure</h4>
         <div className="flex flex-wrap sm:flex-nowrap gap-1 font-mono text-xs overflow-x-auto pb-2 scrollbar-hide">
-          <motion.button 
+          <motion.button
             className="px-3 py-2 rounded-lg bg-red-500/20 text-red-400 cursor-pointer hover:bg-red-500/30 active:bg-red-500/40 transition-colors flex-shrink-0"
             onClick={() => setExpandedSection(expandedSection === 'header' ? null : 'header')}
             whileHover={{ scale: 1.02 }}
@@ -187,7 +187,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
             Header
           </motion.button>
           <span className="text-surface-600 self-center hidden sm:inline">.</span>
-          <motion.button 
+          <motion.button
             className="px-3 py-2 rounded-lg bg-purple-500/20 text-purple-400 cursor-pointer hover:bg-purple-500/30 active:bg-purple-500/40 transition-colors flex-shrink-0"
             onClick={() => setExpandedSection(expandedSection === 'payload' ? null : 'payload')}
             whileHover={{ scale: 1.02 }}
@@ -196,7 +196,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
             Payload
           </motion.button>
           <span className="text-surface-600 self-center hidden sm:inline">.</span>
-          <motion.button 
+          <motion.button
             className="px-3 py-2 rounded-lg bg-cyan-500/20 text-cyan-400 cursor-pointer hover:bg-cyan-500/30 active:bg-cyan-500/40 transition-colors flex-shrink-0"
             onClick={() => setExpandedSection(expandedSection === 'signature' ? null : 'signature')}
             whileHover={{ scale: 1.02 }}
@@ -220,7 +220,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
         >
           <div className="space-y-2">
             {Object.entries(decoded.header).map(([key, value]) => (
-              <ClaimRow 
+              <ClaimRow
                 key={key}
                 claim={key}
                 value={value}
@@ -253,7 +253,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
                 return aIdx - bIdx
               })
               .map(([key, value]) => (
-                <ClaimRow 
+                <ClaimRow
                   key={key}
                   claim={key}
                   value={isTimestamp(key) && typeof value === 'number' ? formatTimestamp(value) : value}
@@ -287,7 +287,7 @@ export function TokenInspector({ token }: TokenInspectorProps) {
               <p className="text-xs sm:text-sm text-blue-300 flex items-start gap-2">
                 <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <span>
-                  To verify this signature, fetch the public key from the issuer's 
+                  To verify this signature, fetch the public key from the issuer's
                   JWKS endpoint and verify using the {String(decoded.header.alg || 'specified')} algorithm.
                 </span>
               </p>
@@ -300,22 +300,22 @@ export function TokenInspector({ token }: TokenInspectorProps) {
 }
 
 // Token Section Component
-function TokenSection({ 
-  title, 
+function TokenSection({
+  title,
   subtitle,
-  icon: Icon, 
-  color, 
-  isExpanded, 
-  onToggle, 
-  children 
+  icon: Icon,
+  color,
+  isExpanded,
+  onToggle,
+  children
 }: {
   title: string
   subtitle: string
-  icon: React.ElementType
+  icon: ElementType
   color: string
   isExpanded: boolean
   onToggle: () => void
-  children: React.ReactNode
+  children: ReactNode
 }) {
   const colorClasses: Record<string, string> = {
     red: 'text-red-400 bg-red-500/10 border-red-500/20',
@@ -362,9 +362,9 @@ function TokenSection({
 }
 
 // Claim Row Component
-function ClaimRow({ 
-  claim, 
-  value, 
+function ClaimRow({
+  claim,
+  value,
   info,
   onCopy,
   isCopied,
@@ -373,7 +373,7 @@ function ClaimRow({
   claim: string
   value: unknown
   rawValue?: unknown // Keep in type for API compatibility
-  info?: { label: string; description: string; icon: React.ElementType }
+  info?: { label: string; description: string; icon: ElementType }
   onCopy: () => void
   isCopied: boolean
   isExpired?: boolean
@@ -390,7 +390,7 @@ function ClaimRow({
   }
 
   return (
-    <div 
+    <div
       className={`flex items-start gap-2 sm:gap-3 p-2.5 sm:p-3 rounded-lg transition-colors group ${
         isExpired ? 'bg-red-500/10' : 'bg-surface-900/50 hover:bg-surface-800/50 active:bg-surface-800/70'
       }`}

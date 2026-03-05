@@ -1,6 +1,6 @@
 /**
  * SCIM Inspector Component
- * 
+ *
  * Visualizes SCIM resources, schemas, and operations for educational purposes.
  */
 
@@ -96,32 +96,32 @@ export function SCIMInspector({ data, type, title }: SCIMInspectorProps) {
           <h3 className="text-sm font-medium text-slate-200">{title}</h3>
         </div>
       )}
-      
+
       <div className="p-4">
         {type === 'resource' && (
-          <ResourceView 
-            resource={data as SCIMResource} 
+          <ResourceView
+            resource={data as SCIMResource}
             expanded={expandedSections}
             onToggle={toggleSection}
           />
         )}
-        
+
         {type === 'list' && (
-          <ListView 
+          <ListView
             resources={Array.isArray(data) ? data as SCIMResource[] : [data as SCIMResource]}
             expanded={expandedSections}
             onToggle={toggleSection}
           />
         )}
-        
+
         {type === 'patch' && (
           <PatchView operations={data as PatchOperation[]} />
         )}
-        
+
         {type === 'filter' && (
           <FilterView filter={data as unknown as string} />
         )}
-        
+
         {type === 'schema' && (
           <SchemaView schema={data as unknown as { attributes: SCIMSchemaAttribute[] }} />
         )}
@@ -194,8 +194,8 @@ function ResourceView({ resource, expanded, onToggle }: ResourceViewProps) {
       )}
 
       {/* Resource Attributes */}
-      <AttributeTree 
-        data={resource} 
+      <AttributeTree
+        data={resource}
         expanded={expanded}
         onToggle={onToggle}
         path="root"
@@ -212,7 +212,7 @@ function ResourceView({ resource, expanded, onToggle }: ResourceViewProps) {
 interface AttributeTreeProps {
   data: Record<string, unknown>
   expanded: Set<string>
-  onToggle: (section: string)=>void
+  onToggle: (section: string) => void
   path: string
   excludeKeys?: string[]
 }
@@ -250,7 +250,7 @@ function AttributeNode({ name, value, expanded, onToggle, path }: AttributeNodeP
   const isArray = Array.isArray(value)
 
   // Handle enterprise extension key specially
-  const displayName = name.startsWith('urn:ietf:params:scim') 
+  const displayName = name.startsWith('urn:ietf:params:scim')
     ? schemaLabels[name]?.label || 'Extension'
     : name
 
@@ -271,7 +271,7 @@ function AttributeNode({ name, value, expanded, onToggle, path }: AttributeNodeP
             {isArray ? `[${itemCount}]` : `{${itemCount}}`}
           </span>
         </button>
-        
+
         <AnimatePresence>
           {isExpanded && (
             <motion.div
@@ -372,16 +372,16 @@ function ListView({ resources, expanded, onToggle }: ListViewProps) {
                 : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
             }`}
           >
-            {(resource as { userName?: string; displayName?: string }).userName || 
-             (resource as { displayName?: string }).displayName || 
-             resource.id || 
+            {(resource as { userName?: string; displayName?: string }).userName ||
+             (resource as { displayName?: string }).displayName ||
+             resource.id ||
              `Resource ${i + 1}`}
           </button>
         ))}
       </div>
 
       {/* Selected Resource */}
-      <ResourceView 
+      <ResourceView
         resource={resources[selectedIndex]}
         expanded={expanded}
         onToggle={onToggle}
@@ -410,7 +410,7 @@ function PatchView({ operations }: PatchViewProps) {
       <div className="text-xs text-slate-400 mb-2">
         RFC 7644 Section 3.5.2 - PATCH Operations
       </div>
-      
+
       {operations.map((op, i) => (
         <motion.div
           key={i}
@@ -427,7 +427,7 @@ function PatchView({ operations }: PatchViewProps) {
               <code className="text-cyan-400 text-sm">{op.path}</code>
             )}
           </div>
-          
+
           {op.value !== undefined && (
             <div className="mt-2 pl-4 border-l-2 border-slate-600">
               <div className="text-xs text-slate-500 mb-1">Value:</div>
@@ -463,9 +463,9 @@ function FilterView({ filter }: FilterViewProps) {
       <div className="text-xs text-slate-400">
         RFC 7644 Section 3.4.2.2 - Filter Syntax
       </div>
-      
+
       <div className="bg-slate-800 rounded p-4 font-mono">
-        <div 
+        <div
           className="text-slate-200"
           dangerouslySetInnerHTML={{ __html: highlighted }}
         />
@@ -508,7 +508,7 @@ function SchemaView({ schema }: SchemaViewProps) {
       </div>
 
       {schema.attributes?.map((attr) => (
-        <SchemaAttribute 
+        <SchemaAttribute
           key={attr.name}
           attribute={attr}
           expanded={expandedAttrs.has(attr.name)}
@@ -578,6 +578,4 @@ function SchemaAttribute({ attribute, expanded, onToggle }: SchemaAttributeProps
     </div>
   )
 }
-
-export default SCIMInspector
 

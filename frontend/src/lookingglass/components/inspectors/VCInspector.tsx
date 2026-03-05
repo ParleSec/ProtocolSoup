@@ -9,7 +9,8 @@ import {
   ShieldCheck,
   ShieldX,
 } from 'lucide-react'
-import type { VCArtifact } from '../../lookingglass/flows/base'
+import type { VCArtifact } from '../../flows/base'
+import { decodeJWTWithoutValidation } from '../../../utils/crypto'
 
 interface VCInspectorProps {
   artifacts: VCArtifact[]
@@ -204,26 +205,6 @@ function artifactIcon(type: VCArtifact['type']): { icon: ElementType; fg: string
       return { icon: ShieldCheck, fg: 'text-violet-400', bg: 'bg-violet-500/10' }
     default:
       return { icon: FileText, fg: 'text-amber-400', bg: 'bg-amber-500/10' }
-  }
-}
-
-function decodeJWTWithoutValidation(token: string): { header: Record<string, unknown>; payload: Record<string, unknown> } | null {
-  const parts = token.split('.')
-  if (parts.length !== 3) {
-    return null
-  }
-  try {
-    const decodePart = (value: string): Record<string, unknown> => {
-      const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
-      const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-      return JSON.parse(atob(base64 + padding)) as Record<string, unknown>
-    }
-    return {
-      header: decodePart(parts[0]),
-      payload: decodePart(parts[1]),
-    }
-  } catch {
-    return null
   }
 }
 
