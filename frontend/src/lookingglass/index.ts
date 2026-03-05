@@ -24,7 +24,8 @@ export {
   type RealFlowExecutorResult,
 } from './hooks'
 
-// Legacy executor (for backwards compatibility)
+// Legacy executor compatibility surface
+// @deprecated Prefer flow-specific executors from ./flows and useRealFlowExecutor.
 export {
   FlowExecutor,
   useFlowExecutor,
