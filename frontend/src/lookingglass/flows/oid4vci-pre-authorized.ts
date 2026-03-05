@@ -10,6 +10,7 @@
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
+import { decodeJWTWithoutValidation } from '../../utils/crypto'
 
 export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
@@ -244,6 +245,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       },
       privateKey,
     )
+    const decodedProofJWT = decodeJWTWithoutValidation(proofJWT)
 
     this.addVCArtifact({
       type: 'proof_jwt',
@@ -251,7 +253,9 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       format: 'openid4vci-proof+jwt',
       rfcReference: 'OpenID4VCI 1.0 Section 8.2',
       raw: proofJWT,
-      json: this.decodeJWTWithoutValidation(proofJWT),
+      json: decodedProofJWT
+        ? { header: decodedProofJWT.header, payload: decodedProofJWT.payload }
+        : {},
       metadata: {
         nonceBound: true,
         walletSubject: normalizedSubject,
@@ -356,6 +360,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
 
   private captureCredential(rawCredential: string): void {
     const issuerJWT = this.extractIssuerJWT(rawCredential)
+    const decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
     const decoded = this.decodeJwt(issuerJWT, 'access_token')
     this.updateState({
       decodedTokens: [...this.state.decodedTokens, decoded],
@@ -367,7 +372,9 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       format: 'dc+sd-jwt',
       rfcReference: 'OpenID4VCI 1.0 Section 8',
       raw: rawCredential,
-      json: this.decodeJWTWithoutValidation(issuerJWT),
+      json: decodedCredentialJWT
+        ? { header: decodedCredentialJWT.header, payload: decodedCredentialJWT.payload }
+        : {},
       metadata: {
         hasDisclosures: rawCredential.includes('~'),
         disclosureCount: disclosureCount > 0 ? disclosureCount : 0,
@@ -387,26 +394,6 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
   private extractIssuerJWT(rawCredential: string): string {
     const segments = rawCredential.split('~')
     return segments[0] || rawCredential
-  }
-
-  private decodeJWTWithoutValidation(token: string): Record<string, unknown> {
-    try {
-      const [headerB64, payloadB64] = token.split('.')
-      if (!headerB64 || !payloadB64) {
-        return {}
-      }
-      const parsePart = (value: string): Record<string, unknown> => {
-        const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
-        const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-        return JSON.parse(atob(base64 + padding)) as Record<string, unknown>
-      }
-      return {
-        header: parsePart(headerB64),
-        payload: parsePart(payloadB64),
-      }
-    } catch {
-      return {}
-    }
   }
 
   private async getWalletSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string }> {
