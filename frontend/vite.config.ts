@@ -53,7 +53,7 @@ export default defineConfig({
       '/saml': { target: 'http://localhost:8080', changeOrigin: true },
       '/spiffe': { target: 'http://localhost:8080', changeOrigin: true },
       '/scim': { target: 'http://localhost:8080', changeOrigin: true },
-      '/ssf': {
+      '^/ssf(?:/|$)': {
         target: 'http://localhost:8080',
         changeOrigin: true,
         // Disable response buffering for SSE (/ssf/events/stream)

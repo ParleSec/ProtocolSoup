@@ -7,8 +7,8 @@ import {
   Code, ExternalLink, Loader2, ArrowRight,
   Fingerprint, Server, Globe, FileKey, Shield, Users, Radio
 } from 'lucide-react'
-import { TokenInspector } from '../components/lookingglass/TokenInspector'
-import { FlowDiagram } from '../components/lookingglass/FlowDiagram'
+import { TokenInspector } from '../lookingglass/components/inspectors/TokenInspector'
+import { FlowDiagram } from '../lookingglass/components/FlowDiagram'
 import { useProtocolFlows, FlowStep } from '../protocols'
 import { SEO } from '../components/common/SEO'
 import { getFlowSEO } from '../config/seo'

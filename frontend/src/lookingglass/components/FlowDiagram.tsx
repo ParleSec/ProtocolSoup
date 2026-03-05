@@ -1,13 +1,13 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ElementType } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
+import {
   User, Globe, Shield, Database, Key, X, Users
 } from 'lucide-react'
 
 // Native SVG icon paths for reliable rendering inside SVG (no foreignObject needed)
 // Each renders centered at (0,0) within a given size
-function SvgActorIcon({ type, cx, cy, size, color }: { 
-  type: React.ElementType; cx: number; cy: number; size: number; color: string 
+function SvgActorIcon({ type, cx, cy, size, color }: {
+  type: ElementType; cx: number; cy: number; size: number; color: string
 }) {
   const s = size / 2 // half-size for centering
   const opacity = 0.8
@@ -112,125 +112,125 @@ interface FlowDiagramProps {
 }
 
 // Actor configurations - supports OAuth 2.0, OIDC, SAML, and SPIFFE terminology
-const actorConfig: Record<string, { 
-  icon: React.ElementType
+const actorConfig: Record<string, {
+  icon: ElementType
   label: string
   shortLabel: string
   color: string
 }> = {
-  'Client': { 
-    icon: Globe, 
+  'Client': {
+    icon: Globe,
     label: 'Client Application',
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
-  'Client Application': { 
-    icon: Globe, 
+  'Client Application': {
+    icon: Globe,
     label: 'Client Application',
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
-  'Client Backend': { 
-    icon: Globe, 
+  'Client Backend': {
+    icon: Globe,
     label: 'Client Backend',
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
-  'Client (Backend Service)': { 
-    icon: Globe, 
+  'Client (Backend Service)': {
+    icon: Globe,
     label: 'Client Backend',
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
-  'Relying Party (Client)': { 
-    icon: Globe, 
+  'Relying Party (Client)': {
+    icon: Globe,
     label: 'Relying Party',
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
-  'Relying Party Backend': { 
-    icon: Globe, 
+  'Relying Party Backend': {
+    icon: Globe,
     label: 'Relying Party Backend',
     shortLabel: 'Client',
     color: '#60a5fa', // blue
   },
-  'User': { 
-    icon: User, 
+  'User': {
+    icon: User,
     label: 'Resource Owner',
     shortLabel: 'User',
     color: '#4ade80', // green
   },
-  'Resource Owner (User)': { 
-    icon: User, 
+  'Resource Owner (User)': {
+    icon: User,
     label: 'Resource Owner',
     shortLabel: 'User',
     color: '#4ade80', // green
   },
-  'End-User': { 
-    icon: User, 
+  'End-User': {
+    icon: User,
     label: 'End-User',
     shortLabel: 'User',
     color: '#4ade80', // green
   },
-  'Authorization Server': { 
-    icon: Shield, 
+  'Authorization Server': {
+    icon: Shield,
     label: 'Authorization Server',
     shortLabel: 'Auth Server',
     color: '#c084fc', // purple
   },
   // OIDC terminology (same as Auth Server but with OIDC naming)
-  'OpenID Provider': { 
-    icon: Shield, 
+  'OpenID Provider': {
+    icon: Shield,
     label: 'OpenID Provider',
     shortLabel: 'Auth Server',
     color: '#c084fc', // purple
   },
-  'Resource Server': { 
-    icon: Database, 
+  'Resource Server': {
+    icon: Database,
     label: 'Resource Server',
     shortLabel: 'API',
     color: '#fb923c', // orange
   },
-  'Resource Server (API)': { 
-    icon: Database, 
+  'Resource Server (API)': {
+    icon: Database,
     label: 'Resource Server',
     shortLabel: 'API',
     color: '#fb923c', // orange
   },
   // For token validation steps (self-referential)
-  'Browser': { 
-    icon: Globe, 
+  'Browser': {
+    icon: Globe,
     label: 'Browser',
     shortLabel: 'Browser',
     color: '#60a5fa', // blue
   },
   // SAML actors
-  'Service Provider': { 
-    icon: Globe, 
+  'Service Provider': {
+    icon: Globe,
     label: 'Service Provider',
     shortLabel: 'SP',
     color: '#60a5fa', // blue
   },
-  'Identity Provider': { 
-    icon: Shield, 
+  'Identity Provider': {
+    icon: Shield,
     label: 'Identity Provider',
     shortLabel: 'IdP',
     color: '#c084fc', // purple
   },
-  'Service Providers': { 
-    icon: Database, 
+  'Service Providers': {
+    icon: Database,
     label: 'Service Providers',
     shortLabel: 'SPs',
     color: '#fb923c', // orange
   },
-  'Other Service Providers': { 
-    icon: Database, 
+  'Other Service Providers': {
+    icon: Database,
     label: 'Other Service Providers',
     shortLabel: 'Other SPs',
     color: '#fb923c', // orange
   },
-  'Both Parties': { 
-    icon: Shield, 
+  'Both Parties': {
+    icon: Shield,
     label: 'Both Parties',
     shortLabel: 'Both',
     color: '#9ca3af', // gray
@@ -492,7 +492,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
 
   const totalWidth = leftPadding + rightPadding + actorWidth + (actors.length - 1) * actorSpacing
   const diagramHeight = headerHeight + steps.length * rowHeight + 40
-  
+
   // Allow full height for flows with many steps (8+ steps need ~700px)
   const maxHeight = Math.max(diagramHeight, 400)
 
@@ -502,7 +502,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
     <div className="space-y-4">
       {/* Sequence Diagram */}
       <div className="relative overflow-x-auto overflow-y-hidden scrollbar-hide">
-        <svg 
+        <svg
           viewBox={`0 0 ${totalWidth} ${diagramHeight}`}
           className="w-full"
           style={{ minWidth: Math.min(totalWidth, 420), maxWidth: Math.max(totalWidth + 40, 800), height: maxHeight, margin: '0 auto', display: 'block' }}
@@ -595,19 +595,19 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
             const fromX = getActorCenterX(step.from)
             const toX = getActorCenterX(step.to)
             const y = headerHeight + index * rowHeight + rowHeight / 2 + 5
-            
+
             const isHovered = hoveredStep === step.order
             const isSelected = selectedStep === step.order
             const isActive = activeStep === step.order
             const highlight = isHovered || isSelected || isActive
-            
+
             const msgColor = messageColors[step.type] || messageColors['request']
             const isSelfMessage = step.from === step.to
             const isLeftToRight = fromX < toX
             const arrowOffset = 6
 
             return (
-              <g 
+              <g
                 key={step.order}
                 onClick={() => handleStepClick(step.order)}
                 onMouseEnter={() => setHoveredStep(step.order)}
@@ -688,7 +688,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
                       strokeOpacity={highlight ? 1 : 0.7}
                       markerEnd={`url(#arrow-${step.type})`}
                     />
-                    
+
                     {/* Message label */}
                     <text
                       x={(fromX + toX) / 2}
@@ -713,7 +713,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
       <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-6 text-[10px] sm:text-xs text-surface-400 py-2">
         {Object.entries(messageColors).map(([type, config]) => (
           <div key={type} className="flex items-center gap-1.5 sm:gap-2">
-            <div 
+            <div
               className="w-5 sm:w-8 h-0.5 rounded"
               style={{ backgroundColor: config.stroke, opacity: 0.8 }}
             />
@@ -739,7 +739,7 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
             </button>
 
             <div className="flex items-center gap-2.5 sm:gap-3 mb-3 sm:mb-4 pr-8">
-              <div 
+              <div
                 className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center font-bold text-xs sm:text-sm text-white flex-shrink-0"
                 style={{ backgroundColor: messageColors[selectedStepData.type]?.stroke || '#6366f1', opacity: 0.9 }}
               >
@@ -780,4 +780,3 @@ export function FlowDiagram({ steps, activeStep = -1, onStepClick }: FlowDiagram
     </div>
   )
 }
-

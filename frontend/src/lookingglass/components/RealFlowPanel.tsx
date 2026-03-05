@@ -13,7 +13,7 @@ import {
   ChevronRight, Fingerprint, Code, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ElementType } from 'react'
 import type { 
   FlowExecutorState, 
   FlowEvent, 
@@ -21,8 +21,8 @@ import type {
   DecodedToken 
 } from '../flows'
 import type { WireCapturedExchange } from '../types'
-import { TLSInspector } from '../../components/lookingglass/TLSInspector'
-import { VCInspector } from '../../components/lookingglass/VCInspector'
+import { TLSInspector } from './inspectors/TLSInspector'
+import { VCInspector } from './inspectors/VCInspector'
 
 // ============================================================================
 // Main Panel Component
@@ -361,7 +361,7 @@ function EventsList({ events }: { events: FlowEvent[] }) {
     )
   }
 
-  const eventConfig: Record<FlowEvent['type'], { icon: React.ElementType; color: string }> = {
+  const eventConfig: Record<FlowEvent['type'], { icon: ElementType; color: string }> = {
     info: { icon: Info, color: 'text-blue-400 bg-blue-500/10' },
     request: { icon: Send, color: 'text-cyan-400 bg-cyan-500/10' },
     response: { icon: ArrowDownLeft, color: 'text-green-400 bg-green-500/10' },
@@ -773,7 +773,7 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
     )
   }
 
-  const tokenConfig: Record<DecodedToken['type'], { label: string; shortLabel: string; color: string; icon: React.ElementType }> = {
+  const tokenConfig: Record<DecodedToken['type'], { label: string; shortLabel: string; color: string; icon: ElementType }> = {
     access_token: { label: 'Access Token', shortLabel: 'Access', color: 'text-green-400', icon: Key },
     id_token: { label: 'ID Token (OIDC)', shortLabel: 'ID Token', color: 'text-orange-400', icon: Fingerprint },
     refresh_token: { label: 'Refresh Token', shortLabel: 'Refresh', color: 'text-blue-400', icon: RotateCcw },

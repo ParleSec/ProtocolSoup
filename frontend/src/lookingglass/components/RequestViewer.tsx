@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { 
-  ChevronDown, ChevronRight, Copy, Check, 
+import {
+  ChevronDown, ChevronRight, Copy, Check,
   ArrowUp, ArrowDown, Clock, Globe, Terminal,
   AlertTriangle, CheckCircle
 } from 'lucide-react'
@@ -31,12 +31,12 @@ const SECURITY_HEADERS = [
   'cache-control', 'pragma', 'www-authenticate', 'set-cookie'
 ]
 
-export function RequestViewer({ 
-  method, 
-  url, 
-  headers, 
-  body, 
-  response, 
+export function RequestViewer({
+  method,
+  url,
+  headers,
+  body,
+  response,
   duration,
   showCurl = true,
   highlightSecurity = true
@@ -47,27 +47,27 @@ export function RequestViewer({
   // Generate cURL equivalent
   const curlCommand = useMemo(() => {
     let curl = `curl -X ${method.toUpperCase()} '${url}'`
-    
+
     if (headers) {
       Object.entries(headers).forEach(([key, value]) => {
         // Mask authorization header values for security
-        const displayValue = key.toLowerCase() === 'authorization' 
+        const displayValue = key.toLowerCase() === 'authorization'
           ? value.replace(/Bearer .+/, 'Bearer <TOKEN>')
           : value
         curl += ` \\\n  -H '${key}: ${displayValue}'`
       })
     }
-    
+
     if (body) {
       const bodyStr = typeof body === 'string' ? body : JSON.stringify(body)
       curl += ` \\\n  -d '${bodyStr}'`
     }
-    
+
     return curl
   }, [method, url, headers, body])
 
   // Check if a header is security-relevant
-  const isSecurityHeader = (key: string) => 
+  const isSecurityHeader = (key: string) =>
     highlightSecurity && SECURITY_HEADERS.includes(key.toLowerCase())
 
   const toggleSection = (section: string) => {
@@ -179,7 +179,7 @@ export function RequestViewer({
             </div>
           </div>
         )}
-        
+
         {/* cURL Command */}
         {showCurl && (
           <div className="mt-4">
@@ -312,18 +312,18 @@ export function RequestViewer({
 }
 
 // Section component
-function Section({ 
-  title, 
-  icon, 
-  isExpanded, 
-  onToggle, 
-  children 
+function Section({
+  title,
+  icon,
+  isExpanded,
+  onToggle,
+  children
 }: {
   title: string
-  icon: React.ReactNode
+  icon: ReactNode
   isExpanded: boolean
   onToggle: () => void
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <div className="border-b border-white/5 last:border-0">

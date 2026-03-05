@@ -5,6 +5,10 @@
  * requests, responses, tokens, and cryptographic operations.
  * 
  * This is NOT a simulation - it runs real OAuth 2.0 and OIDC flows.
+ *
+ * @deprecated This module is kept for compatibility only.
+ * Use flow-specific executors under `lookingglass/flows` with
+ * `useRealFlowExecutor` for all new work.
  */
 
 import { generateCodeVerifier, generateCodeChallenge, generateState, generateNonce } from '../utils/crypto'

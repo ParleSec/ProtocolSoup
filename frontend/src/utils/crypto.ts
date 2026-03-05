@@ -38,6 +38,65 @@ export function base64URLDecode(str: string): Uint8Array {
 }
 
 /**
+ * Decode a base64url value into a UTF-8 string.
+ */
+export function decodeBase64URLToString(str: string): string | null {
+  try {
+    const decodedBytes = base64URLDecode(str)
+    return new TextDecoder().decode(decodedBytes)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Decode a base64url value that contains JSON.
+ */
+export function decodeBase64URLJSON<T = unknown>(str: string): T | null {
+  const decoded = decodeBase64URLToString(str)
+  if (!decoded) {
+    return null
+  }
+  try {
+    return JSON.parse(decoded) as T
+  } catch {
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+export interface DecodedJWT {
+  header: Record<string, unknown>
+  payload: Record<string, unknown>
+  signature: string
+}
+
+/**
+ * Decode JWT segments without validating the signature.
+ */
+export function decodeJWTWithoutValidation(token: string): DecodedJWT | null {
+  const [headerSegment, payloadSegment, signature] = token.split('.')
+  if (!headerSegment || !payloadSegment || signature === undefined) {
+    return null
+  }
+
+  const header = decodeBase64URLJSON<unknown>(headerSegment)
+  const payload = decodeBase64URLJSON<unknown>(payloadSegment)
+  if (!isRecord(header) || !isRecord(payload)) {
+    return null
+  }
+
+  return {
+    header,
+    payload,
+    signature,
+  }
+}
+
+/**
  * Generate a PKCE code verifier
  * A high-entropy cryptographic random string (43-128 chars)
  */

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ElementType, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   AlertTriangle, CheckCircle, XCircle, Clock,
@@ -67,7 +67,7 @@ interface SVIDInspectorProps {
 }
 
 // SPIFFE-specific claim explanations
-const spiffeClaimInfo: Record<string, { label: string; description: string; icon: React.ElementType }> = {
+const spiffeClaimInfo: Record<string, { label: string; description: string; icon: ElementType }> = {
   sub: { label: 'SPIFFE ID', description: 'The unique workload identity in SPIFFE URI format', icon: Fingerprint },
   aud: { label: 'Audience', description: 'Intended recipient service(s) for this JWT-SVID', icon: Server },
   exp: { label: 'Expiration', description: 'JWT-SVIDs are short-lived (typically 5 minutes)', icon: Clock },
@@ -640,7 +640,7 @@ function SPIFFEIDInspector({ spiffeId }: { spiffeId: string }) {
       }
       const url = new URL(spiffeId)
       const pathParts = url.pathname.split('/').filter(Boolean)
-      
+
       return {
         valid: true,
         scheme: 'spiffe',
@@ -723,11 +723,11 @@ function SVIDSection({
 }: {
   title: string
   subtitle: string
-  icon: React.ElementType
+  icon: ElementType
   color: string
   isExpanded: boolean
   onToggle: () => void
-  children: React.ReactNode
+  children: ReactNode
 }) {
   const colorClasses: Record<string, string> = {
     red: 'text-red-400 bg-red-500/10 border-red-500/20',
@@ -814,4 +814,3 @@ function FieldRow({
     </div>
   )
 }
-

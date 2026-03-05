@@ -1,11 +1,11 @@
 /**
  * SAML Inspector Component
- * 
+ *
  * Visualizes SAML assertions, requests, and responses with
  * XML syntax highlighting and parsed attribute views.
  */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
 interface SAMLInspectorProps {
@@ -97,11 +97,11 @@ export function SAMLInspector({
             )}
           </div>
         </div>
-        
+
         {signatureValid !== undefined && (
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
-            signatureValid 
-              ? 'bg-emerald-500/20 text-emerald-400' 
+            signatureValid
+              ? 'bg-emerald-500/20 text-emerald-400'
               : 'bg-red-500/20 text-red-400'
           }`}>
             <span>{signatureValid ? '✓' : '✗'}</span>
@@ -141,22 +141,22 @@ export function SAMLInspector({
           {activeTab === 'parsed' && assertion && (
             <ParsedView assertion={assertion} />
           )}
-          
+
           {activeTab === 'xml' && xml && (
             <XMLView xml={xml} />
           )}
-          
+
           {activeTab === 'signature' && (
-            <SignatureView 
-              valid={signatureValid} 
-              errors={signatureErrors} 
+            <SignatureView
+              valid={signatureValid}
+              errors={signatureErrors}
             />
           )}
-          
+
           {activeTab === 'conditions' && assertion?.conditions && (
             <ConditionsView conditions={assertion.conditions} />
           )}
-          
+
           {!assertion && !xml && (
             <div className="text-center py-8 text-slate-400">
               No SAML data available
@@ -183,17 +183,17 @@ function ParsedView({ assertion }: { assertion: SAMLAssertion }) {
         <Section title="Subject">
           <InfoRow label="NameID" value={assertion.subject.nameId} highlight />
           {assertion.subject.nameIdFormat && (
-            <InfoRow 
-              label="Format" 
-              value={formatNameIdFormat(assertion.subject.nameIdFormat)} 
-              mono 
+            <InfoRow
+              label="Format"
+              value={formatNameIdFormat(assertion.subject.nameIdFormat)}
+              mono
             />
           )}
           {assertion.subject.subjectConfirmation && (
             <>
-              <InfoRow 
-                label="Confirmation Method" 
-                value={formatConfirmationMethod(assertion.subject.subjectConfirmation.method)} 
+              <InfoRow
+                label="Confirmation Method"
+                value={formatConfirmationMethod(assertion.subject.subjectConfirmation.method)}
               />
               {assertion.subject.subjectConfirmation.recipient && (
                 <InfoRow label="Recipient" value={assertion.subject.subjectConfirmation.recipient} mono />
@@ -211,9 +211,9 @@ function ParsedView({ assertion }: { assertion: SAMLAssertion }) {
             <InfoRow label="Session Index" value={assertion.authnStatement.sessionIndex} mono />
           )}
           {assertion.authnStatement.authnContextClassRef && (
-            <InfoRow 
-              label="Context Class" 
-              value={formatAuthnContext(assertion.authnStatement.authnContextClassRef)} 
+            <InfoRow
+              label="Context Class"
+              value={formatAuthnContext(assertion.authnStatement.authnContextClassRef)}
             />
           )}
         </Section>
@@ -229,7 +229,7 @@ function ParsedView({ assertion }: { assertion: SAMLAssertion }) {
               </div>
               <div className="flex flex-wrap gap-2">
                 {values.map((value, i) => (
-                  <span 
+                  <span
                     key={i}
                     className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded text-sm"
                   >
@@ -272,7 +272,7 @@ function XMLView({ xml }: { xml: string }) {
         {copied ? '✓ Copied' : 'Copy'}
       </button>
       <pre className="bg-slate-950 rounded-lg p-4 overflow-x-auto text-sm leading-relaxed">
-        <code 
+        <code
           className="text-slate-300"
           dangerouslySetInnerHTML={{ __html: highlightXML(escapeHtml(xml)) }}
         />
@@ -281,12 +281,12 @@ function XMLView({ xml }: { xml: string }) {
   )
 }
 
-function SignatureView({ 
-  valid, 
-  errors 
-}: { 
+function SignatureView({
+  valid,
+  errors
+}: {
   valid?: boolean
-  errors?: string[] 
+  errors?: string[]
 }) {
   return (
     <div className="space-y-4">
@@ -303,10 +303,10 @@ function SignatureView({
           </span>
           <div>
             <h4 className="font-medium text-white">
-              {valid === undefined 
-                ? 'Signature Not Verified' 
-                : valid 
-                  ? 'Signature Valid' 
+              {valid === undefined
+                ? 'Signature Not Verified'
+                : valid
+                  ? 'Signature Valid'
                   : 'Signature Invalid'}
             </h4>
             <p className="text-sm text-slate-400">
@@ -324,7 +324,7 @@ function SignatureView({
         <div className="space-y-2">
           <h4 className="text-sm font-medium text-red-400">Validation Errors</h4>
           {errors.map((error, i) => (
-            <div 
+            <div
               key={i}
               className="px-3 py-2 bg-red-500/10 border border-red-500/20 rounded text-sm text-red-300"
             >
@@ -343,10 +343,10 @@ function SignatureView({
   )
 }
 
-function ConditionsView({ 
-  conditions 
-}: { 
-  conditions: NonNullable<SAMLAssertion['conditions']> 
+function ConditionsView({
+  conditions
+}: {
+  conditions: NonNullable<SAMLAssertion['conditions']>
 }) {
   const now = new Date()
   const notBefore = conditions.notBefore ? new Date(conditions.notBefore) : null
@@ -358,8 +358,8 @@ function ConditionsView({
     <div className="space-y-4">
       {/* Validity Status */}
       <div className={`p-4 rounded-lg ${
-        isValid 
-          ? 'bg-emerald-500/10 border border-emerald-500/30' 
+        isValid
+          ? 'bg-emerald-500/10 border border-emerald-500/30'
           : 'bg-red-500/10 border border-red-500/30'
       }`}>
         <div className="flex items-center gap-3">
@@ -369,7 +369,7 @@ function ConditionsView({
               {isValid ? 'Conditions Valid' : 'Conditions Invalid'}
             </h4>
             <p className="text-sm text-slate-400">
-              {isValid 
+              {isValid
                 ? 'The assertion is within its validity period'
                 : 'The assertion is outside its validity period'}
             </p>
@@ -380,15 +380,15 @@ function ConditionsView({
       {/* Time Window */}
       <Section title="Validity Window">
         {conditions.notBefore && (
-          <InfoRow 
-            label="Not Before" 
+          <InfoRow
+            label="Not Before"
             value={formatDateTime(conditions.notBefore)}
             status={notBefore && now >= notBefore ? 'valid' : 'invalid'}
           />
         )}
         {conditions.notOnOrAfter && (
-          <InfoRow 
-            label="Not On Or After" 
+          <InfoRow
+            label="Not On Or After"
             value={formatDateTime(conditions.notOnOrAfter)}
             status={notOnOrAfter && now < notOnOrAfter ? 'valid' : 'invalid'}
           />
@@ -402,7 +402,7 @@ function ConditionsView({
             This assertion is only valid for the following audiences:
           </p>
           {conditions.audience.map((aud, i) => (
-            <div 
+            <div
               key={i}
               className="px-3 py-2 bg-slate-800 rounded text-sm text-slate-300 font-mono mb-2 last:mb-0"
             >
@@ -417,7 +417,7 @@ function ConditionsView({
 
 // Helper Components
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="border border-slate-700 rounded-lg overflow-hidden">
       <div className="px-4 py-2 bg-slate-800/50 border-b border-slate-700">
@@ -430,13 +430,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function InfoRow({ 
-  label, 
-  value, 
+function InfoRow({
+  label,
+  value,
   mono = false,
   highlight = false,
   status,
-}: { 
+}: {
   label: string
   value: string
   mono?: boolean
@@ -523,7 +523,4 @@ function formatAttributeName(name: string): string {
   }
   return oidMappings[name] || name
 }
-
-export default SAMLInspector
-
 
