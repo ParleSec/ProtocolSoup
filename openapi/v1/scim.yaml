@@ -1,0 +1,875 @@
+openapi: 3.1.0
+info:
+  title: ProtocolSoup SCIM API
+  version: 1.0.0
+  summary: SCIM 2.0 user and group provisioning endpoints.
+  description: |
+    Public contract for the ProtocolSoup SCIM service.
+    Implements RFC 7642/7643/7644 style resource provisioning and discovery.
+servers:
+  - url: https://protocolsoup.com
+    description: Production SCIM service
+security: []
+tags:
+  - name: Health
+    description: Service health and API index endpoints.
+  - name: Discovery
+    description: SCIM discovery resources.
+  - name: Users
+    description: SCIM user lifecycle operations.
+  - name: Groups
+    description: SCIM group lifecycle operations.
+  - name: Bulk
+    description: SCIM bulk and search operations.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Get service health
+      operationId: getScimHealth
+      responses:
+        "200":
+          description: Health payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api:
+    get:
+      tags: [Health]
+      summary: Get API index
+      operationId: getScimApiIndex
+      responses:
+        "200":
+          description: API index payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiIndexResponse"
+        "503":
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /scim/v2/ServiceProviderConfig:
+    get:
+      tags: [Discovery]
+      summary: Get service provider capabilities
+      operationId: getServiceProviderConfig
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: SCIM service provider configuration.
+          content:
+            application/scim+json:
+              schema:
+                type: object
+                additionalProperties: true
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/ResourceTypes:
+    get:
+      tags: [Discovery]
+      summary: List resource types
+      operationId: listResourceTypes
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Resource type list.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/ResourceTypes/{id}:
+    get:
+      tags: [Discovery]
+      summary: Get resource type by ID
+      operationId: getResourceType
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Resource type descriptor.
+          content:
+            application/scim+json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: Resource type not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Schemas:
+    get:
+      tags: [Discovery]
+      summary: List SCIM schemas
+      operationId: listSchemas
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Schema list.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Schemas/{id}:
+    get:
+      tags: [Discovery]
+      summary: Get schema by ID
+      operationId: getSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Schema descriptor.
+          content:
+            application/scim+json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: Schema not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Users:
+    get:
+      tags: [Users]
+      summary: List or filter users
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: filter
+          schema:
+            type: string
+          description: SCIM filter expression.
+        - in: query
+          name: startIndex
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: count
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: User list response.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+              examples:
+                users:
+                  value:
+                    schemas:
+                      - urn:ietf:params:scim:api:messages:2.0:ListResponse
+                    totalResults: 1
+                    startIndex: 1
+                    itemsPerPage: 1
+                    Resources:
+                      - id: "2819c223-7f76-453a-919d-413861904646"
+                        userName: "alice@example.com"
+                        active: true
+        "400":
+          description: Invalid filter or request parameters.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    post:
+      tags: [Users]
+      summary: Create user
+      operationId: createUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUser"
+            examples:
+              create:
+                value:
+                  schemas:
+                    - urn:ietf:params:scim:schemas:core:2.0:User
+                  userName: "newuser@example.com"
+                  name:
+                    givenName: "New"
+                    familyName: "User"
+                  emails:
+                    - value: "newuser@example.com"
+                      primary: true
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScimUser"
+      responses:
+        "201":
+          description: User created.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          description: Invalid user payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Users/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Users]
+      summary: Get user by ID
+      operationId: getUser
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: User not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    put:
+      tags: [Users]
+      summary: Replace user
+      operationId: replaceUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUser"
+      responses:
+        "200":
+          description: Replaced user.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: User not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    patch:
+      tags: [Users]
+      summary: Patch user attributes
+      operationId: patchUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/PatchOpRequest"
+      responses:
+        "200":
+          description: Updated user.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          description: Invalid patch request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: User not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    delete:
+      tags: [Users]
+      summary: Delete user
+      operationId: deleteUser
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: User deleted.
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: User not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Groups:
+    get:
+      tags: [Groups]
+      summary: List groups
+      operationId: listGroups
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Group list response.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    post:
+      tags: [Groups]
+      summary: Create group
+      operationId: createGroup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimGroup"
+      responses:
+        "201":
+          description: Group created.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+        "400":
+          description: Invalid group payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Groups/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Groups]
+      summary: Get group by ID
+      operationId: getGroup
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Group resource.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: Group not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    put:
+      tags: [Groups]
+      summary: Replace group
+      operationId: replaceGroup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimGroup"
+      responses:
+        "200":
+          description: Replaced group.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+        "400":
+          description: Invalid group payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: Group not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    patch:
+      tags: [Groups]
+      summary: Patch group
+      operationId: patchGroup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/PatchOpRequest"
+      responses:
+        "200":
+          description: Updated group.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+        "400":
+          description: Invalid patch payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: Group not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+    delete:
+      tags: [Groups]
+      summary: Delete group
+      operationId: deleteGroup
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Group deleted.
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "404":
+          description: Group not found.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Bulk:
+    post:
+      tags: [Bulk]
+      summary: Execute bulk operations
+      operationId: bulkOperations
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/BulkRequest"
+      responses:
+        "200":
+          description: Bulk response payload.
+          content:
+            application/scim+json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid bulk payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/.search:
+    post:
+      tags: [Bulk]
+      summary: Execute POST-based search
+      operationId: searchScimResources
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Search result list.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "400":
+          description: Invalid search payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Unauthorized request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status, version, protocols]
+      properties:
+        status:
+          type: string
+          example: healthy
+        version:
+          type: string
+          example: 1.0.0
+        protocols:
+          type: array
+          items:
+            type: string
+          example: [scim]
+    ApiIndexResponse:
+      type: object
+      required: [service, version, protocols, endpoints]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        protocols:
+          type: array
+          items:
+            type: string
+        endpoints:
+          type: object
+          additionalProperties:
+            type: string
+    ScimListResponse:
+      type: object
+      required: [schemas, totalResults, Resources]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - urn:ietf:params:scim:api:messages:2.0:ListResponse
+        totalResults:
+          type: integer
+          minimum: 0
+        startIndex:
+          type: integer
+          minimum: 1
+        itemsPerPage:
+          type: integer
+          minimum: 0
+        Resources:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    ScimUser:
+      type: object
+      required: [schemas]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        userName:
+          type: string
+        active:
+          type: boolean
+        name:
+          type: object
+          properties:
+            givenName:
+              type: string
+            familyName:
+              type: string
+        emails:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+              type:
+                type: string
+              primary:
+                type: boolean
+        meta:
+          type: object
+          additionalProperties: true
+    ScimGroup:
+      type: object
+      required: [schemas]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        displayName:
+          type: string
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+              display:
+                type: string
+              $ref:
+                type: string
+        meta:
+          type: object
+          additionalProperties: true
+    PatchOpRequest:
+      type: object
+      required: [schemas, Operations]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - urn:ietf:params:scim:api:messages:2.0:PatchOp
+        Operations:
+          type: array
+          items:
+            type: object
+            required: [op]
+            properties:
+              op:
+                type: string
+                enum: [add, replace, remove]
+              path:
+                type: string
+              value:
+                oneOf:
+                  - type: object
+                    additionalProperties: true
+                  - type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  - type: string
+                  - type: number
+                  - type: boolean
+                  - type: "null"
+    BulkRequest:
+      type: object
+      required: [schemas, Operations]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - urn:ietf:params:scim:api:messages:2.0:BulkRequest
+        failOnErrors:
+          type: integer
+          minimum: 0
+        Operations:
+          type: array
+          items:
+            type: object
+            required: [method, path]
+            properties:
+              method:
+                type: string
+                enum: [POST, PUT, PATCH, DELETE]
+              path:
+                type: string
+              bulkId:
+                type: string
+              data:
+                type: object
+                additionalProperties: true
+    ScimError:
+      type: object
+      required: [schemas, detail, status]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - urn:ietf:params:scim:api:messages:2.0:Error
+        detail:
+          type: string
+        status:
+          type: string
+        scimType:
+          type: string
