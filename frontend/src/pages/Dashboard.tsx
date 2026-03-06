@@ -1,11 +1,60 @@
 import { Link } from 'react-router-dom'
 import { 
   Shield, Eye, Terminal, Fingerprint, 
-  ExternalLink, ChevronRight, Key, 
+  ChevronRight, Key, 
   Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
 import { SEO } from '../components/common/SEO'
 import { generateHomepageSchema } from '../utils/schema'
+
+interface SpecLinkItem {
+  label: string
+  url: string
+  tone?: 'rfc' | 'spec'
+}
+
+interface SpecGroupItem {
+  label: string
+  links: SpecLinkItem[]
+}
+
+const SPEC_GROUPS: SpecGroupItem[] = [
+  {
+    label: 'OAuth/OIDC',
+    links: [
+      { label: 'RFC 6749', url: 'https://datatracker.ietf.org/doc/html/rfc6749', tone: 'rfc' },
+      { label: 'RFC 7636', url: 'https://datatracker.ietf.org/doc/html/rfc7636', tone: 'rfc' },
+      { label: 'RFC 6750', url: 'https://datatracker.ietf.org/doc/html/rfc6750', tone: 'rfc' },
+      { label: 'RFC 7519', url: 'https://datatracker.ietf.org/doc/html/rfc7519', tone: 'rfc' },
+    ],
+  },
+  {
+    label: 'SPIFFE',
+    links: [
+      { label: 'SPIFFE', url: 'https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/' },
+      { label: 'X.509-SVID', url: 'https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid' },
+      { label: 'JWT-SVID', url: 'https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#jwt-svid' },
+      { label: 'SPIRE', url: 'https://spiffe.io/docs/latest/spire-about/' },
+    ],
+  },
+  {
+    label: 'SCIM',
+    links: [
+      { label: 'RFC 7642', url: 'https://datatracker.ietf.org/doc/html/rfc7642', tone: 'rfc' },
+      { label: 'RFC 7643', url: 'https://datatracker.ietf.org/doc/html/rfc7643', tone: 'rfc' },
+      { label: 'RFC 7644', url: 'https://datatracker.ietf.org/doc/html/rfc7644', tone: 'rfc' },
+    ],
+  },
+  {
+    label: 'SSF',
+    links: [
+      { label: 'RFC 8417', url: 'https://datatracker.ietf.org/doc/html/rfc8417', tone: 'rfc' },
+      { label: 'CAEP 1.0', url: 'https://openid.net/specs/openid-caep-1_0.html', tone: 'spec' },
+      { label: 'RISC 1.0', url: 'https://openid.net/specs/openid-risc-profile-1_0.html', tone: 'spec' },
+      { label: 'SSF 1.0', url: 'https://openid.net/specs/openid-sse-framework-1_0.html', tone: 'spec' },
+    ],
+  },
+]
 
 export function Dashboard() {
   const structuredData = generateHomepageSchema()
@@ -170,28 +219,10 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-3">
           Specifications
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
-          <RFCLink number="6749" title="OAuth 2.0" />
-          <RFCLink number="7636" title="PKCE" />
-          <RFCLink number="6750" title="Bearer Token" />
-          <RFCLink number="7519" title="JWT" />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-          <SpecLink url="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/" title="SPIFFE" label="SPIFFE" />
-          <SpecLink url="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#spiffe-verifiable-identity-document-svid" title="X.509-SVID" label="X.509-SVID" />
-          <SpecLink url="https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/#jwt-svid" title="JWT-SVID" label="JWT-SVID" />
-          <SpecLink url="https://spiffe.io/docs/latest/spire-about/" title="SPIRE" label="SPIRE" />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-          <RFCLink number="7642" title="SCIM Concepts" />
-          <RFCLink number="7643" title="SCIM Schema" />
-          <RFCLink number="7644" title="SCIM Protocol" />
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-          <RFCLink number="8417" title="SET (RFC 8417)" />
-          <SpecLink url="https://openid.net/specs/openid-caep-1_0.html" title="CAEP" label="CAEP 1.0" />
-          <SpecLink url="https://openid.net/specs/openid-risc-profile-1_0.html" title="RISC" label="RISC 1.0" />
-          <SpecLink url="https://openid.net/specs/openid-sse-framework-1_0.html" title="SSF" label="SSF 1.0" />
+        <div className="space-y-2.5">
+          {SPEC_GROUPS.map((group) => (
+            <SpecGroup key={group.label} label={group.label} links={group.links} />
+          ))}
         </div>
       </section>
     </div>
@@ -357,32 +388,29 @@ function ProtocolCard({
   )
 }
 
-function RFCLink({ number, title }: { number: string; title: string }) {
+function SpecGroup({ label, links }: SpecGroupItem) {
   return (
-    <a
-      href={`https://datatracker.ietf.org/doc/html/rfc${number}`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all text-sm group"
-    >
-      <span className="text-surface-400 font-mono group-hover:text-amber-400 transition-colors">RFC {number}</span>
-      <span className="text-surface-400 group-hover:text-white transition-colors">{title}</span>
-      <ExternalLink className="w-3 h-3 text-surface-600 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
-    </a>
-  )
-}
-
-function SpecLink({ url, title, label }: { url: string; title: string; label: string }) {
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/5 hover:border-white/20 hover:bg-white/5 transition-all text-sm group"
-    >
-      <span className="text-surface-400 font-mono group-hover:text-green-400 transition-colors">{label}</span>
-      <span className="text-surface-400 group-hover:text-white transition-colors">{title}</span>
-      <ExternalLink className="w-3 h-3 text-surface-600 opacity-0 group-hover:opacity-100 transition-opacity ml-auto" />
-    </a>
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
+      <span className="text-surface-500 text-[11px] sm:text-xs font-medium uppercase tracking-wide w-full sm:w-24 flex-shrink-0 pt-1">
+        {label}
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {links.map((link) => (
+          <a
+            key={link.label}
+            href={link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono transition-colors ${
+              link.tone === 'rfc'
+                ? 'text-amber-300/90 hover:text-amber-200 hover:bg-amber-500/10'
+                : 'text-emerald-300/90 hover:text-emerald-200 hover:bg-emerald-500/10'
+            }`}
+          >
+            {link.label}
+          </a>
+        ))}
+      </div>
+    </div>
   )
 }

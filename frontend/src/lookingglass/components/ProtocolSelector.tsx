@@ -48,8 +48,8 @@ export function ProtocolSelector({
     if (protocolButtonRef.current) {
       const rect = protocolButtonRef.current.getBoundingClientRect()
       const isMobile = window.innerWidth < 640
-      const dropdownWidth = isMobile ? Math.min(rect.width, window.innerWidth - 32) : Math.max(rect.width, 200)
-      const leftPos = isMobile ? Math.max(16, rect.left) : rect.left
+      const dropdownWidth = isMobile ? Math.min(window.innerWidth - 32, Math.max(rect.width, 220)) : Math.max(rect.width, 200)
+      const leftPos = isMobile ? 16 : rect.left
       setProtocolDropdownPos({
         top: rect.bottom + 4,
         left: leftPos,
@@ -156,21 +156,22 @@ export function ProtocolSelector({
   }
 
   return (
-    <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3">
+    <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:flex-wrap sm:items-center sm:gap-3">
       {/* Protocol Select */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-        <span className="text-surface-600 text-xs sm:text-sm font-mono sm:w-auto flex-shrink-0">protocol:</span>
+      <div className="min-w-0 sm:flex sm:items-center sm:gap-2">
+        <span className="hidden sm:inline text-surface-600 text-xs sm:text-sm font-mono flex-shrink-0">protocol:</span>
         <button
           ref={protocolButtonRef}
+          aria-label="Select protocol"
           onClick={() => {
             setIsFlowOpen(false)
             setIsProtocolOpen(!isProtocolOpen)
           }}
-          className="flex items-center gap-2 px-3 py-2 sm:py-1.5 rounded bg-surface-900 border border-white/10 hover:border-white/20 active:border-white/30 text-sm font-mono transition-colors w-full sm:flex-initial sm:min-w-[140px] touch-manipulation"
+          className="flex items-center gap-2 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded bg-surface-900 border border-white/10 hover:border-white/20 active:border-white/30 text-sm font-mono transition-colors w-full min-w-0 sm:w-auto sm:min-w-[140px] touch-manipulation"
         >
           <div className="flex items-center gap-2 min-w-0">
             <span className={`truncate ${selectedProtocol ? 'text-white' : 'text-surface-400'}`}>
-              {selectedProtocol?.id || 'select'}
+              {selectedProtocol?.id || 'protocol'}
             </span>
             {selectedProtocol && WIP_PROTOCOL_IDS.has(selectedProtocol.id) && (
               <span className="px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-[10px] font-semibold tracking-wide text-amber-300">
@@ -183,24 +184,25 @@ export function ProtocolSelector({
       </div>
 
       {/* Flow Select */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-        <span className="text-surface-600 text-xs sm:text-sm font-mono sm:w-auto flex-shrink-0">flow:</span>
+      <div className="min-w-0 sm:flex sm:items-center sm:gap-2">
+        <span className="hidden sm:inline text-surface-600 text-xs sm:text-sm font-mono flex-shrink-0">flow:</span>
         <button
           ref={flowButtonRef}
+          aria-label="Select flow"
           onClick={() => {
             if (!selectedProtocol) return
             setIsProtocolOpen(false)
             setIsFlowOpen(!isFlowOpen)
           }}
           disabled={!selectedProtocol}
-          className={`flex items-center gap-2 px-3 py-2 sm:py-1.5 rounded bg-surface-900 border border-white/10 text-sm font-mono transition-colors w-full sm:flex-initial sm:min-w-[200px] touch-manipulation ${
+          className={`flex items-center gap-2 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded bg-surface-900 border border-white/10 text-sm font-mono transition-colors w-full min-w-0 sm:w-auto sm:min-w-[200px] touch-manipulation ${
             selectedProtocol 
               ? 'hover:border-white/20 active:border-white/30' 
               : 'opacity-50 cursor-not-allowed'
           }`}
         >
           <span className={`${selectedFlow ? 'text-white' : 'text-surface-400'} truncate`}>
-            {selectedFlow?.id || 'select'}
+            {selectedFlow?.id || 'flow'}
           </span>
           <ChevronDown className={`w-3.5 h-3.5 text-surface-400 ml-auto flex-shrink-0 transition-transform ${isFlowOpen ? 'rotate-180' : ''}`} />
         </button>

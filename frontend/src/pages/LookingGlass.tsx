@@ -6,7 +6,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-  Eye, Play, RotateCcw, Key, Terminal, Square,
+  Eye, Play, RotateCcw, Key, Square,
   Fingerprint, Shield, Lock, Sparkles,
   RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink
 } from 'lucide-react'
@@ -83,6 +83,7 @@ export function LookingGlass() {
   const [oid4vpStepwiseVPToken, setOID4VPStepwiseVPToken] = useState('')
   const [oid4vpStepwiseLastStep, setOID4VPStepwiseLastStep] = useState('')
   const [oid4vpDisclosureClaims, setOID4VPDisclosureClaims] = useState<string[]>([])
+  const [showAllQuickFlows, setShowAllQuickFlows] = useState(false)
 
   const { protocols, loading: protocolsLoading } = useProtocols()
   const {
@@ -144,6 +145,7 @@ export function LookingGlass() {
   const isSCIMFlow = selectedProtocol?.id === 'scim'
   const isOID4VCITxCodeFlow = selectedProtocol?.id === 'oid4vci' && flowId === 'oid4vci-pre-authorized-tx-code'
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
+  const hasFlowConfigurationInputs = isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCITxCodeFlow || isOID4VPFlow
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
 
   // Use stored token or user input for flows that need a token
@@ -913,6 +915,56 @@ export function LookingGlass() {
   }, [protocols, resetFlow, clearWireEvents, navigate])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
+  const quickStartFlows = [
+    {
+      icon: Workflow,
+      label: 'Interaction Code Flow',
+      sublabel: 'Full OAuth 2.0 + OIDC',
+      color: 'cyan',
+      protocolId: 'oidc',
+      flowId: 'interaction-code',
+    },
+    {
+      icon: Shield,
+      label: 'Authorization Code',
+      sublabel: 'OAuth 2.0',
+      color: 'blue',
+      protocolId: 'oauth2',
+      flowId: 'authorization_code',
+    },
+    {
+      icon: Lock,
+      label: 'Client Credentials',
+      sublabel: 'OAuth 2.0',
+      color: 'green',
+      protocolId: 'oauth2',
+      flowId: 'client_credentials',
+    },
+    {
+      icon: RefreshCw,
+      label: 'Refresh Token',
+      sublabel: 'OAuth 2.0',
+      color: 'purple',
+      protocolId: 'oauth2',
+      flowId: 'refresh_token',
+    },
+    {
+      icon: Fingerprint,
+      label: 'OIDC Auth Code',
+      sublabel: 'OpenID Connect',
+      color: 'orange',
+      protocolId: 'oidc',
+      flowId: 'oidc_authorization_code',
+    },
+    {
+      icon: FileKey,
+      label: 'SP-Initiated SSO',
+      sublabel: 'SAML 2.0',
+      color: 'blue',
+      protocolId: 'saml',
+      flowId: 'sp_initiated_sso',
+    },
+  ] as const
 
   return (
     <>
@@ -941,77 +993,49 @@ export function LookingGlass() {
       {/* Quick Select - when nothing selected */}
       {!selectedFlow && !protocolsLoading && (
         <section>
-          <div className="flex items-center gap-2 text-surface-400 text-sm mb-3">
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>Quick start - select a flow to begin</span>
+          <div className="flex items-center justify-between gap-2 text-surface-400 text-sm mb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Quick start - select a flow to begin</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAllQuickFlows((current) => !current)}
+              className="sm:hidden text-[11px] font-medium text-surface-500 hover:text-surface-300 transition-colors"
+            >
+              {showAllQuickFlows ? 'Show less' : `Show all (${quickStartFlows.length})`}
+            </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <FlowButton
-              icon={Workflow}
-              label="Interaction Code Flow"
-              sublabel="Full OAuth 2.0 + OIDC"
-              color="cyan"
-              onClick={() => handleQuickSelect('oidc', 'interaction-code')}
-            />
-            <FlowButton
-              icon={Shield}
-              label="Authorization Code"
-              sublabel="OAuth 2.0"
-              color="blue"
-              onClick={() => handleQuickSelect('oauth2', 'authorization_code')}
-            />
-            <FlowButton
-              icon={Lock}
-              label="Client Credentials"
-              sublabel="OAuth 2.0"
-              color="green"
-              onClick={() => handleQuickSelect('oauth2', 'client_credentials')}
-            />
+          <div className="sm:hidden grid grid-cols-2 gap-2">
+            {(showAllQuickFlows ? quickStartFlows : quickStartFlows.slice(0, 4)).map((flow) => (
+              <FlowButton
+                key={`${flow.protocolId}-${flow.flowId}`}
+                icon={flow.icon}
+                label={flow.label}
+                sublabel={flow.sublabel}
+                color={flow.color}
+                compact
+                onClick={() => handleQuickSelect(flow.protocolId, flow.flowId)}
+              />
+            ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
-            <FlowButton
-              icon={RefreshCw}
-              label="Refresh Token"
-              sublabel="OAuth 2.0"
-              color="purple"
-              onClick={() => handleQuickSelect('oauth2', 'refresh_token')}
-            />
-            <FlowButton
-              icon={Fingerprint}
-              label="OIDC Auth Code"
-              sublabel="OpenID Connect"
-              color="orange"
-              onClick={() => handleQuickSelect('oidc', 'oidc_authorization_code')}
-            />
-            <FlowButton
-              icon={FileKey}
-              label="SP-Initiated SSO"
-              sublabel="SAML 2.0"
-              color="blue"
-              onClick={() => handleQuickSelect('saml', 'sp_initiated_sso')}
-            />
+          <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {quickStartFlows.map((flow) => (
+              <FlowButton
+                key={`${flow.protocolId}-${flow.flowId}`}
+                icon={flow.icon}
+                label={flow.label}
+                sublabel={flow.sublabel}
+                color={flow.color}
+                onClick={() => handleQuickSelect(flow.protocolId, flow.flowId)}
+              />
+            ))}
           </div>
         </section>
       )}
 
       {/* Protocol Selector */}
-      <section className="rounded-xl border border-white/10 bg-surface-900/30 p-3 sm:p-5">
-        <div className="flex items-center justify-between mb-3 sm:mb-4">
-          <div className="flex items-center gap-2">
-            <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-surface-400" />
-            <span className="text-xs sm:text-sm font-medium text-surface-300">Configuration</span>
-          </div>
-          {selectedFlow && (
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
-            >
-              <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              Reset
-            </button>
-          )}
-        </div>
-        
+      <section className="flex flex-wrap items-center gap-2 sm:gap-3">
         <ProtocolSelector
           protocols={protocols}
           selectedProtocol={selectedProtocol}
@@ -1020,7 +1044,20 @@ export function LookingGlass() {
           onFlowSelect={handleFlowSelect}
           loading={protocolsLoading}
         />
+        {selectedFlow && (
+          <button
+            onClick={handleReset}
+            aria-label="Reset selected flow"
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded border border-white/10 text-xs sm:text-sm text-surface-400 hover:text-white hover:border-white/20 transition-colors"
+          >
+            <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            <span className="hidden sm:inline">Reset</span>
+          </button>
+        )}
+      </section>
 
+      {hasFlowConfigurationInputs && (
+        <section className="rounded-xl border border-white/10 bg-surface-900/20 p-3 sm:p-4">
         {/* Refresh Token Input - shown when refresh token flow is selected */}
         {isRefreshTokenFlow && (
           <motion.div
@@ -1309,7 +1346,8 @@ export function LookingGlass() {
             )}
           </motion.div>
         )}
-      </section>
+        </section>
+      )}
 
       {/* Execution */}
       {selectedFlow && (
