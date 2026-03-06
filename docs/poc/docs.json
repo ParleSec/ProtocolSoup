@@ -1,0 +1,43 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "ProtocolSoup Docs",
+  "theme": "mint",
+  "colors": {
+    "primary": "#2b6be4",
+    "light": "#7aa8ff",
+    "dark": "#1a49a5"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Start Here",
+        "pages": [
+          "index",
+          "start-here/overview"
+        ]
+      },
+      {
+        "tab": "GHCR Services",
+        "pages": [
+          "ghcr/overview"
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "pages": [
+          "api-reference/overview"
+        ],
+        "openapi": [
+          "openapi/gateway.yaml",
+          "openapi/scim.yaml"
+        ]
+      },
+      {
+        "tab": "Protocols And Specs",
+        "pages": [
+          "protocols-and-specs/overview"
+        ]
+      }
+    ]
+  }
+}
