@@ -1,0 +1,120 @@
+---
+title: Protocol Catalog
+description: All protocol families, flows, and demo scenarios available in ProtocolSoup.
+---
+
+## OAuth 2.0
+
+**Standards:** RFC 6749, RFC 7636 (PKCE), RFC 7662 (Introspection), RFC 7009 (Revocation), RFC 8628 (Device Code)
+
+| Flow | Description |
+|------|-------------|
+| Authorization Code | Standard authorization grant with redirect |
+| Authorization Code + PKCE | Authorization code with Proof Key for Code Exchange |
+| Client Credentials | Machine-to-machine token issuance |
+| Refresh Token | Token renewal without re-authorization |
+| Token Introspection | Validate and inspect active tokens |
+| Token Revocation | Invalidate access or refresh tokens |
+| Device Code | Authorization for input-constrained devices |
+| Implicit | Legacy browser-based flow (deprecated) |
+| Resource Owner Password | Legacy direct credential exchange (deprecated) |
+
+## OpenID Connect
+
+**Standards:** OIDC Core 1.0, OIDC Discovery 1.0
+
+| Flow | Description |
+|------|-------------|
+| Authorization Code | OIDC authentication with ID token |
+| Hybrid | Combined code + token response |
+| Implicit | Legacy OIDC implicit flow |
+| UserInfo | Claims retrieval from the UserInfo endpoint |
+| Discovery | OpenID Provider metadata and JWKS resolution |
+| Interaction Code | Interactive authorization with PKCE |
+
+## SAML 2.0
+
+**Standards:** SAML 2.0 Core, Bindings, Profiles, Metadata
+
+| Flow | Description |
+|------|-------------|
+| SP-Initiated SSO | Service Provider starts the login flow |
+| IdP-Initiated SSO | Identity Provider starts the login flow |
+| Single Logout | Coordinated logout across participants |
+| Metadata Exchange | SP/IdP metadata discovery and sharing |
+
+**Demo scenarios:** Assertion Deep Dive, Metadata Exploration
+
+## SCIM 2.0
+
+**Standards:** RFC 7642, RFC 7643, RFC 7644
+
+| Flow | Description |
+|------|-------------|
+| User Lifecycle | Create, read, update, deactivate users |
+| Group Membership | Group CRUD and membership management |
+| User Discovery | Filter expressions and search queries |
+| Bulk Operations | Batch create/update/delete |
+| Schema Discovery | ServiceProviderConfig, ResourceTypes, Schemas |
+| Outbound Provisioning | Client-initiated provisioning sync |
+
+## SPIFFE/SPIRE
+
+**Standards:** SPIFFE, SPIRE, SPIFFE Workload API, X.509-SVID, JWT-SVID
+
+| Flow | Description |
+|------|-------------|
+| X.509-SVID Issuance | Retrieve X.509 workload identity certificate |
+| JWT-SVID Issuance | Retrieve JWT workload identity token |
+| mTLS Handshake | Mutual TLS using X.509-SVIDs |
+| Certificate Rotation | Automatic SVID renewal |
+| Workload Registration | Register workload entries in SPIRE |
+| Node Attestation | Node identity verification |
+| Workload Attestation | Workload identity verification |
+| Trust Bundle Federation | Cross-trust-domain bundle exchange |
+
+**Requires:** SPIFFE compose overlay (`docker-compose.spiffe.yml`) for full mode. Demo mode returns 503.
+
+## Shared Signals Framework (SSF)
+
+**Standards:** OpenID SSF 1.0, CAEP 1.0, RISC 1.0
+
+| Flow | Description |
+|------|-------------|
+| Stream Configuration | Create and configure event streams |
+| Push Delivery | Transmitter pushes SETs to receiver |
+| Poll Delivery | Receiver polls transmitter for SETs |
+| CAEP Session Revoked | Session revocation event and response |
+| CAEP Credential Change | Credential change event and response |
+| RISC Account Disabled | Account disabled event and response |
+| RISC Credential Compromise | Credential compromise event and response |
+
+**Demo scenarios:** SSF Interactive Sandbox, Push vs Poll Comparison
+
+## OID4VCI
+
+**Standards:** OpenID4VCI 1.0
+
+| Flow | Description |
+|------|-------------|
+| Pre-Authorized Code | Credential issuance with pre-authorized grant |
+| Pre-Authorized + tx_code | Issuance with transaction code challenge |
+| Deferred Issuance | Credential issued asynchronously |
+
+**Credential type:** UniversityDegreeCredential (SD-JWT VC, `dc+sd-jwt` format)
+
+## OID4VP
+
+**Standards:** OpenID4VP 1.0
+
+| Flow | Description |
+|------|-------------|
+| DCQL + direct_post | DCQL query with direct_post response mode |
+| DCQL + direct_post.jwt | DCQL query with encrypted JWT response |
+
+**Client ID schemes:** `redirect_uri`, `did:web`
+
+## Related
+
+- [Flow Walkthroughs](/using/flow-walkthroughs/)
+- [Looking Glass](/using/looking-glass/)

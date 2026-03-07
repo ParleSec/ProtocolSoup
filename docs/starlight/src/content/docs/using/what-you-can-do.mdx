@@ -1,0 +1,55 @@
+---
+title: What You Can Do
+description: Execute, inspect, and compare identity protocol flows with real payloads.
+---
+
+ProtocolSoup executes real protocol flows and shows you every request, response, token, and validation decision. Nothing is mocked at the display layer.
+
+## Execute Protocol Flows
+
+Run 42+ flows across 8 protocol families:
+
+- **OAuth 2.0** -- Authorization Code, PKCE, Client Credentials, Refresh Token, Device Code, Implicit, Token Introspection, Token Revocation
+- **OpenID Connect** -- Authorization Code, Hybrid, Implicit, UserInfo, Discovery, Interaction Code
+- **SAML 2.0** -- SP-Initiated SSO, IdP-Initiated SSO, Single Logout, Metadata Exchange
+- **SCIM 2.0** -- User Lifecycle, Group Membership, Filter Queries, Bulk Operations, Schema Discovery, Outbound Provisioning
+- **SPIFFE/SPIRE** -- X.509-SVID Issuance, JWT-SVID Issuance, mTLS Handshake, Certificate Rotation, Node/Workload Attestation, Trust Bundle Federation
+- **Shared Signals (SSF)** -- Stream Configuration, Push/Poll Delivery, CAEP Session Revoked, CAEP Credential Change, RISC Account Disabled, RISC Credential Compromise
+- **OID4VCI** -- Pre-Authorized Code, Pre-Authorized + tx_code, Deferred Issuance
+- **OID4VP** -- DCQL + direct_post, DCQL + direct_post.jwt
+
+## Inspect Artifacts
+
+- Decode OAuth 2.0 and OIDC tokens (access tokens, ID tokens, refresh tokens)
+- Read SAML assertions, AuthnRequests, and metadata XML
+- Inspect SCIM payloads (Users, Groups, Bulk, PATCH operations)
+- Examine X.509-SVID certificates, JWT-SVIDs, and trust bundles
+- Decode Security Event Tokens (SETs) for CAEP/RISC events
+- Inspect OID4VCI credential offers and SD-JWT VCs
+- Examine OID4VP authorization requests and presentation responses
+
+## Compare Protocol Families
+
+Use the same workflow across every protocol to compare:
+
+- Authorization and consent models (OAuth vs SAML vs SPIFFE)
+- Token formats and claims (JWT vs SAML assertion vs X.509)
+- Session and state management approaches
+- Trust establishment patterns
+
+## Key Features
+
+| Feature | What It Does |
+|---------|-------------|
+| **Looking Glass** | Real-time execution console with step-by-step flow visualization and WebSocket event streaming |
+| **Token Inspector** | Decode and inspect JWT, SAML, X.509, and SET tokens from any flow |
+| **Mock IdP** | Built-in identity provider with configurable demo users and clients |
+| **SSF Sandbox** | Dedicated event-stream testing with CAEP/RISC transmitter and receiver |
+| **Flow Visualizer** | Visual protocol flow diagrams with RFC references at each step |
+
+## Recommended Path
+
+1. Browse the [Protocol Catalog](/using/protocol-catalog/).
+2. Pick one flow from [Flow Walkthroughs](/using/flow-walkthroughs/).
+3. Execute it in Looking Glass.
+4. Change one input and rerun to observe control behavior.
