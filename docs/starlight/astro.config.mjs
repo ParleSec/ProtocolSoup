@@ -15,6 +15,7 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/ParleSec/ProtocolSoup' },
       ],
+      favicon: '/favicon.svg',
       customCss: ['./src/styles/custom.css'],
       head: [
         { tag: 'meta', attrs: { name: 'theme-color', content: '#a855f7' } },
