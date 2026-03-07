@@ -1,0 +1,491 @@
+openapi: 3.1.0
+info:
+  title: ProtocolSoup VC API
+  version: 1.0.0
+  summary: OID4VCI and OID4VP service endpoints.
+  description: |
+    Public contract for the ProtocolSoup VC service.
+    Includes issuer (OID4VCI) and verifier (OID4VP) protocol endpoints.
+servers:
+  - url: https://protocolsoup.com
+    description: Production VC service
+security: []
+tags:
+  - name: Health
+    description: Service health and API index endpoints.
+  - name: OID4VCI
+    description: Credential issuance and token exchange endpoints.
+  - name: OID4VP
+    description: Request object and wallet response verification endpoints.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Get service health
+      operationId: getVcHealth
+      responses:
+        "200":
+          description: Health payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api:
+    get:
+      tags: [Health]
+      summary: Get API index
+      operationId: getVcApiIndex
+      responses:
+        "200":
+          description: API index payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiIndexResponse"
+  /.well-known/openid-credential-issuer/oid4vci:
+    get:
+      tags: [OID4VCI]
+      summary: Canonical issuer metadata path
+      operationId: getVcIssuerMetadataCanonical
+      responses:
+        "200":
+          description: Credential issuer metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Metadata path not available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/.well-known/openid-credential-issuer:
+    get:
+      tags: [OID4VCI]
+      summary: OID4VCI issuer metadata
+      operationId: getVcIssuerMetadata
+      responses:
+        "200":
+          description: Credential issuer metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oid4vci/credential-offer/{offerID}:
+    get:
+      tags: [OID4VCI]
+      summary: Resolve by-reference credential offer
+      operationId: getVcCredentialOffer
+      parameters:
+        - in: path
+          name: offerID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Credential offer payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Offer not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/offers/pre-authorized:
+    post:
+      tags: [OID4VCI]
+      summary: Create pre-authorized offer (by-reference)
+      operationId: createVcPreAuthorizedOffer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Offer creation response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid offer payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/offers/pre-authorized/by-value:
+    post:
+      tags: [OID4VCI]
+      summary: Create pre-authorized offer (by-value)
+      operationId: createVcPreAuthorizedOfferByValue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Offer creation response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid offer payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/offers/pre-authorized/deferred:
+    post:
+      tags: [OID4VCI]
+      summary: Create deferred-capable pre-authorized offer
+      operationId: createVcDeferredOffer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Deferred offer creation response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid offer payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/token:
+    post:
+      tags: [OID4VCI]
+      summary: Exchange grant for access token and nonce
+      operationId: vcToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Access token response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              examples:
+                token:
+                  value:
+                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    token_type: Bearer
+                    expires_in: 600
+                    c_nonce: "n-0S6_WzA2Mj"
+                    c_nonce_expires_in: 60
+        "400":
+          description: Invalid grant or request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/nonce:
+    post:
+      tags: [OID4VCI]
+      summary: Rotate c_nonce for active token
+      operationId: vcRotateNonce
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Nonce response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Invalid or missing access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/credential:
+    post:
+      tags: [OID4VCI]
+      summary: Submit proof and request credential
+      operationId: vcIssueCredential
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Credential issued or deferred transaction created.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid proof, nonce, or request contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Invalid or missing access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/deferred_credential:
+    post:
+      tags: [OID4VCI]
+      summary: Poll deferred credential transaction
+      operationId: vcDeferredCredential
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Deferred credential response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid transaction request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Invalid or missing access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/request/create:
+    post:
+      tags: [OID4VP]
+      summary: Create OID4VP request object
+      operationId: vcCreateOid4vpRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Request object payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid request contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/request/{requestID}:
+    get:
+      tags: [OID4VP]
+      summary: Get OID4VP request object
+      operationId: vcGetOid4vpRequest
+      parameters:
+        - in: path
+          name: requestID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Request object payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Request not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+    post:
+      tags: [OID4VP]
+      summary: Get OID4VP request object (POST)
+      operationId: vcPostOid4vpRequest
+      parameters:
+        - in: path
+          name: requestID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Request object payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Request not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/response:
+    post:
+      tags: [OID4VP]
+      summary: Wallet response callback endpoint
+      operationId: vcHandleWalletResponse
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Verifier policy result.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid wallet response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/result/{requestID}:
+    get:
+      tags: [OID4VP]
+      summary: Get verification result
+      operationId: vcGetVerificationResult
+      parameters:
+        - in: path
+          name: requestID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verification status payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Result not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        error_description:
+          type: string
+        error_uri:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status, version, protocols]
+      properties:
+        status:
+          type: string
+          example: healthy
+        version:
+          type: string
+          example: 1.0.0
+        protocols:
+          type: array
+          items:
+            type: string
+    ApiIndexResponse:
+      type: object
+      required: [service, version, protocols, endpoints]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        protocols:
+          type: array
+          items:
+            type: string
+        endpoints:
+          type: object
+          additionalProperties:
+            type: string
