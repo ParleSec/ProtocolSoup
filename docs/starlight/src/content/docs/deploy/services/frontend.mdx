@@ -1,0 +1,50 @@
+---
+title: "Frontend"
+description: "React UI with Looking Glass and token inspector."
+---
+
+# Frontend (`protocolsoup-frontend`)
+
+Image: `ghcr.io/parlesec/protocolsoup-frontend`
+
+## When To Use
+
+Use frontend when you want the browser UI for flow execution, Looking Glass, and token inspection.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `3000` |
+| Health | Root path `GET /` |
+| Server | nginx serving Vite-built static assets |
+| Stack | React 18, Vite 7, Tailwind CSS, Framer Motion, Zustand |
+
+## Dependency
+
+Frontend requires a gateway service reachable at hostname `gateway` on port `8080`. The built-in nginx config resolves `gateway:8080` using Docker DNS, so both containers must share a Docker network and the gateway container must be named `gateway`.
+
+The nginx proxy forwards these paths to the gateway: `/api`, `/ws`, `/oauth2`, `/oidc`, `/saml`, `/spiffe`, `/scim`, `/ssf`.
+
+## Run
+
+Both containers must be on the same Docker network with the gateway named `gateway`:
+
+```bash
+docker network create protocolsoup-net
+
+docker run -d --name gateway --network protocolsoup-net \
+  -p 8080:8080 ghcr.io/parlesec/protocolsoup-gateway:latest
+
+docker run -d --name frontend --network protocolsoup-net \
+  -p 3000:3000 ghcr.io/parlesec/protocolsoup-frontend:latest
+```
+
+If you use Docker Compose, the `docker-compose.yml` already configures this networking.
+
+## Operational Notes
+
+- If the UI loads but flows fail, verify gateway health at `http://localhost:8080/health`.
+- The gateway container **must** be named `gateway` for nginx DNS resolution. To change this, you would need a custom nginx config.
+- WebSocket proxying is required for Looking Glass sessions (`/ws/lookingglass/{session}`).
+- In production, expose only the frontend publicly and keep gateway on an internal network.

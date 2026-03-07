@@ -1,0 +1,45 @@
+---
+title: "Wallet"
+description: "OID4VP wallet harness for presentation submission testing."
+---
+
+# Wallet (`protocolsoup-wallet`)
+
+Image: `ghcr.io/parlesec/protocolsoup-wallet`
+
+## When To Use
+
+Use wallet service to simulate wallet-side OID4VP presentation submission against a VC verifier target.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Internal port | `8080` (commonly mapped to host `8081`) |
+| Health | `GET /health` |
+| Submit | `POST /submit` |
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `WALLET_TARGET_BASE_URL` | No | `https://protocolsoup.com` | VC verifier service URL for OID4VP submissions |
+| `WALLET_ALLOWED_CORS_ORIGINS` | No | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins |
+| `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default DID subject for demo sessions |
+| `WALLET_SESSION_TTL` | No | Go duration (e.g. `30m`) | Session lifetime; omit for server default |
+| `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Enforce strict session boundaries between demo runs |
+
+## Run
+
+```bash
+docker run -p 8081:8080 \
+  -e WALLET_TARGET_BASE_URL=http://host.docker.internal:8080 \
+  -e WALLET_ALLOWED_CORS_ORIGINS=http://localhost:3000 \
+  ghcr.io/parlesec/protocolsoup-wallet:latest
+```
+
+## Operational Notes
+
+- `WALLET_TARGET_BASE_URL` must point to the VC service or federation service running OID4VP.
+- Keep strict session isolation enabled in shared environments.
+- Use narrow CORS origin allow-lists outside local development.

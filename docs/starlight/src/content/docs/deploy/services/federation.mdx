@@ -1,0 +1,86 @@
+---
+title: "Federation"
+description: "OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a single runtime."
+---
+
+# Federation (`protocolsoup-federation`)
+
+Image: `ghcr.io/parlesec/protocolsoup-federation`
+
+## When To Use
+
+Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a single service. This is the most protocol-rich image in ProtocolSoup.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `8080` |
+| Health | `GET /health` |
+| API index | `GET /api` |
+| Storage | File-based (optional persistent volume) |
+| Database | None required |
+
+## Protocol Endpoints
+
+### OAuth 2.0
+
+- `GET|POST /oauth2/authorize`, `POST /oauth2/token`
+- `POST /oauth2/introspect`, `POST /oauth2/revoke`
+- `GET /oauth2/demo/users`, `GET /oauth2/demo/clients`
+
+### OIDC
+
+- `GET /oidc/.well-known/openid-configuration`
+- `GET /oidc/.well-known/jwks.json`
+- `GET|POST /oidc/authorize`, `POST /oidc/token`, `GET|POST /oidc/userinfo`
+
+### SAML
+
+- `GET /saml/metadata`, `GET|POST /saml/sso`, `GET|POST /saml/acs`, `GET|POST /saml/slo`
+
+### OID4VCI
+
+- `GET /oid4vci/.well-known/openid-credential-issuer`
+- `POST /oid4vci/offers/pre-authorized`, `POST /oid4vci/token`
+- `POST /oid4vci/credential`, `POST /oid4vci/deferred_credential`
+
+### OID4VP
+
+- `POST /oid4vp/request/create`, `GET|POST /oid4vp/request/{requestID}`
+- `POST /oid4vp/response`, `GET /oid4vp/result/{requestID}`
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer metadata, redirect URIs |
+| `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
+| `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in identity provider |
+| `SHOWCASE_DATA_DIR` | No | - | Persistent storage for VC/session state |
+| `SHOWCASE_ENV` | No | `development` | Environment mode |
+
+## Run
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolsoup-federation:latest
+```
+
+With persistent storage:
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SHOWCASE_DATA_DIR=/app/data \
+  -v federation-data:/app/data \
+  ghcr.io/parlesec/protocolsoup-federation:latest
+```
+
+## Operational Notes
+
+- `SHOWCASE_BASE_URL` must match your external URL. OIDC discovery, SAML metadata, and OID4VCI issuer metadata all derive from this value.
+- Mock IdP is enabled by default. It provides demo users and clients for flow execution.
+- Mount persistent storage if you need VC credential and session continuity across restarts.
+- Pair with gateway for unified routing in multi-service deployments.
