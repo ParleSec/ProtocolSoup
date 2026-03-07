@@ -2,9 +2,14 @@ name: Docs Quality
 
 on:
   push:
-    branches: [ "**" ]
+    paths:
+      - "docs/starlight/**"
+      - "openapi/**"
   pull_request:
     branches: [ master, develop ]
+    paths:
+      - "docs/starlight/**"
+      - "openapi/**"
 
 permissions:
   contents: read
@@ -30,7 +35,7 @@ jobs:
         run: npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1
 
   docs-build:
-    name: API Docs Build Validation
+    name: Docs Build Check
     runs-on: ubuntu-latest
     needs: [openapi-lint]
 
@@ -43,12 +48,49 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Build API reference pages
-        run: mkdir -p .docs-build && npx @redocly/cli build-docs openapi/v1/gateway.yaml -o .docs-build/gateway.html && npx @redocly/cli build-docs openapi/v1/scim.yaml -o .docs-build/scim.html && npx @redocly/cli build-docs openapi/v1/federation.yaml -o .docs-build/federation.html && npx @redocly/cli build-docs openapi/v1/vc.yaml -o .docs-build/vc.html
+      - name: Install dependencies
+        run: npm ci
+        working-directory: docs/starlight
 
-      - name: Upload docs build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-docs-build
-          path: .docs-build/
-          retention-days: 7
+      - name: Copy OpenAPI specs
+        run: |
+          mkdir -p docs/starlight/public/openapi
+          cp openapi/v1/*.yaml docs/starlight/public/openapi/
+
+      - name: Build docs
+        run: npm run build
+        working-directory: docs/starlight
+
+      - name: Validate required docs files exist
+        run: |
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+
+          required = [
+            "docs/starlight/src/content/docs/index.mdx",
+            "docs/starlight/src/content/docs/start-here/overview.mdx",
+            "docs/starlight/src/content/docs/start-here/quickstart.mdx",
+            "docs/starlight/src/content/docs/api/overview.mdx",
+            "docs/starlight/src/content/docs/deploy/overview.mdx",
+            "docs/starlight/src/content/docs/protocols/oauth2.mdx",
+            "docs/starlight/src/content/docs/protocols/oidc.mdx",
+            "docs/starlight/src/content/docs/protocols/saml.mdx",
+            "docs/starlight/src/content/docs/protocols/scim.mdx",
+            "docs/starlight/src/pages/api/reference.astro",
+            "docs/starlight/src/layouts/ApiReference.astro",
+            "openapi/v1/gateway.yaml",
+            "openapi/v1/scim.yaml",
+            "openapi/v1/federation.yaml",
+            "openapi/v1/vc.yaml",
+          ]
+
+          missing = [p for p in required if not Path(p).exists()]
+          if missing:
+            print("Required docs files missing:")
+            for p in missing:
+              print(f"  - {p}")
+            sys.exit(1)
+
+          print(f"All {len(required)} required docs files present.")
+          PY

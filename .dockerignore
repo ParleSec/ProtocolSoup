@@ -1,6 +1,13 @@
+# VCS and CI
+.git
+.github
+
 # Dependencies
 **/node_modules
 **/vendor
+
+# Astro build cache
+**/.astro
 
 # Build outputs
 **/dist

@@ -5,6 +5,7 @@ vendor/
 # Build outputs
 dist/
 build/
+.astro/
 *.exe
 *.exe~
 *.dll

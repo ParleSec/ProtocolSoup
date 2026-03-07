@@ -1,0 +1,21 @@
+FROM node:20-alpine AS build
+
+WORKDIR /build
+
+COPY docs/starlight/package.json docs/starlight/package-lock.json ./docs/starlight/
+RUN cd docs/starlight && npm ci
+
+COPY docs/starlight ./docs/starlight
+COPY openapi/v1 ./openapi/v1
+
+RUN mkdir -p docs/starlight/public/openapi && \
+    cp openapi/v1/*.yaml docs/starlight/public/openapi/
+
+RUN cd docs/starlight && npm run build
+
+FROM nginx:alpine
+
+COPY docker/nginx-docs.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /build/docs/starlight/dist /usr/share/nginx/html
+
+EXPOSE 3000
