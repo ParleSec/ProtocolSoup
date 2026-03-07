@@ -1,5 +1,9 @@
 # ACME Example Protocol (Contributor Walkthrough)
 
+> Canonical docs site route: `https://docs.protocolsoup.com/developers/extending/acme-example/`
+>
+> This legacy file remains for in-repo context; public navigation should use the docs site route.
+
 This is a minimal, concrete example you can follow end-to-end when adding a new protocol. It creates a single endpoint `GET /acme/ping` and a flow called `acme_ping`.
 
 ## Files you will touch

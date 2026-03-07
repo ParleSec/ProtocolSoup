@@ -1,5 +1,9 @@
 # Adding Protocols (Contributor Guide)
 
+> Canonical docs site route: `https://docs.protocolsoup.com/developers/extending/add-a-protocol/`
+>
+> This legacy file remains for in-repo context; public navigation should use the docs site route.
+
 This is a concrete, end-to-end checklist for adding a new protocol plugin. It includes exact files to touch and a worked example.
 
 ## 0. Choose IDs and naming

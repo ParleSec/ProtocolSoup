@@ -290,12 +290,12 @@ ProtocolSoup/
 
 ## Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
-- [Adding Protocols](docs/ADDING_PROTOCOLS.md) - Plugin development guide
-- [ACME Example Protocol](docs/EXAMPLE_ACME.md) - End-to-end contributor walkthrough
-- [SPIFFE/SPIRE Integration](docs/SPIFFE.md) - Workload identity setup
-- [Container Images](docs/packages/README.md) - GHCR package documentation
-- [Contributing](CONTRIBUTING.md) - Contributing guidelines
+- [Docs Home](https://docs.protocolsoup.com/) - Public docs portal
+- [Start Here](https://docs.protocolsoup.com/start-here/overview) - First-run orientation and setup
+- [Use ProtocolSoup](https://docs.protocolsoup.com/use-protocolsoup/what-you-can-do) - User flows and walkthroughs
+- [Container Images](https://docs.protocolsoup.com/ghcr/overview) - GHCR deployment guidance
+- [API Reference](https://docs.protocolsoup.com/api-reference/overview) - OpenAPI-backed integration docs
+- [Protocols](https://docs.protocolsoup.com/protocols/oauth2) - Standards-aligned protocol pages
 
 ---
 
