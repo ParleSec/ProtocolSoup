@@ -63,18 +63,18 @@ jobs:
 
       - name: Validate Fly token
         run: |
-          if [ -z "${FLY_API_TOKEN:-}" ]; then
-            echo "FLY_API_TOKEN secret is required for docs production deployment."
+          if [ -z "${FLY_DOCS_API_TOKEN:-}" ]; then
+            echo "FLY_DOCS_API_TOKEN secret is required for docs production deployment."
             exit 1
           fi
           flyctl auth whoami
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_DOCS_API_TOKEN: ${{ secrets.FLY_DOCS_API_TOKEN }}
 
       - name: Deploy production docs app
         run: flyctl deploy --config fly.docs.toml --app protocolsoup-docs --remote-only
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_DOCS_API_TOKEN: ${{ secrets.FLY_DOCS_API_TOKEN }}
 
       - name: Smoke test Fly hostname
         run: curl -fsS "https://protocolsoup-docs.fly.dev/" > /dev/null
