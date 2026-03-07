@@ -1,93 +1,144 @@
 # protocolsoup-federation
 
-**OAuth 2.0, OpenID Connect, and SAML 2.0 Identity Provider**
+## Service Summary
 
-Complete federation server with built-in Mock IdP. Use for local development, testing, or learning authentication protocols.
+- **Image:** `ghcr.io/parlesec/protocolsoup-federation`
+- **Purpose:** Run OAuth 2.0, OpenID Connect, SAML 2.0, OID4VCI, and OID4VP endpoints in one service runtime.
+- **Topology role:** Core protocol service; can run standalone or behind `protocolsoup-gateway`.
+
+## Runtime Contract
+
+### Ports
+
+- `8080/tcp`: protocol endpoints, API index, and health checks.
+
+### Dependencies
+
+- No external database is required for a basic run.
+- Optional companion services:
+  - `protocolsoup-gateway` for unified routing.
+  - `protocolsoup-wallet` for OID4VP wallet callback automation.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_LISTEN_ADDR` | No | `:8080` | Listen address |
+| `SHOWCASE_BASE_URL` | No | `http://localhost:8080` | Public issuer/base URL used in generated metadata and tokens |
+| `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
+| `SHOWCASE_ENV` | No | `development` | Runtime environment label |
+| `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in mock identity provider |
+| `SHOWCASE_DATA_DIR` | No | `(none)` | Enables durable VC wallet-credential and verifier-session persistence |
+| `MOCKIDP_ALICE_PASSWORD` | No | `(auto-generated)` | Demo user password override |
+| `MOCKIDP_BOB_PASSWORD` | No | `(auto-generated)` | Demo user password override |
+| `MOCKIDP_ADMIN_PASSWORD` | No | `(auto-generated)` | Demo user password override |
+| `MOCKIDP_DEMO_CLIENT_SECRET` | No | `(auto-generated)` | OAuth/OIDC demo-app client secret override |
+| `MOCKIDP_MACHINE_CLIENT_SECRET` | No | `(auto-generated)` | OAuth machine-client secret override |
+
+### Storage And Volumes
+
+- Stateless by default.
+- If `SHOWCASE_DATA_DIR` is set, mount a persistent volume (for example `/app/data`) to keep VC-related state across restarts.
+
+### Health And Readiness
+
+- `GET /health` returns runtime health.
+- `GET /api` returns protocol and endpoint index metadata.
+- Container healthchecks typically probe `/health`.
+
+## API Surface
+
+### Health And Index
+
+- `GET /health`
+- `GET /api`
+
+### OAuth 2.0
+
+- `GET|POST /oauth2/authorize`
+- `POST /oauth2/token`
+- `POST /oauth2/introspect`
+- `POST /oauth2/revoke`
+- `GET /oauth2/demo/users`
+- `GET /oauth2/demo/clients`
+
+### OpenID Connect
+
+- `GET /oidc/.well-known/openid-configuration`
+- `GET /oidc/.well-known/jwks.json`
+- `GET /oidc/authorize`
+- `POST /oidc/token`
+- `GET|POST /oidc/userinfo`
+
+### SAML 2.0
+
+- `GET /saml/metadata`
+- `GET|POST /saml/sso`
+- `GET|POST /saml/acs`
+- `GET|POST /saml/slo`
+- `GET /saml/demo/users`
+
+### Verifiable Credentials (Mounted Modules)
+
+- `GET /.well-known/openid-credential-issuer/oid4vci`
+- `POST /oid4vci/*`
+- `POST /oid4vp/request/create`
+- `GET|POST /oid4vp/request/{requestID}`
+- `POST /oid4vp/response`
+- `GET /oid4vp/result/{requestID}`
 
 ## Quick Start
+
+### docker run
 
 ```bash
 docker run -p 8080:8080 \
   -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  ghcr.io/parlesec/protocolsoup-federation
+  -e SHOWCASE_DATA_DIR=/app/data \
+  -v federation-data:/app/data \
+  ghcr.io/parlesec/protocolsoup-federation:latest
 ```
 
-**Runs standalone** - no external dependencies.
+### docker compose snippet
 
-## Endpoints
-
-### OAuth 2.0
-| Endpoint | Description |
-|----------|-------------|
-| `GET /oauth2/authorize` | Authorization endpoint |
-| `POST /oauth2/authorize` | Authorization form submit |
-| `POST /oauth2/token` | Token endpoint |
-| `POST /oauth2/introspect` | Token introspection (RFC 7662) |
-| `POST /oauth2/revoke` | Token revocation (RFC 7009) |
-
-### OpenID Connect
-| Endpoint | Description |
-|----------|-------------|
-| `GET /oidc/.well-known/openid-configuration` | Discovery document |
-| `GET /oidc/.well-known/jwks.json` | JSON Web Key Set |
-| `GET /oidc/authorize` | Authorization endpoint |
-| `POST /oidc/token` | Token endpoint |
-| `GET /oidc/userinfo` | UserInfo endpoint |
-
-### SAML 2.0
-| Endpoint | Description |
-|----------|-------------|
-| `GET /saml/metadata` | IdP Metadata (XML) |
-| `GET /saml/sso` | SSO Service (Redirect binding) |
-| `POST /saml/sso` | SSO Service (POST binding) |
-| `POST /saml/acs` | Assertion Consumer Service |
-| `GET /saml/slo` | Single Logout (Redirect) |
-| `POST /saml/slo` | Single Logout (POST) |
-
-### Demo
-| Endpoint | Description |
-|----------|-------------|
-| `GET /oauth2/demo/users` | Demo user credentials |
-| `GET /oauth2/demo/clients` | Demo client credentials |
-| `GET /saml/demo/users` | SAML demo users |
-
-## Demo Users
-
-| Username | Description |
-|----------|-------------|
-| `alice@example.com` | Standard user |
-| `bob@example.com` | Standard user |
-| `admin@example.com` | Admin user |
-
-Passwords are randomized at startup. Retrieve via `GET /oauth2/demo/users`.
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Issuer URL in tokens |
-| `SHOWCASE_LISTEN_ADDR` | `:8080` | Listen address |
-| `SHOWCASE_MOCK_IDP` | `true` | Enable Mock IdP |
-| `MOCKIDP_ALICE_PASSWORD` | (random) | Alice's password |
-| `MOCKIDP_BOB_PASSWORD` | (random) | Bob's password |
-| `MOCKIDP_ADMIN_PASSWORD` | (random) | Admin's password |
-| `MOCKIDP_DEMO_CLIENT_SECRET` | (random) | demo-app client secret |
-| `MOCKIDP_MACHINE_CLIENT_SECRET` | (random) | machine-client secret |
-
-## Supported OAuth 2.0 Flows
-
-- Authorization Code (with PKCE)
-- Client Credentials
-- Implicit (legacy)
-- Refresh Token
-
-## Example: Get an Access Token
-
-```bash
-# Client Credentials flow
-curl -X POST http://localhost:8080/oauth2/token \
-  -d "grant_type=client_credentials" \
-  -d "client_id=machine-client" \
-  -d "client_secret=<from /oauth2/demo/clients>" \
-  -d "scope=read write"
+```yaml
+services:
+  federation-service:
+    image: ghcr.io/parlesec/protocolsoup-federation:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - SHOWCASE_BASE_URL=http://localhost:8080
+      - SHOWCASE_DATA_DIR=/app/data
+    volumes:
+      - federation-data:/app/data
 ```
+
+## Security Hardening
+
+- Set `SHOWCASE_BASE_URL` to your external HTTPS origin.
+- Restrict `SHOWCASE_CORS_ORIGINS` to trusted production origins.
+- Override autogenerated mock credentials in shared environments.
+- Keep services on private networks when fronted by a gateway or reverse proxy.
+- Persist VC state (`SHOWCASE_DATA_DIR`) on protected storage if replay/audit continuity matters.
+
+## Troubleshooting
+
+- **OIDC discovery issuer mismatch:** ensure `SHOWCASE_BASE_URL` matches the URL clients call.
+- **Login succeeds but client exchange fails:** verify demo client secret via `/oauth2/demo/clients`.
+- **OID4VP result not found after restart:** configure persistent `SHOWCASE_DATA_DIR`.
+- **Browser CORS errors:** check `SHOWCASE_CORS_ORIGINS` includes the frontend origin.
+
+## Versioning And Tags
+
+- `latest` is published from default-branch builds.
+- `sha-*` tags are emitted per build for immutable traceability.
+- release tags publish semver variants (`vX.Y.Z`, `vX.Y`, `vX`).
+
+## Related Docs
+
+- Package index: [README.md](README.md)
+- API contract: [../../openapi/v1/federation.yaml](../../openapi/v1/federation.yaml)
+- OID4VCI module notes: [oid4vci.md](oid4vci.md)
+- OID4VP module notes: [oid4vp.md](oid4vp.md)
+- Standalone VC service: [vc.md](vc.md)

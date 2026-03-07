@@ -1,76 +1,103 @@
 # protocolsoup-frontend
 
-**React UI for ProtocolSoup**
+## Service Summary
 
-Interactive dashboard for exploring authentication protocols with Looking Glass visualization.
+- **Image:** `ghcr.io/parlesec/protocolsoup-frontend`
+- **Purpose:** Serve the React UI for protocol browsing, flow execution, Looking Glass inspection, and SSF sandbox interaction.
+- **Topology role:** Web entrypoint that proxies protocol/API traffic to the gateway service.
+
+## Runtime Contract
+
+### Ports
+
+- `3000/tcp`: Nginx-served frontend application.
+
+### Dependencies
+
+- Requires a reachable gateway backend at `gateway:8080` on the same Docker network.
+- The container Nginx proxy forwards protocol and API routes to that upstream.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `(none)` | N/A | N/A | This image is pre-built and does not expose runtime env switches for upstream selection |
+
+### Storage And Volumes
+
+- No persistent storage required.
+
+### Health And Readiness
+
+- Container healthcheck probes `http://localhost:3000`.
+- Readiness depends on both static asset availability and upstream gateway reachability for API-backed screens.
+
+## API Surface
+
+- This image is UI-only; it does not implement backend protocol handlers.
+- Built-in Nginx proxy routes:
+  - `/api`
+  - `/ws`
+  - `/oauth2`
+  - `/oidc`
+  - `/saml`
+  - `/scim`
+  - `/ssf`
+  - `/spiffe`
 
 ## Quick Start
 
-```bash
-docker run -p 3000:3000 \
-  ghcr.io/parlesec/protocolsoup-frontend
-```
-
-**Requires:** Backend service(s) running on port 8080 (Gateway or individual services)
-
-## Features
-
-- **Protocol Explorer** - Browse OAuth 2.0, OIDC, SAML, SCIM, SSF, SPIFFE
-- **Looking Glass** - Real-time protocol flow visualization
-- **Token Inspector** - Decode and inspect JWTs, SAML assertions
-- **SSF Sandbox** - Interactive security event testing
-- **Flow Diagrams** - Step-by-step protocol animations
-
-## Architecture
-
-```
-┌─────────────────┐      ┌─────────────────┐
-│    Frontend     │----->│     Gateway     │
-│   (port 3000)   │      │   (port 8080)   │
-└─────────────────┘      └─────────────────┘
-```
-
-The frontend expects backend APIs at `http://localhost:8080` by default.
-
-## Full Stack Example
+### docker run
 
 ```bash
-# Start backend services
-docker run -d -p 8080:8080 --name federation \
-  ghcr.io/parlesec/protocolsoup-federation
+# Start a user-defined network so frontend can resolve "gateway"
+docker network create protocolsoup-net
 
-# Start frontend
-docker run -d -p 3000:3000 --name frontend \
-  ghcr.io/parlesec/protocolsoup-frontend
+docker run -d --name gateway --network protocolsoup-net \
+  -p 8080:8080 ghcr.io/parlesec/protocolsoup-gateway:latest
 
-# Open browser
-open http://localhost:3000
+docker run -d --name frontend --network protocolsoup-net \
+  -p 3000:3000 ghcr.io/parlesec/protocolsoup-frontend:latest
 ```
 
-## Docker Compose
+### docker compose snippet
 
 ```yaml
 services:
   frontend:
-    image: ghcr.io/parlesec/protocolsoup-frontend
+    image: ghcr.io/parlesec/protocolsoup-frontend:latest
     ports:
       - "3000:3000"
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
 
   gateway:
-    image: ghcr.io/parlesec/protocolsoup-gateway
+    image: ghcr.io/parlesec/protocolsoup-gateway:latest
     ports:
       - "8080:8080"
-    environment:
-      - FEDERATION_SERVICE_URL=http://federation:8080
-    depends_on:
-      - federation
-
-  federation:
-    image: ghcr.io/parlesec/protocolsoup-federation
 ```
 
-## Environment Variables
+## Security Hardening
 
-The frontend is pre-built and doesn't require runtime configuration. API URL is determined by the browser's location.
+- Terminate TLS in front of the frontend service for production.
+- Keep gateway on a private network segment; only expose the frontend ingress publicly.
+- Ensure upstream gateway CORS policy is restricted to expected origins.
+
+## Troubleshooting
+
+- **UI loads but protocol calls fail:** gateway is missing, unhealthy, or not resolvable as `gateway`.
+- **WebSocket-based Looking Glass is disconnected:** verify `/ws` proxy path reaches the gateway.
+- **Direct deep links return 404 at reverse proxy:** ensure SPA fallback to `index.html` is preserved.
+
+## Versioning And Tags
+
+- `latest` is published from default-branch builds.
+- `sha-*` tags are emitted per build for immutable traceability.
+- release tags publish semver variants (`vX.Y.Z`, `vX.Y`, `vX`).
+
+## Related Docs
+
+- Package index: [README.md](README.md)
+- Gateway service docs: [gateway.md](gateway.md)
+- Platform quickstart: [../content/start-here/quickstart.md](../content/start-here/quickstart.md)

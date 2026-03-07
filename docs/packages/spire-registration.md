@@ -1,89 +1,97 @@
 # protocolsoup-spire-registration
 
-**SPIRE Workload Registration - Bootstrap Container**
+## Service Summary
 
-One-shot container that registers default workload entries on SPIRE Server. Runs once and exits.
+- **Image:** `ghcr.io/parlesec/protocolsoup-spire-registration`
+- **Purpose:** Run one-shot SPIRE workload registration bootstrap against the SPIRE server socket.
+- **Topology role:** Initialization helper in SPIFFE stack startup; exits after creating baseline entries.
+
+## Runtime Contract
+
+### Ports
+
+- None.
+
+### Dependencies
+
+- Requires SPIRE Server socket mounted at `/run/spire/sockets/server.sock`.
+- Typically run after `protocolsoup-spire-server` (and often `protocolsoup-spire-agent`) are healthy.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `(none)` | N/A | N/A | Behavior is defined by embedded registration script |
+
+### Storage And Volumes
+
+- `/run/spire/sockets` (read-only): provides SPIRE Server socket access for registration CLI calls.
+- No persistent local state is stored by this container.
+
+### Health And Readiness
+
+- No long-running health endpoint.
+- Success criteria: container exits with code `0` after registering entries.
+
+## API Surface
+
+- No HTTP API.
+- Executes `spire-server entry create` commands against server socket.
 
 ## Quick Start
+
+### docker run
 
 ```bash
 docker run --rm \
   -v spire-server-socket:/run/spire/sockets:ro \
-  ghcr.io/parlesec/protocolsoup-spire-registration
+  ghcr.io/parlesec/protocolsoup-spire-registration:latest
 ```
 
-**Requires:** `protocolsoup-spire-server` healthy
-
-## Registered Entries
-
-This container creates the following workload entries:
-
-| SPIFFE ID | Selector | Description |
-|-----------|----------|-------------|
-| `spiffe://protocolsoup.com/workload/backend` | `docker:label:app:protocol-backend` | Main backend service |
-| `spiffe://protocolsoup.com/workload/demo-client` | `docker:label:app:demo-client` | Demo client workload |
-| `spiffe://protocolsoup.com/workload/demo-service` | `docker:label:app:demo-service` | Demo service workload |
-
-## Docker Compose
+### docker compose snippet
 
 ```yaml
 services:
   spire-registration:
-    image: ghcr.io/parlesec/protocolsoup-spire-registration
+    image: ghcr.io/parlesec/protocolsoup-spire-registration:latest
     depends_on:
       spire-server:
         condition: service_healthy
-      spire-agent:
-        condition: service_healthy
     volumes:
       - spire-server-socket:/run/spire/sockets:ro
-    restart: "no"  # Run once and exit
+    restart: "no"
 ```
 
-## Volumes
+## Registered Workload Entries
 
-| Path | Description |
-|------|-------------|
-| `/run/spire/sockets` | SPIRE Server socket (read-only) |
+- `spiffe://protocolsoup.com/workload/backend`
+- `spiffe://protocolsoup.com/workload/demo-client`
+- `spiffe://protocolsoup.com/workload/demo-service`
 
-## Behavior
+All default entries in the bootstrap script use selector `unix:uid:0` under parent `spiffe://protocolsoup.com/agent/main`.
 
-1. Waits for SPIRE Server to be healthy
-2. Creates workload entries via `spire-server entry create`
-3. Exits with code 0 on success
+## Security Hardening
 
-## Custom Entries
+- Keep registration container ephemeral and run only during controlled bootstrap windows.
+- Restrict socket access to trusted bootstrap jobs.
+- Audit and prune stale registration entries after topology changes.
 
-To register custom workloads, run commands against the SPIRE Server directly:
+## Troubleshooting
 
-```bash
-docker exec spire-server \
-  /opt/spire/bin/spire-server entry create \
-  -socketPath /run/spire/sockets/server.sock \
-  -parentID spiffe://protocolsoup.com/agent/main \
-  -spiffeID spiffe://protocolsoup.com/workload/custom \
-  -selector docker:label:app:custom-app
-```
+- **`Server socket not available`:** ensure SPIRE server volume mount and readiness.
+- **Entries not created but container exits:** inspect container logs for "Entry may already exist" and list current entries manually.
+- **Workload attestation mismatch:** verify selectors in registration entries match actual runtime workload selectors.
+- **Windows Docker socket issues:** prefer compose-managed SPIRE startup.
 
-## Platform Notes
+## Versioning And Tags
 
-### Windows Docker
+- `latest` is published from default-branch builds.
+- `sha-*` tags are emitted per build for immutable traceability.
+- release tags publish semver variants (`vX.Y.Z`, `vX.Y`, `vX`).
 
-When running on Windows with Docker Desktop, **use Docker Compose instead of standalone `docker run`** for SPIRE containers. Windows Docker has limitations with Unix socket volumes that can prevent proper socket sharing.
+## Related Docs
 
-**Recommended approach:**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
-```
-
-The standalone `docker run` commands work correctly on Linux and macOS.
-
-## Use With
-
-Use this container as part of the full SPIFFE stack:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
-```
-
-The registration container runs after SPIRE Server/Agent are healthy and then exits.
+- Package index: [README.md](README.md)
+- SPIRE server image: [spire-server.md](spire-server.md)
+- SPIRE agent image: [spire-agent.md](spire-agent.md)
+- SPIFFE service image: [spiffe.md](spiffe.md)
