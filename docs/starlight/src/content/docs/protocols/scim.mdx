@@ -1,0 +1,54 @@
+---
+title: "SCIM 2.0"
+description: "Identity provisioning with user/group lifecycle, bulk operations, and filter queries."
+---
+
+# SCIM 2.0
+
+## Standards
+
+- RFC 7642 -- SCIM Definitions, Overview, Concepts
+- RFC 7643 -- SCIM Core Schema
+- RFC 7644 -- SCIM Protocol
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `user-lifecycle` | User Lifecycle | Create, read, update, deactivate users |
+| `group-membership` | Group Membership | Group CRUD and membership management |
+| `user-discovery` | User Discovery | Filter expressions and search queries |
+| `bulk-operations` | Bulk Operations | Batch create/update/delete |
+| `schema-discovery` | Schema Discovery | ServiceProviderConfig, ResourceTypes, Schemas |
+| `outbound-provisioning` | Outbound Provisioning | Client-initiated provisioning sync |
+
+## Demo Scenarios
+
+- **Basic User Provisioning** -- User CRUD lifecycle
+- **Filter Expression Demo** -- SCIM filter query syntax
+- **PATCH Operations Demo** -- Add, remove, replace operations
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/scim/v2/ServiceProviderConfig` | GET | Service provider capabilities |
+| `/scim/v2/ResourceTypes` | GET | Available resource types |
+| `/scim/v2/ResourceTypes/{id}` | GET | Resource type by ID |
+| `/scim/v2/Schemas` | GET | Supported schemas |
+| `/scim/v2/Schemas/{id}` | GET | Schema by ID |
+| `/scim/v2/Users` | GET, POST | List/create users |
+| `/scim/v2/Users/{id}` | GET, PUT, PATCH, DELETE | User operations |
+| `/scim/v2/Groups` | GET, POST | List/create groups |
+| `/scim/v2/Groups/{id}` | GET, PUT, PATCH, DELETE | Group operations |
+| `/scim/v2/Bulk` | POST | Bulk operations |
+| `/scim/v2/.search` | POST | Server-side search |
+
+## What To Validate
+
+- User schema: `userName`, `name`, `emails`, `active`, `meta`
+- Group membership: `members` array with `$ref` and `display`
+- PATCH semantics: `add`, `remove`, `replace` operations
+- Filter expressions: `eq`, `co`, `sw`, `gt`, `lt` operators
+- Bulk: operation count, error handling, atomicity
+- ETag: `If-Match` / `If-None-Match` for concurrent updates

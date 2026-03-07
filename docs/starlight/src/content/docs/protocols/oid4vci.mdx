@@ -1,0 +1,56 @@
+---
+title: "OID4VCI"
+description: "Verifiable credential issuance with SD-JWT VC and deferred delivery."
+---
+
+# OID4VCI
+
+## Standards
+
+- OpenID for Verifiable Credential Issuance (OID4VCI) 1.0
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `oid4vci-pre-authorized` | Pre-Authorized Code | Credential issuance with pre-authorized grant |
+| `oid4vci-pre-authorized-tx-code` | Pre-Authorized + tx_code | Issuance with transaction code challenge |
+| `oid4vci-deferred-issuance` | Deferred Issuance | Credential issued asynchronously via polling |
+
+## Demo Scenarios
+
+- **Pre-Authorized Issuance** -- Direct pre-authorized code flow
+- **Pre-Authorized + tx_code** -- Issuance with user-provided transaction code
+- **Deferred Issuance Polling** -- Deferred credential retrieval
+
+## Credential Details
+
+| Property | Value |
+|----------|-------|
+| Credential type | `UniversityDegreeCredential` |
+| VCT | `https://protocolsoup.com/credentials/university_degree` |
+| Format | `dc+sd-jwt` (SD-JWT VC) |
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/oid4vci/.well-known/openid-credential-issuer` | GET | Issuer metadata |
+| `/.well-known/openid-credential-issuer/oid4vci` | GET | Issuer metadata (alternate) |
+| `/oid4vci/credential-offer/{offerID}` | GET | Credential offer by reference |
+| `/oid4vci/offers/pre-authorized` | POST | Create pre-authorized offer |
+| `/oid4vci/offers/pre-authorized/by-value` | POST | Create offer (by value) |
+| `/oid4vci/offers/pre-authorized/deferred` | POST | Create deferred offer |
+| `/oid4vci/token` | POST | Token endpoint (`pre-authorized_code`, `authorization_code`) |
+| `/oid4vci/nonce` | POST | Nonce endpoint |
+| `/oid4vci/credential` | POST | Credential request |
+| `/oid4vci/deferred_credential` | POST | Deferred credential retrieval |
+
+## What To Validate
+
+- Credential offer: `credential_issuer`, `credential_configuration_ids`, `grants`
+- Token exchange: `pre-authorized_code` grant type, optional `tx_code`
+- Proof: key binding proof JWT with `nonce` from nonce endpoint
+- Credential response: SD-JWT VC with selective disclosure claims
+- Deferred: `transaction_id` in initial response, polling with `deferred_credential` endpoint
+- Wallet credential store: persisted at `{SHOWCASE_DATA_DIR}/vc/wallet_credentials.json`

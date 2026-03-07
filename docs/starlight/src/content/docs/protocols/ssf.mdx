@@ -1,0 +1,83 @@
+---
+title: "Shared Signals Framework"
+description: "Real-time security event sharing with CAEP and RISC events."
+---
+
+# Shared Signals Framework (SSF)
+
+## Standards
+
+- OpenID Shared Signals Framework 1.0
+- CAEP (Continuous Access Evaluation Protocol) 1.0
+- RISC (Risk Incident Sharing and Coordination) 1.0
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `ssf-stream-configuration` | Stream Configuration | Create and configure event streams |
+| `ssf-push-delivery` | Push Delivery | Transmitter pushes SETs to receiver |
+| `ssf-poll-delivery` | Poll Delivery | Receiver polls transmitter for SETs |
+| `caep-session-revoked` | Session Revoked (CAEP) | Session revocation event and response |
+| `caep-credential-change` | Credential Change (CAEP) | Credential change event and response |
+| `risc-account-disabled` | Account Disabled (RISC) | Account disabled event and response |
+| `risc-credential-compromise` | Credential Compromise (RISC) | Credential compromise event and response |
+
+## Demo Scenarios
+
+- **SSF Interactive Sandbox** -- Full transmitter/receiver sandbox
+- **Session Revocation Demo** -- CAEP session revoked event lifecycle
+- **Credential Compromise Response** -- RISC response action execution
+- **Push vs Poll Comparison** -- Delivery mode behavior comparison
+
+## Supported Event Actions
+
+`session-revoked`, `credential-change`, `device-compliance-change`, `credential-compromise`, `account-disabled`, `account-enabled`, `account-purged`, `identifier-changed`, `assurance-level-change`, `token-claims-change`, `identifier-recycled`, `account-credential-change-required`, `sessions-revoked`
+
+## Endpoints
+
+### Transmitter
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/ssf/.well-known/ssf-configuration` | GET | SSF discovery |
+| `/ssf/jwks` | GET | Transmitter JWKS |
+| `/ssf/stream` | POST, GET, PATCH, DELETE | Stream CRUD |
+| `/ssf/status` | GET, POST | Stream status |
+| `/ssf/subjects` | GET, POST | Subject management |
+| `/ssf/actions/{action}` | POST | Trigger event action |
+| `/ssf/push` | POST | Push delivery |
+| `/ssf/poll` | GET, POST | Poll delivery |
+| `/ssf/ack` | POST | Acknowledge events |
+
+### Receiver
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/ssf/receiver/push` | POST | Receive pushed SETs |
+| `/ssf/receiver/status` | GET | Receiver health |
+| `/ssf/receiver/events` | GET | Received event log |
+| `/ssf/receiver/actions` | GET | Response action log |
+
+### Monitoring
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/ssf/events/stream` | GET | SSE event stream |
+| `/ssf/events` | GET | Event history |
+| `/ssf/security-state` | GET | All security states |
+| `/ssf/security-state/{email}` | GET | State by subject |
+| `/ssf/decode` | POST | Decode SET |
+
+## Architecture
+
+SSF runs a standalone receiver on port `8081` alongside the main API on port `8080`. Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver. The receiver validates SETs and executes response actions via the MockIdP action executor.
+
+## What To Validate
+
+- Stream configuration: delivery method, event types, subject format
+- SET structure: `iss`, `iat`, `jti`, `events` claim with event URI keys
+- Push delivery: SET JWT signature, receiver bearer token authentication
+- Poll delivery: `sets` response, `more_available` flag, acknowledgment
+- Response actions: receiver processes event and updates security state
+- Security state: subject state changes after event processing
