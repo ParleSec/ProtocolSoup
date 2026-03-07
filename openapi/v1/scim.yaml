@@ -788,10 +788,13 @@ components:
             properties:
               value:
                 type: string
+                description: Member resource ID
               display:
                 type: string
-              $ref:
+                description: Member display name
+              uri:
                 type: string
+                description: URI reference to the member resource (SCIM `$ref` field)
         meta:
           type: object
           additionalProperties: true
