@@ -1,0 +1,64 @@
+---
+title: ProtocolSoup Documentation
+description: Interactive security protocol demonstrations with real implementations
+template: splash
+hero:
+  title: ProtocolSoup
+  tagline: Interactive security protocol demonstrations with real implementations. Execute OAuth 2.0, OIDC, SAML, SCIM, SPIFFE, SSF, and Verifiable Credential flows against live services. Inspect every token, header, and state change through Looking Glass.
+  actions:
+    - text: Open ProtocolSoup
+      link: https://protocolsoup.com
+      icon: external
+      variant: primary
+    - text: Get Started
+      link: /start-here/overview/
+      icon: right-arrow
+      variant: secondary
+    - text: Protocol Guides
+      link: /protocols/oauth2/
+      variant: minimal
+---
+
+import { LinkCard, CardGrid, Aside } from '@astrojs/starlight/components';
+
+<Aside type="tip" title="ProtocolSoup is live">
+Head to [protocolsoup.com](https://protocolsoup.com) to run real protocol flows, inspect tokens, and explore Looking Glass. Self-host it yourself or use the hosted instance.
+</Aside>
+
+## Choose Your Path
+
+<CardGrid>
+  <LinkCard title="Run Flows and Learn" href="/using/what-you-can-do/" description="Execute protocol flows in Looking Glass, decode tokens, inspect assertions, and compare protocol behavior across families." />
+  <LinkCard title="Deploy and Integrate" href="/deploy/overview/" description="Pull container images from GHCR, deploy individual services or the full stack, and integrate APIs into your own infrastructure." />
+</CardGrid>
+
+## Quickstart
+
+Run the full stack locally in under two minutes:
+
+```bash
+cd docker
+docker compose up -d
+```
+
+- UI: `http://localhost:3000`
+- API: `http://localhost:8080`
+
+Or pull a single service:
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolsoup-federation:latest
+```
+
+[Full quickstart guide](/start-here/quickstart/)
+
+## What's Covered
+
+<CardGrid>
+  <LinkCard title="For End Users" href="/using/what-you-can-do/" description="Flow execution, Looking Glass, token inspection, protocol comparisons" />
+  <LinkCard title="Deploy With GHCR" href="/deploy/overview/" description="Service images, deployment models, runtime contracts, environment variables" />
+  <LinkCard title="API Reference" href="/api/reference/" description="Interactive OpenAPI endpoint docs with send/test, integration patterns, versioning policy" />
+  <LinkCard title="Protocol Guides" href="/protocols/oauth2/" description="Per-protocol standards coverage, available flows, and endpoint references" />
+</CardGrid>
