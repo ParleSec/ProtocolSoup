@@ -1,0 +1,63 @@
+---
+title: "OID4VP"
+description: "Verifiable presentation verification with DCQL queries and wallet submission."
+---
+
+# OID4VP
+
+## Standards
+
+- OpenID for Verifiable Presentations (OID4VP) 1.0
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `oid4vp-direct-post` | DCQL + direct_post | DCQL query with direct_post response mode |
+| `oid4vp-direct-post-jwt` | DCQL + direct_post.jwt | DCQL query with encrypted JWT response |
+
+## Demo Scenarios
+
+- **DCQL direct_post** -- Standard presentation flow
+- **DCQL direct_post.jwt** -- Encrypted response variant
+
+## DCQL Query
+
+The default query requests a `university_degree` credential with `degree` and `graduation_year` claims:
+
+```json
+{
+  "credentials": [{
+    "id": "university_degree",
+    "claims": [
+      { "path": ["degree"] },
+      { "path": ["graduation_year"] }
+    ],
+    "meta": {
+      "vct_values": ["https://protocolsoup.com/credentials/university_degree"]
+    }
+  }]
+}
+```
+
+## Client ID Schemes
+
+- `redirect_uri` -- standard redirect-based client identification
+- `did:web` -- DID Web method for decentralized verifier identity
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/oid4vp/request/create` | POST | Create authorization request |
+| `/oid4vp/request/{requestID}` | GET, POST | Retrieve/update authorization request |
+| `/oid4vp/response` | POST | Wallet response (`direct_post`, `direct_post.jwt`) |
+| `/oid4vp/result/{requestID}` | GET | Verification result |
+
+## What To Validate
+
+- Authorization request: signed JWT with `client_id`, `nonce`, `dcql_query`, `response_mode`
+- Request URI: `request_uri` for wallet to fetch the full request
+- Wallet response: `vp_token` and `presentation_submission` matching DCQL query
+- Verification result: credential validation, claim extraction, proof verification
+- Response binding: `state` and `nonce` alignment between request and response

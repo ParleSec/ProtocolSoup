@@ -1,0 +1,60 @@
+---
+title: "SAML 2.0"
+description: "Enterprise SSO with assertion exchange, metadata, and Single Logout."
+---
+
+# SAML 2.0
+
+## Standards
+
+- SAML 2.0 Core
+- SAML 2.0 Bindings
+- SAML 2.0 Profiles
+- SAML 2.0 Metadata
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `sp_initiated_sso` | SP-Initiated SSO | Service Provider starts the login flow |
+| `idp_initiated_sso` | IdP-Initiated SSO | Identity Provider starts the login flow |
+| `single_logout` | Single Logout | Coordinated logout across participants |
+| `metadata` | Metadata Exchange | SP/IdP metadata discovery and sharing |
+
+## Demo Scenarios
+
+- **SP-Initiated SSO Demo** -- Complete SP redirect flow
+- **IdP-Initiated SSO Demo** -- IdP pushes assertion to SP
+- **Single Logout Demo** -- Logout propagation
+- **Assertion Deep Dive** -- Assertion parsing and validation
+- **Metadata Exploration** -- SP/IdP metadata inspection
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/saml/metadata` | GET | SP/IdP metadata |
+| `/saml/sso` | GET, POST | SSO service (IdP side) |
+| `/saml/acs` | GET, POST | Assertion Consumer Service (SP side) |
+| `/saml/slo` | GET, POST | Single Logout |
+| `/saml/login` | GET, POST | SP-initiated login |
+| `/saml/idp-initiated` | GET | IdP-initiated SSO |
+| `/saml/demo/users` | GET | Demo users |
+| `/saml/demo/sessions` | GET | Active demo sessions |
+
+### Looking Glass Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/saml/looking-glass/authn-request` | GET | Create AuthnRequest for inspection |
+| `/saml/looking-glass/authenticate` | POST | Authenticate with Looking Glass tracking |
+| `/saml/looking-glass/logout-request` | GET | Create LogoutRequest for inspection |
+| `/saml/looking-glass/logout` | POST | Process logout with Looking Glass tracking |
+
+## What To Validate
+
+- AuthnRequest: `ID`, `IssueInstant`, `Destination`, `AssertionConsumerServiceURL`
+- Assertion: `Issuer`, `Subject`, `Conditions`, `AuthnStatement`, `AttributeStatement`
+- Signature: XML signature on assertion or response
+- Replay: `InResponseTo` matching, `NotOnOrAfter` constraints
+- SLO: `LogoutRequest` and `LogoutResponse` sequencing

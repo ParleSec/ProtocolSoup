@@ -1,5 +1,9 @@
 # SPIFFE/SPIRE Integration
 
+> Canonical docs site route: `https://docs.protocolsoup.com/protocols/spiffe/`
+>
+> This legacy file remains for in-repo context; public navigation should use the docs site route.
+
 This document describes the real, production-ready SPIFFE/SPIRE implementation in ProtocolSoup.
 
 ## Overview

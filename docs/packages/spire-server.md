@@ -1,69 +1,68 @@
 # protocolsoup-spire-server
 
-**SPIRE Server - Certificate Authority for Workload Identity**
+## Service Summary
 
-Issues X.509-SVIDs and JWT-SVIDs for the `spiffe://protocolsoup.com` trust domain.
+- **Image:** `ghcr.io/parlesec/protocolsoup-spire-server`
+- **Purpose:** Run SPIRE Server as trust-domain authority and SVID issuer for `spiffe://protocolsoup.com`.
+- **Topology role:** SPIFFE control-plane root used by SPIRE agents and SPIFFE-enabled workloads.
+
+## Runtime Contract
+
+### Ports
+
+- `8081/tcp`: SPIRE Server API (agent connections and registration operations).
+- `8443/tcp`: federation bundle endpoint.
+
+### Dependencies
+
+- No external service dependency; this image includes SPIRE server runtime and config.
+- Companion images usually include:
+  - `protocolsoup-spire-agent`
+  - `protocolsoup-spire-registration`
+  - `protocolsoup-spiffe`
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `(none)` | N/A | N/A | Runtime behavior is primarily driven by mounted config and SPIRE CLI operations |
+
+### Storage And Volumes
+
+- `/opt/spire/data/server`: persistent server state (SQLite datastore + key material).
+- `/run/spire/sockets`: local admin socket path (`server.sock`) for CLI and other containers.
+
+### Health And Readiness
+
+- Container healthcheck runs:
+  - `/opt/spire/bin/spire-server healthcheck -socketPath /run/spire/sockets/server.sock`
+- Config also enables HTTP health endpoints (`/live`, `/ready`) on internal port `8080`.
+
+## API Surface
+
+- SPIRE gRPC/API listener on `8081` for agent attestation and server operations.
+- SPIFFE federation bundle endpoint on `8443`.
+- Local admin operations via `spire-server` CLI and Unix socket (`server.sock`).
 
 ## Quick Start
 
-```bash
-docker run -d \
-  -v spire-data:/opt/spire/data/server \
-  -v spire-socket:/run/spire/sockets \
-  --name spire-server \
-  ghcr.io/parlesec/protocolsoup-spire-server
-```
-
-## Ports
-
-| Port | Description |
-|------|-------------|
-| `8081` | SPIRE Server API (agent connections, registration) |
-| `8443` | Federation bundle endpoint (HTTPS) |
-
-## Volumes
-
-| Path | Description |
-|------|-------------|
-| `/opt/spire/data/server` | Server data (keys, database) |
-| `/run/spire/sockets` | Unix socket for local CLI |
-
-## Health Check
+### docker run
 
 ```bash
-docker exec spire-server \
-  /opt/spire/bin/spire-server healthcheck \
-  -socketPath /run/spire/sockets/server.sock
+docker run -d --name spire-server \
+  -v spire-server-data:/opt/spire/data/server \
+  -v spire-server-socket:/run/spire/sockets \
+  -p 8081:8081 \
+  -p 8443:8443 \
+  ghcr.io/parlesec/protocolsoup-spire-server:latest
 ```
 
-## Generate Join Token
-
-For agents to connect, generate a join token:
-
-```bash
-docker exec spire-server \
-  /opt/spire/bin/spire-server token generate \
-  -socketPath /run/spire/sockets/server.sock \
-  -spiffeID spiffe://protocolsoup.com/agent/main
-```
-
-## Register Workload Entry
-
-```bash
-docker exec spire-server \
-  /opt/spire/bin/spire-server entry create \
-  -socketPath /run/spire/sockets/server.sock \
-  -parentID spiffe://protocolsoup.com/agent/main \
-  -spiffeID spiffe://protocolsoup.com/workload/myapp \
-  -selector docker:label:app:myapp
-```
-
-## Docker Compose
+### docker compose snippet
 
 ```yaml
 services:
   spire-server:
-    image: ghcr.io/parlesec/protocolsoup-spire-server
+    image: ghcr.io/parlesec/protocolsoup-spire-server:latest
     volumes:
       - spire-server-data:/opt/spire/data/server
       - spire-server-socket:/run/spire/sockets
@@ -72,35 +71,31 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 15s
-
-volumes:
-  spire-server-data:
-  spire-server-socket:
 ```
 
-## Configuration
+## Security Hardening
 
-The server is pre-configured for the `protocolsoup.com` trust domain with:
-- In-memory datastore (for demos)
-- Join token node attestation
-- 1-hour SVID TTL
-- RSA-2048 CA key
+- Keep socket and datastore volumes private to trusted workloads only.
+- Restrict network exposure of ports `8081` and `8443`.
+- Rotate join tokens and registration entries as part of environment lifecycle.
+- Back up and protect server state (`datastore.sqlite3`, signing keys) as sensitive PKI material.
 
-## Platform Notes
+## Troubleshooting
 
-### Windows Docker
+- **Server healthcheck fails:** verify socket path mount and write permissions.
+- **Agent attestation failures:** validate join token workflow and trust-domain consistency.
+- **Federation endpoint unavailable:** check port `8443` exposure and network policy.
+- **Windows Docker socket issues:** prefer compose-based SPIRE stack orchestration.
 
-When running on Windows with Docker Desktop, **use Docker Compose instead of standalone `docker run`** for SPIRE containers. Windows Docker has limitations with Unix socket volumes that can cause the server socket to fail initialization.
+## Versioning And Tags
 
-**Recommended approach:**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
-```
+- `latest` is published from default-branch builds.
+- `sha-*` tags are emitted per build for immutable traceability.
+- release tags publish semver variants (`vX.Y.Z`, `vX.Y`, `vX`).
 
-The standalone `docker run` commands work correctly on Linux and macOS.
+## Related Docs
 
-## Use With
-
-- `protocolsoup-spire-agent` - Standalone agent
-- `protocolsoup-spiffe` - Service with embedded agent
-- `protocolsoup-spire-registration` - Bootstrap workload entries
+- Package index: [README.md](README.md)
+- SPIRE agent image: [spire-agent.md](spire-agent.md)
+- SPIRE registration image: [spire-registration.md](spire-registration.md)
+- SPIFFE service image: [spiffe.md](spiffe.md)

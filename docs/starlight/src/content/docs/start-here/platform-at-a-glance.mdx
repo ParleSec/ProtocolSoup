@@ -1,0 +1,106 @@
+---
+title: Platform At A Glance
+description: Understand how ProtocolSoup is architected before you deploy or integrate.
+---
+
+## Architecture
+
+ProtocolSoup is a Go backend with a React frontend. The backend uses a plugin system where each identity protocol is a self-contained module that registers its own HTTP routes, flow definitions, and demo scenarios. The frontend connects via a gateway that aggregates protocol metadata and proxies traffic to the correct backend service.
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Browser (React UI)                                 │
+│  Looking Glass • Token Inspector • Flow Visualizer  │
+└──────────────────────┬──────────────────────────────┘
+                       │ HTTP + WebSocket
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│  Gateway (:8080)                                     │
+│  Protocol discovery • Request routing • LG sessions  │
+└──┬──────────┬──────────┬──────────┬─────────────────┘
+   ▼          ▼          ▼          ▼
+Federation  SCIM       SSF       SPIFFE
+(OAuth2,    (Users,    (CAEP,    (X.509,
+ OIDC,      Groups,    RISC,     JWT-SVID,
+ SAML,      Bulk,      Push,     mTLS)
+ OID4VCI,   Search)    Poll)
+ OID4VP)
+```
+
+## Services
+
+| Service | Image | Port | Protocols |
+|---------|-------|------|-----------|
+| **Frontend** | `protocolsoup-frontend` | 3000 | UI for all protocols |
+| **Gateway** | `protocolsoup-gateway` | 8080 | Protocol discovery, routing, Looking Glass |
+| **Federation** | `protocolsoup-federation` | 8080 | OAuth 2.0, OIDC, SAML 2.0, OID4VCI, OID4VP |
+| **SCIM** | `protocolsoup-scim` | 8080 | SCIM 2.0 Users, Groups, Bulk, Search |
+| **SSF** | `protocolsoup-ssf` | 8080, 8081 | SSF with CAEP/RISC events (8081 = receiver) |
+| **SPIFFE** | `protocolsoup-spiffe` | 8080 | Workload identity (demo or SPIRE-backed) |
+| **VC** | `protocolsoup-vc` | 8080 | Standalone OID4VCI/OID4VP |
+| **Wallet** | `protocolsoup-wallet` | 8080 | OID4VP wallet harness |
+| **SPIRE** | `protocolsoup-spire-server`, `-agent`, `-registration` | 8081, 8443 | SPIRE trust domain infrastructure |
+
+## Request Flow
+
+1. User selects a protocol and flow in the frontend UI.
+2. Frontend sends the request to the gateway via nginx proxy.
+3. Gateway routes to the correct protocol service based on path prefix.
+4. Protocol service executes the flow, generating real tokens, assertions, or credentials.
+5. Each step emits a Looking Glass event over WebSocket.
+6. Looking Glass renders every step, payload, and validation result in the browser in real time.
+
+## Plugin System
+
+Each protocol is a Go plugin implementing a standard interface:
+
+- **`Info()`** -- returns protocol ID, name, version, description, and tags
+- **`RegisterRoutes()`** -- mounts HTTP endpoints (e.g. `/oauth2/token`, `/saml/sso`)
+- **`GetFlowDefinitions()`** -- declares available flows for the UI
+- **`GetDemoScenarios()`** -- provides pre-configured demo scenarios
+
+Plugins are registered at startup and automatically contribute to protocol discovery, Looking Glass integration, and the API index.
+
+## Looking Glass Events
+
+Protocol handlers emit structured events during flow execution. Events flow through WebSocket to the frontend where they render as a timeline:
+
+| Event Type | Purpose |
+|------------|---------|
+| `flow.step` | Major protocol steps (redirect, token exchange, assertion delivery) |
+| `token.issued` | Token creation with decoded claims |
+| `token.validated` | Token validation pass/fail with details |
+| `http.exchange` | Full HTTP request/response pairs |
+| `security.warning` | Spec violations and validation failures |
+| `crypto.operation` | Signing, verification, key generation |
+
+Each event can carry RFC reference annotations linking to the relevant specification section.
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend runtime | Go 1.24, chi router |
+| Frontend framework | React 18, Vite 7 |
+| Styling | Tailwind CSS, Framer Motion |
+| State management | Zustand |
+| Real-time | WebSocket (Looking Glass event streaming) |
+| Storage | SQLite (SCIM), file-based (SSF, VC state) |
+| Identity | Built-in mock IdP with configurable demo users and clients |
+| Container images | Multi-arch (linux/amd64, linux/arm64), scanned with Trivy |
+
+## Deployment Options
+
+| Model | Compose File | Services | Best For |
+|-------|-------------|----------|----------|
+| Full stack | `docker-compose.yml` | frontend, gateway, federation, SCIM, SSF | Learning, demos, full exploration |
+| Full stack + SPIFFE | `docker-compose.yml` + `docker-compose.spiffe.yml` | All above + SPIRE + SPIFFE | Workload identity evaluation |
+| Simple monolith | `docker-compose.simple.yml` | Single backend + frontend | Quick OAuth/OIDC/SAML evaluation |
+| Single service | `docker run` from GHCR | Any one image | Targeted testing, CI pipelines |
+| Custom topology | Selected GHCR images | Your choice | Platform integration |
+
+## Related
+
+- [Quickstart](/start-here/quickstart/) -- get running in under two minutes
+- [Deployment Models](/deploy/deployment-models/) -- detailed deployment options
+- [API Overview](/api/overview/) -- endpoint documentation

@@ -1,0 +1,391 @@
+openapi: 3.1.0
+info:
+  title: ProtocolSoup Gateway API
+  version: 1.0.0
+  summary: API gateway and protocol aggregation service.
+  description: |
+    Public contract for the ProtocolSoup gateway service.
+    The gateway aggregates protocol metadata and proxies protocol-specific traffic to upstream services.
+servers:
+  - url: https://protocolsoup.com
+    description: Production gateway
+security: []
+tags:
+  - name: Health
+    description: Service and upstream health endpoints.
+  - name: Discovery
+    description: Protocol and API discovery endpoints.
+  - name: LookingGlass
+    description: Looking Glass orchestration and decode endpoints.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Get gateway health
+      operationId: getGatewayHealth
+      responses:
+        "200":
+          description: Gateway health payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GatewayHealthResponse"
+              examples:
+                ok:
+                  value:
+                    status: ok
+                    ready: true
+                    last_refresh: "2026-03-06T05:40:00Z"
+        "503":
+          description: Gateway is not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /health/upstreams:
+    get:
+      tags: [Health]
+      summary: Get upstream health
+      operationId: getGatewayUpstreamHealth
+      responses:
+        "200":
+          description: At least one upstream is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamHealthResponse"
+        "503":
+          description: Upstreams unavailable or unconfigured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpstreamHealthResponse"
+  /api:
+    get:
+      tags: [Discovery]
+      summary: Get API index
+      operationId: getGatewayApiIndex
+      responses:
+        "200":
+          description: API index and endpoint map.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiIndexResponse"
+        "503":
+          description: Gateway cannot provide index.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/protocols:
+    get:
+      tags: [Discovery]
+      summary: List aggregated protocols
+      operationId: listGatewayProtocols
+      responses:
+        "200":
+          description: Aggregated protocol list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtocolListResponse"
+        "503":
+          description: No upstream protocols available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/protocols/{id}:
+    get:
+      tags: [Discovery]
+      summary: Get protocol details
+      operationId: getGatewayProtocol
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: Protocol ID (for example `scim`, `oidc`, `oauth2`).
+      responses:
+        "200":
+          description: Protocol metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtocolSummary"
+        "404":
+          description: Protocol not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/protocols/{id}/flows:
+    get:
+      tags: [Discovery]
+      summary: List protocol flow definitions
+      operationId: getGatewayProtocolFlows
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Flow definitions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlowListResponse"
+        "404":
+          description: Protocol not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/protocols/{id}/demo/{flow}:
+    post:
+      tags: [LookingGlass]
+      summary: Start a protocol demo session
+      operationId: startGatewayDemo
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+        - in: path
+          name: flow
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartDemoResponse"
+              examples:
+                demo:
+                  value:
+                    session_id: "session-abc123"
+                    protocol: "scim"
+                    flow: "user-lifecycle"
+                    ws_endpoint: "/ws/lookingglass/session-abc123"
+                    scenario: null
+        "404":
+          description: Protocol or flow not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/lookingglass/decode:
+    post:
+      tags: [LookingGlass]
+      summary: Decode token payload for Looking Glass
+      operationId: decodeGatewayToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecodeRequest"
+            examples:
+              jwt:
+                value:
+                  token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+      responses:
+        "200":
+          description: Decoded token payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid token payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/lookingglass/sessions:
+    get:
+      tags: [LookingGlass]
+      summary: List Looking Glass sessions
+      operationId: listGatewayLookingGlassSessions
+      responses:
+        "200":
+          description: Session list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "503":
+          description: Looking Glass unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/lookingglass/sessions/{id}:
+    get:
+      tags: [LookingGlass]
+      summary: Get Looking Glass session details
+      operationId: getGatewayLookingGlassSession
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session details.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Session not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    GatewayHealthResponse:
+      type: object
+      required: [status, ready]
+      properties:
+        status:
+          type: string
+          example: ok
+        ready:
+          type: boolean
+          example: true
+        last_refresh:
+          type: string
+          format: date-time
+    UpstreamHealthResponse:
+      type: object
+      required: [status, ready, upstreams]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, no_upstreams]
+        ready:
+          type: boolean
+        upstreams:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpstreamHealth"
+    UpstreamHealth:
+      type: object
+      required: [name, url, status, protocol_count, last_checked, health_endpoint]
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        status:
+          type: string
+          enum: [healthy, unhealthy, error]
+        error:
+          type: string
+        protocol_count:
+          type: integer
+          minimum: 0
+        last_checked:
+          type: string
+          format: date-time
+        health_endpoint:
+          type: string
+    ApiIndexResponse:
+      type: object
+      required: [service, version, ready, protocols, endpoints]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        ready:
+          type: boolean
+        protocols:
+          type: array
+          items:
+            type: string
+        endpoints:
+          type: object
+          additionalProperties:
+            type: string
+    ProtocolListResponse:
+      type: object
+      required: [protocols]
+      properties:
+        protocols:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProtocolSummary"
+    ProtocolSummary:
+      type: object
+      required: [id, name, version, description, tags]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    FlowListResponse:
+      type: object
+      required: [flows]
+      properties:
+        flows:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    StartDemoResponse:
+      type: object
+      required: [session_id, protocol, flow, ws_endpoint]
+      properties:
+        session_id:
+          type: string
+        protocol:
+          type: string
+        flow:
+          type: string
+        ws_endpoint:
+          type: string
+        scenario:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: "null"
+    DecodeRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string

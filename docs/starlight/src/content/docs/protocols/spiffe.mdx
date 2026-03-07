@@ -1,0 +1,71 @@
+---
+title: "SPIFFE And SPIRE"
+description: "Workload identity with X.509 and JWT SVIDs, mTLS, and certificate rotation."
+---
+
+# SPIFFE And SPIRE
+
+## Standards
+
+- SPIFFE (Secure Production Identity Framework for Everyone)
+- SPIRE (SPIFFE Runtime Environment)
+- SPIFFE Workload API
+- X.509-SVID specification
+- JWT-SVID specification
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `workload-registration` | Workload Registration | Register workload entries in SPIRE |
+| `node-attestation` | Node Attestation | Node identity verification |
+| `workload-attestation` | Workload Attestation | Workload identity verification |
+| `x509-svid-issuance` | X.509-SVID Issuance | Retrieve X.509 workload identity certificate |
+| `jwt-svid-issuance` | JWT-SVID Issuance | Retrieve JWT workload identity token |
+| `mtls-handshake` | mTLS Handshake | Mutual TLS using X.509-SVIDs |
+| `certificate-rotation` | Certificate Rotation | Automatic SVID renewal |
+| `trust-bundle-federation` | Trust Bundle Federation | Cross-trust-domain bundle exchange |
+
+## Demo Scenarios
+
+- **X.509-SVID Acquisition** -- Retrieve and inspect X.509 certificate
+- **JWT-SVID Acquisition** -- Retrieve and decode JWT workload token
+- **mTLS Configuration** -- Service-to-service mTLS with SVIDs
+- **Certificate Rotation Analysis** -- Observe automatic SVID renewal
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/spiffe/.well-known/spiffe-bundle` | GET | Trust bundle (JWKS format) |
+| `/spiffe/svid/x509` | GET | X.509-SVID |
+| `/spiffe/svid/x509/chain` | GET | X.509-SVID chain (PEM) |
+| `/spiffe/svid/jwt` | GET | JWT-SVID |
+| `/spiffe/svid/info` | GET | SVID metadata |
+| `/spiffe/validate/jwt` | POST | Validate JWT-SVID |
+| `/spiffe/validate/x509` | POST | Validate X.509-SVID |
+| `/spiffe/workload` | GET | Workload info |
+| `/spiffe/trust-bundle` | GET | Trust bundle info |
+| `/spiffe/demo/mtls/call` | POST | mTLS demo call |
+| `/spiffe/demo/jwt-auth/call` | POST | JWT auth demo call |
+| `/spiffe/demo/rotation` | GET | Certificate rotation demo |
+| `/spiffe/status` | GET | Service status |
+
+## Prerequisites
+
+SPIFFE flows require the SPIFFE compose overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+Without SPIRE infrastructure, SPIFFE endpoints return `503 Service Unavailable`.
+
+## What To Validate
+
+- SPIFFE ID format: `spiffe://{trust_domain}/{path}`
+- X.509-SVID: certificate chain, SAN URI, expiry
+- JWT-SVID: `sub` (SPIFFE ID), `aud`, `exp`, signature
+- Trust bundle: JWKS keys match signing certificates
+- mTLS: both sides present valid SVIDs from the same trust domain
+- Rotation: new SVID issued before previous one expires

@@ -1,0 +1,45 @@
+---
+title: "SPIRE Server"
+description: "Trust domain authority for SPIFFE workload identity."
+---
+
+# SPIRE Server (`protocolsoup-spire-server`)
+
+Image: `ghcr.io/parlesec/protocolsoup-spire-server`
+
+## When To Use
+
+Use SPIRE server as the trust domain authority for SPIFFE-enabled deployments. Required for full SPIFFE mode.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| API port | `8081` |
+| Federation bundle port | `8443` |
+| Health | Socket check via `/run/spire/sockets/server.sock` |
+| Persistent state | Required for trust data and key material |
+
+## Required Volumes
+
+| Mount Path | Purpose |
+|------------|---------|
+| `/opt/spire/data/server` | Server state and key material |
+| `/run/spire/sockets` | Server socket (shared with agent) |
+
+## Run
+
+```bash
+docker run -d --name spire-server \
+  -v spire-server-data:/opt/spire/data/server \
+  -v spire-server-socket:/run/spire/sockets \
+  -p 8081:8081 \
+  -p 8443:8443 \
+  ghcr.io/parlesec/protocolsoup-spire-server:latest
+```
+
+## Operational Notes
+
+- Keep SPIRE sockets and datastore restricted.
+- Required before starting SPIRE Agent or SPIRE Registration.
+- Pair with SPIRE Agent and SPIRE Registration (see other pages in this tab).

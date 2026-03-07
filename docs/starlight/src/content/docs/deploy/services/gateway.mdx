@@ -1,0 +1,63 @@
+---
+title: "Gateway"
+description: "API aggregation and protocol routing service."
+---
+
+# Gateway (`protocolsoup-gateway`)
+
+Image: `ghcr.io/parlesec/protocolsoup-gateway`
+
+## When To Use
+
+Use gateway when you run multiple protocol services and need a single API entrypoint for routing, protocol discovery, and Looking Glass WebSocket connections.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `8080` |
+| Health | `GET /health` |
+| Upstream health | `GET /health/upstreams` |
+| API index | `GET /api` |
+| WebSocket | `/ws/lookingglass/{session}` |
+
+## Core Endpoints
+
+- `GET /api/protocols` -- list all registered protocols
+- `GET /api/protocols/{id}` -- protocol details
+- `GET /api/protocols/{id}/flows` -- flow definitions
+- `POST /api/protocols/{id}/demo/{flow}` -- start demo session
+- `POST /api/lookingglass/decode` -- decode token
+- `GET /api/lookingglass/sessions` -- list Looking Glass sessions
+- `GET /.well-known/jwks.json` -- JSON Web Key Set
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for generated links |
+| `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
+| `FEDERATION_SERVICE_URL` | No | - | Federation upstream URL |
+| `SCIM_SERVICE_URL` | No | - | SCIM upstream URL |
+| `SSF_SERVICE_URL` | No | - | SSF upstream URL |
+| `SPIFFE_SERVICE_URL` | No | - | SPIFFE upstream URL |
+| `SHOWCASE_ENV` | No | `development` | Environment mode |
+
+## Run
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e FEDERATION_SERVICE_URL=http://federation-service:8080 \
+  -e SCIM_SERVICE_URL=http://scim-service:8080 \
+  -e SSF_SERVICE_URL=http://ssf-service:8080 \
+  ghcr.io/parlesec/protocolsoup-gateway:latest
+```
+
+## Operational Notes
+
+- Configure at least one upstream service URL. Without upstreams, the protocol inventory will be empty.
+- Set `SHOWCASE_CORS_ORIGINS` to your frontend origin for browser access.
+- Gateway includes rate limiting (100 requests/minute) and security headers.
+- Place behind HTTPS termination for internet-facing deployments.
+- Request timeout is 60 seconds.

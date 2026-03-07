@@ -1,0 +1,81 @@
+---
+title: "SSF"
+description: "Shared Signals Framework with CAEP/RISC events and standalone receiver."
+---
+
+# SSF (`protocolsoup-ssf`)
+
+Image: `ghcr.io/parlesec/protocolsoup-ssf`
+
+## When To Use
+
+Use SSF service to test security event stream configuration, CAEP/RISC event delivery, and receiver response actions.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Primary port | `8080` (SSF APIs) |
+| Receiver port | `8081` (push delivery listener) |
+| Health | `GET /health` |
+| SSF discovery | `GET /ssf/.well-known/ssf-configuration` |
+| Receiver status | `GET /ssf/receiver/status` |
+
+## Key Endpoints
+
+### Transmitter
+
+- `POST|GET|PATCH|DELETE /ssf/stream` -- stream management
+- `GET|POST /ssf/status` -- stream status
+- `GET|POST /ssf/subjects` -- subject management
+- `POST /ssf/actions/{action}` -- trigger event actions
+- `POST /ssf/push` -- push delivery
+- `GET|POST /ssf/poll` -- poll delivery
+- `POST /ssf/ack` -- acknowledge events
+
+### Receiver
+
+- `POST /ssf/receiver/push` -- receive pushed SETs
+- `GET /ssf/receiver/status` -- receiver health
+- `GET /ssf/receiver/events` -- received event log
+- `GET /ssf/receiver/actions` -- response action log
+
+### Supporting
+
+- `GET /ssf/events/stream` -- SSE event stream
+- `GET /ssf/events` -- event history
+- `GET /ssf/security-state` -- all security states
+- `GET /ssf/security-state/{email}` -- security state by subject
+- `POST /ssf/decode` -- decode SET token
+- `GET /ssf/event-types` -- available event types
+
+## Supported Event Actions
+
+`session-revoked`, `credential-change`, `device-compliance-change`, `credential-compromise`, `account-disabled`, `account-enabled`, `account-purged`, `identifier-changed`, `assurance-level-change`, `token-claims-change`, `identifier-recycled`, `account-credential-change-required`, `sessions-revoked`
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External base URL |
+| `SSF_DATA_DIR` | No | `./data` | Stream and receiver state directory |
+| `SSF_RECEIVER_PORT` | No | `8081` | Standalone receiver listener port |
+| `SSF_RECEIVER_TOKEN` | No | auto-generated | Bearer token for push delivery authentication |
+
+## Run
+
+```bash
+docker run -p 8080:8080 -p 8081:8081 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SSF_DATA_DIR=/app/data \
+  -v ssf-data:/app/data \
+  ghcr.io/parlesec/protocolsoup-ssf:latest
+```
+
+## Operational Notes
+
+- Port `8081` runs the standalone receiver. Keep it private unless you intentionally test external push delivery.
+- Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver on port `8081`.
+- The receiver validates SETs and executes response actions (session revocation, credential compromise, etc.) via the built-in MockIdP action executor.
+- Set `SSF_RECEIVER_TOKEN` explicitly in shared environments.
+- Persist `SSF_DATA_DIR` to keep stream and event state across restarts.

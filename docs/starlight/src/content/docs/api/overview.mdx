@@ -1,0 +1,42 @@
+---
+title: "API Reference"
+description: "Interactive endpoint documentation for all ProtocolSoup services, generated from OpenAPI specifications."
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+# API Reference
+
+Every ProtocolSoup service publishes a versioned OpenAPI 3.1 contract. This tab renders those contracts as interactive reference pages where you can inspect parameters, schemas, and example payloads for each endpoint.
+
+## Endpoints
+
+All four ProtocolSoup API services are available in a single interactive reference with live request testing:
+
+<CardGrid>
+  <LinkCard title="Interactive API Reference" href="/api/reference/" description="Browse all Gateway, Federation, SCIM, and VC endpoints in one view. Switch between services, inspect schemas, and send test requests directly from the docs." />
+</CardGrid>
+
+The reference includes **Gateway** (health, discovery, sessions, Looking Glass), **Federation** (OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP), **SCIM** (users, groups, bulk, schemas), and **VC** (credential issuance, presentations, verification).
+
+## Base URLs
+
+| Environment | URL |
+|-------------|-----|
+| Production (gateway) | `https://protocolsoup.com` |
+| Local full stack | `http://localhost:8080` (gateway), `http://localhost:3000` (UI) |
+| Direct service | `http://localhost:8080` per service (each binds to `:8080` by default) |
+
+## Authentication
+
+Most endpoints are unauthenticated for demo purposes. Exceptions:
+
+- **SCIM endpoints** require a `Bearer` token via the `Authorization` header. Set `SCIM_API_TOKEN` on the SCIM service, then send `Authorization: Bearer <your-token>` with every request.
+- **OIDC UserInfo** requires a valid access token. Obtain one by running an OIDC Authorization Code flow, then send `Authorization: Bearer <access_token>` to `GET /oidc/userinfo`.
+- **OID4VCI credential and nonce endpoints** require a bearer token from the OID4VCI token exchange. Call `POST /oid4vci/token` first to get an access token, then use it on `POST /oid4vci/credential` and `POST /oid4vci/nonce`.
+
+## Before You Start
+
+1. Pick an [integration pattern](/api/integration-patterns/) -- gateway-first, direct, or hybrid.
+2. Open the [Interactive Reference](/api/reference/) to browse and test endpoints.
+3. Review [versioning and compatibility](/api/versioning/) for upgrade planning.

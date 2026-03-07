@@ -1,0 +1,54 @@
+---
+title: "OAuth 2.0"
+description: "Delegated authorization flows with PKCE, introspection, revocation, and device code."
+---
+
+# OAuth 2.0
+
+## Standards
+
+- RFC 6749 -- OAuth 2.0 Authorization Framework
+- RFC 7636 -- Proof Key for Code Exchange (PKCE)
+- RFC 7662 -- Token Introspection
+- RFC 7009 -- Token Revocation
+- RFC 8628 -- Device Authorization Grant
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `authorization_code` | Authorization Code | Standard redirect-based authorization |
+| `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
+| `client_credentials` | Client Credentials | Machine-to-machine token issuance |
+| `refresh_token` | Refresh Token | Token renewal without re-authorization |
+| `token_introspection` | Token Introspection | Validate and inspect active tokens (RFC 7662) |
+| `token_revocation` | Token Revocation | Invalidate tokens (RFC 7009) |
+| `device_code` | Device Code | Authorization for input-constrained devices (RFC 8628) |
+| `implicit` | Implicit (Legacy) | Browser-based flow, deprecated per security BCP |
+| `password` | Resource Owner Password (Legacy) | Direct credential exchange, deprecated |
+
+## Demo Scenarios
+
+- **Authorization Code Flow Demo** -- Complete redirect flow with consent
+- **PKCE Flow Demo** -- PKCE challenge/verifier exchange
+- **Client Credentials Demo** -- Direct client authentication
+- **Token Refresh Demo** -- Refresh grant with token rotation
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/oauth2/authorize` | GET, POST | Authorization endpoint |
+| `/oauth2/token` | POST | Token endpoint |
+| `/oauth2/introspect` | POST | Token introspection |
+| `/oauth2/revoke` | POST | Token revocation |
+| `/oauth2/demo/users` | GET | List demo users |
+| `/oauth2/demo/clients` | GET | List demo clients |
+
+## What To Validate
+
+- PKCE code_challenge and code_verifier alignment
+- Token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `scope`
+- Introspection response: `active`, `token_type`, `scope`
+- Revocation: subsequent introspection returns `active: false`
+- Device code: polling interval, `authorization_pending` vs `slow_down`

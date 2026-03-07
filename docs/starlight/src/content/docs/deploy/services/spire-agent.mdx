@@ -1,0 +1,44 @@
+---
+title: "SPIRE Agent"
+description: "Workload API socket provider for SPIFFE-enabled workloads."
+---
+
+# SPIRE Agent (`protocolsoup-spire-agent`)
+
+Image: `ghcr.io/parlesec/protocolsoup-spire-agent`
+
+## When To Use
+
+Use SPIRE agent to provide Workload API sockets (`agent.sock`) to SPIFFE-enabled services.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| TCP port | None (Unix socket only) |
+| Workload API | `/run/spire/sockets/agent.sock` |
+| Depends on | SPIRE server socket |
+
+## Required Volumes
+
+| Mount Path | Purpose |
+|------------|---------|
+| `/run/spire/sockets/server` (read-only) | SPIRE server socket |
+| `/run/spire/sockets` | Agent socket output |
+| `/opt/spire/data/agent` | Agent state |
+
+## Run
+
+```bash
+docker run -d --name spire-agent \
+  -v spire-server-socket:/run/spire/sockets/server:ro \
+  -v spire-agent-socket:/run/spire/sockets \
+  -v spire-agent-data:/opt/spire/data/agent \
+  ghcr.io/parlesec/protocolsoup-spire-agent:latest
+```
+
+## Operational Notes
+
+- Only trusted workloads should mount `agent.sock`.
+- If agent startup loops, verify SPIRE server socket availability first.
+- Start SPIRE server before starting the agent.

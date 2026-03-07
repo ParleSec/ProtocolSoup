@@ -1,114 +1,125 @@
 # protocolsoup-spiffe
 
-**SPIFFE Workload Identity Service**
+## Service Summary
 
-Demonstrates X.509-SVID and JWT-SVID issuance, validation, and mTLS. Includes embedded SPIRE Agent.
+- **Image:** `ghcr.io/parlesec/protocolsoup-spiffe`
+- **Purpose:** Expose SPIFFE/SPIRE APIs for X.509-SVID and JWT-SVID retrieval, validation, trust-bundle inspection, and mTLS/JWT demo operations.
+- **Topology role:** Optional protocol service in the split stack; can run in demo mode alone or in full mode with SPIRE infrastructure.
+
+## Runtime Contract
+
+### Ports
+
+- `8080/tcp`: SPIFFE API endpoints plus health/index routes.
+
+### Dependencies
+
+- **Demo mode:** none.
+- **Full SPIFFE mode:** requires SPIRE infrastructure and socket sharing (`docker-compose.spiffe.yml`).
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_LISTEN_ADDR` | No | `:8080` | Listen address |
+| `SHOWCASE_BASE_URL` | No | `http://localhost:8080` | Public base URL |
+| `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
+| `SHOWCASE_ENV` | No | `development` | Runtime environment label |
+| `SHOWCASE_SPIFFE_ENABLED` | No | `false` | Enable real Workload API integration |
+| `SHOWCASE_SPIFFE_SOCKET_PATH` | No | `unix:///run/spire/sockets/agent.sock` | SPIRE Agent Workload API socket |
+| `SHOWCASE_SPIFFE_TRUST_DOMAIN` | No | `protocolsoup.com` | Expected SPIFFE trust domain |
+| `SPIRE_SERVER_ADDRESS` | No | `spire-server:8081` | Target used by mTLS demo calls |
+
+### Storage And Volumes
+
+- Demo mode requires no persistent storage.
+- Full mode commonly mounts:
+  - SPIRE server socket read-only (`/run/spire/sockets/server`)
+  - agent state directory (`/opt/spire/data/agent`)
+
+### Health And Readiness
+
+- `GET /health` for service health.
+- `GET /spiffe/status` reports whether SPIFFE integration is active or fallback/demo mode.
+
+## API Surface
+
+### Status, Bundle, And Workload
+
+- `GET /spiffe/status`
+- `GET /spiffe/.well-known/spiffe-bundle`
+- `GET /spiffe/trust-bundle`
+- `GET /spiffe/workload`
+
+### SVID Endpoints
+
+- `GET /spiffe/svid/x509`
+- `GET /spiffe/svid/x509/chain`
+- `GET /spiffe/svid/jwt?audience=<aud>`
+- `GET /spiffe/svid/info`
+
+### Validation Endpoints
+
+- `POST /spiffe/validate/jwt`
+- `POST /spiffe/validate/x509`
+
+### Demo Endpoints
+
+- `GET /spiffe/demo/mtls`
+- `POST /spiffe/demo/mtls/call`
+- `GET /spiffe/demo/jwt-auth`
+- `POST /spiffe/demo/jwt-auth/call`
+- `GET /spiffe/demo/rotation`
 
 ## Quick Start
 
+### docker run
+
 ```bash
-# Demo mode (simulated responses, no SPIRE required)
+# Demo mode (no SPIRE required)
 docker run -p 8080:8080 \
   -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  ghcr.io/parlesec/protocolsoup-spiffe
+  ghcr.io/parlesec/protocolsoup-spiffe:latest
 ```
 
-**Note:** Without SPIRE infrastructure, runs in demo mode with simulated responses.
+### docker compose snippet
 
-## Full SPIFFE Stack
-
-For real SVID issuance with SPIRE:
-
-```bash
-cd docker
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```yaml
+services:
+  spiffe-service:
+    image: ghcr.io/parlesec/protocolsoup-spiffe:latest
+    environment:
+      - SHOWCASE_BASE_URL=http://localhost:8080
+      - SHOWCASE_SPIFFE_ENABLED=true
+      - SHOWCASE_SPIFFE_SOCKET_PATH=unix:///run/spire/sockets/agent.sock
+    volumes:
+      - spire-server-socket:/run/spire/sockets/server:ro
+      - spiffe-agent-data:/opt/spire/data/agent
 ```
 
-This starts:
-- SPIRE Server (CA)
-- SPIRE Agent (workload attestation)
-- SPIFFE Service (this image with embedded agent)
+## Security Hardening
 
-## Endpoints
+- Run with `SHOWCASE_SPIFFE_ENABLED=true` only when SPIRE dependencies are correctly isolated.
+- Keep SPIRE sockets on internal networks and do not expose them publicly.
+- Use TLS at ingress and restrict frontend origins via `SHOWCASE_CORS_ORIGINS`.
+- Pin trust domain expectations via `SHOWCASE_SPIFFE_TRUST_DOMAIN`.
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /spiffe/status` | SPIFFE/SPIRE availability |
-| `GET /spiffe/svid/x509` | X.509-SVID certificate details |
-| `GET /spiffe/svid/x509/chain` | Full certificate chain (PEM) |
-| `GET /spiffe/svid/jwt?audience=svc` | JWT-SVID token |
-| `GET /spiffe/.well-known/spiffe-bundle` | Trust bundle endpoint |
-| `GET /spiffe/trust-bundle` | Trust bundle details |
-| `GET /spiffe/workload` | Workload identity info |
-| `POST /spiffe/validate/jwt` | Validate a JWT-SVID |
-| `POST /spiffe/validate/x509` | Validate an X.509-SVID |
+## Troubleshooting
 
-## Environment Variables
+- **`SPIFFE Workload API unavailable`:** set `SHOWCASE_SPIFFE_ENABLED=true` and verify socket mount/path.
+- **mTLS demo call fails:** confirm `SPIRE_SERVER_ADDRESS` resolves and SPIRE Server is healthy.
+- **SVID endpoints return `503`:** service is in demo mode or agent startup/attestation has not completed yet.
+- **Intermittent trust errors after long downtime:** refresh SPIRE bootstrap and reconnect agent.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Service base URL |
-| `SHOWCASE_LISTEN_ADDR` | `:8080` | Listen address |
-| `SHOWCASE_SPIFFE_ENABLED` | `false` | Enable real SPIFFE |
-| `SHOWCASE_SPIFFE_SOCKET_PATH` | `unix:///run/spire/sockets/agent.sock` | Workload API socket |
-| `SHOWCASE_SPIFFE_TRUST_DOMAIN` | `protocolsoup.com` | SPIFFE trust domain |
+## Versioning And Tags
 
-## SPIFFE Concepts
+- `latest` is published from default-branch builds.
+- `sha-*` tags are emitted per build for immutable traceability.
+- release tags publish semver variants (`vX.Y.Z`, `vX.Y`, `vX`).
 
-### Trust Domain
-All identities belong to `spiffe://protocolsoup.com/...`
+## Related Docs
 
-### SPIFFE ID Format
-```
-spiffe://protocolsoup.com/workload/backend
-spiffe://protocolsoup.com/workload/demo-client
-```
-
-### X.509-SVID
-- Short-lived X.509 certificate
-- SPIFFE ID in SAN URI extension
-- Auto-rotated by SPIRE Agent
-
-### JWT-SVID
-- Short-lived JWT token
-- SPIFFE ID in `sub` claim
-- Audience-scoped
-
-## Example: Get JWT-SVID
-
-```bash
-curl "http://localhost:8080/spiffe/svid/jwt?audience=my-service"
-```
-
-Response:
-```json
-{
-  "token": "eyJhbGciOiJSUzI1NiIs...",
-  "spiffe_id": "spiffe://protocolsoup.com/workload/backend",
-  "audience": ["my-service"],
-  "expires_at": "2026-01-28T14:00:00Z"
-}
-```
-
-## Example: Validate JWT-SVID
-
-```bash
-curl -X POST http://localhost:8080/spiffe/validate/jwt \
-  -H "Content-Type: application/json" \
-  -d '{
-    "token": "eyJhbGciOiJFUzI1NiIs...",
-    "audience": ["my-service"]
-  }'
-```
-
-Response:
-```json
-{
-  "valid": true,
-  "spiffe_id": "spiffe://protocolsoup.com/workload/backend",
-  "details": {
-    "validation_type": "cryptographic",
-    "signature": "verified against SPIFFE trust bundle"
-  }
-}
-```
+- Package index: [README.md](README.md)
+- SPIFFE protocol implementation: [../../backend/internal/protocols/spiffe/README.md](../../backend/internal/protocols/spiffe/README.md)
+- SPIRE server image: [spire-server.md](spire-server.md)
+- SPIRE agent image: [spire-agent.md](spire-agent.md)

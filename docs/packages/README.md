@@ -1,5 +1,9 @@
 # ProtocolSoup Container Images
 
+> Canonical docs site route: `https://docs.protocolsoup.com/ghcr/overview/`
+>
+> This file remains the in-repo runtime contract source; public navigation should use the docs site route wrappers.
+
 Documentation for all ProtocolSoup container images available on GitHub Container Registry.
 
 ## Core Services
@@ -78,3 +82,7 @@ All images are public and don't require authentication:
 ```bash
 docker pull ghcr.io/parlesec/protocolsoup-<name>:latest
 ```
+
+## Service Page Standard
+
+Use [`SERVICE_TEMPLATE.md`](SERVICE_TEMPLATE.md) as the required structure for all GHCR service pages.
