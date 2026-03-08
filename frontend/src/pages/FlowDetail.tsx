@@ -106,6 +106,32 @@ export function FlowDetail() {
     if (protocolId === 'oidc') {
       badges.push({ label: 'ID Token', color: 'purple', icon: Fingerprint })
     }
+    // OID4VCI badges
+    if (protocolId === 'oid4vci') {
+      badges.push({ label: 'Verifiable Credentials', color: 'green', icon: Shield })
+    }
+    if (mappedFlowId === 'oid4vci-pre-authorized') {
+      badges.push({ label: 'Pre-Authorized Code', color: 'blue', icon: Key })
+      badges.push({ label: 'Proof + c_nonce', color: 'purple', icon: Lock })
+    }
+    if (mappedFlowId === 'oid4vci-pre-authorized-tx-code') {
+      badges.push({ label: 'tx_code Required', color: 'amber', icon: Lock })
+    }
+    if (mappedFlowId === 'oid4vci-deferred-issuance') {
+      badges.push({ label: 'Deferred Polling', color: 'cyan', icon: Server })
+    }
+    // OID4VP badges
+    if (protocolId === 'oid4vp') {
+      badges.push({ label: 'Presentation Verification', color: 'purple', icon: Eye })
+    }
+    if (mappedFlowId === 'oid4vp-direct-post') {
+      badges.push({ label: 'DCQL Query', color: 'blue', icon: Code })
+      badges.push({ label: 'direct_post', color: 'green', icon: ArrowRight })
+    }
+    if (mappedFlowId === 'oid4vp-direct-post-jwt') {
+      badges.push({ label: 'direct_post.jwt', color: 'purple', icon: Shield })
+      badges.push({ label: 'Encrypted Response', color: 'cyan', icon: Lock })
+    }
     // SAML badges — backend IDs: sp_initiated_sso, idp_initiated_sso, single_logout, metadata
     if (protocolId === 'saml') {
       badges.push({ label: 'XML-Based', color: 'cyan', icon: FileKey })
@@ -186,6 +212,8 @@ export function FlowDetail() {
     switch (id) {
       case 'oauth2': return 'OAuth 2.0'
       case 'oidc': return 'OpenID Connect'
+      case 'oid4vci': return 'OID4VCI'
+      case 'oid4vp': return 'OID4VP'
       case 'saml': return 'SAML 2.0'
       case 'spiffe': return 'SPIFFE/SPIRE'
       case 'scim': return 'SCIM 2.0'

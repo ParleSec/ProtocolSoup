@@ -172,11 +172,32 @@ const actorConfig: Record<string, {
     shortLabel: 'User',
     color: '#4ade80', // green
   },
+  // OID4 wallet actor
+  'Wallet': {
+    icon: User,
+    label: 'Wallet',
+    shortLabel: 'Wallet',
+    color: '#4ade80', // green
+  },
   'Authorization Server': {
     icon: Shield,
     label: 'Authorization Server',
     shortLabel: 'Auth Server',
     color: '#c084fc', // purple
+  },
+  // OID4 verifier actor
+  'Verifier': {
+    icon: Shield,
+    label: 'Verifier',
+    shortLabel: 'Verifier',
+    color: '#818cf8', // indigo
+  },
+  // OID4 credential issuer actor
+  'Credential Issuer': {
+    icon: Database,
+    label: 'Credential Issuer',
+    shortLabel: 'Issuer',
+    color: '#10b981', // emerald
   },
   // OIDC terminology (same as Auth Server but with OIDC naming)
   'OpenID Provider': {

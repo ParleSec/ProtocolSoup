@@ -1,5 +1,5 @@
 import type { ElementType } from 'react'
-import { Fingerprint, FileKey, Key, Radio, Shield, Users } from 'lucide-react'
+import { Eye, Fingerprint, FileKey, Key, KeyRound, Radio, Shield, Users } from 'lucide-react'
 
 export interface ProtocolFlowSummary {
   id: string
@@ -55,6 +55,33 @@ export const PROTOCOL_CATALOG: ProtocolCatalogItem[] = [
       { id: 'hybrid', name: 'Hybrid Flow', rfc: '§3.3' },
       { id: 'userinfo', name: 'UserInfo Endpoint', rfc: '§5.3' },
       { id: 'discovery', name: 'Discovery', rfc: 'Discovery 1.0' },
+    ],
+  },
+  {
+    id: 'oid4vci',
+    name: 'OID4VCI',
+    description: 'OpenID for Verifiable Credential Issuance. Demonstrates credential offers, pre-authorized code token exchange, nonce-bound proof validation, and SD-JWT VC issuance.',
+    icon: KeyRound,
+    color: 'green',
+    spec: 'OpenID4VCI 1.0',
+    specUrl: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html',
+    flows: [
+      { id: 'oid4vci-pre-authorized', name: 'Pre-Authorized Code', rfc: 'OID4VCI §4, §6.1, §8' },
+      { id: 'oid4vci-pre-authorized-tx-code', name: 'Pre-Authorized + tx_code', rfc: 'OID4VCI §6.1' },
+      { id: 'oid4vci-deferred-issuance', name: 'Deferred Issuance', rfc: 'OID4VCI Deferred Endpoint' },
+    ],
+  },
+  {
+    id: 'oid4vp',
+    name: 'OID4VP',
+    description: 'OpenID for Verifiable Presentations. Shows DCQL request contracts, request object validation, direct_post/direct_post.jwt responses, and verifier policy decisions.',
+    icon: Eye,
+    color: 'purple',
+    spec: 'OpenID4VP 1.0',
+    specUrl: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html',
+    flows: [
+      { id: 'oid4vp-direct-post', name: 'DCQL + direct_post', rfc: 'OID4VP §5, §8.2' },
+      { id: 'oid4vp-direct-post-jwt', name: 'DCQL + direct_post.jwt', rfc: 'OID4VP §8.3.1' },
     ],
   },
   {

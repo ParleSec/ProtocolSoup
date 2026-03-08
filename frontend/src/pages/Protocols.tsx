@@ -26,7 +26,7 @@ export function Protocols() {
   const faqSchema = generateFAQSchema([
     {
       question: 'What authentication protocols does Protocol Soup support?',
-      answer: 'Protocol Soup supports OAuth 2.0, OpenID Connect (OIDC), SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF (Shared Signals Framework). Each protocol includes multiple flows and detailed documentation.',
+      answer: 'Protocol Soup supports OAuth 2.0, OpenID Connect (OIDC), OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF (Shared Signals Framework). Each protocol includes multiple flows and detailed documentation.',
     },
     {
       question: 'What is the difference between OAuth 2.0 and OpenID Connect?',
@@ -40,18 +40,25 @@ export function Protocols() {
       question: 'What is the Shared Signals Framework (SSF)?',
       answer: 'SSF is an OpenID standard for real-time security event sharing between identity providers and applications. It includes CAEP (Continuous Access Evaluation Profile) for session management and RISC (Risk Incident Sharing and Coordination) for security incident response.',
     },
+    {
+      question: 'What are OID4VCI and OID4VP used for?',
+      answer: 'OID4VCI (OpenID for Verifiable Credential Issuance) is used to issue verifiable credentials to wallets. OID4VP (OpenID for Verifiable Presentations) is used by verifiers to request and validate credential presentations from wallets.',
+    },
   ])
 
   return (
     <>
       <SEO
-        title="Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM, SSF"
-        description="Comprehensive reference for authentication and identity protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and Shared Signals Framework (SSF)."
+        title="Identity Protocol Reference Guide - OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM, SSF"
+        description="Comprehensive reference for authentication, verifiable credential, provisioning, and security signaling protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and Shared Signals Framework (SSF)."
         canonical="/protocols"
         ogType="website"
         keywords={[
           'identity protocol reference',
           'authentication protocols',
+          'verifiable credential protocols',
+          'oid4vci',
+          'oid4vp',
           'oauth2 documentation',
           'oidc specification',
           'saml documentation',
@@ -73,7 +80,7 @@ export function Protocols() {
           <h1 className="text-xl sm:text-2xl font-semibold text-white">Protocol Reference</h1>
         </div>
         <p className="text-surface-400 ml-12 sm:ml-[52px] text-sm sm:text-base">
-          Documentation, flow diagrams, and security considerations for each protocol.
+          Documentation, flow diagrams, and security considerations for each protocol family.
         </p>
       </header>
 

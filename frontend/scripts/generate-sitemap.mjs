@@ -38,6 +38,8 @@ const PAGE_TITLES = {
 const PROTOCOL_TITLES = {
   oauth2: 'OAuth 2.0 Tutorial - Complete Authorization Framework Guide',
   oidc: 'OpenID Connect Tutorial - Authentication Layer for OAuth 2.0',
+  oid4vci: 'OID4VCI Tutorial - Verifiable Credential Issuance with OpenID',
+  oid4vp: 'OID4VP Tutorial - Verifiable Presentation Requests and Validation',
   saml: 'SAML 2.0 Tutorial - Enterprise SSO & Federation Explained',
   spiffe: 'SPIFFE/SPIRE Tutorial - Zero Trust Workload Identity',
   scim: 'SCIM 2.0 Tutorial - Cross-Domain Identity Provisioning',

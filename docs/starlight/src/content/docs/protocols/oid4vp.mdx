@@ -1,29 +1,32 @@
 ---
 title: "OID4VP"
-description: "Verifiable presentation verification with DCQL queries and wallet submission."
+description: "OpenID4VP verifier flows with DCQL request contracts, direct_post transports, and policy-based presentation evaluation."
 ---
 
 # OID4VP
 
 ## Standards
 
-- OpenID for Verifiable Presentations (OID4VP) 1.0
+- OpenID for Verifiable Presentations 1.0 (final)
+- OAuth 2.0 Authorization Framework (request/response parameter model)
+- JOSE (JWT/JWS/JWE processing for request objects and `direct_post.jwt`)
+- DID Core / did:web (for `decentralized_identifier` client_id scheme handling)
 
 ## Available Flows
 
 | Flow ID | Name | Description |
 |---------|------|-------------|
-| `oid4vp-direct-post` | DCQL + direct_post | DCQL query with direct_post response mode |
-| `oid4vp-direct-post-jwt` | DCQL + direct_post.jwt | DCQL query with encrypted JWT response |
+| `oid4vp-direct-post` | DCQL + direct_post | Verifier creates signed request object; wallet posts `vp_token` + `state` to `response_uri` |
+| `oid4vp-direct-post-jwt` | DCQL + direct_post.jwt | Wallet posts encrypted `response` JWE containing signed `oauth-authz-resp+jwt` payload |
 
 ## Demo Scenarios
 
-- **DCQL direct_post** -- Standard presentation flow
-- **DCQL direct_post.jwt** -- Encrypted response variant
+- **DCQL direct_post** -- Create request object, hand off to wallet, evaluate verifier policy
+- **DCQL direct_post.jwt** -- Same flow with encrypted response transport and inner JWT validation
 
 ## DCQL Query
 
-The default query requests a `university_degree` credential with `degree` and `graduation_year` claims:
+Default query (used when neither `dcql_query` nor `scope` is supplied) requests a `university_degree` credential with `degree` and `graduation_year` claims:
 
 ```json
 {
@@ -40,24 +43,63 @@ The default query requests a `university_degree` credential with `degree` and `g
 }
 ```
 
+## Request and Response Contracts
+
+- Authorization request enforces XOR: exactly one of `dcql_query` or `scope`.
+- For `response_mode` `direct_post` and `direct_post.jwt`, `response_uri` is required and `redirect_uri` must be absent.
+- Request object header `typ` must be `oauth-authz-req+jwt`.
+- VP token header `typ` must be `vp+jwt`.
+- `direct_post.jwt` inner response header `typ` must be `oauth-authz-resp+jwt`.
+
 ## Client ID Schemes
 
-- `redirect_uri` -- standard redirect-based client identification
-- `did:web` -- DID Web method for decentralized verifier identity
+- Supported in MVP profile:
+  - `redirect_uri:` (prefix form)
+  - `decentralized_identifier:` with `did:web`
+- `decentralized_identifier:did:web` requests are resolved and validated against runtime DID document trust checks:
+  - URL derivation from DID syntax
+  - host allowlist enforcement
+  - DID document fetch and parse
+  - DID document `id` match and verification material presence
+
+## Verifier Evaluation (Implementation)
+
+1. Verifier creates request object (`request`) and `request_uri`, binding fresh `nonce` and `state`.
+2. Wallet fetches request object from `request_uri` (GET or POST retrieval supported).
+3. Wallet submits response:
+   - `direct_post`: `vp_token` + `state`
+   - `direct_post.jwt`: `response` JWE (RSA-OAEP + A256GCM), decrypted to signed inner response JWT
+4. Verifier resolves session by `state`, validates expiry, and evaluates presentation policy:
+   - nonce binding
+   - audience binding
+   - token expiry
+   - holder binding (`iss`/`sub` and `cnf.jkt` consistency)
+   - credential lineage/signature and required DCQL claim-path checks
+5. Result is stored and returned as a policy decision (`allowed`, `code`, `message`, `reasons`, `reason_codes`).
 
 ## Endpoints
 
 | Path | Methods | Purpose |
 |------|---------|---------|
 | `/oid4vp/request/create` | POST | Create authorization request |
-| `/oid4vp/request/{requestID}` | GET, POST | Retrieve/update authorization request |
-| `/oid4vp/response` | POST | Wallet response (`direct_post`, `direct_post.jwt`) |
-| `/oid4vp/result/{requestID}` | GET | Verification result |
+| `/oid4vp/request/{requestID}` | GET, POST | Retrieve request object by request URI |
+| `/oid4vp/response` | POST | Wallet callback (`direct_post` or `direct_post.jwt`) |
+| `/oid4vp/result/{requestID}` | GET | Retrieve verification status (`pending`/`completed`) and result |
+
+## Implementation Profile Notes
+
+- Request objects are signed in current implementation even when using `redirect_uri:` client_id scheme.
+- In OpenID4VP final profile language, `redirect_uri:` has limitations for signed-request trust models; treat this as current implementation profile behavior and validate interop requirements per relying wallet.
+- For `direct_post.jwt`, implementation expects encrypted `response` using `RSA-OAEP` + `A256GCM` and validates inner response JWT audience against `response_uri`.
+- Wallet response parser accepts JSON and form payloads; protocol requirements for direct_post transports still apply.
 
 ## What To Validate
 
-- Authorization request: signed JWT with `client_id`, `nonce`, `dcql_query`, `response_mode`
-- Request URI: `request_uri` for wallet to fetch the full request
-- Wallet response: `vp_token` and `presentation_submission` matching DCQL query
-- Verification result: credential validation, claim extraction, proof verification
-- Response binding: `state` and `nonce` alignment between request and response
+- Authorization request: signed request object with `typ=oauth-authz-req+jwt`, `client_id`, `response_mode`, `response_uri`, `nonce`, `state`, `exp`
+- DCQL contract: exactly one of `dcql_query` or `scope`; required claim paths derived from DCQL are enforced
+- Client identification: only supported scheme matrix accepted (`redirect_uri`, `decentralized_identifier`)
+- `direct_post` response: `state` maps to active request and `vp_token` is present
+- `direct_post.jwt` response: decrypts successfully, inner JWT signature/type/audience/subject/expiry checks pass
+- VP token checks: `typ=vp+jwt`, nonce match, audience match, expiry valid, holder binding verified
+- Credential evidence checks: presented credential subject/issuer/signature/lineage align with stored issuance record and required claim disclosures
+- Result endpoint: returns `pending` until callback is processed, then `completed` with policy decision object

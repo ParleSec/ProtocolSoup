@@ -11,6 +11,8 @@ import { SAML_EXAMPLES } from './saml'
 import { SPIFFE_EXAMPLES } from './spiffe'
 import { SCIM_EXAMPLES } from './scim'
 import { SSF_EXAMPLES } from './ssf'
+import { OID4VCI_EXAMPLES } from './oid4vci'
+import { OID4VP_EXAMPLES } from './oid4vp'
 
 export interface CodeExample {
   /** Syntax-highlighting language hint */
@@ -29,6 +31,8 @@ export const CODE_EXAMPLES: Record<string, CodeExample> = {
   ...SPIFFE_EXAMPLES,
   ...SCIM_EXAMPLES,
   ...SSF_EXAMPLES,
+  ...OID4VCI_EXAMPLES,
+  ...OID4VP_EXAMPLES,
 
   /* Fallback shown when a flow has no dedicated example */
   _default: {

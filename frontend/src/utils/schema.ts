@@ -32,7 +32,7 @@ export function generateWebApplicationSchema() {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
     name: SITE_CONFIG.name,
-    description: 'Interactive playground for learning authentication protocols by running real OAuth 2.0, OpenID Connect, SAML, SPIFFE, and SCIM flows.',
+    description: 'Interactive playground for learning authentication and verifiable credential protocols by running real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, and SCIM flows.',
     url: SITE_CONFIG.baseUrl,
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Web Browser',
@@ -47,6 +47,8 @@ export function generateWebApplicationSchema() {
       'JWT token decoding and validation',
       'OAuth 2.0 flow visualization',
       'OpenID Connect testing',
+      'OID4VCI issuance flow testing',
+      'OID4VP verification flow testing',
       'SAML 2.0 SSO debugging',
       'SPIFFE/SPIRE workload identity',
       'SCIM 2.0 provisioning testing',
@@ -68,7 +70,7 @@ export function generateSoftwareApplicationSchema() {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
     name: SITE_CONFIG.name,
-    description: 'Learn authentication and identity protocols by executing real flows. Interactive OAuth 2.0, OIDC, SAML, SPIFFE, and SCIM testing tool.',
+    description: 'Learn authentication and identity protocols by executing real flows. Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, and SCIM testing tool.',
     url: SITE_CONFIG.baseUrl,
     applicationCategory: 'SecurityApplication',
     operatingSystem: 'Any',
@@ -244,6 +246,10 @@ export function generateHomepageSchema() {
       {
         question: 'What is the difference between OAuth and OpenID Connect?',
         answer: 'OAuth 2.0 is an authorization protocol that grants access to resources, while OpenID Connect (OIDC) is an authentication layer built on top of OAuth 2.0. OIDC adds an ID token that contains information about the authenticated user.',
+      },
+      {
+        question: 'What are OID4VCI and OID4VP?',
+        answer: 'OID4VCI issues verifiable credentials from an issuer to a wallet. OID4VP lets a verifier request and validate verifiable presentations from a wallet, including request object and response-mode security checks.',
       },
       {
         question: 'What is PKCE and why is it important?',
