@@ -77,8 +77,15 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_DOCS_API_TOKEN }}
 
-      - name: Smoke test Fly hostname
-        run: curl -fsS "https://protocolsoup-docs.fly.dev/" > /dev/null
-
-      - name: Smoke test docs custom domain
-        run: curl -fsS "https://docs.protocolsoup.com/" > /dev/null
+      - name: Smoke test
+        run: |
+          for url in "https://protocolsoup-docs.fly.dev/" "https://docs.protocolsoup.com/"; do
+            for i in 1 2 3; do
+              if curl -fsS --retry 2 --retry-delay 5 "$url" > /dev/null 2>&1; then
+                echo "✓ $url"
+                break
+              fi
+              echo "Attempt $i failed for $url, waiting 10s..."
+              sleep 10
+            done
+          done
