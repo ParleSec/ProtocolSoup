@@ -4,6 +4,7 @@ import {
   ChevronRight, Key, 
   Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
+
 import { SEO } from '../components/common/SEO'
 import { generateHomepageSchema } from '../utils/schema'
 
@@ -26,6 +27,19 @@ const SPEC_GROUPS: SpecGroupItem[] = [
       { label: 'RFC 7636', url: 'https://datatracker.ietf.org/doc/html/rfc7636', tone: 'rfc' },
       { label: 'RFC 6750', url: 'https://datatracker.ietf.org/doc/html/rfc6750', tone: 'rfc' },
       { label: 'RFC 7519', url: 'https://datatracker.ietf.org/doc/html/rfc7519', tone: 'rfc' },
+    ],
+  },
+  {
+    label: 'SAML',
+    links: [
+      { label: 'RFC 7522', url: 'https://datatracker.ietf.org/doc/rfc7522/', tone: 'rfc' },
+    ],
+  },
+  {
+    label: 'OpenID4VC',
+    links: [
+      { label: 'OpenID4VCI 1.0', url: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html', tone: 'spec' },
+      { label: 'OpenID4VP 1.0', url: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html', tone: 'spec' },
     ],
   },
   {
@@ -219,7 +233,7 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-3">
           Specifications
         </h2>
-        <div className="space-y-2.5">
+        <div className="space-y-0.5 sm:space-y-2.5">
           {SPEC_GROUPS.map((group) => (
             <SpecGroup key={group.label} label={group.label} links={group.links} />
           ))}
@@ -390,8 +404,8 @@ function ProtocolCard({
 
 function SpecGroup({ label, links }: SpecGroupItem) {
   return (
-    <div className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
-      <span className="text-surface-500 text-[11px] sm:text-xs font-medium uppercase tracking-wide w-full sm:w-24 flex-shrink-0 pt-1">
+    <div className="border-l-2 border-white/[0.06] hover:border-white/15 pl-3 pr-1 py-px sm:py-1 rounded-r-md transition-colors duration-200">
+      <span className="text-surface-500 text-[11px] sm:text-xs font-medium uppercase tracking-wide block mb-0.5">
         {label}
       </span>
       <div className="flex flex-wrap gap-1.5">
