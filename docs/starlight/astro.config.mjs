@@ -114,7 +114,6 @@ export default defineConfig({
             { label: 'Explore All Endpoints', link: '/api/reference/', attrs: { target: '_self' } },
             { slug: 'api/overview' },
             { slug: 'api/integration-patterns' },
-            { slug: 'api/versioning' },
           ],
         },
       ],
