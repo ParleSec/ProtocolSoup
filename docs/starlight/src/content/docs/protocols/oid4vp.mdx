@@ -14,19 +14,19 @@ description: "OpenID4VP verifier flows with DCQL request contracts, direct_post 
 
 ## Available Flows
 
-| Flow ID | Name | Description |
-|---------|------|-------------|
-| `oid4vp-direct-post` | DCQL + direct_post | Verifier creates signed request object; wallet posts `vp_token` + `state` to `response_uri` |
-| `oid4vp-direct-post-jwt` | DCQL + direct_post.jwt | Wallet posts encrypted `response` JWE containing signed `oauth-authz-resp+jwt` payload |
+| Flow ID | Name | Steps | Description |
+|---------|------|-------|-------------|
+| `oid4vp-direct-post` | DCQL + direct_post | 4 | Verifier creates signed request object, wallet fetches from `request_uri`, posts `vp_token` + `state` to `response_uri`, verifier validates and evaluates policy |
+| `oid4vp-direct-post-jwt` | DCQL + direct_post.jwt | 4 | Verifier creates signed request, wallet fetches from `request_uri`, posts encrypted JWE containing signed `oauth-authz-resp+jwt`, verifier decrypts and evaluates policy |
 
 ## Demo Scenarios
 
 - **DCQL direct_post** -- Create request object, hand off to wallet, evaluate verifier policy
 - **DCQL direct_post.jwt** -- Same flow with encrypted response transport and inner JWT validation
 
-## DCQL Query
+## Example DCQL Query
 
-Default query (used when neither `dcql_query` nor `scope` is supplied) requests a `university_degree` credential with `degree` and `graduation_year` claims:
+Example DCQL query requesting a `university_degree` credential with `degree` and `graduation_year` claims:
 
 ```json
 {
@@ -53,53 +53,54 @@ Default query (used when neither `dcql_query` nor `scope` is supplied) requests 
 
 ## Client ID Schemes
 
-- Supported in MVP profile:
-  - `redirect_uri:` (prefix form)
-  - `decentralized_identifier:` with `did:web`
-- `decentralized_identifier:did:web` requests are resolved and validated against runtime DID document trust checks:
-  - URL derivation from DID syntax
-  - host allowlist enforcement
-  - DID document fetch and parse
-  - DID document `id` match and verification material presence
+- OpenID4VP defines multiple client identification schemes, including:
+  - `pre_registered` (e.g., verifier registered out-of-band)
+  - `redirect_uri` (e.g., verifier identified by redirect URI trust context)
+  - `decentralized_identifier` (e.g., DID-based verifier identification)
+  - `verifier_attestation`
+  - `x509_san_dns`
+  - `x509_hash`
+  - `openid_federation`
+- Verifier and wallet MUST apply scheme-specific trust validation rules for the chosen scheme.
 
-## Verifier Evaluation (Implementation)
+## Verifier Evaluation Flow (OID4VP §5, §6, §8)
 
-1. Verifier creates request object (`request`) and `request_uri`, binding fresh `nonce` and `state`.
-2. Wallet fetches request object from `request_uri` (GET or POST retrieval supported).
-3. Wallet submits response:
-   - `direct_post`: `vp_token` + `state`
-   - `direct_post.jwt`: `response` JWE (RSA-OAEP + A256GCM), decrypted to signed inner response JWT
-4. Verifier resolves session by `state`, validates expiry, and evaluates presentation policy:
-   - nonce binding
-   - audience binding
+1. **Create Authorization Request** — Verifier builds a signed request object (`typ=oauth-authz-req+jwt`) containing `client_id`, `response_type=vp_token`, `response_mode`, `response_uri`, `dcql_query` (or `scope`), `nonce`, `state`, and `exp`. Publishes it at a `request_uri`.
+2. **Wallet Fetches Request Object** — Wallet fetches the signed request from `request_uri` via GET or POST. Validates JWT signature, `typ` header, and expiry before processing.
+3. **Wallet Submits Response** — Wallet evaluates DCQL query, selects matching credentials, creates signed `vp_token` (`typ=vp+jwt`), and submits to `response_uri`:
+   - `direct_post`: form-post `vp_token` + `state`
+   - `direct_post.jwt`: form-post encrypted `response` JWE containing signed inner JWT (`typ=oauth-authz-resp+jwt`) with `vp_token`, `state`, and audience bound to `response_uri`
+4. **Verifier Validates + Policy Decision** — Verifier resolves session by `state`, then validates:
+   - nonce binding (VP token nonce matches request nonce)
+   - audience binding (VP token audience includes `client_id`)
    - token expiry
-   - holder binding (`iss`/`sub` and `cnf.jkt` consistency)
-   - credential lineage/signature and required DCQL claim-path checks
-5. Result is stored and returned as a policy decision (`allowed`, `code`, `message`, `reasons`, `reason_codes`).
+   - holder binding (`iss`/`sub` matches wallet identity, `cnf.jkt` matches key thumbprint)
+  - credential evidence (issuer signature, subject binding, disclosure integrity, and trust policy checks)
+   - DCQL claim-path completeness (all required claim paths present in disclosed claims)
+5. **Result** — Policy decision is stored and returned as `allowed`/`denied` with `code`, `message`, `reasons`, and `reason_codes`.
 
 ## Endpoints
 
-| Path | Methods | Purpose |
-|------|---------|---------|
-| `/oid4vp/request/create` | POST | Create authorization request |
-| `/oid4vp/request/{requestID}` | GET, POST | Retrieve request object by request URI |
-| `/oid4vp/response` | POST | Wallet callback (`direct_post` or `direct_post.jwt`) |
-| `/oid4vp/result/{requestID}` | GET | Retrieve verification status (`pending`/`completed`) and result |
+| Endpoint Role | Purpose |
+|---------------|---------|
+| Authorization Request Endpoint | Verifier creates and publishes a request object / request URI |
+| Request URI Retrieval Endpoint | Wallet fetches request object by `request_uri` |
+| Response URI Endpoint | Wallet submits `direct_post` or `direct_post.jwt` response payloads |
+| Verification Result Endpoint (optional) | Verifier exposes policy evaluation outcome to client tooling |
 
-## Implementation Profile Notes
+## Illustrative Examples (Non-Normative)
 
-- Request objects are signed in current implementation even when using `redirect_uri:` client_id scheme.
-- In OpenID4VP final profile language, `redirect_uri:` has limitations for signed-request trust models; treat this as current implementation profile behavior and validate interop requirements per relying wallet.
-- For `direct_post.jwt`, implementation expects encrypted `response` using `RSA-OAEP` + `A256GCM` and validates inner response JWT audience against `response_uri`.
-- Wallet response parser accepts JSON and form payloads; protocol requirements for direct_post transports still apply.
+- `direct_post` response parameters: `state=<opaque-value>&vp_token=<compact-jws>`
+- `direct_post.jwt` response parameter: `response=<compact-jwe>` where the decrypted plaintext is an inner JWT with `typ=oauth-authz-resp+jwt`
+- VP token essentials: `typ=vp+jwt`, nonce bound to request nonce, audience bound to verifier `client_id`
 
 ## What To Validate
 
 - Authorization request: signed request object with `typ=oauth-authz-req+jwt`, `client_id`, `response_mode`, `response_uri`, `nonce`, `state`, `exp`
 - DCQL contract: exactly one of `dcql_query` or `scope`; required claim paths derived from DCQL are enforced
-- Client identification: only supported scheme matrix accepted (`redirect_uri`, `decentralized_identifier`)
+- Client identification: chosen client_id scheme follows OpenID4VP scheme-specific trust validation
 - `direct_post` response: `state` maps to active request and `vp_token` is present
-- `direct_post.jwt` response: decrypts successfully, inner JWT signature/type/audience/subject/expiry checks pass
+- `direct_post.jwt` response: decrypts successfully and inner JWT signature/type/audience/subject/expiry checks pass
 - VP token checks: `typ=vp+jwt`, nonce match, audience match, expiry valid, holder binding verified
-- Credential evidence checks: presented credential subject/issuer/signature/lineage align with stored issuance record and required claim disclosures
-- Result endpoint: returns `pending` until callback is processed, then `completed` with policy decision object
+- Credential evidence checks: presented credential subject/issuer/signature/disclosures satisfy verifier trust policy and required claim paths
+- Policy output: verifier returns explicit decision with status, code, and reason details
