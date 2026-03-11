@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { 
   Shield, Eye, Terminal, Fingerprint, 
-  ChevronRight, Key, 
+  ChevronRight, Key, KeyRound,
   Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
 
@@ -76,19 +76,33 @@ export function Dashboard() {
   return (
     <>
       <SEO
-        title="Protocol Soup - Interactive Authentication Protocol Playground"
-        description="Protocol Soup helps you learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against working infrastructure."
+        title="OAuth 2.0 Playground & Identity Protocol Testing Tool | Protocol Soup"
+        description="Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and learn protocols hands-on."
         canonical="/"
         ogType="website"
         keywords={[
           'oauth2 playground',
-          'oauth testing tool',
+          'oauth 2.0 testing tool',
           'oidc testing',
+          'openid connect playground',
           'authentication protocol sandbox',
           'jwt decoder',
           'token inspector',
           'oauth2 tutorial',
           'openid connect tutorial',
+          'saml testing tool',
+          'saml 2.0 playground',
+          'verifiable credentials',
+          'oid4vci playground',
+          'oid4vp testing',
+          'openid4vci',
+          'openid4vp',
+          'spiffe spire tutorial',
+          'scim 2.0 testing',
+          'identity protocol testing',
+          'oauth flow visualization',
+          'pkce tutorial',
+          'security protocol sandbox',
         ]}
         structuredData={structuredData}
       />
@@ -101,11 +115,11 @@ export function Dashboard() {
         </div>
         <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-3 flex items-center gap-3">
           Protocol Soup
-          <span className="text-2xl sm:text-3xl">🍜</span>
+          <span className="text-2xl sm:text-3xl" aria-hidden="true">🍜</span>
         </h1>
         <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
-          Learn authentication and identity protocols by running them. Execute real OAuth 2.0, OpenID Connect, 
-          SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against working infrastructure and see exactly what happens at each step.
+          Learn authentication and identity protocols by running them. Execute real protocol flows against working 
+          infrastructure and see exactly what happens at each step.
         </p>
       </header>
 
@@ -172,59 +186,59 @@ export function Dashboard() {
             name="OAuth 2.0"
             description="Authorization framework for delegated access"
             color="blue"
-            flows={['authorization_code', 'client_credentials', 'pkce', 'refresh_token']}
             to="/protocol/oauth2"
-          />
-          <ProtocolCard
-            icon={Fingerprint}
-            name="OpenID Connect"
-            description="Authentication layer built on OAuth 2.0"
-            color="orange"
-            flows={['oidc_code', 'hybrid', 'userinfo', 'discovery']}
-            to="/protocol/oidc"
           />
           <ProtocolCard
             icon={FileKey}
             name="SAML 2.0"
             description="XML-based federated identity and SSO"
             color="cyan"
-            flows={['sp_initiated_sso', 'idp_initiated_sso', 'single_logout']}
             to="/protocol/saml"
+          />
+          <ProtocolCard
+            icon={Fingerprint}
+            name="OpenID Connect"
+            description="Authentication layer built on OAuth 2.0"
+            color="orange"
+            to="/protocol/oidc"
+          />
+          <ProtocolCard
+            icon={Radio}
+            name="SSF"
+            description="Real-time security event sharing framework"
+            color="amber"
+            to="/protocol/ssf"
+          />
+          <ProtocolCard
+            icon={KeyRound}
+            name="OID4VCI"
+            description="Verifiable credential issuance over OpenID"
+            color="green"
+            to="/protocol/oid4vci"
           />
           <ProtocolCard
             icon={Shield}
             name="SPIFFE/SPIRE"
             description="Zero-trust workload identity framework"
             color="green"
-            flows={['x509_svid', 'jwt_svid', 'mtls', 'cert_rotation']}
             to="/protocol/spiffe"
+          />
+          <ProtocolCard
+            icon={Eye}
+            name="OID4VP"
+            description="Verifiable presentation requests and verification"
+            color="purple"
+            to="/protocol/oid4vp"
           />
           <ProtocolCard
             icon={Users}
             name="SCIM 2.0"
             description="Cross-domain identity provisioning"
             color="purple"
-            flows={['user_lifecycle', 'group_mgmt', 'filters', 'bulk_ops']}
             to="/protocol/scim"
           />
-          <ProtocolCard
-            icon={Radio}
-            name="SSF (Shared Signals)"
-            description="Real-time security event sharing framework"
-            color="amber"
-            flows={['caep_events', 'risc_events', 'set_tokens', 'zero_trust']}
-            to="/protocol/ssf"
-          />
-        </div>
-      </section>
-
-      {/* Coming Soon */}
-      <section className="rounded-xl border border-dashed border-white/10 p-4 sm:p-6 text-center">
-        <p className="text-surface-400 mb-2">More protocols on the roadmap</p>
-        <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4 text-surface-400 text-sm">
-          <span>WebAuthn</span>
-          <span className="text-surface-700 hidden sm:inline">•</span>
-          <span>FIDO2</span>
+          <ComingSoonCard name="WebAuthn" description="Passwordless authentication" />
+          <ComingSoonCard name="FIDO2" description="Strong authentication framework" />
         </div>
       </section>
 
@@ -254,7 +268,7 @@ function ValueCard({
   description: string
 }) {
   return (
-    <div className="p-4 rounded-xl bg-surface-900/50 border border-white/5">
+    <div className="p-4 rounded-xl bg-surface-900/50 border border-white/10">
       <Icon className="w-5 h-5 text-amber-400 mb-3" />
       <h3 className="font-medium text-white mb-1">{title}</h3>
       <p className="text-sm text-surface-400">{description}</p>
@@ -305,7 +319,7 @@ function NavCard({
   return (
     <Link
       to={to}
-      className={`group relative overflow-hidden rounded-xl border ${c.border} bg-gradient-to-br ${c.bg} to-transparent p-6 transition-all`}
+      className={`group relative overflow-hidden rounded-xl border ${c.border} bg-gradient-to-br ${c.bg} to-transparent p-6 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`}
     >
       <div className={`absolute top-0 right-0 w-32 h-32 ${c.bg.replace('from-', 'bg-')} rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 opacity-50`} />
       <div className="relative">
@@ -322,83 +336,95 @@ function NavCard({
   )
 }
 
-function ProtocolCard({ 
-  icon: Icon, 
-  name, 
-  description, 
+function ProtocolCard({
+  icon: Icon,
+  name,
+  description,
   color,
-  flows, 
-  to 
+  to,
 }: {
   icon: React.ElementType
   name: string
   description: string
   color: 'blue' | 'orange' | 'cyan' | 'green' | 'purple' | 'amber'
-  flows: string[]
   to: string
 }) {
   const colors = {
     blue: {
       border: 'border-blue-500/20 hover:border-blue-500/40',
+      accent: 'bg-blue-500/50',
       bg: 'bg-blue-500/10',
       text: 'text-blue-400',
-      tag: 'bg-blue-500/10 text-blue-300',
     },
     orange: {
       border: 'border-orange-500/20 hover:border-orange-500/40',
+      accent: 'bg-orange-500/50',
       bg: 'bg-orange-500/10',
       text: 'text-orange-400',
-      tag: 'bg-orange-500/10 text-orange-300',
     },
     cyan: {
       border: 'border-cyan-500/20 hover:border-cyan-500/40',
+      accent: 'bg-cyan-500/50',
       bg: 'bg-cyan-500/10',
       text: 'text-cyan-400',
-      tag: 'bg-cyan-500/10 text-cyan-300',
     },
     green: {
       border: 'border-green-500/20 hover:border-green-500/40',
+      accent: 'bg-green-500/50',
       bg: 'bg-green-500/10',
       text: 'text-green-400',
-      tag: 'bg-green-500/10 text-green-300',
     },
     purple: {
       border: 'border-purple-500/20 hover:border-purple-500/40',
+      accent: 'bg-purple-500/50',
       bg: 'bg-purple-500/10',
       text: 'text-purple-400',
-      tag: 'bg-purple-500/10 text-purple-300',
     },
     amber: {
       border: 'border-amber-500/20 hover:border-amber-500/40',
+      accent: 'bg-amber-500/50',
       bg: 'bg-amber-500/10',
       text: 'text-amber-400',
-      tag: 'bg-amber-500/10 text-amber-300',
     },
   }
   const c = colors[color]
 
   return (
-    <Link to={to} className={`block rounded-xl border ${c.border} p-5 transition-colors group`}>
-      <div className="flex items-start gap-4">
-        <div className={`w-10 h-10 rounded-lg ${c.bg} flex items-center justify-center flex-shrink-0`}>
-          <Icon className={`w-5 h-5 ${c.text}`} />
+    <Link to={to} className={`block rounded-xl border ${c.border} bg-surface-900/30 overflow-hidden transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`}>
+      <div className={`h-0.5 ${c.accent}`} />
+      <div className="flex items-center gap-3 p-4">
+        <div className={`w-9 h-9 rounded-lg ${c.bg} flex items-center justify-center flex-shrink-0`}>
+          <Icon className={`w-[18px] h-[18px] ${c.text}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="font-semibold text-white">{name}</span>
-            <ChevronRight className="w-4 h-4 text-surface-600 group-hover:text-surface-400 transition-colors" />
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-white text-sm">{name}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-surface-600 group-hover:text-surface-400 transition-colors" />
           </div>
-          <p className="text-sm text-surface-400 mb-3">{description}</p>
-          <div className="flex flex-wrap gap-1.5">
-            {flows.map(flow => (
-              <code key={flow} className={`px-2 py-0.5 rounded text-xs font-mono ${c.tag}`}>
-                {flow}
-              </code>
-            ))}
-          </div>
+          <p className="text-xs text-surface-400 mt-0.5">{description}</p>
         </div>
       </div>
     </Link>
+  )
+}
+
+function ComingSoonCard({ name, description }: { name: string; description: string }) {
+  return (
+    <div className="block rounded-xl border border-dashed border-white/10 bg-surface-900/20 overflow-hidden">
+      <div className="h-0.5 bg-white/10" />
+      <div className="flex items-center gap-3 p-4">
+        <div className="w-9 h-9 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+          <span className="text-surface-600 text-xs font-bold">?</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-surface-500 text-sm">{name}</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide bg-white/5 text-surface-500">Soon</span>
+          </div>
+          <p className="text-xs text-surface-600 mt-0.5">{description}</p>
+        </div>
+      </div>
+    </div>
   )
 }
 
