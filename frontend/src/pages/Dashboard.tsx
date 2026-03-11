@@ -76,7 +76,7 @@ export function Dashboard() {
   return (
     <>
       <SEO
-        title="OAuth 2.0 Playground & Identity Protocol Testing Tool | Protocol Soup"
+        title="Protocol Soup | Run Real Authentication & Identity Protocol Flows"
         description="Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and learn protocols hands-on."
         canonical="/"
         ogType="website"

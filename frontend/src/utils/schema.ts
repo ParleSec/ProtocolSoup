@@ -237,27 +237,39 @@ export function generateHomepageSchema() {
     generateFAQSchema([
       {
         question: 'What is Protocol Soup?',
-        answer: 'Protocol Soup is an interactive playground for learning authentication and identity protocols. You can execute real OAuth 2.0, OpenID Connect, SAML, SPIFFE/SPIRE, and SCIM flows against working infrastructure and see exactly what happens at each step.',
+        answer: 'Protocol Soup is a free, interactive testing tool for authentication and identity protocols. Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against live infrastructure, inspect every HTTP exchange, and decode tokens in real-time.',
       },
       {
-        question: 'What is OAuth 2.0 and how does it work?',
-        answer: 'OAuth 2.0 is an authorization framework that enables applications to obtain limited access to user accounts on HTTP services. It works by delegating user authentication to the service that hosts the user account and authorizing third-party applications to access the user account.',
+        question: 'How do I test OAuth 2.0 flows?',
+        answer: 'Protocol Soup lets you execute real OAuth 2.0 flows — Authorization Code, Authorization Code + PKCE, Client Credentials, Refresh Token, Token Introspection, and Token Revocation — against a working authorization server. You see every request, response, header, and token as it happens.',
       },
       {
-        question: 'What is the difference between OAuth and OpenID Connect?',
-        answer: 'OAuth 2.0 is an authorization protocol that grants access to resources, while OpenID Connect (OIDC) is an authentication layer built on top of OAuth 2.0. OIDC adds an ID token that contains information about the authenticated user.',
+        question: 'What is the difference between OAuth 2.0 and OpenID Connect?',
+        answer: 'OAuth 2.0 is an authorization framework that grants delegated access to resources. OpenID Connect (OIDC) is an authentication layer built on OAuth 2.0 that adds an ID token containing verified user identity claims. OAuth answers "what can this app access?" while OIDC answers "who is this user?"',
       },
       {
-        question: 'What are OID4VCI and OID4VP?',
-        answer: 'OID4VCI issues verifiable credentials from an issuer to a wallet. OID4VP lets a verifier request and validate verifiable presentations from a wallet, including request object and response-mode security checks.',
+        question: 'What are verifiable credentials and how do OID4VCI and OID4VP work?',
+        answer: 'Verifiable credentials are tamper-evident digital credentials (like diplomas or licenses) that a holder can present to a verifier. OID4VCI (OpenID for Verifiable Credential Issuance) defines how an issuer delivers credentials to a wallet. OID4VP (OpenID for Verifiable Presentations) defines how a verifier requests and validates credential presentations from a wallet.',
       },
       {
-        question: 'What is PKCE and why is it important?',
-        answer: 'PKCE (Proof Key for Code Exchange) is a security extension to OAuth 2.0 that prevents authorization code interception attacks. It is essential for public clients like mobile apps and single-page applications that cannot securely store client secrets.',
+        question: 'What is PKCE and why is it required for OAuth 2.0?',
+        answer: 'PKCE (Proof Key for Code Exchange, RFC 7636) prevents authorization code interception attacks by binding the token request to the original authorization request via a code_verifier/code_challenge pair. It is required for public clients (SPAs, mobile apps) and recommended for all OAuth 2.0 clients.',
       },
       {
-        question: 'What is SAML and how is it different from OAuth?',
-        answer: 'SAML (Security Assertion Markup Language) is an XML-based protocol for exchanging authentication and authorization data between identity providers and service providers. Unlike OAuth, which is designed for API authorization, SAML is primarily used for enterprise single sign-on (SSO).',
+        question: 'How is SAML different from OAuth and OIDC?',
+        answer: 'SAML 2.0 is an XML-based federation protocol primarily used for enterprise single sign-on (SSO) between identity providers and service providers. OAuth 2.0 and OIDC are JSON/REST-based protocols designed for API authorization and modern web/mobile authentication. SAML predates OAuth and is common in enterprise environments.',
+      },
+      {
+        question: 'What is SPIFFE and how does it provide zero-trust workload identity?',
+        answer: 'SPIFFE (Secure Production Identity Framework For Everyone) provides cryptographic identities to workloads in distributed systems. SPIRE is the reference implementation that issues X.509-SVIDs and JWT-SVIDs, enabling mTLS between services and automatic certificate rotation — the foundation for zero-trust service mesh architectures.',
+      },
+      {
+        question: 'What is SCIM 2.0 and how does it automate user provisioning?',
+        answer: 'SCIM 2.0 (System for Cross-domain Identity Management, RFC 7644) is a REST API standard for automating user and group provisioning across identity domains. It supports create, read, update, delete operations, filter queries, bulk operations, and schema discovery.',
+      },
+      {
+        question: 'What is the Shared Signals Framework (SSF)?',
+        answer: 'SSF enables real-time security event sharing between cooperating systems using Security Event Tokens (SETs). It includes CAEP (Continuous Access Evaluation Protocol) for session signals and RISC (Risk Incident Sharing and Coordination) for account compromise signals — essential for zero-trust continuous authorization.',
       },
     ]),
   ]

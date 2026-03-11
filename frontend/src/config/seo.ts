@@ -7,7 +7,7 @@
 
 export const SITE_CONFIG = {
   name: 'Protocol Soup',
-  tagline: 'An Interactive Protocol Sandbox',
+  tagline: 'Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM & SSF Testing Playground',
   baseUrl: 'https://protocolsoup.com',
   defaultImage: 'https://protocolsoup.com/og-image.png',
   twitterHandle: '@protocolsoup',
@@ -31,17 +31,26 @@ export interface PageSEO {
 export const PAGE_SEO: Record<string, PageSEO> = {
   // Homepage - Primary landing page
   '/': {
-    title: 'Protocol Soup - OAuth 2.0, OIDC & SAML Testing Playground',
-    description: 'Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows.',
+    title: 'Protocol Soup | Run Real Authentication & Identity Protocol Flows',
+    description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and learn protocols hands-on.',
     keywords: [
       'oauth2 playground',
-      'oauth testing tool',
+      'oauth 2.0 testing tool',
       'oidc testing',
+      'openid connect playground',
       'authentication protocol sandbox',
       'jwt decoder',
       'token inspector',
-      'oauth2 tutorial',
-      'openid connect tutorial',
+      'saml testing tool',
+      'verifiable credentials',
+      'oid4vci playground',
+      'oid4vp testing',
+      'spiffe spire tutorial',
+      'scim 2.0 testing',
+      'identity protocol testing',
+      'oauth flow visualization',
+      'pkce tutorial',
+      'security protocol sandbox',
     ],
     ogType: 'website',
   },

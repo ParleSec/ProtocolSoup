@@ -128,17 +128,22 @@ export function SEO({
 export function HomeSEO() {
   return (
     <SEO
-      title="OAuth 2.0, OIDC & SAML Testing Playground"
-      description="Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows."
+      title="Protocol Soup | Run Real Authentication & Identity Protocol Flows"
+      description="Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and learn protocols hands-on."
       canonical="/"
       ogType="website"
       keywords={[
         'oauth2 playground',
-        'oauth testing tool',
+        'oauth 2.0 testing tool',
         'oidc testing',
         'authentication protocol sandbox',
         'jwt decoder',
         'token inspector',
+        'verifiable credentials',
+        'oid4vci',
+        'oid4vp',
+        'saml testing tool',
+        'identity protocol testing',
       ]}
     />
   )
@@ -147,16 +152,21 @@ export function HomeSEO() {
 export function ProtocolsSEO() {
   return (
     <SEO
-      title="Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM"
-      description="Comprehensive reference for authentication and identity protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0."
+      title="Identity Protocol Reference - OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM, SSF"
+      description="Comprehensive reference for authentication, identity, and verifiable credential protocols. Sequence diagrams, security considerations, and spec-accurate documentation for every flow."
       canonical="/protocols"
       ogType="website"
       keywords={[
         'identity protocol reference',
         'authentication protocols',
+        'verifiable credential protocols',
         'oauth2 documentation',
         'oidc specification',
+        'oid4vci documentation',
+        'oid4vp specification',
         'saml documentation',
+        'scim reference',
+        'security protocols',
       ]}
     />
   )
@@ -166,7 +176,7 @@ export function LookingGlassSEO() {
   return (
     <SEO
       title="Looking Glass - Live Protocol Flow Execution & Traffic Inspector"
-      description="Execute authentication protocol flows in real-time and inspect every HTTP request, response, header, and token. See OAuth 2.0, OIDC, and SAML flows as they happen."
+      description="Execute OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, and SCIM flows in real-time. Inspect every HTTP request, response, header, and token as it happens."
       canonical="/looking-glass"
       ogType="website"
       keywords={[
@@ -175,6 +185,8 @@ export function LookingGlassSEO() {
         'http traffic inspector',
         'authentication debugger',
         'token debugger',
+        'api testing tool',
+        'verifiable credential debugger',
       ]}
     />
   )
