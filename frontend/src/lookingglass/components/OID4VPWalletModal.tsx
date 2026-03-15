@@ -14,6 +14,8 @@ interface OID4VPWalletModalProps {
   requestURI: string
   didWebAllowedHosts: string[]
   walletHandoffPayload: string
+  walletHandoffQRCodeDataURL: string
+  walletHandoffQRCodeError: string | null
   capturedWalletSubject: string
   walletSubjectInput: string
   onWalletSubjectInputChange: (value: string) => void
@@ -45,6 +47,8 @@ export function OID4VPWalletModal({
   requestURI,
   didWebAllowedHosts,
   walletHandoffPayload,
+  walletHandoffQRCodeDataURL,
+  walletHandoffQRCodeError,
   capturedWalletSubject,
   walletSubjectInput,
   onWalletSubjectInputChange,
@@ -129,6 +133,33 @@ export function OID4VPWalletModal({
               <pre className="p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
                 {walletHandoffPayload}
               </pre>
+              {walletHandoffPayload.startsWith('openid4vp://') && (
+                <div className="pt-1">
+                  <a
+                    href={walletHandoffPayload}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded border border-cyan-500/30 bg-cyan-500/10 text-[11px] sm:text-xs text-cyan-200 hover:text-cyan-100 transition-colors"
+                  >
+                    Open deep link on this device
+                  </a>
+                </div>
+              )}
+              {walletHandoffQRCodeDataURL && (
+                <div className="pt-2 flex flex-col items-center gap-2">
+                  <img
+                    src={walletHandoffQRCodeDataURL}
+                    alt="OID4VP wallet handoff QR"
+                    className="w-48 h-48 rounded-lg border border-white/10 bg-white p-2"
+                  />
+                  <p className="text-[11px] sm:text-xs text-surface-400 text-center max-w-[280px]">
+                    Scan with an OID4VP-compatible wallet on another device, or use the deep link above on this one
+                  </p>
+                </div>
+              )}
+              {!walletHandoffQRCodeDataURL && walletHandoffQRCodeError && (
+                <p className="pt-1 text-[11px] sm:text-xs text-amber-300">
+                  QR generation failed: {walletHandoffQRCodeError}
+                </p>
+              )}
             </div>
           )}
 

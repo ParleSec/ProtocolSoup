@@ -51,6 +51,8 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
         const reasons = getReasonList(metadata)
         const reasonCodes = getReasonCodeList(metadata)
         const credentialEvidence = getCredentialEvidence(metadata)
+        const deferredIssuance = getDeferredIssuance(metadata)
+        const deferredStatus = deferredIssuance ? deferredStatusConfig(deferredIssuance.status) : null
 
         return (
           <div key={artifact.id} className="rounded-lg bg-surface-900/50 border border-white/5 overflow-hidden">
@@ -75,6 +77,28 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
             <div className="p-3 space-y-2">
               {artifact.rfcReference && (
                 <div className="text-[11px] text-indigo-400 font-mono">{artifact.rfcReference}</div>
+              )}
+
+              {deferredIssuance && deferredStatus && (
+                <div className={`p-2 rounded border ${deferredStatus.background}`}>
+                  <div className={`text-xs font-medium ${deferredStatus.text}`}>
+                    Deferred issuance {deferredStatus.label}
+                  </div>
+                  <div className="mt-1 text-[11px] text-surface-300">
+                    Transaction ID: <code className="text-surface-200">{deferredIssuance.transactionId || 'n/a'}</code>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-surface-300">
+                    {deferredIssuance.pollAttempt !== undefined && (
+                      <span>
+                        Poll attempt: {deferredIssuance.pollAttempt}
+                        {deferredIssuance.maxPollAttempts !== undefined ? `/${deferredIssuance.maxPollAttempts}` : ''}
+                      </span>
+                    )}
+                    {deferredIssuance.retryAfterSeconds !== undefined && (
+                      <span>Retry after: {deferredIssuance.retryAfterSeconds}s</span>
+                    )}
+                  </div>
+                </div>
               )}
 
               {checks.length > 0 && (
@@ -244,6 +268,82 @@ interface CredentialEvidenceView {
   requiredClaimPaths: string[]
   disclosedClaims: Record<string, unknown>
   fullClaims: Record<string, unknown>
+}
+
+interface DeferredIssuanceView {
+  transactionId: string
+  status: string
+  pollAttempt?: number
+  maxPollAttempts?: number
+  retryAfterSeconds?: number
+}
+
+function deferredStatusConfig(status: string): { label: string; text: string; background: string } {
+  switch (status) {
+    case 'transaction_created':
+      return {
+        label: 'started',
+        text: 'text-blue-300',
+        background: 'bg-blue-500/5 border-blue-500/20',
+      }
+    case 'pending':
+      return {
+        label: 'pending',
+        text: 'text-amber-200',
+        background: 'bg-amber-500/5 border-amber-500/20',
+      }
+    case 'completed':
+      return {
+        label: 'completed',
+        text: 'text-green-300',
+        background: 'bg-green-500/5 border-green-500/20',
+      }
+    case 'timeout':
+      return {
+        label: 'timed out',
+        text: 'text-red-300',
+        background: 'bg-red-500/5 border-red-500/20',
+      }
+    default:
+      return {
+        label: status || 'unknown',
+        text: 'text-surface-300',
+        background: 'bg-surface-950 border-white/10',
+      }
+  }
+}
+
+function getDeferredIssuance(metadata: Record<string, unknown>): DeferredIssuanceView | null {
+  const hasDeferredFlag = Boolean(metadata.deferredFlow || metadata.deferred)
+  const transactionId = String(
+    metadata.transactionId || metadata.transaction_id || metadata.deferredTransactionId || '',
+  ).trim()
+
+  if (!hasDeferredFlag && !transactionId) {
+    return null
+  }
+
+  const status = String(metadata.deferredStatus || '').trim() || (metadata.deferred ? 'transaction_created' : '')
+  return {
+    transactionId,
+    status,
+    pollAttempt: toOptionalInt(metadata.pollAttempt ?? metadata.deferredPollAttempts),
+    maxPollAttempts: toOptionalInt(metadata.maxPollAttempts ?? metadata.deferredMaxPollAttempts),
+    retryAfterSeconds: toOptionalInt(metadata.retryAfterSeconds ?? metadata.deferredRetryAfterSeconds),
+  }
+}
+
+function toOptionalInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.floor(value)
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value.trim(), 10)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
 }
 
 function getCredentialEvidence(metadata: Record<string, unknown>): CredentialEvidenceView | null {

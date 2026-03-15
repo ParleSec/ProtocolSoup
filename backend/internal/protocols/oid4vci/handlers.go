@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -627,6 +629,10 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	if grant.Deferred {
 		transactionID := p.randomValue(24)
 		now := time.Now().UTC()
+		deferredRetryAfterSeconds := int(math.Ceil(deferredReadyDelay.Seconds()))
+		if deferredRetryAfterSeconds < 1 {
+			deferredRetryAfterSeconds = 1
+		}
 		p.mu.Lock()
 		p.issuanceTransactions[transactionID] = &issuanceTransaction{
 			Model: models.VCIssuanceTransaction{
@@ -662,10 +668,11 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"transaction_id":      transactionID,
-			"c_nonce":             nextNonce.Value,
-			"c_nonce_expires_in":  int(nonceTTL.Seconds()),
-			"credential_response": "deferred",
+			"transaction_id":               transactionID,
+			"c_nonce":                      nextNonce.Value,
+			"c_nonce_expires_in":           int(nonceTTL.Seconds()),
+			"credential_response":          "deferred",
+			"deferred_retry_after_seconds": deferredRetryAfterSeconds,
 		})
 		return
 	}
@@ -726,7 +733,16 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 
 	now := time.Now().UTC()
 	if now.Before(transaction.ReadyAt) {
-		writeOID4VCIError(w, http.StatusBadRequest, "issuance_pending", "credential is not ready yet")
+		retryAfterSeconds := int(math.Ceil(transaction.ReadyAt.Sub(now).Seconds()))
+		if retryAfterSeconds < 1 {
+			retryAfterSeconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":               "issuance_pending",
+			"error_description":   "credential is not ready yet",
+			"retry_after_seconds": retryAfterSeconds,
+		})
 		return
 	}
 

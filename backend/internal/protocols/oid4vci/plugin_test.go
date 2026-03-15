@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,6 +176,80 @@ func TestDeferredIssuanceFlow(t *testing.T) {
 	deferredPayload := decodeJSONMap(t, deferredResp)
 	if asString(t, deferredPayload["credential"]) == "" {
 		t.Fatalf("expected deferred credential")
+	}
+}
+
+func TestDeferredIssuancePendingReturnsRetryHints(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	walletSubject := asString(t, offerPayload["wallet_subject"])
+
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	tokenPayload := decodeJSONMap(t, tokenResp)
+	accessToken := asString(t, tokenPayload["access_token"])
+	cNonce := asString(t, tokenPayload["c_nonce"])
+	proofJWT := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
+
+	credentialResp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": "UniversityDegreeCredential",
+			"proofs": []map[string]interface{}{
+				{
+					"proof_type": "jwt",
+					"jwt":        proofJWT,
+				},
+			},
+		},
+		map[string]string{
+			"Authorization": "Bearer " + accessToken,
+		},
+	)
+	assertStatus(t, credentialResp, http.StatusOK)
+	credentialPayload := decodeJSONMap(t, credentialResp)
+	transactionID := asString(t, credentialPayload["transaction_id"])
+	if transactionID == "" {
+		t.Fatalf("expected deferred transaction_id")
+	}
+	initialRetry, ok := credentialPayload["deferred_retry_after_seconds"].(float64)
+	if !ok || int(initialRetry) < 1 {
+		t.Fatalf("expected deferred_retry_after_seconds >= 1, got %v", credentialPayload["deferred_retry_after_seconds"])
+	}
+
+	pendingResp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/deferred_credential",
+		map[string]interface{}{
+			"transaction_id": transactionID,
+		},
+		map[string]string{
+			"Authorization": "Bearer " + accessToken,
+		},
+	)
+	assertStatus(t, pendingResp, http.StatusBadRequest)
+	retryAfterHeader := strings.TrimSpace(pendingResp.Header.Get("Retry-After"))
+	if retryAfterHeader == "" {
+		t.Fatalf("expected Retry-After header on issuance_pending response")
+	}
+	pendingPayload := decodeJSONMap(t, pendingResp)
+	if asString(t, pendingPayload["error"]) != "issuance_pending" {
+		t.Fatalf("expected issuance_pending error, got %v", pendingPayload["error"])
+	}
+	pendingRetry, ok := pendingPayload["retry_after_seconds"].(float64)
+	if !ok || int(pendingRetry) < 1 {
+		t.Fatalf("expected retry_after_seconds >= 1, got %v", pendingPayload["retry_after_seconds"])
 	}
 }
 

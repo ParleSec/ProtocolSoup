@@ -33,6 +33,7 @@ import {
   parseSDJWTDisclosureClaimNames,
   humanizeOID4VPTrustMode,
 } from '../protocols/config/oid4vp'
+import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
@@ -64,6 +65,8 @@ export function LookingGlass() {
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
   const [pendingExecute, setPendingExecute] = useState(false)
   const [handoffCopied, setHandoffCopied] = useState(false)
+  const [oid4vpWalletHandoffQRCodeDataURL, setOID4VPWalletHandoffQRCodeDataURL] = useState('')
+  const [oid4vpWalletHandoffQRCodeError, setOID4VPWalletHandoffQRCodeError] = useState<string | null>(null)
   const [capturedVCWalletSubject, setCapturedVCWalletSubject] = useState('')
   const [capturedVCCredentialJWT, setCapturedVCCredentialJWT] = useState('')
   const [oid4vpWalletModalOpen, setOID4VPWalletModalOpen] = useState(false)
@@ -330,6 +333,44 @@ export function LookingGlass() {
     () => String(walletHandoffArtifact?.metadata?.qrPayload || walletHandoffArtifact?.metadata?.deepLink || walletHandoffArtifact?.raw || '').trim(),
     [walletHandoffArtifact],
   )
+  const oid4vpWalletDeepLink = useMemo(() => {
+    if (!oid4vpWalletHandoffPayload.startsWith('openid4vp://')) {
+      return ''
+    }
+    return oid4vpWalletHandoffPayload
+  }, [oid4vpWalletHandoffPayload])
+
+  useEffect(() => {
+    if (!isOID4VPFlow || !oid4vpWalletHandoffPayload) {
+      setOID4VPWalletHandoffQRCodeDataURL('')
+      setOID4VPWalletHandoffQRCodeError(null)
+      return
+    }
+
+    let cancelled = false
+    setOID4VPWalletHandoffQRCodeError(null)
+
+    toQRCodeDataURL(oid4vpWalletHandoffPayload, {
+      width: 300,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+    })
+      .then((dataURL) => {
+        if (!cancelled) {
+          setOID4VPWalletHandoffQRCodeDataURL(dataURL)
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        const message = error instanceof Error ? error.message : 'Failed to generate QR code'
+        setOID4VPWalletHandoffQRCodeDataURL('')
+        setOID4VPWalletHandoffQRCodeError(message)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isOID4VPFlow, oid4vpWalletHandoffPayload])
 
   const latestCapturedOID4VCITxCode = useMemo(() => {
     const artifacts = realExecutor.state?.vcArtifacts || []
@@ -1447,17 +1488,45 @@ export function LookingGlass() {
                       Deep-link/QR payload is generated from the live request object and can be used with an external wallet agent.
                     </p>
                   </div>
-                  <button
-                    onClick={copyWalletHandoff}
-                    className="flex items-center gap-1 px-2 py-1 rounded bg-surface-900 text-xs text-surface-300 hover:text-white border border-white/10"
-                  >
-                    {handoffCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {handoffCopied ? 'Copied' : 'Copy'}
-                  </button>
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                    {oid4vpWalletDeepLink && (
+                      <a
+                        href={oid4vpWalletDeepLink}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-surface-900 text-xs text-cyan-200 hover:text-cyan-100 border border-cyan-500/30"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        Open
+                      </a>
+                    )}
+                    <button
+                      onClick={copyWalletHandoff}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-surface-900 text-xs text-surface-300 hover:text-white border border-white/10"
+                    >
+                      {handoffCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {handoffCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
                 </div>
                 <pre className="mt-2 p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
                   {String(walletHandoffArtifact.metadata?.qrPayload || walletHandoffArtifact.metadata?.deepLink || walletHandoffArtifact.raw || '')}
                 </pre>
+                {oid4vpWalletHandoffQRCodeDataURL && (
+                  <div className="mt-3 flex flex-col items-center gap-2">
+                    <img
+                      src={oid4vpWalletHandoffQRCodeDataURL}
+                      alt="OID4VP wallet handoff QR"
+                      className="w-44 h-44 rounded-lg border border-white/10 bg-white p-2"
+                    />
+                    <p className="text-[11px] text-surface-400 text-center max-w-[260px]">
+                      Scan with an OID4VP-compatible wallet on another device, or use the deep link on this one
+                    </p>
+                  </div>
+                )}
+                {!oid4vpWalletHandoffQRCodeDataURL && oid4vpWalletHandoffQRCodeError && (
+                  <p className="mt-2 text-[11px] text-amber-300">
+                    QR generation failed: {oid4vpWalletHandoffQRCodeError}
+                  </p>
+                )}
               </div>
             )}
             {isOID4VPFlow && !!oid4vpTrustMode && (
@@ -1512,6 +1581,8 @@ export function LookingGlass() {
             requestURI={oid4vpRequestURI}
             didWebAllowedHosts={oid4vpDidWebAllowedHosts}
             walletHandoffPayload={oid4vpWalletHandoffPayload}
+            walletHandoffQRCodeDataURL={oid4vpWalletHandoffQRCodeDataURL}
+            walletHandoffQRCodeError={oid4vpWalletHandoffQRCodeError}
             capturedWalletSubject={capturedVCWalletSubject}
             walletSubjectInput={oid4vpWalletSubjectInput}
             onWalletSubjectInputChange={setOID4VPWalletSubjectInput}
