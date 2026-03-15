@@ -121,6 +121,7 @@ export type VCArtifactType =
   | 'wallet_handoff'
   | 'vp_token'
   | 'verification_result'
+  | 'deferred_status'
 
 export interface VCArtifact {
   id: string

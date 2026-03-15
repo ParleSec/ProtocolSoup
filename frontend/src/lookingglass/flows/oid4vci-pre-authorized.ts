@@ -302,7 +302,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       const transactionID = String(credentialData.transaction_id)
       const deferredRetryAfterSeconds = this.parsePositiveInt(credentialData.deferred_retry_after_seconds)
       this.addVCArtifact({
-        type: 'verification_result',
+        type: 'deferred_status',
         title: 'Deferred Issuance Transaction',
         format: 'oid4vci-deferred',
         rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
@@ -379,7 +379,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
         const payload = data as Record<string, unknown>
         if (typeof payload.credential === 'string') {
           this.addVCArtifact({
-            type: 'verification_result',
+            type: 'deferred_status',
             title: 'Deferred Issuance Completed',
             format: 'oid4vci-deferred',
             rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
@@ -419,7 +419,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
         }
         const retryAfterSeconds = this.extractDeferredRetryAfterSeconds(errorData, response)
         this.addVCArtifact({
-          type: 'verification_result',
+          type: 'deferred_status',
           title: 'Deferred Issuance Pending',
           format: 'oid4vci-deferred',
           rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
@@ -453,7 +453,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     }
 
     this.addVCArtifact({
-      type: 'verification_result',
+      type: 'deferred_status',
       title: 'Deferred Issuance Timed Out',
       format: 'oid4vci-deferred',
       rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',

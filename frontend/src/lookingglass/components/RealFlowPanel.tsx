@@ -84,7 +84,7 @@ export function RealFlowPanel({
     { label: 'Holder binding', ok: Boolean(verificationChecks.holderBindingVerified) },
   ]
   const latestDeferredArtifact = state?.vcArtifacts
-    ? [...state.vcArtifacts].reverse().find((artifact) => isDeferredArtifactMetadata((artifact.metadata || {}) as Record<string, unknown>))
+    ? [...state.vcArtifacts].reverse().find((artifact) => artifact.type === 'deferred_status')
     : null
   const deferredMetadata = (latestDeferredArtifact?.metadata || {}) as Record<string, unknown>
   const deferredStatus = String(deferredMetadata.deferredStatus || '').trim()
@@ -949,16 +949,6 @@ function ParamRow({ label, value, color, truncate }: { label: string; value: str
       <CopyButton text={value} />
     </div>
   )
-}
-
-function isDeferredArtifactMetadata(metadata: Record<string, unknown>): boolean {
-  if (metadata.deferredFlow || metadata.deferred) {
-    return true
-  }
-  const transactionId = String(
-    metadata.transactionId || metadata.transaction_id || metadata.deferredTransactionId || '',
-  ).trim()
-  return transactionId.length > 0
 }
 
 function deferredStatusStyleConfig(status: string): { label: string; text: string; container: string } {

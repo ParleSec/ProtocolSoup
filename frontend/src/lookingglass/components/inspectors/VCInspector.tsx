@@ -1,6 +1,7 @@
 import { useMemo, useState, type ElementType } from 'react'
 import {
   Check,
+  Clock,
   Copy,
   Eye,
   FileText,
@@ -227,6 +228,8 @@ function artifactIcon(type: VCArtifact['type']): { icon: ElementType; fg: string
       return { icon: KeyRound, fg: 'text-emerald-400', bg: 'bg-emerald-500/10' }
     case 'verification_result':
       return { icon: ShieldCheck, fg: 'text-violet-400', bg: 'bg-violet-500/10' }
+    case 'deferred_status':
+      return { icon: Clock, fg: 'text-blue-400', bg: 'bg-blue-500/10' }
     default:
       return { icon: FileText, fg: 'text-amber-400', bg: 'bg-amber-500/10' }
   }
