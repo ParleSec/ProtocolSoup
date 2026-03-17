@@ -353,6 +353,12 @@ jobs:
         run: npm run build
         env:
           CI: true
+
+      - name: Build wallet frontend bundle
+        working-directory: frontend
+        run: npm run build:wallet
+        env:
+          CI: true
       
       - name: Upload frontend build artifacts
         uses: actions/upload-artifact@v4

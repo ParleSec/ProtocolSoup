@@ -3,6 +3,8 @@ package main
 import (
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestResolveWalletScopeKeyPrecedence(t *testing.T) {
@@ -110,4 +112,66 @@ func TestGetOrCreateWalletPrunesExpiredEntries(t *testing.T) {
 	if stillExists {
 		t.Fatalf("expected expired wallet entry to be pruned")
 	}
+}
+
+func TestParseOpenID4VPURIExtractsRequestURI(t *testing.T) {
+	requestURI, requestJWT, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123")
+	if err != nil {
+		t.Fatalf("parseOpenID4VPURI: %v", err)
+	}
+	if requestJWT != "" {
+		t.Fatalf("expected empty request JWT, got %q", requestJWT)
+	}
+	if requestURI != "https://protocolsoup.com/oid4vp/request/abc123" {
+		t.Fatalf("unexpected requestURI %q", requestURI)
+	}
+}
+
+func TestResolveRequestContextWithOptionsRejectsExternalByDefault(t *testing.T) {
+	server := &walletHarnessServer{
+		targetHost:        "protocolsoup.com",
+		targetResponseURI: "https://protocolsoup.com/oid4vp/response",
+		allowExternal:     false,
+	}
+	requestJWT := buildTestRequestJWT(t, "https://wallet.example.org/oid4vp/response")
+	if _, err := server.resolveRequestContextWithOptions("req-123", requestJWT, false); err == nil {
+		t.Fatalf("expected external response_uri to be rejected when allowExternal=false")
+	}
+}
+
+func TestResolveRequestContextWithOptionsAllowsExternalWhenEnabled(t *testing.T) {
+	server := &walletHarnessServer{
+		targetHost:        "protocolsoup.com",
+		targetResponseURI: "https://protocolsoup.com/oid4vp/response",
+		allowExternal:     true,
+	}
+	requestJWT := buildTestRequestJWT(t, "https://wallet.example.org/oid4vp/response")
+	context, err := server.resolveRequestContextWithOptions("req-123", requestJWT, true)
+	if err != nil {
+		t.Fatalf("resolveRequestContextWithOptions external: %v", err)
+	}
+	if context.Trusted {
+		t.Fatalf("expected external context to be untrusted")
+	}
+	if context.ResponseURI != "https://wallet.example.org/oid4vp/response" {
+		t.Fatalf("unexpected response URI %q", context.ResponseURI)
+	}
+}
+
+func buildTestRequestJWT(t *testing.T, responseURI string) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"jti":           "req-123",
+		"state":         "state-123",
+		"nonce":         "nonce-123",
+		"client_id":     "did:example:verifier",
+		"response_mode": "direct_post",
+		"response_uri":  responseURI,
+	})
+	token.Header["typ"] = "oauth-authz-req+jwt"
+	signed, err := token.SignedString([]byte("wallet-harness-test-secret"))
+	if err != nil {
+		t.Fatalf("sign request jwt: %v", err)
+	}
+	return signed
 }

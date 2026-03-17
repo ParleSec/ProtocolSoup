@@ -4,15 +4,19 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -30,6 +34,9 @@ type walletHarnessServer struct {
 	targetBaseURL     string
 	targetHost        string
 	targetResponseURI string
+	issuerBaseURL     string
+	allowExternal     bool
+	appTitle          string
 
 	defaultWalletSubject string
 	walletSessionTTL     time.Duration
@@ -69,11 +76,76 @@ type resolvedRequestContext struct {
 	ClientID     string
 	ResponseMode string
 	ResponseURI  string
+	Trusted      bool
 }
+
+type resolvedRequestEnvelope struct {
+	RequestJWT       string
+	RequestURI       string
+	RequestID        string
+	DecodedHeader    map[string]interface{}
+	DecodedPayload   map[string]interface{}
+	RequestURISource string
+}
+
+type apiResolveRequest struct {
+	RequestURI  string `json:"request_uri,omitempty"`
+	OpenID4VP   string `json:"openid4vp_uri,omitempty"`
+	RequestJWT  string `json:"request,omitempty"`
+	RequestID   string `json:"request_id,omitempty"`
+	TrustAccept bool   `json:"approve_external_trust,omitempty"`
+}
+
+type apiWalletRequest struct {
+	WalletSubject         string   `json:"wallet_subject,omitempty"`
+	CredentialJWT         string   `json:"credential_jwt,omitempty"`
+	DisclosureClaims      []string `json:"disclosure_claims,omitempty"`
+	RequestURI            string   `json:"request_uri,omitempty"`
+	OpenID4VP             string   `json:"openid4vp_uri,omitempty"`
+	RequestJWT            string   `json:"request,omitempty"`
+	RequestID             string   `json:"request_id,omitempty"`
+	ApproveExternalTrust  bool     `json:"approve_external_trust,omitempty"`
+	LookingGlassSessionID string   `json:"looking_glass_session_id,omitempty"`
+	ForceIssue            bool     `json:"force_issue,omitempty"`
+}
+
+type didWebResolutionResult struct {
+	DidDocumentURL string                 `json:"did_document_url,omitempty"`
+	Resolved       bool                   `json:"resolved"`
+	DocumentID     string                 `json:"document_id,omitempty"`
+	IDMatches      bool                   `json:"id_matches,omitempty"`
+	MethodsFound   bool                   `json:"methods_found,omitempty"`
+	Error          string                 `json:"error,omitempty"`
+	Document       map[string]interface{} `json:"document,omitempty"`
+}
+
+type trustEvaluation struct {
+	TrustedTarget          bool                    `json:"trusted_target"`
+	RequiresExternalAccept bool                    `json:"requires_external_approval"`
+	AllowExternalVerifiers bool                    `json:"allow_external_verifiers"`
+	ClientIDScheme         string                  `json:"client_id_scheme,omitempty"`
+	DidWeb                 *didWebResolutionResult `json:"did_web,omitempty"`
+}
+
+type credentialSummary struct {
+	Subject          string                 `json:"subject,omitempty"`
+	ExpiresAt        string                 `json:"expires_at,omitempty"`
+	IsSDJWT          bool                   `json:"is_sd_jwt"`
+	VCT              string                 `json:"vct,omitempty"`
+	DisclosureClaims []string               `json:"disclosure_claims,omitempty"`
+	DisclosureCount  int                    `json:"disclosure_count,omitempty"`
+	KeyBindingJWT    bool                   `json:"key_binding_jwt,omitempty"`
+	Claims           map[string]interface{} `json:"claims,omitempty"`
+}
+
+//go:embed static/*
+var walletStaticFS embed.FS
 
 func main() {
 	listenAddr := envOrDefault("WALLET_LISTEN_ADDR", ":8080")
 	targetBaseURL := strings.TrimRight(strings.TrimSpace(envOrDefault("WALLET_TARGET_BASE_URL", "https://protocolsoup.com")), "/")
+	issuerBaseURL := strings.TrimRight(strings.TrimSpace(envOrDefault("WALLET_ISSUER_BASE_URL", targetBaseURL)), "/")
+	appTitle := strings.TrimSpace(envOrDefault("WALLET_APP_TITLE", "Protocol Soup Wallet"))
 	defaultWalletSubject := strings.TrimSpace(envOrDefault("WALLET_DEFAULT_SUBJECT", "did:example:wallet:alice"))
 	walletSessionTTL := 20 * time.Minute
 	if ttlRaw := strings.TrimSpace(os.Getenv("WALLET_SESSION_TTL")); ttlRaw != "" {
@@ -84,6 +156,7 @@ func main() {
 		walletSessionTTL = ttl
 	}
 	strictIsolation := parseBoolEnv("WALLET_STRICT_SESSION_ISOLATION", true)
+	allowExternal := parseBoolEnv("WALLET_ALLOW_EXTERNAL_VERIFIERS", true)
 	allowedCORSOrigins := parseOriginAllowList(envOrDefault("WALLET_ALLOWED_CORS_ORIGINS", "https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev"))
 
 	parsedBaseURL, err := url.ParseRequestURI(targetBaseURL)
@@ -96,6 +169,13 @@ func main() {
 	targetHost := strings.ToLower(strings.TrimSpace(parsedBaseURL.Host))
 	if targetHost == "" {
 		log.Fatalf("invalid WALLET_TARGET_BASE_URL %q: host is required", targetBaseURL)
+	}
+	parsedIssuerURL, err := url.ParseRequestURI(issuerBaseURL)
+	if err != nil {
+		log.Fatalf("invalid WALLET_ISSUER_BASE_URL %q: %v", issuerBaseURL, err)
+	}
+	if parsedIssuerURL.Scheme != "http" && parsedIssuerURL.Scheme != "https" {
+		log.Fatalf("invalid WALLET_ISSUER_BASE_URL %q: scheme must be http or https", issuerBaseURL)
 	}
 
 	clientTimeout := 15 * time.Second
@@ -114,6 +194,9 @@ func main() {
 		targetBaseURL:        targetBaseURL,
 		targetHost:           targetHost,
 		targetResponseURI:    targetBaseURL + "/oid4vp/response",
+		issuerBaseURL:        issuerBaseURL,
+		allowExternal:        allowExternal,
+		appTitle:             appTitle,
 		defaultWalletSubject: defaultWalletSubject,
 		walletSessionTTL:     walletSessionTTL,
 		strictIsolation:      strictIsolation,
@@ -124,6 +207,12 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", server.handleHealth)
 	mux.HandleFunc("/submit", server.handleSubmit)
+	mux.HandleFunc("/api/resolve", server.handleAPIResolve)
+	mux.HandleFunc("/api/session", server.handleAPISession)
+	mux.HandleFunc("/api/issue", server.handleAPIIssue)
+	mux.HandleFunc("/api/preview", server.handleAPIPreview)
+	mux.HandleFunc("/api/present", server.handleAPIPresent)
+	mux.HandleFunc("/", server.handleWalletApp)
 
 	httpServer := &http.Server{
 		Addr:              listenAddr,
@@ -133,6 +222,9 @@ func main() {
 
 	log.Printf("wallet harness listening on %s", listenAddr)
 	log.Printf("wallet harness target base URL: %s", targetBaseURL)
+	log.Printf("wallet harness issuer base URL: %s", issuerBaseURL)
+	log.Printf("wallet harness external verifier support: %t", allowExternal)
+	log.Printf("wallet harness app title: %s", appTitle)
 	log.Printf("wallet harness strict session isolation: %t", strictIsolation)
 	log.Printf("wallet harness wallet session ttl: %s", walletSessionTTL)
 	log.Printf("wallet harness CORS origins: %d configured", len(allowedCORSOrigins))
@@ -147,6 +239,439 @@ func (s *walletHarnessServer) handleHealth(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *walletHarnessServer) handleWalletApp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	staticFS, err := fs.Sub(walletStaticFS, "static")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "server_error",
+			"error_description": "wallet static bundle is unavailable",
+		})
+		return
+	}
+
+	cleanPath := path.Clean("/" + strings.TrimSpace(r.URL.Path))
+	relativePath := strings.TrimPrefix(cleanPath, "/")
+	if relativePath == "." {
+		relativePath = ""
+	}
+
+	serveIndex := func() {
+		indexBytes, readErr := fs.ReadFile(staticFS, "index.html")
+		if readErr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{
+				"error":             "server_error",
+				"error_description": "wallet index is unavailable",
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(indexBytes)
+	}
+
+	if relativePath == "" {
+		serveIndex()
+		return
+	}
+	if strings.HasPrefix(relativePath, "api/") || relativePath == "submit" || relativePath == "health" {
+		http.NotFound(w, r)
+		return
+	}
+	if strings.Contains(path.Base(relativePath), ".") {
+		if _, statErr := fs.Stat(staticFS, relativePath); statErr == nil {
+			http.FileServer(http.FS(staticFS)).ServeHTTP(w, r)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	serveIndex()
+}
+
+func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	var req apiResolveRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	envelope, err := s.resolveRequestEnvelope(r.Context(), req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	requestContext, err := s.resolveRequestContextWithOptions(envelope.RequestID, envelope.RequestJWT, true)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	trust := s.evaluateTrust(requestContext, envelope.DecodedPayload)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"request_id":         requestContext.RequestID,
+		"request_uri":        envelope.RequestURI,
+		"request":            envelope.RequestJWT,
+		"request_uri_source": envelope.RequestURISource,
+		"response_mode":      requestContext.ResponseMode,
+		"response_uri":       requestContext.ResponseURI,
+		"client_id":          requestContext.ClientID,
+		"state":              requestContext.State,
+		"nonce":              requestContext.Nonce,
+		"scope":              asString(envelope.DecodedPayload["scope"]),
+		"dcql_query":         envelope.DecodedPayload["dcql_query"],
+		"request_header":     envelope.DecodedHeader,
+		"request_payload":    envelope.DecodedPayload,
+		"trust":              trust,
+	})
+}
+
+func (s *walletHarnessServer) handleAPISession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	scopeKey, sessionID, err := s.resolveAPIScopeKey(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	subject := scopedWalletSubject(s.defaultWalletSubject, scopeKey)
+	wallet, err := s.getOrCreateWallet(scopeKey, subject)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "server_error",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	var keyThumbprint string
+	if pubJWK, ok := wallet.KeySet.GetJWKByID(wallet.KeySet.RSAKeyID()); ok {
+		keyThumbprint = strings.TrimSpace(pubJWK.Thumbprint())
+	}
+	expiresInSeconds := 0
+	if s.walletSessionTTL > 0 {
+		remaining := int(time.Until(wallet.LastAccess.Add(s.walletSessionTTL)).Seconds())
+		if remaining > 0 {
+			expiresInSeconds = remaining
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"app_title":                  s.appTitle,
+		"wallet_session_id":          sessionID,
+		"wallet_subject":             wallet.Subject,
+		"wallet_scope":               wallet.ScopeKey,
+		"wallet_key_id":              wallet.KeySet.RSAKeyID(),
+		"wallet_key_thumbprint":      keyThumbprint,
+		"wallet_session_ttl_seconds": int(s.walletSessionTTL.Seconds()),
+		"wallet_session_expires_in":  expiresInSeconds,
+		"credential_present":         strings.TrimSpace(wallet.CredentialJWT) != "",
+		"credential_summary":         summarizeCredential(wallet.CredentialJWT),
+	})
+}
+
+func (s *walletHarnessServer) handleAPIIssue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	var req apiWalletRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	scopeKey, _, err := s.resolveAPIScopeKey(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	subject := strings.TrimSpace(req.WalletSubject)
+	if subject == "" {
+		subject = scopedWalletSubject(s.defaultWalletSubject, scopeKey)
+	}
+	wallet, err := s.getOrCreateWallet(scopeKey, subject)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "server_error",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	credentialSource := ""
+	if req.ForceIssue {
+		issuedCredential, issueErr := s.issueCredentialForWallet(r.Context(), wallet, strings.TrimSpace(req.LookingGlassSessionID))
+		if issueErr != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": issueErr.Error(),
+			})
+			return
+		}
+		if bindErr := s.bindCredential(wallet, issuedCredential); bindErr != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": bindErr.Error(),
+			})
+			return
+		}
+		credentialSource = "forced_oid4vci"
+	} else {
+		credentialSource, err = s.ensureWalletCredential(r.Context(), wallet, strings.TrimSpace(req.CredentialJWT), strings.TrimSpace(req.LookingGlassSessionID))
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": err.Error(),
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"wallet_subject":     wallet.Subject,
+		"wallet_scope":       wallet.ScopeKey,
+		"credential_source":  credentialSource,
+		"credential_jwt":     wallet.CredentialJWT,
+		"credential_summary": summarizeCredential(wallet.CredentialJWT),
+	})
+}
+
+func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	var req apiWalletRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	req.DisclosureClaims = normalizeDisclosureClaims(req.DisclosureClaims)
+
+	scopeKey, _, err := s.resolveAPIScopeKey(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	subject := strings.TrimSpace(req.WalletSubject)
+	if subject == "" {
+		subject = scopedWalletSubject(s.defaultWalletSubject, scopeKey)
+	}
+	wallet, err := s.getOrCreateWallet(scopeKey, subject)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "server_error",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, strings.TrimSpace(req.CredentialJWT), strings.TrimSpace(req.LookingGlassSessionID))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	if !trust.TrustedTarget && !s.allowExternal {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error":             "invalid_request",
+			"error_description": "external verifier requests are disabled by wallet configuration",
+		})
+		return
+	}
+
+	presentedCredential, disclosureClaims, err := buildPresentedCredential(wallet.CredentialJWT, req.DisclosureClaims)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	vpToken, err := s.createVPToken(wallet, requestContext, presentedCredential)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": fmt.Sprintf("create vp_token: %v", err),
+		})
+		return
+	}
+	vpHeader := map[string]interface{}{}
+	vpPayload := map[string]interface{}{}
+	if decodedVP, decodeErr := intcrypto.DecodeTokenWithoutValidation(vpToken); decodeErr == nil && decodedVP != nil {
+		vpHeader = decodedVP.Header
+		vpPayload = decodedVP.Payload
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"mode":              "preview",
+		"request_id":        requestContext.RequestID,
+		"request_uri":       envelope.RequestURI,
+		"response_mode":     requestContext.ResponseMode,
+		"response_uri":      requestContext.ResponseURI,
+		"wallet_subject":    wallet.Subject,
+		"wallet_scope":      wallet.ScopeKey,
+		"credential_source": credentialSource,
+		"disclosure_claims": disclosureClaims,
+		"vp_token":          vpToken,
+		"vp_header":         vpHeader,
+		"vp_payload":        vpPayload,
+		"request_header":    envelope.DecodedHeader,
+		"request_payload":   envelope.DecodedPayload,
+		"trust":             trust,
+	})
+}
+
+func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	var req apiWalletRequest
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	req.DisclosureClaims = normalizeDisclosureClaims(req.DisclosureClaims)
+
+	scopeKey, _, err := s.resolveAPIScopeKey(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	subject := strings.TrimSpace(req.WalletSubject)
+	if subject == "" {
+		subject = scopedWalletSubject(s.defaultWalletSubject, scopeKey)
+	}
+	wallet, err := s.getOrCreateWallet(scopeKey, subject)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "server_error",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, strings.TrimSpace(req.CredentialJWT), strings.TrimSpace(req.LookingGlassSessionID))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
+	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	if !trust.TrustedTarget {
+		if !s.allowExternal {
+			writeJSON(w, http.StatusForbidden, map[string]string{
+				"error":             "invalid_request",
+				"error_description": "external verifier requests are disabled by wallet configuration",
+			})
+			return
+		}
+		if !req.ApproveExternalTrust {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error":             "invalid_request",
+				"error_description": "external verifier trust approval is required",
+			})
+			return
+		}
+	}
+
+	presentedCredential, disclosureClaims, err := buildPresentedCredential(wallet.CredentialJWT, req.DisclosureClaims)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	vpToken, err := s.createVPToken(wallet, requestContext, presentedCredential)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": fmt.Sprintf("create vp_token: %v", err),
+		})
+		return
+	}
+	upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, strings.TrimSpace(req.LookingGlassSessionID))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, upstreamStatus, map[string]interface{}{
+		"mode":                    "present",
+		"request_id":              requestContext.RequestID,
+		"request_uri":             envelope.RequestURI,
+		"response_mode":           requestContext.ResponseMode,
+		"response_uri":            requestContext.ResponseURI,
+		"wallet_subject":          wallet.Subject,
+		"wallet_scope":            wallet.ScopeKey,
+		"credential_source":       credentialSource,
+		"disclosure_claims":       disclosureClaims,
+		"upstream_status":         upstreamStatus,
+		"upstream_body":           upstreamBody,
+		"external_trust_approved": req.ApproveExternalTrust,
+		"trust":                   trust,
+	})
 }
 
 func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +801,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		"mode":                 "one_click",
 		"request_id":           requestContext.RequestID,
 		"response_mode":        requestContext.ResponseMode,
-		"response_uri":         s.targetResponseURI,
+		"response_uri":         requestContext.ResponseURI,
 		"wallet_subject":       wallet.Subject,
 		"wallet_scope":         wallet.ScopeKey,
 		"credential_source":    credentialSource,
@@ -285,6 +810,457 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		"upstream_body":        upstreamBody,
 		"wallet_stepwise_hint": "use mode=stepwise for keygen/issuance/presentation ceremony controls",
 	})
+}
+
+func decodeJSONBody(r *http.Request, target interface{}) error {
+	if r == nil || r.Body == nil {
+		return fmt.Errorf("request body is required")
+	}
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1024*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid JSON body: %w", err)
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("request body must contain a single JSON object")
+	}
+	return nil
+}
+
+func (s *walletHarnessServer) resolveAPIScopeKey(w http.ResponseWriter, r *http.Request) (string, string, error) {
+	sessionID := strings.TrimSpace(r.Header.Get("X-Wallet-Session"))
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(r.URL.Query().Get("wallet_session"))
+	}
+	if sessionID == "" {
+		if cookie, err := r.Cookie("ps_wallet_session"); err == nil {
+			sessionID = strings.TrimSpace(cookie.Value)
+		}
+	}
+	if sessionID == "" {
+		sessionID = randomValue(24)
+	}
+	if !isSafeSessionToken(sessionID) {
+		return "", "", fmt.Errorf("wallet session id contains unsupported characters")
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "ps_wallet_session",
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(s.walletSessionTTL.Seconds()),
+	})
+	return "web:" + sessionID, sessionID, nil
+}
+
+func isSafeSessionToken(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if len(trimmed) > 128 {
+		return false
+	}
+	for _, ch := range trimmed {
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (s *walletHarnessServer) resolveWalletPresentationContext(
+	ctx context.Context,
+	req apiWalletRequest,
+) (*resolvedRequestEnvelope, *resolvedRequestContext, trustEvaluation, error) {
+	envelope, err := s.resolveRequestEnvelope(ctx, apiResolveRequest{
+		RequestURI: req.RequestURI,
+		OpenID4VP:  req.OpenID4VP,
+		RequestJWT: req.RequestJWT,
+		RequestID:  req.RequestID,
+	})
+	if err != nil {
+		return nil, nil, trustEvaluation{}, err
+	}
+	requestContext, err := s.resolveRequestContextWithOptions(envelope.RequestID, envelope.RequestJWT, true)
+	if err != nil {
+		return nil, nil, trustEvaluation{}, err
+	}
+	trust := s.evaluateTrust(requestContext, envelope.DecodedPayload)
+	return envelope, requestContext, trust, nil
+}
+
+func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req apiResolveRequest) (*resolvedRequestEnvelope, error) {
+	requestURI := strings.TrimSpace(req.RequestURI)
+	openID4VPURI := strings.TrimSpace(req.OpenID4VP)
+	requestJWT := strings.TrimSpace(req.RequestJWT)
+	requestID := strings.TrimSpace(req.RequestID)
+	requestSource := ""
+
+	if openID4VPURI != "" {
+		uriRequestURI, uriRequestJWT, err := parseOpenID4VPURI(openID4VPURI)
+		if err != nil {
+			return nil, err
+		}
+		if requestURI == "" && uriRequestURI != "" {
+			requestURI = uriRequestURI
+			requestSource = "openid4vp_uri"
+		}
+		if requestJWT == "" && uriRequestJWT != "" {
+			requestJWT = uriRequestJWT
+			if requestSource == "" {
+				requestSource = "openid4vp_uri"
+			}
+		}
+	}
+	if requestJWT == "" && requestURI == "" {
+		return nil, fmt.Errorf("openid4vp_uri or request_uri or request is required")
+	}
+	if requestJWT == "" {
+		normalizedRequestURI, err := s.validateExternalURL(requestURI)
+		if err != nil {
+			return nil, fmt.Errorf("request_uri is not allowed: %w", err)
+		}
+		requestURI = normalizedRequestURI
+		fetchedRequestJWT, fetchedRequestID, err := s.fetchRequestObject(ctx, requestURI)
+		if err != nil {
+			return nil, err
+		}
+		requestJWT = fetchedRequestJWT
+		if requestID == "" {
+			requestID = fetchedRequestID
+		}
+		if requestSource == "" {
+			requestSource = "request_uri"
+		}
+	}
+	if requestSource == "" {
+		requestSource = "request"
+	}
+
+	decodedRequest, err := intcrypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		return nil, fmt.Errorf("decode request object jwt: %w", err)
+	}
+	if requestID == "" {
+		requestID = strings.TrimSpace(asString(decodedRequest.Payload["jti"]))
+	}
+	if requestID == "" {
+		return nil, fmt.Errorf("request object is missing jti")
+	}
+	header := make(map[string]interface{}, len(decodedRequest.Header))
+	for key, value := range decodedRequest.Header {
+		header[key] = value
+	}
+	payload := make(map[string]interface{}, len(decodedRequest.Payload))
+	for key, value := range decodedRequest.Payload {
+		payload[key] = value
+	}
+	return &resolvedRequestEnvelope{
+		RequestJWT:       requestJWT,
+		RequestURI:       requestURI,
+		RequestID:        requestID,
+		DecodedHeader:    header,
+		DecodedPayload:   payload,
+		RequestURISource: requestSource,
+	}, nil
+}
+
+func parseOpenID4VPURI(raw string) (string, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("openid4vp_uri is required")
+	}
+	parsedURI, err := url.Parse(trimmed)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid openid4vp_uri: %w", err)
+	}
+	if !strings.EqualFold(parsedURI.Scheme, "openid4vp") {
+		return "", "", fmt.Errorf("unsupported URI scheme %q expected openid4vp", parsedURI.Scheme)
+	}
+	query := parsedURI.Query()
+	requestURI := strings.TrimSpace(query.Get("request_uri"))
+	requestJWT := strings.TrimSpace(query.Get("request"))
+	if requestURI == "" && requestJWT == "" {
+		return "", "", fmt.Errorf("openid4vp_uri must include request_uri or request parameter")
+	}
+	return requestURI, requestJWT, nil
+}
+
+func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
+	normalized := strings.TrimSpace(raw)
+	parsed, err := url.ParseRequestURI(normalized)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL %q: %w", raw, err)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("URL userinfo is not allowed")
+	}
+	hostWithPort := strings.ToLower(strings.TrimSpace(parsed.Host))
+	if hostWithPort == "" {
+		return "", fmt.Errorf("URL host is required")
+	}
+	if hostWithPort == s.targetHost {
+		return parsed.String(), nil
+	}
+	if !s.allowExternal {
+		return "", fmt.Errorf("URL host %q is not allowed", hostWithPort)
+	}
+
+	hostName := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if hostName == "" {
+		return "", fmt.Errorf("URL hostname is required")
+	}
+	if parsed.Scheme != "https" {
+		isLocalDevHost := hostName == "localhost" || strings.HasPrefix(hostName, "127.")
+		if !isLocalDevHost {
+			return "", fmt.Errorf("external URL scheme %q is not allowed", parsed.Scheme)
+		}
+	}
+	if hostName == "localhost" || strings.HasSuffix(hostName, ".local") || strings.HasSuffix(hostName, ".internal") {
+		return "", fmt.Errorf("external URL host %q is not allowed", hostName)
+	}
+	if parsedIP := net.ParseIP(hostName); parsedIP != nil {
+		if parsedIP.IsLoopback() || parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsUnspecified() {
+			return "", fmt.Errorf("external URL host %q is not allowed", hostName)
+		}
+	}
+	return parsed.String(), nil
+}
+
+func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI string) (string, string, error) {
+	methods := []string{http.MethodGet, http.MethodPost}
+	lastError := fmt.Errorf("request object fetch failed")
+	for _, method := range methods {
+		var bodyReader io.Reader
+		if method == http.MethodPost {
+			bodyReader = strings.NewReader(url.Values{}.Encode())
+		}
+		req, err := http.NewRequestWithContext(ctx, method, requestURI, bodyReader)
+		if err != nil {
+			lastError = fmt.Errorf("build %s request_uri request: %w", method, err)
+			continue
+		}
+		req.Header.Set("Accept", "application/json")
+		if method == http.MethodPost {
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		}
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			lastError = fmt.Errorf("request_uri fetch failed: %w", err)
+			continue
+		}
+		responseBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			lastError = fmt.Errorf("request_uri returned %d: %s", resp.StatusCode, oneLine(string(responseBytes)))
+			continue
+		}
+		trimmedBody := strings.TrimSpace(string(responseBytes))
+		if trimmedBody == "" {
+			lastError = fmt.Errorf("request_uri returned an empty response body")
+			continue
+		}
+
+		var payload map[string]interface{}
+		if err := json.Unmarshal(responseBytes, &payload); err == nil {
+			if parsedRequest := strings.TrimSpace(asString(payload["request"])); parsedRequest != "" {
+				return parsedRequest, strings.TrimSpace(asString(payload["request_id"])), nil
+			}
+		}
+		var directJWT string
+		if err := json.Unmarshal(responseBytes, &directJWT); err == nil {
+			directJWT = strings.TrimSpace(directJWT)
+			if directJWT != "" {
+				return directJWT, "", nil
+			}
+		}
+		if strings.Count(trimmedBody, ".") >= 2 {
+			return trimmedBody, "", nil
+		}
+		lastError = fmt.Errorf("request_uri response did not contain a request object jwt")
+	}
+	return "", "", lastError
+}
+
+func (s *walletHarnessServer) evaluateTrust(requestContext *resolvedRequestContext, requestPayload map[string]interface{}) trustEvaluation {
+	clientIDScheme := inferClientIDScheme(requestContext.ClientID, requestPayload)
+	trust := trustEvaluation{
+		TrustedTarget:          requestContext.Trusted,
+		RequiresExternalAccept: !requestContext.Trusted && s.allowExternal,
+		AllowExternalVerifiers: s.allowExternal,
+		ClientIDScheme:         clientIDScheme,
+	}
+	didWebID := extractDidWebIdentifier(requestContext.ClientID)
+	if didWebID != "" {
+		resolution := s.resolveDIDWeb(context.Background(), didWebID)
+		trust.DidWeb = &resolution
+	}
+	return trust
+}
+
+func inferClientIDScheme(clientID string, requestPayload map[string]interface{}) string {
+	claimedScheme := strings.TrimSpace(asString(requestPayload["client_id_scheme"]))
+	if claimedScheme != "" {
+		return claimedScheme
+	}
+	normalizedClientID := strings.TrimSpace(clientID)
+	switch {
+	case strings.HasPrefix(normalizedClientID, "decentralized_identifier:"):
+		return "decentralized_identifier"
+	case strings.HasPrefix(normalizedClientID, "did:"):
+		return "decentralized_identifier"
+	case strings.HasPrefix(normalizedClientID, "redirect_uri:"):
+		return "redirect_uri"
+	default:
+		return "redirect_uri"
+	}
+}
+
+func extractDidWebIdentifier(clientID string) string {
+	normalizedClientID := strings.TrimSpace(clientID)
+	if strings.HasPrefix(normalizedClientID, "decentralized_identifier:") {
+		normalizedClientID = strings.TrimSpace(strings.TrimPrefix(normalizedClientID, "decentralized_identifier:"))
+	}
+	if strings.HasPrefix(normalizedClientID, "did:web:") {
+		return normalizedClientID
+	}
+	return ""
+}
+
+func didWebDocumentURL(did string) (string, error) {
+	normalized := strings.TrimSpace(did)
+	if !strings.HasPrefix(normalized, "did:web:") {
+		return "", fmt.Errorf("unsupported DID %q expected did:web", did)
+	}
+	identifier := strings.TrimPrefix(normalized, "did:web:")
+	if identifier == "" {
+		return "", fmt.Errorf("did:web identifier is empty")
+	}
+	segments := strings.Split(identifier, ":")
+	hostSegment, err := url.PathUnescape(strings.TrimSpace(segments[0]))
+	if err != nil {
+		return "", fmt.Errorf("decode did:web host: %w", err)
+	}
+	if hostSegment == "" {
+		return "", fmt.Errorf("did:web host is empty")
+	}
+	pathSegments := make([]string, 0, len(segments)-1)
+	for _, segment := range segments[1:] {
+		decodedSegment, err := url.PathUnescape(strings.TrimSpace(segment))
+		if err != nil {
+			return "", fmt.Errorf("decode did:web path segment: %w", err)
+		}
+		if decodedSegment == "" {
+			continue
+		}
+		pathSegments = append(pathSegments, decodedSegment)
+	}
+	if len(pathSegments) == 0 {
+		return "https://" + hostSegment + "/.well-known/did.json", nil
+	}
+	return "https://" + hostSegment + "/" + strings.Join(pathSegments, "/") + "/did.json", nil
+}
+
+func (s *walletHarnessServer) resolveDIDWeb(ctx context.Context, did string) didWebResolutionResult {
+	result := didWebResolutionResult{}
+	documentURL, err := didWebDocumentURL(did)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	normalizedDocumentURL, err := s.validateExternalURL(documentURL)
+	if err != nil {
+		result.Error = fmt.Sprintf("validate did:web document URL: %v", err)
+		return result
+	}
+	result.DidDocumentURL = normalizedDocumentURL
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, normalizedDocumentURL, nil)
+	if err != nil {
+		result.Error = fmt.Sprintf("build did:web request: %v", err)
+		return result
+	}
+	req.Header.Set("Accept", "application/did+json, application/json")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		result.Error = fmt.Sprintf("fetch did:web document: %v", err)
+		return result
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		result.Error = fmt.Sprintf("did:web document returned %d: %s", resp.StatusCode, oneLine(string(body)))
+		return result
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		result.Error = fmt.Sprintf("decode did:web document: %v", err)
+		return result
+	}
+	result.Resolved = true
+	result.Document = payload
+	result.DocumentID = strings.TrimSpace(asString(payload["id"]))
+	result.IDMatches = result.DocumentID == strings.TrimSpace(did)
+	authenticationMethods, hasAuth := payload["authentication"].([]interface{})
+	assertionMethods, hasAssertion := payload["assertionMethod"].([]interface{})
+	verificationMethods, hasVerification := payload["verificationMethod"].([]interface{})
+	result.MethodsFound = (hasAuth && len(authenticationMethods) > 0) || (hasAssertion && len(assertionMethods) > 0) || (hasVerification && len(verificationMethods) > 0)
+	return result
+}
+
+func summarizeCredential(rawCredential string) *credentialSummary {
+	normalized := strings.TrimSpace(rawCredential)
+	if normalized == "" {
+		return nil
+	}
+	summary := &credentialSummary{}
+	credentialToDecode := normalized
+
+	if envelope, err := vc.ParseSDJWTEnvelope(normalized); err == nil {
+		summary.IsSDJWT = true
+		credentialToDecode = strings.TrimSpace(envelope.IssuerSignedJWT)
+		summary.DisclosureCount = len(envelope.Disclosures)
+		summary.KeyBindingJWT = strings.TrimSpace(envelope.KeyBindingJWT) != ""
+		disclosureClaims := make([]string, 0, len(envelope.Disclosures))
+		for _, disclosure := range envelope.Disclosures {
+			decodedDisclosure, err := vc.DecodeSDJWTDisclosure(disclosure)
+			if err != nil {
+				continue
+			}
+			claimName := strings.TrimSpace(decodedDisclosure.ClaimName)
+			if claimName == "" {
+				continue
+			}
+			disclosureClaims = append(disclosureClaims, claimName)
+		}
+		sort.Strings(disclosureClaims)
+		summary.DisclosureClaims = disclosureClaims
+	}
+
+	decodedCredential, err := intcrypto.DecodeTokenWithoutValidation(credentialToDecode)
+	if err != nil {
+		return summary
+	}
+	claimsCopy := make(map[string]interface{}, len(decodedCredential.Payload))
+	for key, value := range decodedCredential.Payload {
+		claimsCopy[key] = value
+	}
+	summary.Claims = claimsCopy
+	summary.Subject = strings.TrimSpace(asString(decodedCredential.Payload["sub"]))
+	summary.VCT = strings.TrimSpace(asString(decodedCredential.Payload["vct"]))
+	if expRaw, ok := decodedCredential.Payload["exp"]; ok {
+		expUnix, err := toUnixTimestamp(expRaw)
+		if err == nil && expUnix > 0 {
+			summary.ExpiresAt = time.Unix(expUnix, 0).UTC().Format(time.RFC3339)
+		}
+	}
+	return summary
 }
 
 func normalizeDisclosureClaims(raw []string) []string {
@@ -453,7 +1429,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"step":              "submit_response",
 			"request_id":        requestContext.RequestID,
 			"response_mode":     requestContext.ResponseMode,
-			"response_uri":      s.targetResponseURI,
+			"response_uri":      requestContext.ResponseURI,
 			"wallet_subject":    wallet.Subject,
 			"wallet_scope":      wallet.ScopeKey,
 			"credential_source": credentialSource,
@@ -584,6 +1560,9 @@ func (s *walletHarnessServer) submitToVerifier(
 	form := url.Values{}
 	form.Set("state", requestContext.State)
 	if requestContext.ResponseMode == "direct_post.jwt" {
+		if !requestContext.Trusted {
+			return 0, nil, fmt.Errorf("direct_post.jwt is only supported for trusted verifier callbacks")
+		}
 		responseJWT, err := s.createDirectPostResponseJWT(wallet, requestContext, normalizedVPToken)
 		if err != nil {
 			return 0, nil, fmt.Errorf("create direct_post.jwt response: %w", err)
@@ -597,7 +1576,7 @@ func (s *walletHarnessServer) submitToVerifier(
 		form.Set("vp_token", normalizedVPToken)
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.targetResponseURI, strings.NewReader(form.Encode()))
+	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, requestContext.ResponseURI, strings.NewReader(form.Encode()))
 	if err != nil {
 		return 0, nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -623,6 +1602,10 @@ func (s *walletHarnessServer) submitToVerifier(
 }
 
 func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT string) (*resolvedRequestContext, error) {
+	return s.resolveRequestContextWithOptions(requestID, requestJWT, false)
+}
+
+func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string, requestJWT string, allowExternal bool) (*resolvedRequestContext, error) {
 	decodedRequest, err := intcrypto.DecodeTokenWithoutValidation(requestJWT)
 	if err != nil {
 		return nil, fmt.Errorf("decode request object jwt: %w", err)
@@ -643,16 +1626,36 @@ func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT
 	if responseMode == "" {
 		responseMode = "direct_post"
 	}
+	if responseMode != "direct_post" && responseMode != "direct_post.jwt" {
+		return nil, fmt.Errorf("unsupported response_mode %q", responseMode)
+	}
 	responseURI := strings.TrimSpace(asString(decodedRequest.Payload["response_uri"]))
 	if responseURI == "" {
 		return nil, fmt.Errorf("request object is missing response_uri")
 	}
+	parsedResponseURI, err := url.ParseRequestURI(responseURI)
+	if err != nil {
+		return nil, fmt.Errorf("request object response_uri is invalid: %w", err)
+	}
+	if parsedResponseURI.Scheme != "http" && parsedResponseURI.Scheme != "https" {
+		return nil, fmt.Errorf("request object response_uri uses unsupported scheme %q", parsedResponseURI.Scheme)
+	}
+	if parsedResponseURI.User != nil {
+		return nil, fmt.Errorf("request object response_uri includes userinfo")
+	}
+	responseURI = parsedResponseURI.String()
 	expectedResponseURI, err := s.validateAllowedURL(s.targetResponseURI)
 	if err != nil {
 		return nil, fmt.Errorf("validate target response URI: %w", err)
 	}
-	if responseURI != expectedResponseURI {
-		return nil, fmt.Errorf("request object response_uri %q does not match trusted verifier callback", responseURI)
+	trusted := responseURI == expectedResponseURI
+	if !trusted {
+		if !allowExternal {
+			return nil, fmt.Errorf("request object response_uri %q does not match trusted verifier callback", responseURI)
+		}
+		if _, err := s.validateExternalURL(responseURI); err != nil {
+			return nil, fmt.Errorf("request object response_uri is not allowed: %w", err)
+		}
 	}
 	state := strings.TrimSpace(asString(decodedRequest.Payload["state"]))
 	nonce := strings.TrimSpace(asString(decodedRequest.Payload["nonce"]))
@@ -667,7 +1670,8 @@ func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT
 		Nonce:        nonce,
 		ClientID:     clientID,
 		ResponseMode: responseMode,
-		ResponseURI:  expectedResponseURI,
+		ResponseURI:  responseURI,
+		Trusted:      trusted,
 	}, nil
 }
 
@@ -733,7 +1737,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	}
 
 	offerPayload, err := func() (map[string]interface{}, error) {
-		offerURL := s.targetBaseURL + "/oid4vci/offers/pre-authorized"
+		offerURL := s.issuerBaseURL + "/oid4vci/offers/pre-authorized"
 		offerBody := map[string]interface{}{
 			"wallet_user_id": walletUserIDFromSubject(wallet.Subject),
 		}
@@ -782,7 +1786,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	}
 
 	tokenPayload, err := func() (map[string]interface{}, error) {
-		tokenURL := s.targetBaseURL + "/oid4vci/token"
+		tokenURL := s.issuerBaseURL + "/oid4vci/token"
 		form := url.Values{}
 		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
 		form.Set("pre-authorized_code", preAuthorizedCode)
@@ -825,7 +1829,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		return "", err
 	}
 
-	credentialURL := s.targetBaseURL + "/oid4vci/credential"
+	credentialURL := s.issuerBaseURL + "/oid4vci/credential"
 	credentialRequestBody := map[string]interface{}{
 		"credential_configuration_id": "UniversityDegreeCredential",
 		"proofs": []map[string]interface{}{
@@ -891,7 +1895,7 @@ func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, w
 	claims := jwt.MapClaims{
 		"iss":   subject,
 		"sub":   subject,
-		"aud":   s.targetBaseURL + "/oid4vci",
+		"aud":   s.issuerBaseURL + "/oid4vci",
 		"nonce": cNonce,
 		"iat":   now.Unix(),
 		"exp":   now.Add(3 * time.Minute).Unix(),
@@ -1212,7 +2216,7 @@ func withCORS(next http.Handler, allowedOrigins map[string]struct{}) http.Handle
 				originAllowed = true
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Accept, X-Wallet-Session, X-Looking-Glass-Session")
 				w.Header().Set("Access-Control-Max-Age", "600")
 				w.Header().Set("Vary", "Origin")
 			}

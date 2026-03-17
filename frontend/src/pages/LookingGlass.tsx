@@ -36,11 +36,24 @@ import {
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
+const SAFE_QR_DATA_URL_PREFIX = 'data:image/png;base64,'
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
   executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
   awaiting_user: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', label: 'Awaiting input', shortLabel: 'Waiting' },
   error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'Error', shortLabel: 'Error' },
+}
+
+function sanitizeQRCodeDataURL(raw: string): string {
+  const value = raw.trim()
+  if (!value.startsWith(SAFE_QR_DATA_URL_PREFIX)) {
+    return ''
+  }
+  const base64Payload = value.slice(SAFE_QR_DATA_URL_PREFIX.length)
+  if (!base64Payload || !/^[A-Za-z0-9+/=]+$/.test(base64Payload)) {
+    return ''
+  }
+  return value
 }
 
 export function LookingGlass() {
@@ -65,7 +78,7 @@ export function LookingGlass() {
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
   const [pendingExecute, setPendingExecute] = useState(false)
   const [handoffCopied, setHandoffCopied] = useState(false)
-  const [oid4vpWalletHandoffQRCodeDataURL, setOID4VPWalletHandoffQRCodeDataURL] = useState('')
+  const [oid4vpWalletHandoffQRCodeObjectURL, setOID4VPWalletHandoffQRCodeObjectURL] = useState('')
   const [oid4vpWalletHandoffQRCodeError, setOID4VPWalletHandoffQRCodeError] = useState<string | null>(null)
   const [capturedVCWalletSubject, setCapturedVCWalletSubject] = useState('')
   const [capturedVCCredentialJWT, setCapturedVCCredentialJWT] = useState('')
@@ -86,6 +99,7 @@ export function LookingGlass() {
   const [oid4vpStepwiseVPToken, setOID4VPStepwiseVPToken] = useState('')
   const [oid4vpStepwiseLastStep, setOID4VPStepwiseLastStep] = useState('')
   const [oid4vpDisclosureClaims, setOID4VPDisclosureClaims] = useState<string[]>([])
+  const [oid4vpContractExpanded, setOID4VPContractExpanded] = useState(true)
   const [showAllQuickFlows, setShowAllQuickFlows] = useState(false)
 
   const { protocols, loading: protocolsLoading } = useProtocols()
@@ -334,13 +348,20 @@ export function LookingGlass() {
     [walletHandoffArtifact],
   )
   useEffect(() => {
+    setOID4VPWalletHandoffQRCodeObjectURL((previous) => {
+      if (previous) {
+        URL.revokeObjectURL(previous)
+      }
+      return ''
+    })
+
     if (!isOID4VPFlow || !oid4vpWalletHandoffPayload) {
-      setOID4VPWalletHandoffQRCodeDataURL('')
       setOID4VPWalletHandoffQRCodeError(null)
       return
     }
 
     let cancelled = false
+    let generatedObjectURL = ''
     setOID4VPWalletHandoffQRCodeError(null)
 
     toQRCodeDataURL(oid4vpWalletHandoffPayload, {
@@ -348,22 +369,55 @@ export function LookingGlass() {
       margin: 1,
       errorCorrectionLevel: 'M',
     })
-      .then((dataURL) => {
+      .then(async (dataURL) => {
+        const safeDataURL = sanitizeQRCodeDataURL(dataURL)
+        if (!safeDataURL) {
+          if (!cancelled) {
+            setOID4VPWalletHandoffQRCodeError('Generated QR payload did not pass safety checks')
+          }
+          return
+        }
+        const response = await fetch(safeDataURL)
+        const blob = await response.blob()
+        if (blob.type !== 'image/png') {
+          throw new Error('Generated QR is not a PNG image')
+        }
+        generatedObjectURL = URL.createObjectURL(blob)
+        if (cancelled) {
+          URL.revokeObjectURL(generatedObjectURL)
+          generatedObjectURL = ''
+          return
+        }
         if (!cancelled) {
-          setOID4VPWalletHandoffQRCodeDataURL(dataURL)
+          const nextObjectURL = generatedObjectURL
+          generatedObjectURL = ''
+          setOID4VPWalletHandoffQRCodeObjectURL(nextObjectURL)
         }
       })
       .catch((error: unknown) => {
         if (cancelled) return
         const message = error instanceof Error ? error.message : 'Failed to generate QR code'
-        setOID4VPWalletHandoffQRCodeDataURL('')
+        setOID4VPWalletHandoffQRCodeObjectURL('')
         setOID4VPWalletHandoffQRCodeError(message)
       })
 
     return () => {
       cancelled = true
+      if (generatedObjectURL) {
+        URL.revokeObjectURL(generatedObjectURL)
+      }
     }
   }, [isOID4VPFlow, oid4vpWalletHandoffPayload])
+
+  useEffect(() => {
+    if (!isOID4VPFlow) {
+      setOID4VPContractExpanded(true)
+      return
+    }
+    if (walletHandoffArtifact || status !== 'idle') {
+      setOID4VPContractExpanded(false)
+    }
+  }, [isOID4VPFlow, walletHandoffArtifact, status])
 
   const latestCapturedOID4VCITxCode = useMemo(() => {
     const artifacts = realExecutor.state?.vcArtifacts || []
@@ -1296,87 +1350,103 @@ export function LookingGlass() {
             exit={{ opacity: 0, height: 0 }}
             className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
           >
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
-              <Workflow className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-400" />
-              <span className="text-xs sm:text-sm font-medium text-surface-300">OID4VP request contract</span>
-            </div>
-            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-              Configure either <code className="text-violet-300">dcql_query</code> or a scope alias (mutually exclusive per OpenID4VP).
-            </p>
-
-            <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <Workflow className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-400" />
+                <span className="text-xs sm:text-sm font-medium text-surface-300">OID4VP request contract</span>
+                <span className="text-[10px] sm:text-xs text-surface-500">
+                  {oid4vpQueryMode === 'dcql' ? 'DCQL mode' : 'Scope alias mode'}
+                </span>
+              </div>
               <button
                 type="button"
-                onClick={() => setOID4VPQueryMode('dcql')}
-                className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
-                  oid4vpQueryMode === 'dcql'
-                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
-                    : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                }`}
+                onClick={() => setOID4VPContractExpanded((previous) => !previous)}
+                className="px-2 py-1 rounded border border-white/10 bg-surface-900 text-[10px] sm:text-xs text-surface-300 hover:text-white transition-colors"
               >
-                Use DCQL
-              </button>
-              <button
-                type="button"
-                onClick={() => setOID4VPQueryMode('scope')}
-                className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
-                  oid4vpQueryMode === 'scope'
-                    ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
-                    : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                }`}
-              >
-                Use scope alias
+                {oid4vpContractExpanded ? 'Collapse' : 'Expand'}
               </button>
             </div>
+            {oid4vpContractExpanded && (
+              <>
+                <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+                  Configure either <code className="text-violet-300">dcql_query</code> or a scope alias (mutually exclusive per OpenID4VP).
+                </p>
 
-            {oid4vpQueryMode === 'dcql' && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <label className="text-[11px] sm:text-xs text-surface-400">Preset</label>
-                  <select
-                    value={oid4vpDCQLPresetId}
-                    onChange={(event) => {
-                      const nextPresetId = event.target.value
-                      const preset = OID4VP_DCQL_PRESETS.find((item) => item.id === nextPresetId)
-                      setOID4VPDCQLPresetID(nextPresetId)
-                      if (preset) {
-                        setOID4VPDCQLInput(preset.query)
-                      }
-                    }}
-                    className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => setOID4VPQueryMode('dcql')}
+                    className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                      oid4vpQueryMode === 'dcql'
+                        ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
+                        : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                    }`}
                   >
-                    {OID4VP_DCQL_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.label}</option>
-                    ))}
-                  </select>
-                  <span className="text-[10px] sm:text-xs text-cyan-300">{selectedOID4VPPreset?.description}</span>
+                    Use DCQL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOID4VPQueryMode('scope')}
+                    className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
+                      oid4vpQueryMode === 'scope'
+                        ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
+                        : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
+                    }`}
+                  >
+                    Use scope alias
+                  </button>
                 </div>
-                <textarea
-                  value={oid4vpDCQLInput}
-                  onChange={(event) => setOID4VPDCQLInput(event.target.value)}
-                  rows={7}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
-                  placeholder="Paste dcql_query JSON"
-                />
-                {!!oid4vpDCQLValidationError && (
-                  <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpDCQLValidationError}</p>
-                )}
-              </div>
-            )}
 
-            {oid4vpQueryMode === 'scope' && (
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={oid4vpScopeAliasInput}
-                  onChange={(event) => setOID4VPScopeAliasInput(event.target.value)}
-                  placeholder="e.g. openid profile degree_verification"
-                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
-                />
-                {!!oid4vpScopeAliasValidationError && (
-                  <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpScopeAliasValidationError}</p>
+                {oid4vpQueryMode === 'dcql' && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="text-[11px] sm:text-xs text-surface-400">Preset</label>
+                      <select
+                        value={oid4vpDCQLPresetId}
+                        onChange={(event) => {
+                          const nextPresetId = event.target.value
+                          const preset = OID4VP_DCQL_PRESETS.find((item) => item.id === nextPresetId)
+                          setOID4VPDCQLPresetID(nextPresetId)
+                          if (preset) {
+                            setOID4VPDCQLInput(preset.query)
+                          }
+                        }}
+                        className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
+                      >
+                        {OID4VP_DCQL_PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>{preset.label}</option>
+                        ))}
+                      </select>
+                      <span className="text-[10px] sm:text-xs text-cyan-300">{selectedOID4VPPreset?.description}</span>
+                    </div>
+                    <textarea
+                      value={oid4vpDCQLInput}
+                      onChange={(event) => setOID4VPDCQLInput(event.target.value)}
+                      rows={7}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
+                      placeholder="Paste dcql_query JSON"
+                    />
+                    {!!oid4vpDCQLValidationError && (
+                      <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpDCQLValidationError}</p>
+                    )}
+                  </div>
                 )}
-              </div>
+
+                {oid4vpQueryMode === 'scope' && (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={oid4vpScopeAliasInput}
+                      onChange={(event) => setOID4VPScopeAliasInput(event.target.value)}
+                      placeholder="e.g. openid profile degree_verification"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                    />
+                    {!!oid4vpScopeAliasValidationError && (
+                      <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpScopeAliasValidationError}</p>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </motion.div>
         )}
@@ -1489,22 +1559,27 @@ export function LookingGlass() {
                     {handoffCopied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-                <pre className="mt-2 p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
-                  {String(walletHandoffArtifact.metadata?.qrPayload || walletHandoffArtifact.metadata?.deepLink || walletHandoffArtifact.raw || '')}
-                </pre>
-                {oid4vpWalletHandoffQRCodeDataURL && (
+                <details className="mt-2 rounded border border-white/10 bg-surface-950/70">
+                  <summary className="cursor-pointer px-2 py-1.5 text-[11px] text-surface-400 hover:text-white">
+                    Show raw handoff payload
+                  </summary>
+                  <pre className="px-2 pb-2 text-[11px] text-surface-300 overflow-x-auto">
+                    {oid4vpWalletHandoffPayload}
+                  </pre>
+                </details>
+                {oid4vpWalletHandoffQRCodeObjectURL && (
                   <div className="mt-3 flex flex-col items-center gap-2">
                     <img
-                      src={oid4vpWalletHandoffQRCodeDataURL}
+                      src={oid4vpWalletHandoffQRCodeObjectURL}
                       alt="OID4VP wallet handoff QR"
                       className="w-44 h-44 rounded-lg border border-white/10 bg-white p-2"
                     />
                     <p className="text-[11px] text-surface-400 text-center max-w-[260px]">
-                      Scan with an OID4VP-compatible wallet to complete the presentation
+                      Open wallet.protocolsoup.com on your wallet device and scan to complete the presentation
                     </p>
                   </div>
                 )}
-                {!oid4vpWalletHandoffQRCodeDataURL && oid4vpWalletHandoffQRCodeError && (
+                {!oid4vpWalletHandoffQRCodeObjectURL && oid4vpWalletHandoffQRCodeError && (
                   <p className="mt-2 text-[11px] text-amber-300">
                     QR generation failed: {oid4vpWalletHandoffQRCodeError}
                   </p>
@@ -1512,17 +1587,19 @@ export function LookingGlass() {
               </div>
             )}
             {isOID4VPFlow && !!oid4vpTrustMode && (
-              <div className="mb-3 p-3 rounded-lg border border-violet-500/30 bg-violet-500/5 text-[11px] sm:text-xs text-violet-200">
-                <div className="font-medium mb-1">Verifier trust mode: {humanizeOID4VPTrustMode(oid4vpTrustMode)}</div>
+              <details className="mb-3 p-3 rounded-lg border border-violet-500/30 bg-violet-500/5 text-[11px] sm:text-xs text-violet-200">
+                <summary className="cursor-pointer font-medium">
+                  Verifier trust mode: {humanizeOID4VPTrustMode(oid4vpTrustMode)}
+                </summary>
                 {oid4vpDidWebAllowedHosts.length > 0 && (
-                  <div className="text-surface-300">
+                  <div className="text-surface-300 mt-2">
                     did:web host allowlist: <code>{oid4vpDidWebAllowedHosts.join(', ')}</code>
                   </div>
                 )}
                 {oid4vpDidWebAllowedHosts.length === 0 && (
-                  <div className="text-surface-300">No did:web host allowlist is active for this request.</div>
+                  <div className="text-surface-300 mt-2">No did:web host allowlist is active for this request.</div>
                 )}
-              </div>
+              </details>
             )}
             {selectedProtocol?.id === 'oid4vp' && (oid4vpWalletSubmitMessage || oid4vpWalletSubmitError) && (
               <div className={`mb-3 p-3 rounded-lg border text-xs ${
@@ -1563,7 +1640,7 @@ export function LookingGlass() {
             requestURI={oid4vpRequestURI}
             didWebAllowedHosts={oid4vpDidWebAllowedHosts}
             walletHandoffPayload={oid4vpWalletHandoffPayload}
-            walletHandoffQRCodeDataURL={oid4vpWalletHandoffQRCodeDataURL}
+            walletHandoffQRCodeDataURL={oid4vpWalletHandoffQRCodeObjectURL}
             walletHandoffQRCodeError={oid4vpWalletHandoffQRCodeError}
             capturedWalletSubject={capturedVCWalletSubject}
             walletSubjectInput={oid4vpWalletSubjectInput}

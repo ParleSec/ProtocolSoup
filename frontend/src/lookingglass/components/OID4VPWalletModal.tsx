@@ -141,7 +141,7 @@ export function OID4VPWalletModal({
                     className="w-48 h-48 rounded-lg border border-white/10 bg-white p-2"
                   />
                   <p className="text-[11px] sm:text-xs text-surface-400 text-center max-w-[280px]">
-                    Scan with an OID4VP-compatible wallet to complete the presentation
+                    Open wallet.protocolsoup.com on your wallet device and scan to complete the presentation
                   </p>
                 </div>
               )}

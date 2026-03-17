@@ -10,9 +10,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:wallet": "vite --config vite.wallet.config.ts",
     "build": "npm run generate-sitemap && tsc && vite build",
+    "build:wallet": "tsc --noEmit && vite build --config vite.wallet.config.ts",
     "preview": "vite preview",
-    "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint src wallet --report-unused-disable-directives --max-warnings 0",
     "generate-sitemap": "node scripts/generate-sitemap.mjs",
     "generate-og-image": "node scripts/generate-og-image.mjs"
   },
