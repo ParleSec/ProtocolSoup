@@ -10,6 +10,7 @@
 **/.astro
 
 # Build outputs
+**/.next
 **/dist
 **/build
 **/.next

@@ -7,8 +7,9 @@ dist/
 build/
 .astro/
 .next/
+**/.next/
 *.tsbuildinfo
-.dccache
+**/.dccache
 *.exe
 *.exe~
 *.dll
