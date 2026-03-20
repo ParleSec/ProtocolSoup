@@ -174,6 +174,7 @@ type VCNonce struct {
 type VCIssuanceTransaction struct {
 	TransactionID             string    `json:"transaction_id"`
 	CredentialConfigurationID string    `json:"credential_configuration_id"`
+	Format                    string    `json:"format,omitempty"`
 	AccessTokenID             string    `json:"access_token_id"`
 	Deferred                  bool      `json:"deferred"`
 	Status                    string    `json:"status"`
@@ -198,14 +199,18 @@ type OID4VPPolicyDecision struct {
 	EvaluatedAt time.Time `json:"evaluated_at"`
 }
 
-// OID4VPCredentialEvidence captures verifier claim visibility for SD-JWT presentations.
+// OID4VPCredentialEvidence captures verifier claim visibility for presented credentials.
 type OID4VPCredentialEvidence struct {
-	Subject            string                 `json:"subject,omitempty"`
-	VCT                string                 `json:"vct,omitempty"`
-	Issuer             string                 `json:"issuer,omitempty"`
-	RequiredClaimPaths []string               `json:"required_claim_paths,omitempty"`
-	DisclosedClaims    map[string]interface{} `json:"disclosed_claims,omitempty"`
-	FullClaims         map[string]interface{} `json:"full_claims,omitempty"`
+	Subject                   string                 `json:"subject,omitempty"`
+	Format                    string                 `json:"format,omitempty"`
+	CredentialConfigurationID string                 `json:"credential_configuration_id,omitempty"`
+	VCT                       string                 `json:"vct,omitempty"`
+	Doctype                   string                 `json:"doctype,omitempty"`
+	CredentialTypes           []string               `json:"credential_types,omitempty"`
+	Issuer                    string                 `json:"issuer,omitempty"`
+	RequiredClaimPaths        []string               `json:"required_claim_paths,omitempty"`
+	DisclosedClaims           map[string]interface{} `json:"disclosed_claims,omitempty"`
+	FullClaims                map[string]interface{} `json:"full_claims,omitempty"`
 }
 
 // OID4VPVerificationResult stores structured verification output for VP processing.
@@ -214,6 +219,7 @@ type OID4VPVerificationResult struct {
 	AudienceValidated     bool                 `json:"audience_validated"`
 	ExpiryValidated       bool                 `json:"expiry_validated"`
 	HolderBindingVerified bool                 `json:"holder_binding_verified"`
-	CredentialEvidence    *OID4VPCredentialEvidence `json:"credential_evidence,omitempty"`
-	Policy                OID4VPPolicyDecision `json:"policy"`
+	CredentialEvidence    *OID4VPCredentialEvidence  `json:"credential_evidence,omitempty"`
+	CredentialEvidenceSet []OID4VPCredentialEvidence `json:"credential_evidence_set,omitempty"`
+	Policy                OID4VPPolicyDecision       `json:"policy"`
 }

@@ -7,7 +7,6 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -389,6 +388,11 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		return
 	}
 
+	authorizedCredentialConfigurationIDs := sortedCredentialConfigurationIDs(p.credentialConfigurations)
+	if len(authorizedCredentialConfigurationIDs) == 0 {
+		authorizedCredentialConfigurationIDs = []string{defaultCredentialConfigurationID}
+	}
+
 	scope := "vc:issue"
 	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
 		authCode.UserID,
@@ -396,7 +400,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		scope,
 		tokenTTL,
 		map[string]interface{}{
-			"credential_configuration_ids": []string{defaultCredentialConfigurationID},
+			"credential_configuration_ids": authorizedCredentialConfigurationIDs,
 		},
 	)
 	if err != nil {
@@ -416,14 +420,17 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		return
 	}
 
+	authorizedCredentialConfigurations := make(map[string]struct{}, len(authorizedCredentialConfigurationIDs))
+	for _, credentialConfigurationID := range authorizedCredentialConfigurationIDs {
+		authorizedCredentialConfigurations[credentialConfigurationID] = struct{}{}
+	}
+
 	p.mu.Lock()
 	p.accessGrants[accessToken] = &accessGrant{
 		Token:    accessToken,
 		Subject:  wallet.Subject,
 		WalletID: wallet.ID,
-		CredentialConfigurationIDs: map[string]struct{}{
-			defaultCredentialConfigurationID: {},
-		},
+		CredentialConfigurationIDs: authorizedCredentialConfigurations,
 		CNonce:     nonce,
 		CNonceUsed: false,
 		OfferID:    "authorization_code",
@@ -518,8 +525,17 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	if req.CredentialConfigurationID == "" {
 		req.CredentialConfigurationID = defaultCredentialConfigurationID
 	}
+	credentialConfiguration, supported := p.credentialConfigurations[req.CredentialConfigurationID]
+	if !supported {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_configuration_id is not supported by issuer metadata")
+		return
+	}
 	if _, allowed := grant.CredentialConfigurationIDs[req.CredentialConfigurationID]; !allowed {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_configuration_id is not authorized")
+		return
+	}
+	if requestedFormat := strings.TrimSpace(req.Format); requestedFormat != "" && requestedFormat != credentialConfiguration.Format {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "format does not match credential_configuration_id")
 		return
 	}
 
@@ -610,9 +626,35 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	grant.CNonceUsed = true
 	p.mu.Unlock()
 
-	credentialJWT, err := p.issueCredentialJWT(grant.Subject, req.CredentialConfigurationID, wallet)
+	issuedCredential, err := p.issueCredential(grant.Subject, req.CredentialConfigurationID, wallet)
 	if err != nil {
 		writeServerError(w, "issue credential", err)
+		return
+	}
+	if p.walletStore == nil {
+		writeServerError(w, "persist credential lineage", fmt.Errorf("wallet credential store is unavailable"))
+		return
+	}
+	issuerJWK, ok := p.keySet.GetJWKByID(p.keySet.RSAKeyID())
+	if !ok {
+		writeServerError(w, "persist credential lineage", fmt.Errorf("issuer jwk is unavailable"))
+		return
+	}
+	if !p.walletStore.Put(vc.WalletCredentialRecord{
+		Subject:                   grant.Subject,
+		Format:                    issuedCredential.Format,
+		CredentialConfigurationID: req.CredentialConfigurationID,
+		VCT:                       issuedCredential.VCT,
+		Doctype:                   issuedCredential.Doctype,
+		CredentialTypes:           issuedCredential.CredentialTypes,
+		CredentialJWT:             issuedCredential.CredentialJWT,
+		IssuerSignedJWT:           issuedCredential.IssuerSignedJWT,
+		CredentialID:              issuedCredential.CredentialID,
+		Issuer:                    p.issuerID(),
+		IssuerJWK:                 issuerJWK,
+		IssuedAt:                  time.Now().UTC(),
+	}) {
+		writeServerError(w, "persist credential lineage", fmt.Errorf("failed to persist issued credential in wallet store"))
 		return
 	}
 
@@ -638,6 +680,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			Model: models.VCIssuanceTransaction{
 				TransactionID:             transactionID,
 				CredentialConfigurationID: req.CredentialConfigurationID,
+				Format:                    issuedCredential.Format,
 				AccessTokenID:             accessToken,
 				Deferred:                  true,
 				Status:                    "pending",
@@ -646,7 +689,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			},
 			Subject:    grant.Subject,
 			ReadyAt:    now.Add(deferredReadyDelay),
-			Credential: credentialJWT,
+			Credential: issuedCredential.Credential,
 		}
 		p.mu.Unlock()
 
@@ -683,15 +726,15 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		"Credential Issued",
 		map[string]interface{}{
 			"credential_configuration_id": req.CredentialConfigurationID,
-			"format":                      "dc+sd-jwt",
+			"format":                      issuedCredential.Format,
 			"proofs_submitted":            len(proofs),
 		},
 		p.vcAnnotation("credential_endpoint")...,
 	)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"format":             "dc+sd-jwt",
-		"credential":         credentialJWT,
+		"format":             issuedCredential.Format,
+		"credential":         issuedCredential.Credential,
 		"c_nonce":            nextNonce.Value,
 		"c_nonce_expires_in": int(nonceTTL.Seconds()),
 	})
@@ -753,36 +796,13 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 	p.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"format":     "dc+sd-jwt",
+		"format":     transaction.Model.Format,
 		"credential": transaction.Credential,
 	})
 }
 
 func (p *Plugin) normalizeCredentialConfigurationIDs(rawIDs []string) []string {
-	if len(rawIDs) == 0 {
-		return []string{defaultCredentialConfigurationID}
-	}
-	supported := p.credentialConfigurationsSupported()
-	seen := make(map[string]struct{}, len(rawIDs))
-	normalized := make([]string, 0, len(rawIDs))
-	for _, id := range rawIDs {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, exists := supported[id]; !exists {
-			continue
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		normalized = append(normalized, id)
-	}
-	if len(normalized) == 0 {
-		return []string{defaultCredentialConfigurationID}
-	}
-	return normalized
+	return normalizeCredentialConfigurationIDs(rawIDs, p.credentialConfigurations)
 }
 
 func (p *Plugin) collectProofs(req credentialRequest) []credentialProof {
@@ -950,90 +970,6 @@ func numericDateToInt64(raw interface{}) (int64, error) {
 	default:
 		return 0, fmt.Errorf("unsupported numeric date type %T", raw)
 	}
-}
-
-func (p *Plugin) issueCredentialJWT(subject string, credentialConfigurationID string, wallet *walletIdentity) (string, error) {
-	if p.keySet == nil {
-		return "", fmt.Errorf("keyset is unavailable")
-	}
-	if wallet == nil {
-		return "", fmt.Errorf("wallet context is required")
-	}
-	now := time.Now().UTC()
-	credentialSubject := map[string]interface{}{
-		"id": subject,
-	}
-	selectiveClaims := map[string]interface{}{
-		"department":      wallet.Department,
-		"degree":          wallet.Degree,
-		"family_name":     wallet.FamilyName,
-		"given_name":      wallet.GivenName,
-		"graduation_year": wallet.GraduationYear,
-	}
-	claimNames := make([]string, 0, len(selectiveClaims))
-	for claimName := range selectiveClaims {
-		claimNames = append(claimNames, claimName)
-	}
-	sort.Strings(claimNames)
-	disclosureDigests := make([]string, 0, len(claimNames))
-	disclosureSegments := make([]string, 0, len(claimNames))
-	for _, claimName := range claimNames {
-		disclosure, err := vc.CreateSDJWTDisclosure(claimName, selectiveClaims[claimName], "")
-		if err != nil {
-			return "", fmt.Errorf("create sd-jwt disclosure for %q: %w", claimName, err)
-		}
-		disclosureDigests = append(disclosureDigests, disclosure.Digest)
-		disclosureSegments = append(disclosureSegments, disclosure.Encoded)
-	}
-	credentialSubject["_sd"] = disclosureDigests
-	credentialSubject["_sd_alg"] = "sha-256"
-
-	claims := jwt.MapClaims{
-		"iss": nowIssuer(p.issuerID()),
-		"sub": subject,
-		"iat": now.Unix(),
-		"nbf": now.Unix(),
-		"exp": now.Add(20 * time.Minute).Unix(),
-		"jti": p.randomValue(24),
-		"vct": defaultCredentialVCT,
-		"_sd_alg": "sha-256",
-		"vc": map[string]interface{}{
-			"type": []string{
-				"VerifiableCredential",
-				credentialConfigurationID,
-			},
-			"credentialSubject": credentialSubject,
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["typ"] = "vc+sd-jwt"
-	token.Header["kid"] = p.keySet.RSAKeyID()
-	signed, err := token.SignedString(p.keySet.RSAPrivateKey())
-	if err != nil {
-		return "", err
-	}
-
-	if p.walletStore == nil {
-		return "", fmt.Errorf("wallet credential store is unavailable")
-	}
-	issuerJWK, ok := p.keySet.GetJWKByID(p.keySet.RSAKeyID())
-	if !ok {
-		return "", fmt.Errorf("issuer jwk is unavailable")
-	}
-	serializedCredential := vc.BuildSDJWTSerialization(signed, disclosureSegments, "")
-
-	if !p.walletStore.Put(vc.WalletCredentialRecord{
-		Subject:         subject,
-		VCT:             defaultCredentialVCT,
-		CredentialJWT:   serializedCredential,
-		IssuerSignedJWT: signed,
-		Issuer:          p.issuerID(),
-		IssuerJWK:       issuerJWK,
-		IssuedAt:        now,
-	}) {
-		return "", fmt.Errorf("failed to persist issued credential in wallet store")
-	}
-	return serializedCredential, nil
 }
 
 func nowIssuer(issuer string) string {

@@ -101,6 +101,161 @@ func TestCredentialIssuerMetadataWellKnown(t *testing.T) {
 	}
 }
 
+func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/oid4vci/.well-known/openid-credential-issuer")
+	if err != nil {
+		t.Fatalf("metadata request failed: %v", err)
+	}
+	assertStatus(t, resp, http.StatusOK)
+	payload := decodeJSONMap(t, resp)
+
+	configurations, ok := payload["credential_configurations_supported"].(map[string]interface{})
+	if !ok || len(configurations) == 0 {
+		t.Fatalf("expected credential_configurations_supported map")
+	}
+	expectedFormats := map[string]string{
+		"UniversityDegreeCredential":      "dc+sd-jwt",
+		"UniversityDegreeCredentialJWT":   "jwt_vc_json",
+		"UniversityDegreeCredentialJWTLD": "jwt_vc_json-ld",
+		"UniversityDegreeCredentialLDP":   "ldp_vc",
+		"UniversityDegreeCredentialMDOC":  "mso_mdoc",
+	}
+	for configurationID, expectedFormat := range expectedFormats {
+		rawConfiguration, ok := configurations[configurationID]
+		if !ok {
+			t.Fatalf("expected configuration %q in metadata", configurationID)
+		}
+		configuration, ok := rawConfiguration.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected configuration %q to be object", configurationID)
+		}
+		if asString(t, configuration["format"]) != expectedFormat {
+			t.Fatalf("expected configuration %q format %q, got %q", configurationID, expectedFormat, asString(t, configuration["format"]))
+		}
+	}
+}
+
+func TestCredentialIssuanceSupportsMultipleFormats(t *testing.T) {
+	testCases := []struct {
+		name                      string
+		credentialConfigurationID string
+		format                    string
+	}{
+		{name: "sd-jwt", credentialConfigurationID: "UniversityDegreeCredential", format: "dc+sd-jwt"},
+		{name: "jwt-vc-json", credentialConfigurationID: "UniversityDegreeCredentialJWT", format: "jwt_vc_json"},
+		{name: "jwt-vc-json-ld", credentialConfigurationID: "UniversityDegreeCredentialJWTLD", format: "jwt_vc_json-ld"},
+		{name: "ldp-vc", credentialConfigurationID: "UniversityDegreeCredentialLDP", format: "ldp_vc"},
+		{name: "mso-mdoc", credentialConfigurationID: "UniversityDegreeCredentialMDOC", format: "mso_mdoc"},
+	}
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			server := newTestServer(t)
+			defer server.Close()
+
+			offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+				"credential_configuration_ids": []string{testCase.credentialConfigurationID},
+			})
+			assertStatus(t, offerResp, http.StatusCreated)
+			offerPayload := decodeJSONMap(t, offerResp)
+			walletSubject := asString(t, offerPayload["wallet_subject"])
+
+			tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+				"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+				"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+			})
+			if err != nil {
+				t.Fatalf("token request failed: %v", err)
+			}
+			assertStatus(t, tokenResp, http.StatusOK)
+			tokenPayload := decodeJSONMap(t, tokenResp)
+			accessToken := asString(t, tokenPayload["access_token"])
+			cNonce := asString(t, tokenPayload["c_nonce"])
+			proofJWT := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
+
+			credentialResp := postJSONWithHeaders(
+				t,
+				server.URL+"/oid4vci/credential",
+				map[string]interface{}{
+					"credential_configuration_id": testCase.credentialConfigurationID,
+					"format":                      testCase.format,
+					"proofs": []map[string]interface{}{
+						{
+							"proof_type": "jwt",
+							"jwt":        proofJWT,
+						},
+					},
+				},
+				map[string]string{
+					"Authorization": "Bearer " + accessToken,
+				},
+			)
+			assertStatus(t, credentialResp, http.StatusOK)
+			credentialPayload := decodeJSONMap(t, credentialResp)
+			if asString(t, credentialPayload["format"]) != testCase.format {
+				t.Fatalf("expected format %q, got %q", testCase.format, asString(t, credentialPayload["format"]))
+			}
+			if asString(t, credentialPayload["credential"]) == "" {
+				t.Fatalf("expected credential in response")
+			}
+		})
+	}
+}
+
+func TestCredentialIssuanceRejectsFormatConfigurationMismatch(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredentialMDOC"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	walletSubject := asString(t, offerPayload["wallet_subject"])
+
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	tokenPayload := decodeJSONMap(t, tokenResp)
+	accessToken := asString(t, tokenPayload["access_token"])
+	cNonce := asString(t, tokenPayload["c_nonce"])
+	proofJWT := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
+
+	credentialResp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": "UniversityDegreeCredentialMDOC",
+			"format":                      "jwt_vc_json",
+			"proofs": []map[string]interface{}{
+				{
+					"proof_type": "jwt",
+					"jwt":        proofJWT,
+				},
+			},
+		},
+		map[string]string{
+			"Authorization": "Bearer " + accessToken,
+		},
+	)
+	assertStatus(t, credentialResp, http.StatusBadRequest)
+	payload := decodeJSONMap(t, credentialResp)
+	if asString(t, payload["error"]) != "invalid_credential_request" {
+		t.Fatalf("expected invalid_credential_request, got %v", payload["error"])
+	}
+	if !strings.Contains(asString(t, payload["error_description"]), "format does not match credential_configuration_id") {
+		t.Fatalf("expected format mismatch error description, got %v", payload["error_description"])
+	}
+}
+
 func TestCredentialIssuerMetadataRejectsUnexpectedPathSuffix(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
