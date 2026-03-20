@@ -19,6 +19,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+const (
+	credentialFormatDCSdJWT    = "dc+sd-jwt"
+	credentialFormatMSOMDOC    = "mso_mdoc"
+	credentialFormatJWTVCJSON  = "jwt_vc_json"
+	credentialFormatJWTVCJSONL = "jwt_vc_json-ld"
+	credentialFormatLDPVC      = "ldp_vc"
+)
+
 type createAuthorizationRequest struct {
 	ClientID     string          `json:"client_id"`
 	ResponseMode string          `json:"response_mode"`
@@ -514,7 +522,7 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 		addPolicyReason(result, "vp_token_expired", "vp_token expired")
 	}
 
-	credentialEvidence, credentialErr := p.validatePresentedCredential(claims, walletContext.Subject, session)
+	credentialEvidenceSet, credentialErr := p.validatePresentedCredentials(claims, walletContext.Subject, session)
 	if credentialErr != nil {
 		if policyErr, ok := asVerifierPolicyError(credentialErr); ok {
 			addPolicyReason(result, policyErr.Code, policyErr.Message)
@@ -523,7 +531,10 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 		}
 		result.HolderBindingVerified = false
 	} else {
-		result.CredentialEvidence = credentialEvidence
+		if len(credentialEvidenceSet) > 0 {
+			result.CredentialEvidence = &credentialEvidenceSet[0]
+			result.CredentialEvidenceSet = credentialEvidenceSet
+		}
 	}
 
 	result.Policy.Allowed = result.NonceValidated &&
@@ -740,11 +751,26 @@ func (p *Plugin) resolvePresentedWalletContext(token string, subjectHint string)
 	}, nil
 }
 
-func (p *Plugin) validatePresentedCredential(
+type presentedCredentialEnvelope struct {
+	CredentialID string
+	Format       string
+	Credential   string
+}
+
+type dcqlCredentialRequirement struct {
+	ID                   string
+	Format               string
+	VCTValues            []string
+	DoctypeValues        []string
+	CredentialTypeValues []string
+	RequiredClaimPaths   []string
+}
+
+func (p *Plugin) validatePresentedCredentials(
 	vpClaims jwt.MapClaims,
 	walletSubject string,
 	session *requestSession,
-) (*models.OID4VPCredentialEvidence, error) {
+) ([]models.OID4VPCredentialEvidence, error) {
 	normalizedSubject := strings.TrimSpace(walletSubject)
 	if normalizedSubject == "" {
 		return nil, newVerifierPolicyError("holder_binding_mismatch", "wallet subject is missing", nil)
@@ -753,115 +779,480 @@ func (p *Plugin) validatePresentedCredential(
 	if !ok {
 		return nil, newVerifierPolicyError("credential_missing", "vp claim is missing", nil)
 	}
-	credentialJWT, _ := vpObject["credential_jwt"].(string)
-	credentialJWT = strings.TrimSpace(credentialJWT)
-	if credentialJWT == "" {
-		return nil, newVerifierPolicyError("credential_missing", "presented credential is missing", nil)
-	}
-
-	envelope, err := vc.ParseSDJWTEnvelope(credentialJWT)
+	presentedCredentials, err := extractPresentedCredentialEnvelopes(vpObject)
 	if err != nil {
-		return nil, newVerifierPolicyError("credential_malformed", "presented credential serialization is invalid", err)
-	}
-	issuerSignedJWT := strings.TrimSpace(envelope.IssuerSignedJWT)
-	decodedCredential, err := crypto.DecodeTokenWithoutValidation(issuerSignedJWT)
-	if err != nil {
-		return nil, newVerifierPolicyError("credential_malformed", "presented credential decode failed", err)
-	}
-	credentialSub, _ := decodedCredential.Payload["sub"].(string)
-	if strings.TrimSpace(credentialSub) != normalizedSubject {
-		return nil, newVerifierPolicyError("credential_subject_mismatch", "presented credential subject mismatch", nil)
-	}
-	credentialVCT, _ := decodedCredential.Payload["vct"].(string)
-	credentialVCT = strings.TrimSpace(credentialVCT)
-	if credentialVCT == "" {
-		return nil, newVerifierPolicyError("credential_missing_vct", "presented credential vct is missing", nil)
+		return nil, newVerifierPolicyError("credential_missing", err.Error(), nil)
 	}
 	if p.walletStore == nil {
 		return nil, newVerifierPolicyError("missing_lineage", "wallet credential lineage store is unavailable", nil)
 	}
-	storedRecord, found := p.walletStore.Get(normalizedSubject, credentialVCT)
-	if !found {
+	storedCredentials := p.walletStore.List(normalizedSubject)
+	if len(storedCredentials) == 0 {
 		return nil, newVerifierPolicyError("missing_lineage", "presented credential lineage was not found", nil)
 	}
-	storedIssuerJWT := strings.TrimSpace(storedRecord.IssuerSignedJWT)
-	if storedIssuerJWT == "" {
-		if parsedStored, err := vc.ParseSDJWTEnvelope(storedRecord.CredentialJWT); err == nil {
-			storedIssuerJWT = strings.TrimSpace(parsedStored.IssuerSignedJWT)
+
+	evidenceSet := make([]models.OID4VPCredentialEvidence, 0, len(presentedCredentials))
+	for _, presented := range presentedCredentials {
+		rawCredential := strings.TrimSpace(presented.Credential)
+		if rawCredential == "" {
+			continue
 		}
-	}
-	if storedIssuerJWT != "" && issuerSignedJWT != storedIssuerJWT {
-		return nil, newVerifierPolicyError("missing_lineage", "presented credential does not match stored issuance lineage", nil)
-	}
 
-	verificationKey, expectedAlgPrefix, err := credentialVerificationKeyFromJWK(storedRecord.IssuerJWK)
-	if err != nil {
-		return nil, newVerifierPolicyError("credential_signature_invalid", "issuer verification key is invalid", err)
-	}
-
-	parsedCredential, err := jwt.Parse(issuerSignedJWT, func(token *jwt.Token) (interface{}, error) {
-		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
-			return nil, fmt.Errorf("credential jwt uses unexpected algorithm")
+		credentialFormat := strings.TrimSpace(presented.Format)
+		issuerSignedJWT := rawCredential
+		disclosureClaims := make(map[string]interface{})
+		var disclosures []string
+		shouldParseSDJWTEnvelope := credentialFormat == credentialFormatDCSdJWT || strings.Contains(rawCredential, "~")
+		if shouldParseSDJWTEnvelope {
+			if parsedEnvelope, parseErr := vc.ParseSDJWTEnvelope(rawCredential); parseErr == nil {
+				issuerSignedJWT = strings.TrimSpace(parsedEnvelope.IssuerSignedJWT)
+				disclosures = append(disclosures, parsedEnvelope.Disclosures...)
+				if credentialFormat == "" && len(parsedEnvelope.Disclosures) > 0 {
+					credentialFormat = credentialFormatDCSdJWT
+				}
+			}
 		}
-		kid, _ := token.Header["kid"].(string)
-		if storedRecord.IssuerJWK.Kid != "" && kid != "" && storedRecord.IssuerJWK.Kid != kid {
-			return nil, fmt.Errorf("credential kid mismatch")
+		decodedCredential, err := crypto.DecodeTokenWithoutValidation(issuerSignedJWT)
+		if err != nil {
+			return nil, newVerifierPolicyError("credential_malformed", "presented credential decode failed", err)
 		}
-		return verificationKey, nil
-	}, jwt.WithoutClaimsValidation())
-	if err != nil {
-		return nil, newVerifierPolicyError("credential_signature_invalid", "presented credential signature validation failed", err)
+
+		credentialSub, _ := decodedCredential.Payload["sub"].(string)
+		if strings.TrimSpace(credentialSub) != normalizedSubject {
+			return nil, newVerifierPolicyError("credential_subject_mismatch", "presented credential subject mismatch", nil)
+		}
+		if credentialFormat == "" {
+			credentialFormat = inferCredentialFormat(decodedCredential)
+		}
+
+		credentialVCT, _ := decodedCredential.Payload["vct"].(string)
+		credentialVCT = strings.TrimSpace(credentialVCT)
+		doctype, _ := decodedCredential.Payload["doctype"].(string)
+		doctype = strings.TrimSpace(doctype)
+
+		storedRecord, found := findStoredCredentialLineage(storedCredentials, presented, rawCredential, issuerSignedJWT, credentialFormat, credentialVCT, doctype)
+		if !found {
+			return nil, newVerifierPolicyError("missing_lineage", "presented credential does not match stored issuance lineage", nil)
+		}
+
+		verificationKey, expectedAlgPrefix, err := credentialVerificationKeyFromJWK(storedRecord.IssuerJWK)
+		if err != nil {
+			return nil, newVerifierPolicyError("credential_signature_invalid", "issuer verification key is invalid", err)
+		}
+		parsedCredential, err := jwt.Parse(issuerSignedJWT, func(token *jwt.Token) (interface{}, error) {
+			if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
+				return nil, fmt.Errorf("credential jwt uses unexpected algorithm")
+			}
+			kid, _ := token.Header["kid"].(string)
+			if storedRecord.IssuerJWK.Kid != "" && kid != "" && storedRecord.IssuerJWK.Kid != kid {
+				return nil, fmt.Errorf("credential kid mismatch")
+			}
+			return verificationKey, nil
+		}, jwt.WithoutClaimsValidation())
+		if err != nil || !parsedCredential.Valid {
+			return nil, newVerifierPolicyError("credential_signature_invalid", "presented credential signature validation failed", err)
+		}
+		credentialClaims, ok := parsedCredential.Claims.(jwt.MapClaims)
+		if !ok {
+			return nil, newVerifierPolicyError("credential_malformed", "presented credential claims are invalid", nil)
+		}
+		issuer, _ := credentialClaims["iss"].(string)
+		if strings.TrimSpace(storedRecord.Issuer) != "" && strings.TrimSpace(issuer) != strings.TrimSpace(storedRecord.Issuer) {
+			return nil, newVerifierPolicyError("credential_issuer_mismatch", "presented credential issuer mismatch", nil)
+		}
+		if !claimExpiryIsValid(credentialClaims["exp"]) {
+			return nil, newVerifierPolicyError("credential_expired", "presented credential expired", nil)
+		}
+
+		fullClaims := extractCredentialSubjectClaims(credentialClaims)
+		if credentialFormat == credentialFormatMSOMDOC {
+			if mdocObject, ok := credentialClaims["mdoc"].(map[string]interface{}); ok {
+				if namespaces, hasNamespaces := mdocObject["namespaces"].(map[string]interface{}); hasNamespaces {
+					for claimName, claimValue := range namespaces {
+						if _, exists := fullClaims[claimName]; exists {
+							continue
+						}
+						fullClaims[claimName] = claimValue
+					}
+				} else {
+					for claimName, claimValue := range mdocObject {
+						if _, exists := fullClaims[claimName]; exists {
+							continue
+						}
+						fullClaims[claimName] = claimValue
+					}
+				}
+			}
+		}
+		if credentialFormat == credentialFormatDCSdJWT {
+			digestAllowList := credentialDigestAllowList(credentialClaims)
+			decodedDisclosures, decodeErr := vc.DecodeAndVerifyDisclosures(disclosures, digestAllowList)
+			if decodeErr != nil {
+				return nil, newVerifierPolicyError("disclosure_invalid", "presented disclosures failed validation", decodeErr)
+			}
+			disclosureClaims = vc.DisclosedClaimMap(decodedDisclosures)
+			for claimName, claimValue := range disclosureClaims {
+				fullClaims[claimName] = claimValue
+			}
+		}
+		credentialTypes := extractCredentialTypeValues(credentialClaims)
+		if len(credentialTypes) == 0 {
+			credentialTypes = append(credentialTypes, storedRecord.CredentialTypes...)
+		}
+
+		evidence := models.OID4VPCredentialEvidence{
+			Subject:                   normalizedSubject,
+			Format:                    credentialFormat,
+			CredentialConfigurationID: strings.TrimSpace(storedRecord.CredentialConfigurationID),
+			VCT:                       firstNonEmpty(credentialVCT, strings.TrimSpace(storedRecord.VCT)),
+			Doctype:                   firstNonEmpty(doctype, strings.TrimSpace(storedRecord.Doctype)),
+			CredentialTypes:           dedupeStrings(credentialTypes),
+			Issuer:                    strings.TrimSpace(issuer),
+			RequiredClaimPaths:        nil,
+			DisclosedClaims:           disclosureClaims,
+			FullClaims:                fullClaims,
+		}
+		evidenceSet = append(evidenceSet, evidence)
 	}
-	if !parsedCredential.Valid {
-		return nil, newVerifierPolicyError("credential_signature_invalid", "presented credential signature validation failed", nil)
+	if len(evidenceSet) == 0 {
+		return nil, newVerifierPolicyError("credential_missing", "presented credential is missing", nil)
 	}
 
-	credentialClaims, ok := parsedCredential.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, newVerifierPolicyError("credential_malformed", "presented credential claims are invalid", nil)
-	}
-	issuer, _ := credentialClaims["iss"].(string)
-	if strings.TrimSpace(storedRecord.Issuer) != "" && strings.TrimSpace(issuer) != strings.TrimSpace(storedRecord.Issuer) {
-		return nil, newVerifierPolicyError("credential_issuer_mismatch", "presented credential issuer mismatch", nil)
-	}
-	if !claimExpiryIsValid(credentialClaims["exp"]) {
-		return nil, newVerifierPolicyError("credential_expired", "presented credential expired", nil)
-	}
-
-	digestAllowList := credentialDigestAllowList(credentialClaims)
-	decodedDisclosures, err := vc.DecodeAndVerifyDisclosures(envelope.Disclosures, digestAllowList)
-	if err != nil {
-		return nil, newVerifierPolicyError("disclosure_invalid", "presented disclosures failed validation", err)
-	}
-	disclosedClaims := vc.DisclosedClaimMap(decodedDisclosures)
-
-	fullClaims := extractCredentialSubjectClaims(credentialClaims)
-	for claimName, claimValue := range disclosedClaims {
-		fullClaims[claimName] = claimValue
-	}
-
-	requiredClaimPaths := extractRequiredDCQLClaimPaths("")
+	var requirements []dcqlCredentialRequirement
 	if session != nil {
-		requiredClaimPaths = extractRequiredDCQLClaimPaths(session.DCQLQuery)
+		requirements = parseDCQLCredentialRequirements(session.DCQLQuery)
 	}
-	for _, claimPath := range requiredClaimPaths {
-		if !hasClaimPath(fullClaims, claimPath) {
-			return nil, newVerifierPolicyError(
-				"missing_required_claim",
-				fmt.Sprintf("required claim %q is missing from disclosed credential data", claimPath),
-				nil,
-			)
+	for _, requirement := range requirements {
+		matched := false
+		failureCode := "dcql_format_mismatch"
+		failureMessage := "presented credential does not satisfy requested dcql constraints"
+		for idx := range evidenceSet {
+			ok, code, message := requirementMatchesEvidence(requirement, evidenceSet[idx])
+			if ok {
+				evidenceSet[idx].RequiredClaimPaths = mergeClaimPaths(evidenceSet[idx].RequiredClaimPaths, requirement.RequiredClaimPaths)
+				matched = true
+				break
+			}
+			if strings.TrimSpace(code) != "" {
+				failureCode = code
+			}
+			if strings.TrimSpace(message) != "" {
+				failureMessage = message
+			}
+		}
+		if !matched {
+			return nil, newVerifierPolicyError(failureCode, failureMessage, nil)
 		}
 	}
 
-	return &models.OID4VPCredentialEvidence{
-		Subject:            normalizedSubject,
-		VCT:                credentialVCT,
-		Issuer:             strings.TrimSpace(issuer),
-		RequiredClaimPaths: requiredClaimPaths,
-		DisclosedClaims:    disclosedClaims,
-		FullClaims:         fullClaims,
-	}, nil
+	return evidenceSet, nil
+}
+
+func extractPresentedCredentialEnvelopes(vpObject map[string]interface{}) ([]presentedCredentialEnvelope, error) {
+	result := make([]presentedCredentialEnvelope, 0, 2)
+	rawCredentials, hasCredentials := vpObject["credentials"].([]interface{})
+	if hasCredentials {
+		for _, rawCredential := range rawCredentials {
+			credentialObject, _ := rawCredential.(map[string]interface{})
+			format, _ := credentialObject["format"].(string)
+			credentialID, _ := credentialObject["credential_id"].(string)
+			rawCredentialValue := strings.TrimSpace(asString(credentialObject["credential"]))
+			if rawCredentialValue == "" {
+				rawCredentialValue = strings.TrimSpace(asString(credentialObject["credential_jwt"]))
+			}
+			if rawCredentialValue == "" {
+				continue
+			}
+			result = append(result, presentedCredentialEnvelope{
+				CredentialID: strings.TrimSpace(credentialID),
+				Format:       strings.TrimSpace(format),
+				Credential:   rawCredentialValue,
+			})
+		}
+	}
+	if len(result) == 0 {
+		credentialJWT, _ := vpObject["credential_jwt"].(string)
+		credentialJWT = strings.TrimSpace(credentialJWT)
+		if credentialJWT == "" {
+			return nil, fmt.Errorf("presented credential is missing")
+		}
+		format, _ := vpObject["format"].(string)
+		result = append(result, presentedCredentialEnvelope{
+			Format:     strings.TrimSpace(format),
+			Credential: credentialJWT,
+		})
+	}
+	return result, nil
+}
+
+func findStoredCredentialLineage(
+	records []vc.WalletCredentialRecord,
+	presented presentedCredentialEnvelope,
+	rawCredential string,
+	issuerSignedJWT string,
+	credentialFormat string,
+	credentialVCT string,
+	doctype string,
+) (vc.WalletCredentialRecord, bool) {
+	normalizedCredentialID := strings.TrimSpace(presented.CredentialID)
+	normalizedFormat := strings.TrimSpace(credentialFormat)
+	normalizedVCT := strings.TrimSpace(credentialVCT)
+	normalizedDoctype := strings.TrimSpace(doctype)
+	for _, record := range records {
+		if normalizedCredentialID != "" && strings.TrimSpace(record.CredentialID) == normalizedCredentialID {
+			return record, true
+		}
+	}
+	for _, record := range records {
+		if strings.TrimSpace(record.CredentialJWT) == strings.TrimSpace(rawCredential) {
+			return record, true
+		}
+		storedIssuerJWT := strings.TrimSpace(record.IssuerSignedJWT)
+		if storedIssuerJWT == "" {
+			if envelope, err := vc.ParseSDJWTEnvelope(strings.TrimSpace(record.CredentialJWT)); err == nil {
+				storedIssuerJWT = strings.TrimSpace(envelope.IssuerSignedJWT)
+			}
+		}
+		if storedIssuerJWT != "" && storedIssuerJWT == strings.TrimSpace(issuerSignedJWT) {
+			return record, true
+		}
+	}
+	for _, record := range records {
+		recordFormat := strings.TrimSpace(record.Format)
+		if normalizedFormat != "" && recordFormat != "" && normalizedFormat != recordFormat {
+			continue
+		}
+		if normalizedVCT != "" && strings.TrimSpace(record.VCT) != "" && strings.TrimSpace(record.VCT) != normalizedVCT {
+			continue
+		}
+		if normalizedDoctype != "" && strings.TrimSpace(record.Doctype) != "" && strings.TrimSpace(record.Doctype) != normalizedDoctype {
+			continue
+		}
+		return record, true
+	}
+	return vc.WalletCredentialRecord{}, false
+}
+
+func inferCredentialFormat(decodedCredential *crypto.DecodedToken) string {
+	if decodedCredential == nil {
+		return ""
+	}
+	if typ, ok := decodedCredential.Header["typ"].(string); ok {
+		switch strings.TrimSpace(typ) {
+		case "vc+sd-jwt":
+			return credentialFormatDCSdJWT
+		case "mdoc+jwt":
+			return credentialFormatMSOMDOC
+		case "vc+ldp-jwt":
+			return credentialFormatLDPVC
+		}
+	}
+	vcObject, _ := decodedCredential.Payload["vc"].(map[string]interface{})
+	if credentialSubject, ok := vcObject["credentialSubject"].(map[string]interface{}); ok {
+		if _, hasSD := credentialSubject["_sd"]; hasSD {
+			return credentialFormatDCSdJWT
+		}
+	}
+	if _, hasDoctype := decodedCredential.Payload["doctype"]; hasDoctype {
+		return credentialFormatMSOMDOC
+	}
+	if _, hasContext := vcObject["@context"]; hasContext {
+		return credentialFormatJWTVCJSONL
+	}
+	return credentialFormatJWTVCJSON
+}
+
+func extractCredentialTypeValues(credentialClaims jwt.MapClaims) []string {
+	vcObject, _ := credentialClaims["vc"].(map[string]interface{})
+	return normalizeStringSlice(vcObject["type"])
+}
+
+func normalizeStringSlice(raw interface{}) []string {
+	values := make([]string, 0)
+	switch typed := raw.(type) {
+	case string:
+		if normalized := strings.TrimSpace(typed); normalized != "" {
+			values = append(values, normalized)
+		}
+	case []interface{}:
+		for _, item := range typed {
+			itemString, _ := item.(string)
+			itemString = strings.TrimSpace(itemString)
+			if itemString == "" {
+				continue
+			}
+			values = append(values, itemString)
+		}
+	}
+	return dedupeStrings(values)
+}
+
+func parseDCQLCredentialRequirements(rawDCQLQuery string) []dcqlCredentialRequirement {
+	trimmed := strings.TrimSpace(rawDCQLQuery)
+	if trimmed == "" {
+		return nil
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return nil
+	}
+	rawCredentials, _ := payload["credentials"].([]interface{})
+	requirements := make([]dcqlCredentialRequirement, 0, len(rawCredentials))
+	for _, rawCredential := range rawCredentials {
+		credentialObject, _ := rawCredential.(map[string]interface{})
+		requirement := dcqlCredentialRequirement{
+			ID:     strings.TrimSpace(asString(credentialObject["id"])),
+			Format: strings.TrimSpace(asString(credentialObject["format"])),
+		}
+		if meta, ok := credentialObject["meta"].(map[string]interface{}); ok {
+			requirement.VCTValues = normalizeStringSlice(meta["vct_values"])
+			requirement.DoctypeValues = normalizeStringSlice(meta["doctype_values"])
+			if len(requirement.DoctypeValues) == 0 {
+				if singleDoctype := strings.TrimSpace(asString(meta["doctype"])); singleDoctype != "" {
+					requirement.DoctypeValues = []string{singleDoctype}
+				}
+			}
+			requirement.CredentialTypeValues = normalizeStringSlice(meta["type_values"])
+		}
+		rawClaims, _ := credentialObject["claims"].([]interface{})
+		requiredPaths := make([]string, 0, len(rawClaims))
+		for _, rawClaim := range rawClaims {
+			claimObject, _ := rawClaim.(map[string]interface{})
+			rawPath, _ := claimObject["path"].([]interface{})
+			segments := make([]string, 0, len(rawPath))
+			for _, rawSegment := range rawPath {
+				segment := strings.TrimSpace(asString(rawSegment))
+				if segment == "" {
+					continue
+				}
+				segments = append(segments, segment)
+			}
+			if len(segments) == 0 {
+				continue
+			}
+			requiredPaths = append(requiredPaths, strings.Join(segments, "."))
+		}
+		requirement.RequiredClaimPaths = dedupeStrings(requiredPaths)
+		sort.Strings(requirement.RequiredClaimPaths)
+		requirements = append(requirements, requirement)
+	}
+	return requirements
+}
+
+func requirementMatchesEvidence(requirement dcqlCredentialRequirement, evidence models.OID4VPCredentialEvidence) (bool, string, string) {
+	if requirement.Format != "" && strings.TrimSpace(evidence.Format) != requirement.Format {
+		return false, "dcql_format_mismatch", fmt.Sprintf("credential format %q does not satisfy requested format %q", evidence.Format, requirement.Format)
+	}
+	if len(requirement.VCTValues) > 0 && !containsString(requirement.VCTValues, strings.TrimSpace(evidence.VCT)) {
+		return false, "dcql_meta_mismatch", "credential vct does not satisfy dcql vct_values"
+	}
+	if len(requirement.DoctypeValues) > 0 && !containsString(requirement.DoctypeValues, strings.TrimSpace(evidence.Doctype)) {
+		return false, "dcql_meta_mismatch", "credential doctype does not satisfy dcql doctype_values"
+	}
+	if len(requirement.CredentialTypeValues) > 0 && !intersectsStringSlice(requirement.CredentialTypeValues, evidence.CredentialTypes) {
+		return false, "dcql_meta_mismatch", "credential type does not satisfy dcql type_values"
+	}
+	for _, claimPath := range requirement.RequiredClaimPaths {
+		if !hasClaimPath(evidence.FullClaims, claimPath) {
+			return false, "missing_required_claim", fmt.Sprintf("required claim %q is missing from disclosed credential data", claimPath)
+		}
+	}
+	return true, "", ""
+}
+
+func mergeClaimPaths(existing []string, additions []string) []string {
+	if len(additions) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing)+len(additions))
+	merged := make([]string, 0, len(existing)+len(additions))
+	for _, item := range existing {
+		normalized := strings.TrimSpace(item)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		merged = append(merged, normalized)
+	}
+	for _, item := range additions {
+		normalized := strings.TrimSpace(item)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		merged = append(merged, normalized)
+	}
+	sort.Strings(merged)
+	return merged
+}
+
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
+}
+
+func intersectsStringSlice(left []string, right []string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	lookup := make(map[string]struct{}, len(right))
+	for _, value := range right {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		lookup[normalized] = struct{}{}
+	}
+	for _, value := range left {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := lookup[normalized]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if normalized := strings.TrimSpace(value); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
 }
 
 type verifierPolicyError struct {
@@ -1086,6 +1477,22 @@ func audienceIncludes(rawAudience interface{}, expected string) bool {
 		}
 	}
 	return false
+}
+
+func asString(raw interface{}) string {
+	if raw == nil {
+		return ""
+	}
+	switch typed := raw.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	case fmt.Stringer:
+		return typed.String()
+	default:
+		return ""
+	}
 }
 
 func jsonDecode(r *http.Request, target interface{}) error {

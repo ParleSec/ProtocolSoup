@@ -68,7 +68,7 @@ export class ImplicitExecutor extends FlowExecutorBase {
 
     this.addEvent({
       type: 'security',
-      title: '⚠️ Security Warning: Implicit Flow Deprecated',
+      title: '⚠️ Security Warning: Implicit Flow Legacy',
       description: 'This flow is NOT recommended. Use Authorization Code + PKCE instead.',
       rfcReference: 'OAuth 2.0 Security BCP',
       data: {

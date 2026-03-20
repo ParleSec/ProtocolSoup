@@ -18,6 +18,29 @@ interface UseWebSocketReturn {
   disconnect: () => void
 }
 
+function buildWebSocketURL(url: string): string {
+  if (!url.startsWith('/')) {
+    return url
+  }
+
+  const wsBase = (process.env.NEXT_PUBLIC_WS_BASE_URL || '').trim()
+  if (wsBase) {
+    try {
+      const parsed = new URL(wsBase, window.location.origin)
+      if (parsed.protocol === 'http:') parsed.protocol = 'ws:'
+      if (parsed.protocol === 'https:') parsed.protocol = 'wss:'
+      const basePath = parsed.pathname.replace(/\/$/, '')
+      return `${parsed.protocol}//${parsed.host}${basePath}${url}`
+    } catch {
+      // Fall back to current host if override cannot be parsed.
+    }
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.host
+  return `${protocol}//${host}${url}`
+}
+
 export function useWebSocket(
   url: string | null,
   options: UseWebSocketOptions = {}
@@ -46,11 +69,7 @@ export function useWebSocket(
     shouldReconnectRef.current = true
 
     try {
-      // Build full WebSocket URL
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.host
-      const fullUrl = url.startsWith('/') ? `${protocol}//${host}${url}` : url
-
+      const fullUrl = buildWebSocketURL(url)
       wsRef.current = new WebSocket(fullUrl)
 
       wsRef.current.onopen = () => {

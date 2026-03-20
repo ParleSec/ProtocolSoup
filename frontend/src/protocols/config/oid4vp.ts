@@ -17,14 +17,15 @@ export const OID4VP_DEFAULT_DISCLOSURE_HINTS = [
 
 export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
   {
-    id: 'degree-core',
-    label: 'Degree core',
-    description: 'Requests degree + graduation year from UniversityDegreeCredential.',
+    id: 'degree-sdjwt',
+    label: 'Degree dc+sd-jwt',
+    description: 'Requests degree + graduation_year from an SD-JWT VC credential.',
     query: JSON.stringify(
       {
         credentials: [
           {
             id: 'university_degree',
+            format: 'dc+sd-jwt',
             meta: {
               vct_values: ['https://protocolsoup.com/credentials/university_degree'],
             },
@@ -37,14 +38,15 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
     ),
   },
   {
-    id: 'degree-and-department',
-    label: 'Degree + department',
-    description: 'Requests academic credential plus department for employer verification.',
+    id: 'degree-jwt-vc-json',
+    label: 'Degree jwt_vc_json',
+    description: 'Requests degree + department from a JWT VC JSON credential.',
     query: JSON.stringify(
       {
         credentials: [
           {
             id: 'university_degree',
+            format: 'jwt_vc_json',
             meta: {
               vct_values: ['https://protocolsoup.com/credentials/university_degree'],
             },
@@ -57,25 +59,90 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
     ),
   },
   {
-    id: 'multi-credential',
-    label: 'Multi-credential query',
-    description: 'Demonstrates DCQL with two credential slots and constrained claims.',
+    id: 'degree-jwt-vc-json-ld',
+    label: 'Degree jwt_vc_json-ld',
+    description: 'Requests degree claims from a JWT VC JSON-LD profile.',
     query: JSON.stringify(
       {
         credentials: [
           {
-            id: 'degree_credential',
+            id: 'university_degree',
+            format: 'jwt_vc_json-ld',
+            meta: {
+              vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+            },
+            claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  },
+  {
+    id: 'degree-ldp-vc',
+    label: 'Degree ldp_vc',
+    description: 'Requests degree claims from an ldp_vc profile.',
+    query: JSON.stringify(
+      {
+        credentials: [
+          {
+            id: 'university_degree',
+            format: 'ldp_vc',
+            meta: {
+              vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+            },
+            claims: [{ path: ['degree'] }, { path: ['department'] }],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  },
+  {
+    id: 'degree-mso-mdoc',
+    label: 'Degree mso_mdoc',
+    description: 'Requests holder identity and department from mso_mdoc profile.',
+    query: JSON.stringify(
+      {
+        credentials: [
+          {
+            id: 'university_degree_mdoc',
+            format: 'mso_mdoc',
+            meta: {
+              doctype_values: ['org.iso.18013.5.1.mDL'],
+            },
+            claims: [{ path: ['given_name'] }, { path: ['family_name'] }, { path: ['department'] }],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  },
+  {
+    id: 'multi-format-matrix',
+    label: 'Multi-format matrix',
+    description: 'Demonstrates DCQL constraints over sd-jwt and mso_mdoc credential slots.',
+    query: JSON.stringify(
+      {
+        credentials: [
+          {
+            id: 'university_degree_sd',
+            format: 'dc+sd-jwt',
             meta: {
               vct_values: ['https://protocolsoup.com/credentials/university_degree'],
             },
             claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
           },
           {
-            id: 'employment_credential',
+            id: 'university_degree_mdoc',
+            format: 'mso_mdoc',
             meta: {
-              vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+              doctype_values: ['org.iso.18013.5.1.mDL'],
             },
-            claims: [{ path: ['department'] }],
+            claims: [{ path: ['given_name'] }, { path: ['family_name'] }],
           },
         ],
       },

@@ -244,6 +244,180 @@ func TestDirectPostPolicyDeniesMissingRequiredDisclosureClaim(t *testing.T) {
 	}
 }
 
+func TestDirectPostPolicyDeniesDCQLFormatMismatch(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id":     "university_degree_jwt",
+				"format": "jwt_vc_json",
+				"meta": map[string]interface{}{
+					"vct_values": []string{testCredentialVCT},
+				},
+				"claims": []map[string]interface{}{
+					{
+						"path": []string{"degree"},
+					},
+				},
+			},
+		},
+	})
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "dcql_format_mismatch") {
+		t.Fatalf("expected dcql_format_mismatch reason code, got %v", reasonCodes)
+	}
+}
+
+func TestDirectPostPolicyAllowsDCQLAcrossSupportedFormats(t *testing.T) {
+	testCases := []struct {
+		name                      string
+		credentialConfigurationID string
+		format                    string
+		meta                      map[string]interface{}
+		claims                    []map[string]interface{}
+	}{
+		{
+			name:                      "dc-sd-jwt",
+			credentialConfigurationID: "UniversityDegreeCredential",
+			format:                    "dc+sd-jwt",
+			meta: map[string]interface{}{
+				"vct_values": []string{testCredentialVCT},
+			},
+			claims: []map[string]interface{}{
+				{
+					"path": []string{"degree"},
+				},
+			},
+		},
+		{
+			name:                      "jwt-vc-json",
+			credentialConfigurationID: "UniversityDegreeCredentialJWT",
+			format:                    "jwt_vc_json",
+			meta: map[string]interface{}{
+				"type_values": []string{"UniversityDegreeCredential"},
+			},
+			claims: []map[string]interface{}{
+				{
+					"path": []string{"degree"},
+				},
+			},
+		},
+		{
+			name:                      "jwt-vc-json-ld",
+			credentialConfigurationID: "UniversityDegreeCredentialJWTLD",
+			format:                    "jwt_vc_json-ld",
+			meta: map[string]interface{}{
+				"type_values": []string{"UniversityDegreeCredential"},
+			},
+			claims: []map[string]interface{}{
+				{
+					"path": []string{"degree"},
+				},
+			},
+		},
+		{
+			name:                      "ldp-vc",
+			credentialConfigurationID: "UniversityDegreeCredentialLDP",
+			format:                    "ldp_vc",
+			meta: map[string]interface{}{
+				"type_values": []string{"UniversityDegreeCredential"},
+			},
+			claims: []map[string]interface{}{
+				{
+					"path": []string{"degree"},
+				},
+			},
+		},
+		{
+			name:                      "mso-mdoc",
+			credentialConfigurationID: "UniversityDegreeCredentialMDOC",
+			format:                    "mso_mdoc",
+			meta: map[string]interface{}{
+				"doctype_values": []string{"org.iso.18013.5.1.mDL"},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			env := newCombinedVCServer(t)
+			defer env.Server.Close()
+
+			wallet := issueCredentialForWalletWithSelection(
+				t,
+				env.Server.URL,
+				"alice-"+strings.ReplaceAll(testCase.name, "_", "-"),
+				testCase.credentialConfigurationID,
+				testCase.format,
+			)
+
+			credentialRequirement := map[string]interface{}{
+				"id":     "credential_requirement",
+				"format": testCase.format,
+			}
+			if len(testCase.meta) > 0 {
+				credentialRequirement["meta"] = testCase.meta
+			}
+			if len(testCase.claims) > 0 {
+				credentialRequirement["claims"] = testCase.claims
+			}
+			createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", map[string]interface{}{
+				"credentials": []map[string]interface{}{credentialRequirement},
+			})
+			postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+			resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+			assertPolicyAllowed(t, resultPayload)
+		})
+	}
+}
+
+func TestDirectPostPolicyDeniesDCQLDoctypeMismatchForMSOMDOC(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWalletWithSelection(
+		t,
+		env.Server.URL,
+		"alice-mdoc",
+		"UniversityDegreeCredentialMDOC",
+		"mso_mdoc",
+	)
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id":     "mdoc_requirement",
+				"format": "mso_mdoc",
+				"meta": map[string]interface{}{
+					"doctype_values": []string{"org.iso.18013.5.1.fake"},
+				},
+			},
+		},
+	})
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "dcql_meta_mismatch") {
+		t.Fatalf("expected dcql_meta_mismatch reason code, got %v", reasonCodes)
+	}
+}
+
 func TestDirectPostPolicyDeniesMissingLineageWithExplicitCode(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -445,11 +619,31 @@ func issueCredentialForExternalWallet(t *testing.T, baseURL string, walletUserID
 }
 
 func issueCredentialForWallet(t *testing.T, serverURL string, walletUserID string) *walletFixture {
+	return issueCredentialForWalletWithSelection(t, serverURL, walletUserID, "UniversityDegreeCredential", "")
+}
+
+func issueCredentialForWalletWithSelection(
+	t *testing.T,
+	serverURL string,
+	walletUserID string,
+	credentialConfigurationID string,
+	credentialFormat string,
+) *walletFixture {
 	t.Helper()
 
-	offerResp := postVPJSON(t, serverURL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+	credentialConfigurationID = strings.TrimSpace(credentialConfigurationID)
+	if credentialConfigurationID == "" {
+		credentialConfigurationID = "UniversityDegreeCredential"
+	}
+	credentialFormat = strings.TrimSpace(credentialFormat)
+
+	offerRequestPayload := map[string]interface{}{
 		"wallet_user_id": walletUserID,
-	})
+	}
+	if credentialConfigurationID != "" {
+		offerRequestPayload["credential_configuration_ids"] = []string{credentialConfigurationID}
+	}
+	offerResp := postVPJSON(t, serverURL+"/oid4vci/offers/pre-authorized", offerRequestPayload)
 	assertVPStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeVPJSONMap(t, offerResp)
 	walletSubject := asVPString(offerPayload["wallet_subject"])
@@ -476,15 +670,21 @@ func issueCredentialForWallet(t *testing.T, serverURL string, walletUserID strin
 	credentialResp := postVPJSONWithHeaders(
 		t,
 		serverURL+"/oid4vci/credential",
-		map[string]interface{}{
-			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": []map[string]interface{}{
-				{
-					"proof_type": "jwt",
-					"jwt":        proofJWT,
+		func() map[string]interface{} {
+			payload := map[string]interface{}{
+				"credential_configuration_id": credentialConfigurationID,
+				"proofs": []map[string]interface{}{
+					{
+						"proof_type": "jwt",
+						"jwt":        proofJWT,
+					},
 				},
-			},
-		},
+			}
+			if credentialFormat != "" {
+				payload["format"] = credentialFormat
+			}
+			return payload
+		}(),
 		map[string]string{
 			"Authorization": "Bearer " + asVPString(tokenPayload["access_token"]),
 		},
