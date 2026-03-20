@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
-	"os"
-	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -68,16 +66,14 @@ func (s *Server) setupRouter() {
 		MaxAge:           300,
 	}))
 
-	// Rate limiting for API endpoints
-	rateLimiter := NewRateLimiter(100, time.Minute)
-	r.Use(rateLimiter.Limit)
-
 	// Health check
 	r.Get("/health", s.handleHealth)
 
 	// API routes
-	r.Get("/api", s.handleAPIIndex)
+	rateLimiter := NewRateLimiter(100, time.Minute)
+	r.With(rateLimiter.Limit).Get("/api", s.handleAPIIndex)
 	r.Route("/api", func(r chi.Router) {
+		r.Use(rateLimiter.Limit)
 		r.Get("/", s.handleAPIIndex)
 
 		// Protocol listing
@@ -103,13 +99,14 @@ func (s *Server) setupRouter() {
 
 	// WebSocket routes (optional)
 	if s.lookingGlass != nil {
-		r.Get("/ws/lookingglass/{session}", s.handleLookingGlassWS)
+		r.With(rateLimiter.Limit).Get("/ws/lookingglass/{session}", s.handleLookingGlassWS)
 	}
 
 	// Mount protocol-specific routes
 	for _, p := range s.registry.List() {
 		info := p.Info()
 		protocolRouter := chi.NewRouter()
+		protocolRouter.Use(rateLimiter.Limit)
 		p.RegisterRoutes(protocolRouter)
 		r.Mount("/"+info.ID, protocolRouter)
 
@@ -123,9 +120,9 @@ func (s *Server) setupRouter() {
 		}
 	}
 
-	// Serve static files if configured (for combined frontend+backend deployment)
-	if s.config.StaticDir != "" {
-		s.setupStaticFileServing(r)
+	// Route web traffic to the Next.js runtime when configured.
+	if s.config.FrontendOrigin != "" {
+		s.setupFrontendProxy(r)
 	}
 
 	s.router = r
@@ -172,62 +169,24 @@ func (s *Server) redirectWWWToCanonical() func(http.Handler) http.Handler {
 	}
 }
 
-// setupStaticFileServing configures static file serving with SPA fallback
-func (s *Server) setupStaticFileServing(r chi.Router) {
-	staticDir := s.config.StaticDir
-
-	// Check if static directory exists
-	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
+// setupFrontendProxy routes web traffic to an external frontend runtime (Next.js standalone server).
+func (s *Server) setupFrontendProxy(r chi.Router) {
+	targetOrigin := strings.TrimSpace(s.config.FrontendOrigin)
+	if targetOrigin == "" {
 		return
 	}
 
-	// Create file server
-	fileServer := http.FileServer(http.Dir(staticDir))
-
-	// Serve static files with SPA fallback
-	r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-		// Get the requested path
-		urlPath := r.URL.Path
-
-		// Try to serve the exact file
-		// IMPORTANT: r.URL.Path is rooted (starts with "/"). If we Join it directly, it becomes an absolute path
-		// and ignores staticDir on Unix-like systems, which breaks the existence check and forces SPA fallback.
-		cleanURLPath := path.Clean(urlPath)
-		rel := strings.TrimPrefix(cleanURLPath, "/")
-		fullPath := filepath.Join(staticDir, filepath.FromSlash(rel))
-
-		// Check if file exists (not a directory)
-		info, err := os.Stat(fullPath)
-		if err == nil && !info.IsDir() {
-			// Set appropriate cache headers for assets
-			if isStaticAsset(urlPath) {
-				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			}
-			fileServer.ServeHTTP(w, r)
-			return
-		}
-
-		// For SPA routes, serve index.html
-		indexPath := filepath.Join(staticDir, "index.html")
-		if _, err := os.Stat(indexPath); err == nil {
-			http.ServeFile(w, r, indexPath)
-			return
-		}
-
-		// File not found
-		http.NotFound(w, r)
-	})
-}
-
-// isStaticAsset checks if a path is a static asset that should be cached
-func isStaticAsset(path string) bool {
-	extensions := []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".woff", ".woff2", ".ttf", ".eot"}
-	for _, ext := range extensions {
-		if strings.HasSuffix(path, ext) {
-			return true
-		}
+	targetURL, err := url.Parse(targetOrigin)
+	if err != nil || targetURL.Scheme == "" || targetURL.Host == "" {
+		return
 	}
-	return false
+
+	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, _ error) {
+		http.Error(w, "Frontend runtime unavailable", http.StatusBadGateway)
+	}
+
+	r.Handle("/*", proxy)
 }
 
 // Health check response

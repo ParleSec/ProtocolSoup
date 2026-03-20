@@ -25,8 +25,8 @@ type Config struct {
 	// Enable debug logging
 	Debug bool
 
-	// Static files directory (for serving frontend in combined deployment)
-	StaticDir string
+	// Frontend runtime origin (for proxying web routes to Next.js server)
+	FrontendOrigin string
 
 	// Data directory for durable protocol state (wallet lineage, verifier sessions)
 	DataDir string
@@ -41,7 +41,7 @@ func LoadConfig() *Config {
 		MockIdPEnabled: getEnvBool("SHOWCASE_MOCK_IDP", true),
 		CORSOrigins:    getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
 		Debug:          getEnvBool("SHOWCASE_DEBUG", false),
-		StaticDir:      getEnv("SHOWCASE_STATIC_DIR", ""),
+		FrontendOrigin: getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
 		DataDir:        getEnv("SHOWCASE_DATA_DIR", ""),
 	}
 

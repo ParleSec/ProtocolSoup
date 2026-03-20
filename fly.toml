@@ -18,6 +18,9 @@ primary_region = 'syd'
   SHOWCASE_DEBUG = 'false'
   SHOWCASE_ENV = 'production'
   SHOWCASE_LISTEN_ADDR = ':8080'
+  SHOWCASE_FRONTEND_ORIGIN = 'http://127.0.0.1:3000'
+  BACKEND_ORIGIN = 'http://127.0.0.1:8080'
+  NEXT_PUBLIC_SITE_URL = 'https://protocolsoup.com'
   SHOWCASE_MOCK_IDP = 'true'
   
   # SPIFFE/SPIRE Configuration
