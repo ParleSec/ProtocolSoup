@@ -6,6 +6,9 @@ vendor/
 dist/
 build/
 .astro/
+.next/
+*.tsbuildinfo
+.dccache
 *.exe
 *.exe~
 *.dll
