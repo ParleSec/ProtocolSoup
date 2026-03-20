@@ -10,12 +10,11 @@ services:
       - ./nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certbot/conf:/etc/letsencrypt:ro
       - ./certbot/www:/var/www/certbot:ro
-      - frontend-dist:/usr/share/nginx/html:ro
     depends_on:
       backend:
         condition: service_healthy
-      frontend-builder:
-        condition: service_completed_successfully
+      frontend:
+        condition: service_started
     networks:
       - protocolsoup-network
     restart: unless-stopped
@@ -61,20 +60,23 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Frontend build stage (runs once to build assets)
-  frontend-builder:
+  # Next.js frontend runtime
+  frontend:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend.prod
-    container_name: protocolsoup-frontend-builder
-    volumes:
-      - frontend-dist:/app/dist
+      args:
+        BACKEND_ORIGIN: http://backend:8080
+        NEXT_PUBLIC_SITE_URL: https://protocolsoup.com
+    container_name: protocolsoup-frontend
+    expose:
+      - "3000"
+    environment:
+      - BACKEND_ORIGIN=http://backend:8080
+      - NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
     networks:
       - protocolsoup-network
-
-volumes:
-  frontend-dist:
-    driver: local
+    restart: unless-stopped
 
 networks:
   protocolsoup-network:

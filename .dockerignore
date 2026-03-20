@@ -12,6 +12,9 @@
 # Build outputs
 **/dist
 **/build
+**/.next
+**/*.tsbuildinfo
+**/.dccache
 **/*.exe
 **/*.exe~
 **/*.dll
