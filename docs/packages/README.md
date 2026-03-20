@@ -16,7 +16,7 @@ Documentation for all ProtocolSoup container images available on GitHub Containe
 | [protocolsoup-scim](https://ghcr.io/parlesec/protocolsoup-scim) | SCIM 2.0 | [scim.md](scim.md) |
 | [protocolsoup-ssf](https://ghcr.io/parlesec/protocolsoup-ssf) | Shared Signals | [ssf.md](ssf.md) |
 | [protocolsoup-spiffe](https://ghcr.io/parlesec/protocolsoup-spiffe) | SPIFFE/SPIRE | [spiffe.md](spiffe.md) |
-| [protocolsoup-frontend](https://ghcr.io/parlesec/protocolsoup-frontend) | React UI | [frontend.md](frontend.md) |
+| [protocolsoup-frontend](https://ghcr.io/parlesec/protocolsoup-frontend) | Next.js App Router UI | [frontend.md](frontend.md) |
 | [protocolsoup-wallet](https://ghcr.io/parlesec/protocolsoup-wallet) | OID4VP wallet harness | [wallet.md](wallet.md) |
 
 ## VC Protocol Modules

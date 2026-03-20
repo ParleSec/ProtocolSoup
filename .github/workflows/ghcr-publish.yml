@@ -79,7 +79,7 @@ jobs:
             dockerfile: docker/Dockerfile.frontend
             context: .
             build_args: ""
-            description: React UI for ProtocolSoup
+            description: Next.js App Router UI for ProtocolSoup
           - name: wallet
             image: protocolsoup-wallet
             dockerfile: docker/Dockerfile.wallet-harness

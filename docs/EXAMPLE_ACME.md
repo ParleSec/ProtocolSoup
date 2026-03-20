@@ -14,7 +14,8 @@ This is a minimal, concrete example you can follow end-to-end when adding a new 
 - `backend/cmd/server/main.go`
 - `frontend/src/protocols/registry.ts`
 - `frontend/src/lookingglass/registry.ts`
-- `frontend/src/pages/ProtocolDemo.tsx`
+- `frontend/src/views/ProtocolDemo.tsx`
+- `frontend/next.config.ts`
 
 ## 1) Backend plugin
 
@@ -218,14 +219,14 @@ const flowMeta = {
 }
 ```
 
-Add dev proxy entry:
+Add a Next rewrite entry:
 
 ```ts
-server: {
-  proxy: {
+async rewrites() {
+  return [
     // ...
-    '/acme': { target: 'http://localhost:8080', changeOrigin: true },
-  },
+    { source: '/acme/:path*', destination: `${backendOrigin}/acme/:path*` },
+  ]
 },
 ```
 
