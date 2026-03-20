@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,15 +15,19 @@ import (
 
 // WalletCredentialRecord stores a wallet-held credential and trust material.
 type WalletCredentialRecord struct {
-	Subject         string     `json:"subject"`
-	VCT             string     `json:"vct"`
-	CredentialJWT   string     `json:"credential_jwt"`
-	IssuerSignedJWT string     `json:"issuer_signed_jwt,omitempty"`
-	CredentialID    string     `json:"credential_id,omitempty"`
-	Issuer          string     `json:"issuer"`
-	IssuerJWK       crypto.JWK `json:"issuer_jwk"`
-	IssuedAt        time.Time  `json:"issued_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Subject                   string     `json:"subject"`
+	Format                    string     `json:"format,omitempty"`
+	CredentialConfigurationID string     `json:"credential_configuration_id,omitempty"`
+	VCT                       string     `json:"vct"`
+	Doctype                   string     `json:"doctype,omitempty"`
+	CredentialTypes           []string   `json:"credential_types,omitempty"`
+	CredentialJWT             string     `json:"credential_jwt"`
+	IssuerSignedJWT           string     `json:"issuer_signed_jwt,omitempty"`
+	CredentialID              string     `json:"credential_id,omitempty"`
+	Issuer                    string     `json:"issuer"`
+	IssuerJWK                 crypto.JWK `json:"issuer_jwk"`
+	IssuedAt                  time.Time  `json:"issued_at"`
+	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
 // WalletCredentialStore keeps wallet credential records by subject and VCT.
@@ -99,7 +104,11 @@ func (s *WalletCredentialStore) Put(record WalletCredentialRecord) bool {
 
 	now := time.Now().UTC()
 	record.Subject = subject
+	record.Format = strings.TrimSpace(record.Format)
+	record.CredentialConfigurationID = strings.TrimSpace(record.CredentialConfigurationID)
 	record.VCT = vct
+	record.Doctype = strings.TrimSpace(record.Doctype)
+	record.CredentialTypes = normalizeUniqueStringSlice(record.CredentialTypes)
 	record.CredentialJWT = credential
 	if strings.TrimSpace(record.IssuerSignedJWT) == "" {
 		if parsed, err := ParseSDJWTEnvelope(credential); err == nil {
@@ -159,6 +168,65 @@ func (s *WalletCredentialStore) Get(subject, vct string) (WalletCredentialRecord
 	}
 	record, ok := byVCT[normalizedVCT]
 	return record, ok
+}
+
+// List returns all credential records for a subject.
+func (s *WalletCredentialStore) List(subject string) []WalletCredentialRecord {
+	if s == nil {
+		return nil
+	}
+	normalizedSubject := strings.TrimSpace(subject)
+	if normalizedSubject == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.syncFromDiskLocked(); err != nil {
+		return nil
+	}
+	byVCT, ok := s.credentials[normalizedSubject]
+	if !ok {
+		return nil
+	}
+	records := make([]WalletCredentialRecord, 0, len(byVCT))
+	for _, record := range byVCT {
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].UpdatedAt.After(records[j].UpdatedAt)
+	})
+	return records
+}
+
+// FindByID returns a credential record for a subject and credential ID.
+func (s *WalletCredentialStore) FindByID(subject string, credentialID string) (WalletCredentialRecord, bool) {
+	normalizedID := strings.TrimSpace(credentialID)
+	if normalizedID == "" {
+		return WalletCredentialRecord{}, false
+	}
+	for _, record := range s.List(subject) {
+		if strings.TrimSpace(record.CredentialID) == normalizedID {
+			return record, true
+		}
+	}
+	return WalletCredentialRecord{}, false
+}
+
+// FindByConfiguration returns a record that matches configuration constraints.
+func (s *WalletCredentialStore) FindByConfiguration(subject string, configurationID string, format string) (WalletCredentialRecord, bool) {
+	normalizedConfigurationID := strings.TrimSpace(configurationID)
+	normalizedFormat := strings.TrimSpace(format)
+	for _, record := range s.List(subject) {
+		if normalizedConfigurationID != "" && strings.TrimSpace(record.CredentialConfigurationID) != normalizedConfigurationID {
+			continue
+		}
+		if normalizedFormat != "" && strings.TrimSpace(record.Format) != normalizedFormat {
+			continue
+		}
+		return record, true
+	}
+	return WalletCredentialRecord{}, false
 }
 
 // Reset clears all records. Intended for test isolation.
@@ -228,4 +296,21 @@ func readWalletSnapshot(path string) (*walletCredentialStoreSnapshot, error) {
 		snapshot.Credentials = make(map[string]map[string]WalletCredentialRecord)
 	}
 	return &snapshot, nil
+}
+
+func normalizeUniqueStringSlice(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
 }
