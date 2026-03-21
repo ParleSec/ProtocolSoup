@@ -141,12 +141,28 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
                       <div className="text-surface-200 font-mono break-all">{credentialEvidence.subject || 'n/a'}</div>
                     </div>
                     <div className="p-2 rounded bg-surface-900 border border-white/5">
-                      <div className="text-surface-400 mb-1">Credential Type</div>
-                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.vct || 'n/a'}</div>
+                      <div className="text-surface-400 mb-1">Format</div>
+                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.format || 'n/a'}</div>
                     </div>
                     <div className="p-2 rounded bg-surface-900 border border-white/5">
                       <div className="text-surface-400 mb-1">Issuer</div>
                       <div className="text-surface-200 font-mono break-all">{credentialEvidence.issuer || 'n/a'}</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
+                    <div className="p-2 rounded bg-surface-900 border border-white/5">
+                      <div className="text-surface-400 mb-1">VCT</div>
+                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.vct || 'n/a'}</div>
+                    </div>
+                    <div className="p-2 rounded bg-surface-900 border border-white/5">
+                      <div className="text-surface-400 mb-1">doctype</div>
+                      <div className="text-surface-200 font-mono break-all">{credentialEvidence.doctype || 'n/a'}</div>
+                    </div>
+                    <div className="p-2 rounded bg-surface-900 border border-white/5">
+                      <div className="text-surface-400 mb-1">credential types</div>
+                      <div className="text-surface-200 font-mono break-all">
+                        {credentialEvidence.credentialTypes.length > 0 ? credentialEvidence.credentialTypes.join(', ') : 'n/a'}
+                      </div>
                     </div>
                   </div>
                   {credentialEvidence.requiredClaimPaths.length > 0 && (
@@ -266,7 +282,10 @@ function getReasonCodeList(metadata: Record<string, unknown>): string[] {
 
 interface CredentialEvidenceView {
   subject: string
+  format: string
   vct: string
+  doctype: string
+  credentialTypes: string[]
   issuer: string
   requiredClaimPaths: string[]
   disclosedClaims: Record<string, unknown>
@@ -370,7 +389,12 @@ function getCredentialEvidence(metadata: Record<string, unknown>): CredentialEvi
 
   return {
     subject: typeof evidenceMap.subject === 'string' ? evidenceMap.subject : '',
+    format: typeof evidenceMap.format === 'string' ? evidenceMap.format : '',
     vct: typeof evidenceMap.vct === 'string' ? evidenceMap.vct : '',
+    doctype: typeof evidenceMap.doctype === 'string' ? evidenceMap.doctype : '',
+    credentialTypes: Array.isArray(evidenceMap.credential_types)
+      ? evidenceMap.credential_types.map((item) => String(item))
+      : [],
     issuer: typeof evidenceMap.issuer === 'string' ? evidenceMap.issuer : '',
     requiredClaimPaths,
     disclosedClaims,

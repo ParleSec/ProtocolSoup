@@ -14,9 +14,10 @@ export function generateOrganizationSchema() {
   return {
     '@context': 'https://schema.org',
     '@type': 'Organization',
+    '@id': `${SITE_CONFIG.baseUrl}#organization`,
     name: SITE_CONFIG.name,
     url: SITE_CONFIG.baseUrl,
-    logo: `${SITE_CONFIG.baseUrl}/icons/icon-512.png`,
+    logo: `${SITE_CONFIG.baseUrl}/icons/icon-512.svg`,
     sameAs: [
       `https://twitter.com/${SITE_CONFIG.twitterHandle.replace('@', '')}`,
       'https://github.com/ParleSec/ProtocolSoup',
@@ -53,7 +54,7 @@ export function generateWebApplicationSchema() {
       'SPIFFE/SPIRE workload identity',
       'SCIM 2.0 provisioning testing',
     ],
-    screenshot: `${SITE_CONFIG.baseUrl}/og-image.png`,
+    screenshot: `${SITE_CONFIG.baseUrl}/opengraph-image`,
     softwareVersion: '1.0.0',
     author: {
       '@type': 'Person',
@@ -89,9 +90,13 @@ export function generateWebsiteSchema() {
   return {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
+    '@id': `${SITE_CONFIG.baseUrl}#website`,
     name: SITE_CONFIG.name,
     url: SITE_CONFIG.baseUrl,
     inLanguage: 'en-US',
+    publisher: {
+      '@id': `${SITE_CONFIG.baseUrl}#organization`,
+    },
   }
 }
 
@@ -125,7 +130,7 @@ export function generateTechArticleSchema(params: TechArticleParams) {
       name: SITE_CONFIG.name,
       logo: {
         '@type': 'ImageObject',
-        url: `${SITE_CONFIG.baseUrl}/icons/icon-512.png`,
+        url: `${SITE_CONFIG.baseUrl}/icons/icon-512.svg`,
       },
     },
     mainEntityOfPage: {

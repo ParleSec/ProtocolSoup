@@ -7,7 +7,7 @@
 
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronDown, Loader2, Check } from 'lucide-react'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import type { LookingGlassProtocol, LookingGlassFlow } from '../types'
 
@@ -27,6 +27,7 @@ interface DropdownPosition {
 }
 
 const WIP_PROTOCOL_IDS = new Set(['oid4vci', 'oid4vp'])
+const PROTOCOL_SELECTOR_ORDER = ['oauth2', 'oidc', 'oid4vci', 'oid4vp', 'saml', 'spiffe', 'ssf', 'scim']
 
 export function ProtocolSelector({
   protocols,
@@ -146,6 +147,24 @@ export function ProtocolSelector({
     setIsFlowOpen(false)
   }
 
+  const orderedProtocols = useMemo(() => {
+    const orderIndex = new Map(PROTOCOL_SELECTOR_ORDER.map((id, index) => [id, index]))
+    return [...protocols].sort((a, b) => {
+      const aIndex = orderIndex.get(a.id)
+      const bIndex = orderIndex.get(b.id)
+      if (aIndex !== undefined && bIndex !== undefined) {
+        return aIndex - bIndex
+      }
+      if (aIndex !== undefined) {
+        return -1
+      }
+      if (bIndex !== undefined) {
+        return 1
+      }
+      return a.id.localeCompare(b.id)
+    })
+  }, [protocols])
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-surface-400 text-xs sm:text-sm">
@@ -227,7 +246,7 @@ export function ProtocolSelector({
               }}
               className="rounded border border-white/10 bg-surface-900 shadow-xl overflow-hidden"
             >
-              {protocols.map((protocol) => (
+              {orderedProtocols.map((protocol) => (
                 <button
                   key={protocol.id}
                   onClick={() => handleProtocolSelect(protocol)}

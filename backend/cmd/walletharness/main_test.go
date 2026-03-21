@@ -158,6 +158,91 @@ func TestResolveRequestContextWithOptionsAllowsExternalWhenEnabled(t *testing.T)
 	}
 }
 
+func TestWalletCredentialSelectionMismatch(t *testing.T) {
+	testCases := []struct {
+		name        string
+		wallet      *walletMaterial
+		configID    string
+		format      string
+		hasMismatch bool
+	}{
+		{
+			name: "no_selection_constraints",
+			wallet: &walletMaterial{
+				CredentialJWT:             "placeholder",
+				CredentialConfigurationID: "UniversityDegreeCredential",
+				CredentialFormat:          "dc+sd-jwt",
+			},
+			configID:    "",
+			format:      "",
+			hasMismatch: false,
+		},
+		{
+			name: "empty_wallet_requires_issue",
+			wallet: &walletMaterial{
+				CredentialJWT: "",
+			},
+			configID:    "UniversityDegreeCredential",
+			format:      "dc+sd-jwt",
+			hasMismatch: true,
+		},
+		{
+			name: "matching_active_selection",
+			wallet: &walletMaterial{
+				CredentialJWT:             "placeholder",
+				CredentialConfigurationID: "UniversityDegreeCredential",
+				CredentialFormat:          "dc+sd-jwt",
+			},
+			configID:    "UniversityDegreeCredential",
+			format:      "dc+sd-jwt",
+			hasMismatch: false,
+		},
+		{
+			name: "format_mismatch",
+			wallet: &walletMaterial{
+				CredentialJWT:             "placeholder",
+				CredentialConfigurationID: "UniversityDegreeCredentialLDP",
+				CredentialFormat:          "ldp_vc",
+			},
+			configID:    "UniversityDegreeCredentialLDP",
+			format:      "dc+sd-jwt",
+			hasMismatch: true,
+		},
+		{
+			name: "config_mismatch",
+			wallet: &walletMaterial{
+				CredentialJWT:             "placeholder",
+				CredentialConfigurationID: "UniversityDegreeCredentialLDP",
+				CredentialFormat:          "ldp_vc",
+			},
+			configID:    "UniversityDegreeCredential",
+			format:      "ldp_vc",
+			hasMismatch: true,
+		},
+		{
+			name: "empty_active_format_with_constraints_is_mismatch",
+			wallet: &walletMaterial{
+				CredentialJWT:             "placeholder",
+				CredentialConfigurationID: "UniversityDegreeCredentialLDP",
+				CredentialFormat:          "",
+			},
+			configID:    "UniversityDegreeCredentialLDP",
+			format:      "ldp_vc",
+			hasMismatch: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			hasMismatch := walletCredentialSelectionMismatch(testCase.wallet, testCase.configID, testCase.format)
+			if hasMismatch != testCase.hasMismatch {
+				t.Fatalf("walletCredentialSelectionMismatch() = %v, want %v", hasMismatch, testCase.hasMismatch)
+			}
+		})
+	}
+}
+
 func buildTestRequestJWT(t *testing.T, responseURI string) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

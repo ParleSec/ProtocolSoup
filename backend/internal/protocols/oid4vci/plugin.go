@@ -24,11 +24,9 @@ import (
 )
 
 const (
-	defaultCredentialConfigurationID = "UniversityDegreeCredential"
-	defaultCredentialVCT             = "https://protocolsoup.com/credentials/university_degree"
-	tokenTTL                         = 10 * time.Minute
-	nonceTTL                         = 5 * time.Minute
-	deferredReadyDelay               = 3 * time.Second
+	tokenTTL           = 10 * time.Minute
+	nonceTTL           = 5 * time.Minute
+	deferredReadyDelay = 3 * time.Second
 )
 
 type offerRecord struct {
@@ -70,7 +68,7 @@ type issuanceTransaction struct {
 	Model      models.VCIssuanceTransaction
 	Subject    string
 	ReadyAt    time.Time
-	Credential string
+	Credential interface{}
 }
 
 // Plugin implements OpenID for Verifiable Credential Issuance.
@@ -82,6 +80,8 @@ type Plugin struct {
 	lookingGlass *lookingglass.Engine
 	baseURL      string
 	walletStore  *vc.WalletCredentialStore
+	credentialConfigurations map[string]credentialConfiguration
+	issuerDrivers            map[string]credentialIssuerDriver
 
 	mu                   sync.RWMutex
 	offers               map[string]*offerRecord
@@ -99,16 +99,17 @@ func NewPlugin() *Plugin {
 			ID:          "oid4vci",
 			Name:        "OpenID4VCI",
 			Version:     "0.1.0",
-			Description: "OpenID for Verifiable Credential Issuance with SD-JWT VC",
-			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt"},
-			RFCs:        []string{"OpenID4VCI 1.0", "OAuth 2.0", "SD-JWT VC"},
+			Description: "OpenID for Verifiable Credential Issuance with multi-format VC support",
+			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt", "mso-mdoc", "jwt-vc"},
+			RFCs:        []string{"OpenID4VCI 1.0", "OAuth 2.0", "SD-JWT VC", "VC Data Model 2.0"},
 		}),
-		offers:               make(map[string]*offerRecord),
-		offersByPreAuthCode:  make(map[string]string),
-		accessGrants:         make(map[string]*accessGrant),
-		issuanceTransactions: make(map[string]*issuanceTransaction),
-		wallets:              make(map[string]*walletIdentity),
-		walletsByUserID:      make(map[string]string),
+		credentialConfigurations: defaultCredentialConfigurationRegistry(),
+		offers:                   make(map[string]*offerRecord),
+		offersByPreAuthCode:      make(map[string]string),
+		accessGrants:             make(map[string]*accessGrant),
+		issuanceTransactions:     make(map[string]*issuanceTransaction),
+		wallets:                  make(map[string]*walletIdentity),
+		walletsByUserID:          make(map[string]string),
 	}
 }
 
@@ -130,6 +131,13 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	}
 	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
 		p.lookingGlass = lg
+	}
+	p.issuerDrivers = map[string]credentialIssuerDriver{
+		credentialFormatDCSdJWT:    &sdJWTCredentialIssuerDriver{plugin: p},
+		credentialFormatJWTVCJSON:  &jwtVCCredentialIssuerDriver{plugin: p},
+		credentialFormatJWTVCJSONL: &jwtVCJSONLDCredentialIssuerDriver{plugin: p},
+		credentialFormatLDPVC:      &ldpVCCredentialIssuerDriver{plugin: p},
+		credentialFormatMSOMDOC:    &msoMDocCredentialIssuerDriver{plugin: p},
 	}
 	p.walletStore = vc.DefaultWalletCredentialStore()
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
@@ -608,21 +616,7 @@ func (p *Plugin) metadataWellKnownPath() string {
 }
 
 func (p *Plugin) credentialConfigurationsSupported() map[string]map[string]interface{} {
-	return map[string]map[string]interface{}{
-		defaultCredentialConfigurationID: {
-			"format": "dc+sd-jwt",
-			"vct":    defaultCredentialVCT,
-			"scope":  "vc:university_degree",
-			"cryptographic_binding_methods_supported": []string{
-				"jwk",
-			},
-			"proof_types_supported": map[string]interface{}{
-				"jwt": map[string]interface{}{
-					"proof_signing_alg_values_supported": []string{"RS256"},
-				},
-			},
-		},
-	}
+	return credentialConfigurationsSupportedFromRegistry(p.credentialConfigurations)
 }
 
 func (p *Plugin) randomValue(size int) string {

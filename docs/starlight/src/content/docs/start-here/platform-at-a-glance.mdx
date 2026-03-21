@@ -5,14 +5,14 @@ description: Understand how ProtocolSoup is architected before you deploy or int
 
 ## Architecture
 
-ProtocolSoup is a Go backend with a React frontend. The backend uses a plugin system where each identity protocol is a self-contained module that registers its own HTTP routes, flow definitions, and demo scenarios. The frontend connects via a gateway that aggregates protocol metadata and proxies traffic to the correct backend service.
+ProtocolSoup is a Go backend with a Next.js App Router frontend. The backend uses a plugin system where each identity protocol is a self-contained module that registers its own HTTP routes, flow definitions, and demo scenarios. The frontend serves SSR/SSG discovery pages plus client-interactive protocol tooling, and forwards protocol HTTP traffic to backend services.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  Browser (React UI)                                 │
+│  Browser (Next.js UI)                               │
 │  Looking Glass • Token Inspector • Flow Visualizer  │
 └──────────────────────┬──────────────────────────────┘
-                       │ HTTP + WebSocket
+                       │ HTTP + WebSocket (edge-routed)
                        ▼
 ┌──────────────────────────────────────────────────────┐
 │  Gateway (:8080)                                     │
@@ -44,11 +44,12 @@ Federation  SCIM       SSF       SPIFFE
 ## Request Flow
 
 1. User selects a protocol and flow in the frontend UI.
-2. Frontend sends the request to the gateway via nginx proxy.
-3. Gateway routes to the correct protocol service based on path prefix.
-4. Protocol service executes the flow, generating real tokens, assertions, or credentials.
-5. Each step emits a Looking Glass event over WebSocket.
-6. Looking Glass renders every step, payload, and validation result in the browser in real time.
+2. Frontend sends HTTP protocol requests to backend via configured rewrites.
+3. Edge routing sends WebSocket traffic (`/ws/*`) directly to backend.
+4. Gateway routes to the correct protocol service based on path prefix.
+5. Protocol service executes the flow, generating real tokens, assertions, or credentials.
+6. Each step emits a Looking Glass event over WebSocket.
+7. Looking Glass renders every step, payload, and validation result in the browser in real time.
 
 ## Plugin System
 
@@ -81,7 +82,7 @@ Each event can carry RFC reference annotations linking to the relevant specifica
 | Layer | Technology |
 |-------|-----------|
 | Backend runtime | Go 1.24, chi router |
-| Frontend framework | React 18, Vite 7 |
+| Frontend framework | Next.js App Router, React 18 |
 | Styling | Tailwind CSS, Framer Motion |
 | State management | Zustand |
 | Real-time | WebSocket (Looking Glass event streaming) |

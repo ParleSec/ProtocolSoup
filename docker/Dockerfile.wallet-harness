@@ -2,14 +2,14 @@ FROM node:20-alpine AS wallet-ui-builder
 
 WORKDIR /repo
 
-COPY frontend/package.json frontend/package-lock.json ./frontend/
-WORKDIR /repo/frontend
-RUN npm ci --legacy-peer-deps
+COPY wallet-ui/package.json wallet-ui/package-lock.json ./wallet-ui/
+WORKDIR /repo/wallet-ui
+RUN npm ci
 
 WORKDIR /repo
-COPY frontend/ ./frontend/
+COPY wallet-ui/ ./wallet-ui/
 COPY backend/cmd/walletharness/static ./backend/cmd/walletharness/static
-RUN cd frontend && npm run build:wallet
+RUN cd wallet-ui && npm run build
 
 FROM golang:1.24-alpine AS builder
 

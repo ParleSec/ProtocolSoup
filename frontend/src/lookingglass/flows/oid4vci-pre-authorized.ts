@@ -16,6 +16,8 @@ export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
   txCodeValue?: string
   deferred?: boolean
+  credentialConfigurationID?: string
+  credentialFormat?: string
 }
 
 export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
@@ -55,7 +57,10 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
           deferredRetryAfterSeconds,
         )
       } else if (typeof credentialResponse.credential === 'string') {
-        this.captureCredential(credentialResponse.credential)
+        this.captureCredential(credentialResponse.credential, {
+          format: this.selectedCredentialFormat(credentialResponse),
+          credentialConfigurationID: this.selectedCredentialConfigurationID(),
+        })
       }
 
       this.updateState({
@@ -94,6 +99,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       },
       body: JSON.stringify({
         tx_code_required: !!this.flowConfig.txCodeRequired,
+        credential_configuration_ids: [this.selectedCredentialConfigurationID()],
       }),
       step: 'Create pre-authorized credential offer',
       rfcReference: 'OpenID4VCI 1.0 Section 4',
@@ -280,7 +286,8 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        credential_configuration_id: 'UniversityDegreeCredential',
+        credential_configuration_id: this.selectedCredentialConfigurationID(),
+        format: this.selectedCredentialFormat(),
         proofs: [
           {
             proof_type: 'jwt',
@@ -392,6 +399,8 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
             },
           })
           this.captureCredential(payload.credential, {
+            format: this.selectedCredentialFormat(payload),
+            credentialConfigurationID: this.selectedCredentialConfigurationID(),
             deferredFlow: true,
             deferredStatus: 'completed',
             deferredTransactionId: transaction,
@@ -507,6 +516,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
   private captureCredential(rawCredential: string, additionalMetadata?: Record<string, unknown>): void {
     const issuerJWT = this.extractIssuerJWT(rawCredential)
     const decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
+    const credentialFormat = String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'dc+sd-jwt'
     const decoded = this.decodeJwt(issuerJWT, 'access_token')
     this.updateState({
       decodedTokens: [...this.state.decodedTokens, decoded],
@@ -514,8 +524,8 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     const disclosureCount = rawCredential.split('~').filter(Boolean).length - 1
     this.addVCArtifact({
       type: 'credential',
-      title: 'Issued SD-JWT VC',
-      format: 'dc+sd-jwt',
+      title: `Issued ${credentialFormat} Credential`,
+      format: credentialFormat,
       rfcReference: 'OpenID4VCI 1.0 Section 8',
       raw: rawCredential,
       json: decodedCredentialJWT
@@ -530,12 +540,32 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     this.addEvent({
       type: 'token',
       title: 'Credential Received',
-      description: 'Issued SD-JWT VC captured from credential endpoint',
+      description: `Issued ${credentialFormat} credential captured from credential endpoint`,
       data: {
-        format: 'dc+sd-jwt',
+        format: credentialFormat,
         hasDisclosures: rawCredential.includes('~'),
       },
     })
+  }
+
+  private selectedCredentialConfigurationID(): string {
+    const configured = String(this.flowConfig.credentialConfigurationID || '').trim()
+    if (configured) {
+      return configured
+    }
+    return 'UniversityDegreeCredential'
+  }
+
+  private selectedCredentialFormat(responsePayload?: Record<string, unknown>): string {
+    const responseFormat = responsePayload ? String(responsePayload.format || '').trim() : ''
+    if (responseFormat) {
+      return responseFormat
+    }
+    const configured = String(this.flowConfig.credentialFormat || '').trim()
+    if (configured) {
+      return configured
+    }
+    return 'dc+sd-jwt'
   }
 
   private extractIssuerJWT(rawCredential: string): string {
@@ -618,7 +648,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     if (direct) {
       return direct
     }
-    const legacy = String(offerData.tx_code_value || '').trim()
-    return legacy
+    const fallbackTxCode = String(offerData.tx_code_value || '').trim()
+    return fallbackTxCode
   }
 }

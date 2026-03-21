@@ -10,8 +10,12 @@
 **/.astro
 
 # Build outputs
+**/.next
 **/dist
 **/build
+**/.next
+**/*.tsbuildinfo
+**/.dccache
 **/*.exe
 **/*.exe~
 **/*.dll

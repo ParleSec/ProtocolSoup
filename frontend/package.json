@@ -9,23 +9,19 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "dev:wallet": "vite --config vite.wallet.config.ts",
-    "build": "npm run generate-sitemap && tsc && vite build",
-    "build:wallet": "tsc --noEmit && vite build --config vite.wallet.config.ts",
-    "preview": "vite preview",
-    "lint": "eslint src wallet --report-unused-disable-directives --max-warnings 0",
-    "generate-sitemap": "node scripts/generate-sitemap.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
     "generate-og-image": "node scripts/generate-og-image.mjs"
   },
   "dependencies": {
     "framer-motion": "^11.5.6",
     "lucide-react": "^0.447.0",
+    "next": "latest",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-helmet-async": "^2.0.5",
-    "react-router-dom": "^6.30.3"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
@@ -34,7 +30,6 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.8",
     "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "eslint": "^10.0.0",
     "eslint-plugin-react-hooks": "7.1.0-canary-4842fbea-20260217",
@@ -44,8 +39,7 @@
     "sharp": "^0.33.5",
     "tailwindcss": "^3.4.12",
     "typescript": "^5.6.2",
-    "typescript-eslint": "^8.15.0",
-    "vite": "^7.3.1"
+    "typescript-eslint": "^8.15.0"
   },
   "overrides": {
     "@typescript-eslint/typescript-estree": {

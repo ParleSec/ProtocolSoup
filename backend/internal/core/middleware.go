@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -81,7 +82,10 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 // Limit returns middleware that rate limits requests by IP
 func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
+		ip := resolveClientIP(r)
+		if ip == "" {
+			ip = "unknown"
+		}
 
 		rl.mu.Lock()
 		// Clean old requests
@@ -108,6 +112,54 @@ func (rl *RateLimiter) Limit(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func resolveClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+
+	// Fly.io sets Fly-Client-IP; other proxies commonly set X-Forwarded-For/X-Real-IP.
+	candidates := []string{
+		r.Header.Get("Fly-Client-IP"),
+		r.Header.Get("X-Forwarded-For"),
+		r.Header.Get("X-Real-IP"),
+		r.RemoteAddr,
+	}
+
+	for _, candidate := range candidates {
+		clientIP := normalizeClientIP(candidate)
+		if clientIP != "" {
+			return clientIP
+		}
+	}
+
+	return ""
+}
+
+func normalizeClientIP(value string) string {
+	token := strings.TrimSpace(value)
+	if token == "" {
+		return ""
+	}
+
+	// X-Forwarded-For can be a list; first entry is the original client.
+	if strings.Contains(token, ",") {
+		token = strings.TrimSpace(strings.Split(token, ",")[0])
+	}
+
+	if host, _, err := net.SplitHostPort(token); err == nil {
+		token = host
+	}
+
+	token = strings.TrimPrefix(token, "[")
+	token = strings.TrimSuffix(token, "]")
+
+	parsed := net.ParseIP(token)
+	if parsed == nil {
+		return token
+	}
+	return parsed.String()
 }
 
 // Recovery middleware recovers from panics
