@@ -290,65 +290,6 @@ func (s *WalletCredentialStore) List(subject string) []WalletCredentialRecord {
 	return records
 }
 
-// List returns all credential records for a subject.
-func (s *WalletCredentialStore) List(subject string) []WalletCredentialRecord {
-	if s == nil {
-		return nil
-	}
-	normalizedSubject := strings.TrimSpace(subject)
-	if normalizedSubject == "" {
-		return nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.syncFromDiskLocked(); err != nil {
-		return nil
-	}
-	byVCT, ok := s.credentials[normalizedSubject]
-	if !ok {
-		return nil
-	}
-	records := make([]WalletCredentialRecord, 0, len(byVCT))
-	for _, record := range byVCT {
-		records = append(records, record)
-	}
-	sort.Slice(records, func(i, j int) bool {
-		return records[i].UpdatedAt.After(records[j].UpdatedAt)
-	})
-	return records
-}
-
-// FindByID returns a credential record for a subject and credential ID.
-func (s *WalletCredentialStore) FindByID(subject string, credentialID string) (WalletCredentialRecord, bool) {
-	normalizedID := strings.TrimSpace(credentialID)
-	if normalizedID == "" {
-		return WalletCredentialRecord{}, false
-	}
-	for _, record := range s.List(subject) {
-		if strings.TrimSpace(record.CredentialID) == normalizedID {
-			return record, true
-		}
-	}
-	return WalletCredentialRecord{}, false
-}
-
-// FindByConfiguration returns a record that matches configuration constraints.
-func (s *WalletCredentialStore) FindByConfiguration(subject string, configurationID string, format string) (WalletCredentialRecord, bool) {
-	normalizedConfigurationID := strings.TrimSpace(configurationID)
-	normalizedFormat := strings.TrimSpace(format)
-	for _, record := range s.List(subject) {
-		if normalizedConfigurationID != "" && strings.TrimSpace(record.CredentialConfigurationID) != normalizedConfigurationID {
-			continue
-		}
-		if normalizedFormat != "" && strings.TrimSpace(record.Format) != normalizedFormat {
-			continue
-		}
-		return record, true
-	}
-	return WalletCredentialRecord{}, false
-}
-
 // Reset clears all records. Intended for test isolation.
 func (s *WalletCredentialStore) Reset() {
 	if s == nil {

@@ -1233,43 +1233,6 @@ func intersectsStringSlice(left []string, right []string) bool {
 	return false
 }
 
-	requiredClaimPaths := make([]string, 0)
-	if session != nil {
-		trimmedDCQL := strings.TrimSpace(session.DCQLQuery)
-		if trimmedDCQL != "" {
-			var dcqlPayload map[string]interface{}
-			if err := json.Unmarshal([]byte(trimmedDCQL), &dcqlPayload); err == nil {
-				rawCredentials, _ := dcqlPayload["credentials"].([]interface{})
-				seenRequiredClaims := make(map[string]struct{})
-				for _, rawCredential := range rawCredentials {
-					credentialObject, _ := rawCredential.(map[string]interface{})
-					rawClaims, _ := credentialObject["claims"].([]interface{})
-					for _, rawClaim := range rawClaims {
-						claimObject, _ := rawClaim.(map[string]interface{})
-						rawPath, _ := claimObject["path"].([]interface{})
-						segments := make([]string, 0, len(rawPath))
-						for _, rawSegment := range rawPath {
-							segment, _ := rawSegment.(string)
-							segment = strings.TrimSpace(segment)
-							if segment == "" {
-								continue
-							}
-							segments = append(segments, segment)
-						}
-						if len(segments) == 0 {
-							continue
-						}
-						claimPath := strings.Join(segments, ".")
-						if _, exists := seenRequiredClaims[claimPath]; exists {
-							continue
-						}
-						seenRequiredClaims[claimPath] = struct{}{}
-						requiredClaimPaths = append(requiredClaimPaths, claimPath)
-					}
-				}
-				sort.Strings(requiredClaimPaths)
-			}
-		}
 func containsString(values []string, target string) bool {
 	target = strings.TrimSpace(target)
 	if target == "" {
