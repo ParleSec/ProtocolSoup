@@ -1,5 +1,9 @@
 # Architecture Documentation
 
+> Canonical docs site route: `https://docs.protocolsoup.com/developers/architecture/system-architecture/`
+>
+> This legacy file remains for in-repo context; public navigation should use the docs site route.
+
 ## Overview
 
 The Security Protocol Showcase is built as a modular, extensible platform for demonstrating authentication and authorization protocols. The architecture emphasizes separation of concerns, testability, and the ability to add new protocols without modifying core infrastructure.

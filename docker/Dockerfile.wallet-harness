@@ -1,3 +1,16 @@
+FROM node:20-alpine AS wallet-ui-builder
+
+WORKDIR /repo
+
+COPY wallet-ui/package.json wallet-ui/package-lock.json ./wallet-ui/
+WORKDIR /repo/wallet-ui
+RUN npm ci
+
+WORKDIR /repo
+COPY wallet-ui/ ./wallet-ui/
+COPY backend/cmd/walletharness/static ./backend/cmd/walletharness/static
+RUN cd wallet-ui && npm run build
+
 FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
@@ -6,6 +19,7 @@ COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 
 COPY backend/ ./
+COPY --from=wallet-ui-builder /repo/backend/cmd/walletharness/static ./cmd/walletharness/static
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o wallet-harness ./cmd/walletharness
 
 FROM alpine:3.21

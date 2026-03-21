@@ -1,0 +1,76 @@
+---
+title: "Integration Patterns"
+description: "Choose the right API topology for your ProtocolSoup deployment."
+---
+
+# Integration Patterns
+
+## Pattern 1: Gateway-First
+
+Route all traffic through gateway when you run multiple protocol services.
+
+```
+Client → Gateway (:8080) → Federation / SCIM / SSF / SPIFFE
+```
+
+**When to use:**
+
+- You want one base URL for all clients
+- You need centralized protocol discovery (`GET /api/protocols`)
+- You want Looking Glass WebSocket proxying on the same host
+- You are running the full stack or multiple services
+
+**Configuration:**
+
+Set upstream URLs on the gateway:
+
+```bash
+FEDERATION_SERVICE_URL=http://federation-service:8080
+SCIM_SERVICE_URL=http://scim-service:8080
+SSF_SERVICE_URL=http://ssf-service:8080
+SPIFFE_SERVICE_URL=http://spiffe-service:8080
+VC_SERVICE_URL=http://vc-service:8080
+```
+
+See the full [environment variables reference](/deploy/environment-variables/) for all configuration options.
+
+## Pattern 2: Direct Service
+
+Call protocol APIs directly when you only run one or two services.
+
+```
+Client → Federation (:8080)
+Client → SCIM (:8081)
+```
+
+**When to use:**
+
+- You are validating one protocol family (e.g., SCIM only or VC only)
+- You need maximum control over request routing
+- You are running in CI or automated test pipelines
+
+**Port mapping:** All services default to internal port 8080. When running multiple services without compose, map each to a different host port (e.g. `-p 8081:8080` for the second service).
+
+## Pattern 3: Hybrid
+
+Use gateway for browser traffic and direct access for API integration.
+
+```
+Browser → Gateway → Frontend / Protocol Services
+API Client → Service directly
+```
+
+**When to use:**
+
+- Platform teams own gateway routing for the UI
+- Protocol teams need direct service observability
+- You want separate internal and external traffic paths
+
+## Integration Checklist
+
+- [ ] Set `SHOWCASE_BASE_URL` to your external URL on every service
+- [ ] Set `SHOWCASE_CORS_ORIGINS` for browser clients
+- [ ] Pin image tags based on environment requirements
+- [ ] Mount persistent volumes where state matters (SCIM, SSF, VC)
+- [ ] Verify health endpoints after startup (`GET /health`)
+- [ ] Configure HTTPS termination for internet-facing deployments

@@ -1,0 +1,91 @@
+name: Docs Deploy
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - "docs/starlight/**"
+      - "openapi/**"
+      - "docker/Dockerfile.docs"
+      - "docker/nginx-docs.conf"
+      - "fly.docs.toml"
+      - ".github/workflows/docs-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  build-and-validate:
+    name: Build Starlight Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: docs/starlight
+
+      - name: Copy OpenAPI specs
+        run: |
+          mkdir -p docs/starlight/public/openapi
+          cp openapi/v1/*.yaml docs/starlight/public/openapi/
+
+      - name: Build docs
+        run: npm run build
+        working-directory: docs/starlight
+
+  deploy-production:
+    name: Deploy Docs Production
+    runs-on: ubuntu-latest
+    needs: [build-and-validate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    concurrency:
+      group: deploy-docs-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@1.5
+
+      - name: Validate Fly token
+        run: |
+          if [ -z "${FLY_API_TOKEN:-}" ]; then
+            echo "FLY_DOCS_API_TOKEN secret is required for docs production deployment."
+            exit 1
+          fi
+          flyctl auth whoami
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DOCS_API_TOKEN }}
+
+      - name: Deploy production docs app
+        run: flyctl deploy --config fly.docs.toml --app protocolsoup-docs --remote-only
+        timeout-minutes: 15
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DOCS_API_TOKEN }}
+
+      - name: Smoke test
+        run: |
+          for url in "https://protocolsoup-docs.fly.dev/" "https://docs.protocolsoup.com/"; do
+            for i in 1 2 3; do
+              if curl -fsS --retry 2 --retry-delay 5 "$url" > /dev/null 2>&1; then
+                echo "✓ $url"
+                break
+              fi
+              echo "Attempt $i failed for $url, waiting 10s..."
+              sleep 10
+            done
+          done

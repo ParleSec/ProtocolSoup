@@ -8,6 +8,7 @@
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
+import { decodeJWTWithoutValidation } from '../../utils/crypto'
 
 export interface OID4VPDirectPostConfig extends FlowExecutorConfig {
   responseMode?: 'direct_post' | 'direct_post.jwt'
@@ -190,6 +191,7 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     }
     const requestURI = String(requestData.request_uri || '')
     const requestJWT = String(requestData.request || '')
+    const decodedRequestJWT = requestJWT ? decodeJWTWithoutValidation(requestJWT) : null
     const trustMode = String(requestData.trust_mode || '').trim()
     const didWebAllowedHosts = Array.isArray(requestData.did_web_allowed_hosts)
       ? requestData.did_web_allowed_hosts.map(host => String(host).trim()).filter(Boolean)
@@ -205,7 +207,9 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         format: 'oauth-authz-req+jwt',
         rfcReference: 'OpenID4VP 1.0 Section 5',
         raw: requestJWT,
-        json: this.decodeJWTWithoutValidation(requestJWT),
+        json: decodedRequestJWT
+          ? { header: decodedRequestJWT.header, payload: decodedRequestJWT.payload }
+          : {},
         metadata: {
           responseMode,
           requestURI,
@@ -347,23 +351,4 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     }
   }
 
-  private decodeJWTWithoutValidation(token: string): Record<string, unknown> {
-    try {
-      const [headerB64, payloadB64] = token.split('.')
-      if (!headerB64 || !payloadB64) {
-        return {}
-      }
-      const parsePart = (value: string): Record<string, unknown> => {
-        const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
-        const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-        return JSON.parse(atob(base64 + padding)) as Record<string, unknown>
-      }
-      return {
-        header: parsePart(headerB64),
-        payload: parsePart(payloadB64),
-      }
-    } catch {
-      return {}
-    }
-  }
 }

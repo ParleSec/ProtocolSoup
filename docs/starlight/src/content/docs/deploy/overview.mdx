@@ -1,0 +1,46 @@
+---
+title: "GHCR Overview"
+description: "Deploy ProtocolSoup services from GitHub Container Registry."
+---
+
+# GHCR Overview
+
+ProtocolSoup publishes container images to GitHub Container Registry under the `ghcr.io/parlesec` namespace.
+
+## Available Images
+
+### Core Services
+
+| Image | Protocol Coverage |
+|-------|------------------|
+| `ghcr.io/parlesec/protocolsoup-gateway` | API aggregation, protocol routing, Looking Glass WebSocket |
+| `ghcr.io/parlesec/protocolsoup-federation` | OAuth 2.0, OIDC, SAML 2.0, OID4VCI, OID4VP |
+| `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 user/group provisioning |
+| `ghcr.io/parlesec/protocolsoup-ssf` | SSF with CAEP/RISC events and standalone receiver |
+| `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity (X.509, JWT SVIDs) |
+| `ghcr.io/parlesec/protocolsoup-vc` | OID4VCI and OID4VP (standalone, without federation) |
+| `ghcr.io/parlesec/protocolsoup-wallet` | OID4VP wallet harness for presentation testing |
+| `ghcr.io/parlesec/protocolsoup-frontend` | Next.js App Router UI with Looking Glass and token inspector |
+
+### SPIRE Infrastructure
+
+| Image | Role |
+|-------|------|
+| `ghcr.io/parlesec/protocolsoup-spire-server` | Trust domain authority, key management |
+| `ghcr.io/parlesec/protocolsoup-spire-agent` | Workload API socket provider |
+| `ghcr.io/parlesec/protocolsoup-spire-registration` | One-shot workload entry bootstrap |
+
+## Supply Chain
+
+Published images include:
+
+- Multi-architecture builds
+- Trivy vulnerability scanning
+- Cosign signature and attestation
+- SBOM generation
+
+## Getting Started
+
+1. Choose a [Deployment Model](/deploy/deployment-models/).
+2. Select the service from the pages in this tab.
+3. Pick tags using the [Release And Tag Policy](/deploy/release-and-tag-policy/).

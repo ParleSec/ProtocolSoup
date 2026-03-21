@@ -7,9 +7,11 @@
 
 export const SITE_CONFIG = {
   name: 'Protocol Soup',
-  tagline: 'An Interactive Protocol Sandbox',
+  tagline: 'Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM & SSF Testing Playground',
   baseUrl: 'https://protocolsoup.com',
-  defaultImage: 'https://protocolsoup.com/og-image.png',
+  docsUrl: 'https://docs.protocolsoup.com',
+  walletUrl: 'https://wallet.protocolsoup.com',
+  defaultImage: 'https://protocolsoup.com/opengraph-image',
   twitterHandle: '@protocolsoup',
   author: 'Mason Parle',
   locale: 'en_US',
@@ -31,28 +33,40 @@ export interface PageSEO {
 export const PAGE_SEO: Record<string, PageSEO> = {
   // Homepage - Primary landing page
   '/': {
-    title: 'Protocol Soup - OAuth 2.0, OIDC & SAML Testing Playground',
-    description: 'Learn authentication protocols by running them. Execute real OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM flows against working infrastructure. Decode JWTs, inspect tokens, and understand security flows.',
+    title: 'Protocol Soup | Run Real Authentication & Identity Protocol Flows',
+    description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and learn protocols hands-on.',
     keywords: [
       'oauth2 playground',
-      'oauth testing tool',
+      'oauth 2.0 testing tool',
       'oidc testing',
+      'openid connect playground',
       'authentication protocol sandbox',
       'jwt decoder',
       'token inspector',
-      'oauth2 tutorial',
-      'openid connect tutorial',
+      'saml testing tool',
+      'verifiable credentials',
+      'oid4vci playground',
+      'oid4vp testing',
+      'spiffe spire tutorial',
+      'scim 2.0 testing',
+      'identity protocol testing',
+      'oauth flow visualization',
+      'pkce tutorial',
+      'security protocol sandbox',
     ],
     ogType: 'website',
   },
 
   // Protocols Hub
   '/protocols': {
-    title: 'Identity Protocol Reference Guide - OAuth 2.0, OIDC, SAML, SPIFFE, SCIM',
-    description: 'Comprehensive reference for authentication and identity protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0.',
+    title: 'Identity Protocol Reference Guide - OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM',
+    description: 'Comprehensive reference for authentication and verifiable credential protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0.',
     keywords: [
       'identity protocol reference',
       'authentication protocols',
+      'verifiable credential protocols',
+      'oid4vci',
+      'oid4vp',
       'oauth2 documentation',
       'oidc specification',
       'saml documentation',
@@ -122,6 +136,36 @@ export const PAGE_SEO: Record<string, PageSEO> = {
     ogType: 'article',
   },
 
+  // OID4VCI Protocol
+  '/protocol/oid4vci': {
+    title: 'OID4VCI Tutorial - Verifiable Credential Issuance with OpenID',
+    description: 'Learn OpenID for Verifiable Credential Issuance (OID4VCI) with interactive examples. Explore credential offers, pre-authorized code grants, tx_code challenges, proof binding, c_nonce freshness, and deferred issuance.',
+    keywords: [
+      'oid4vci tutorial',
+      'openid for verifiable credential issuance',
+      'pre-authorized code',
+      'credential offer uri',
+      'sd-jwt vc issuance',
+      'verifiable credential issuance',
+    ],
+    ogType: 'article',
+  },
+
+  // OID4VP Protocol
+  '/protocol/oid4vp': {
+    title: 'OID4VP Tutorial - Verifiable Presentation Requests and Validation',
+    description: 'Learn OpenID for Verifiable Presentations (OID4VP) with interactive verifier flows. Understand DCQL queries, request objects, direct_post/direct_post.jwt, holder binding, and policy evaluation.',
+    keywords: [
+      'oid4vp tutorial',
+      'openid for verifiable presentations',
+      'dcql query',
+      'direct_post.jwt',
+      'vp token validation',
+      'verifiable presentation verification',
+    ],
+    ogType: 'article',
+  },
+
   // SAML 2.0 Protocol
   '/protocol/saml': {
     title: 'SAML 2.0 Tutorial - Enterprise SSO & Federation Explained',
@@ -178,6 +222,8 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
   const protocolNames: Record<string, string> = {
     oauth2: 'OAuth 2.0',
     oidc: 'OpenID Connect',
+    oid4vci: 'OID4VCI',
+    oid4vp: 'OID4VP',
     saml: 'SAML 2.0',
     spiffe: 'SPIFFE/SPIRE',
     scim: 'SCIM 2.0',
@@ -198,6 +244,11 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
     'hybrid': ['oidc hybrid flow', 'hybrid grant type'],
     'userinfo': ['userinfo endpoint', 'oidc claims', 'user profile endpoint'],
     'discovery': ['oidc discovery', 'well-known openid-configuration', 'provider metadata'],
+    'oid4vci-pre-authorized': ['oid4vci pre-authorized code', 'credential offer uri', 'openid4vci issuance'],
+    'oid4vci-pre-authorized-tx-code': ['oid4vci tx_code', 'pre-authorized tx code', 'openid4vci token exchange'],
+    'oid4vci-deferred-issuance': ['oid4vci deferred issuance', 'deferred_credential', 'transaction_id polling'],
+    'oid4vp-direct-post': ['oid4vp direct_post', 'dcql presentation request', 'vp_token response'],
+    'oid4vp-direct-post-jwt': ['oid4vp direct_post.jwt', 'encrypted presentation response', 'oauth-authz-resp+jwt'],
     'sp-initiated-sso': ['sp initiated sso', 'service provider sso', 'saml redirect'],
     'idp-initiated-sso': ['idp initiated sso', 'identity provider sso', 'unsolicited response'],
     'single-logout': ['saml single logout', 'slo', 'federated logout'],

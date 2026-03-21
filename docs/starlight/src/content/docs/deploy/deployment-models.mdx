@@ -1,0 +1,83 @@
+---
+title: "Deployment Models"
+description: "Choose the deployment model that matches your evaluation or integration goal."
+---
+
+# Deployment Models
+
+## Model 1: Full Stack
+
+Run the complete ProtocolSoup experience with all services.
+
+```bash
+cd docker
+docker compose up -d
+```
+
+**Services started:** frontend, gateway, federation-service, scim-service, ssf-service
+
+**Add SPIFFE:**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+**Best for:** Protocol learning, demos, comprehensive evaluation.
+
+## Model 2: Single Service
+
+Run one protocol service from GHCR for targeted testing.
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolsoup-federation:latest
+```
+
+**Best for:** Validating one protocol family, CI pipelines, lightweight evaluation.
+
+**Common single-service deployments:**
+
+| Goal | Image |
+|------|-------|
+| OAuth/OIDC/SAML testing | `protocolsoup-federation` |
+| SCIM provisioning testing | `protocolsoup-scim` |
+| SSF event stream testing | `protocolsoup-ssf` |
+| OID4VCI/OID4VP without federation | `protocolsoup-vc` + `protocolsoup-wallet` |
+
+## Model 3: Simple Monolith
+
+Run a single backend with frontend, no service splitting or gateway.
+
+```bash
+cd docker
+docker compose -f docker-compose.simple.yml up -d
+```
+
+| Service | Port | Role |
+|---------|------|------|
+| backend | 8080 | Single Go process with all protocols registered |
+| frontend | 3000 | Browser UI with Looking Glass |
+
+**Includes:** OAuth 2.0, OIDC, SAML. No SCIM, SSF, SPIFFE, VC, or gateway.
+
+**Note:** This compose file builds from source (`Dockerfile.backend` and `Dockerfile.frontend`) rather than pulling GHCR images. You need the full repository cloned locally.
+
+**Best for:** Quick evaluation of core federation protocols without multi-service overhead.
+
+## Model 4: Custom Topology
+
+Combine selected GHCR images with your own infrastructure.
+
+**Typical pattern:**
+
+1. Run selected ProtocolSoup services from GHCR.
+2. Place behind your own reverse proxy or API gateway.
+3. Configure `SHOWCASE_BASE_URL` to match your external domain.
+4. Apply your organization's auth, logging, and observability controls.
+
+**Best for:** Platform integration, staging environments, production-like deployments.
+
+## Next
+
+Select the service guide you need from the pages in this tab.

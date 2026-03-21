@@ -1,44 +1,66 @@
 # protocolsoup-spire-agent
 
-**SPIRE Agent - Workload Attestation**
+## Service Summary
 
-Connects to SPIRE Server, performs workload attestation, and exposes Workload API socket for applications to fetch SVIDs.
+- **Image:** `ghcr.io/parlesec/protocolsoup-spire-agent`
+- **Purpose:** Run SPIRE Agent for node/workload attestation and provide Workload API sockets to workloads.
+- **Topology role:** Identity-plane runtime that bridges workload processes to SPIRE Server trust data.
+
+## Runtime Contract
+
+### Ports
+
+- No public TCP port is required for normal operation.
+- Agent Workload API is provided via Unix socket (`/run/spire/sockets/agent.sock`).
+
+### Dependencies
+
+- Requires `protocolsoup-spire-server` socket access for bootstrap and trust synchronization.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `(none)` | N/A | N/A | Runtime behavior is defined by embedded bootstrap script and mounted SPIRE config |
+
+### Storage And Volumes
+
+- `/run/spire/sockets/server` (read-only): SPIRE Server socket mount.
+- `/run/spire/sockets`: agent socket output mount (`agent.sock` for workloads).
+- `/opt/spire/data/agent`: agent state (bundle cache and attestation artifacts).
+
+### Health And Readiness
+
+- Container healthcheck runs:
+  - `/opt/spire/bin/spire-agent healthcheck -socketPath /run/spire/sockets/agent.sock`
+- Bootstrap script waits for server socket and generates join token before launching agent runtime.
+
+## API Surface
+
+- Exposes SPIFFE Workload API over Unix socket:
+  - X.509-SVID retrieval
+  - JWT-SVID retrieval
+  - trust-bundle access
+  - rotation watch streams
 
 ## Quick Start
 
+### docker run
+
 ```bash
-docker run -d \
+docker run -d --name spire-agent \
   -v spire-server-socket:/run/spire/sockets/server:ro \
   -v spire-agent-socket:/run/spire/sockets \
   -v spire-agent-data:/opt/spire/data/agent \
-  --name spire-agent \
-  ghcr.io/parlesec/protocolsoup-spire-agent
+  ghcr.io/parlesec/protocolsoup-spire-agent:latest
 ```
 
-**Requires:** `protocolsoup-spire-server` running and healthy
-
-## Volumes
-
-| Path | Description |
-|------|-------------|
-| `/run/spire/sockets/server` | SPIRE Server socket (read-only) |
-| `/run/spire/sockets` | Agent socket (expose to workloads) |
-| `/opt/spire/data/agent` | Agent data (bundle cache) |
-
-## Health Check
-
-```bash
-docker exec spire-agent \
-  /opt/spire/bin/spire-agent healthcheck \
-  -socketPath /run/spire/sockets/agent.sock
-```
-
-## Docker Compose
+### docker compose snippet
 
 ```yaml
 services:
   spire-agent:
-    image: ghcr.io/parlesec/protocolsoup-spire-agent
+    image: ghcr.io/parlesec/protocolsoup-spire-agent:latest
     depends_on:
       spire-server:
         condition: service_healthy
@@ -46,48 +68,30 @@ services:
       - spire-server-socket:/run/spire/sockets/server:ro
       - spire-agent-socket:/run/spire/sockets
       - spire-agent-data:/opt/spire/data/agent
-    healthcheck:
-      test: ["/opt/spire/bin/spire-agent", "healthcheck", "-socketPath", "/run/spire/sockets/agent.sock"]
-      interval: 30s
-      timeout: 10s
-      start_period: 45s
 ```
 
-## Important Note
+## Security Hardening
 
-**For Docker deployments**, consider using `protocolsoup-spiffe` instead. It has an embedded SPIRE Agent, which avoids Unix socket attestation issues across container boundaries.
+- Restrict socket volume access to trusted workloads only.
+- Keep agent and server on isolated, private networks.
+- Rotate join tokens and remove unused registration entries.
+- Audit which workloads can mount `agent.sock`.
 
-The standalone agent is useful for:
-- Kubernetes deployments (DaemonSet pattern)
-- VM-based deployments
-- Multi-workload scenarios
+## Troubleshooting
 
-## Workload API
+- **Agent never becomes healthy:** verify server socket mount path and server health.
+- **Workload cannot get SVID:** confirm workload has access to `/run/spire/sockets/agent.sock`.
+- **Bootstrap loop/re-attestation churn:** inspect persistent agent data volume and token generation path.
+- **Windows Docker socket issues:** prefer compose-managed SPIRE stack.
 
-Applications connect to `/run/spire/sockets/agent.sock` to:
-- Fetch X.509-SVIDs
-- Fetch JWT-SVIDs
-- Watch for SVID rotation
-- Get trust bundles
+## Versioning And Tags
 
-Example with `go-spiffe`:
-```go
-source, err := workloadapi.NewX509Source(ctx,
-    workloadapi.WithClientOptions(
-        workloadapi.WithAddr("unix:///run/spire/sockets/agent.sock"),
-    ),
-)
-```
+- `latest` is published from default-branch builds.
+- `sha-*` tags are emitted per build for immutable traceability.
+- release tags publish semver variants (`vX.Y.Z`, `vX.Y`, `vX`).
 
-## Platform Notes
+## Related Docs
 
-### Windows Docker
-
-When running on Windows with Docker Desktop, **use Docker Compose instead of standalone `docker run`** for SPIRE containers. Windows Docker has limitations with Unix socket volumes that can prevent proper socket sharing between containers.
-
-**Recommended approach:**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
-```
-
-The standalone `docker run` commands work correctly on Linux and macOS.
+- Package index: [README.md](README.md)
+- SPIRE server image: [spire-server.md](spire-server.md)
+- SPIFFE service image: [spiffe.md](spiffe.md)

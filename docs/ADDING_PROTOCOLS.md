@@ -1,5 +1,9 @@
 # Adding Protocols (Contributor Guide)
 
+> Canonical docs site route: `https://docs.protocolsoup.com/developers/extending/add-a-protocol/`
+>
+> This legacy file remains for in-repo context; public navigation should use the docs site route.
+
 This is a concrete, end-to-end checklist for adding a new protocol plugin. It includes exact files to touch and a worked example.
 
 ## 0. Choose IDs and naming
@@ -194,7 +198,7 @@ const PROTOCOL_ICONS = {
 }
 ```
 
-3) `frontend/src/pages/ProtocolDemo.tsx`:
+3) `frontend/src/views/ProtocolDemo.tsx`:
 
 ```ts
 const flowMeta = {
@@ -209,14 +213,14 @@ const flowMeta = {
 ```
 Use the exact `flow.id` string from the backend, not the URL slug.
 
-4) `frontend/vite.config.ts` (dev only): add a proxy entry for the protocol base path so executors can call `/${protocolId}` locally.
+4) `frontend/next.config.ts`: add a rewrite entry for the protocol base path so executors can call `/${protocolId}` in local/dev and production runtimes.
 
 ```ts
-server: {
-  proxy: {
+async rewrites() {
+  return [
     // ...
-    '/newprotocol': { target: 'http://localhost:8080', changeOrigin: true },
-  },
+    { source: '/newprotocol/:path*', destination: `${backendOrigin}/newprotocol/:path*` },
+  ]
 },
 ```
 

@@ -385,6 +385,10 @@ export interface ExecutorFactoryConfig {
   lookingGlassSessionId?: string
   /** OID4VCI transaction code for tx_code flow variants */
   txCodeValue?: string
+  /** OID4VCI credential configuration override */
+  oid4vciCredentialConfigurationID?: string
+  /** OID4VCI credential format override */
+  oid4vciCredentialFormat?: string
   /** OID4VP dcql_query JSON override */
   oid4vpDCQLQueryJSON?: string
   /** OID4VP scope alias override */
@@ -482,8 +486,16 @@ export function createFlowExecutor(
   }
 
   // Handle OID4VCI tx_code flow variants
-  if (flowId.startsWith('oid4vci-') && config.txCodeValue) {
-    (fullConfig as OID4VCIPreAuthorizedConfig).txCodeValue = config.txCodeValue
+  if (flowId.startsWith('oid4vci-')) {
+    if (config.txCodeValue) {
+      (fullConfig as OID4VCIPreAuthorizedConfig).txCodeValue = config.txCodeValue
+    }
+    if (config.oid4vciCredentialConfigurationID) {
+      (fullConfig as OID4VCIPreAuthorizedConfig).credentialConfigurationID = config.oid4vciCredentialConfigurationID
+    }
+    if (config.oid4vciCredentialFormat) {
+      (fullConfig as OID4VCIPreAuthorizedConfig).credentialFormat = config.oid4vciCredentialFormat
+    }
   }
 
   // Handle OID4VP dcql_query/scope alias overrides

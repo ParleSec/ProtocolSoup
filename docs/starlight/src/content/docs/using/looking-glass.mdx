@@ -1,0 +1,66 @@
+---
+title: Looking Glass
+description: The real-time execution and inspection console for protocol flows.
+---
+
+Looking Glass is the primary interface for executing protocol flows. It shows every step of a flow as it happens, with full payload visibility via WebSocket event streaming.
+
+## How It Works
+
+1. Select a protocol and flow from the sidebar.
+2. Enter required inputs (varies by flow -- could be a client ID, subject, callback URL, or tx_code).
+3. Execute the flow.
+4. Watch each step render in real time as the backend emits events.
+5. Click any step to inspect full request/response payloads, tokens, and validation results.
+
+## What You See
+
+Each flow execution produces a timeline of events:
+
+| Event Type | What It Shows |
+|------------|--------------|
+| `flow.step` | Major protocol steps (authorization request sent, token exchanged, assertion delivered) |
+| `token.issued` | Token creation with decoded claims |
+| `token.validated` | Token validation results with pass/fail details |
+| `request.sent` | Outbound HTTP requests with headers and body |
+| `response.received` | HTTP responses with status, headers, and body |
+| `http.exchange` | Complete request/response pairs |
+| `security.warning` | Validation failures, missing parameters, spec violations |
+| `security.info` | Successful security checks and confirmations |
+| `crypto.operation` | Key generation, signing, hash verification |
+
+Every event includes an annotation with RFC references (for example "RFC 6749 Section 4.1") and security context explaining what the step does and why.
+
+## Session Management
+
+Each flow execution creates a Looking Glass session. Sessions are linked to backend processing via:
+
+- The `X-Looking-Glass-Session` HTTP header
+- The `lg_session` query parameter (used for redirects where headers cannot be set)
+
+You can list active sessions at `GET /api/lookingglass/sessions` and retrieve a specific session at `GET /api/lookingglass/sessions/{id}`.
+
+## Token Inspector
+
+The built-in token decoder is available at `POST /api/lookingglass/decode`. It handles:
+
+- JWT access tokens and ID tokens
+- SAML assertions
+- Security Event Tokens (SETs)
+- X.509 certificates
+
+## SSF Sandbox
+
+SSF flows use a dedicated sandbox experience instead of the standard Looking Glass timeline. The SSF sandbox provides:
+
+- Stream configuration and management
+- CAEP/RISC event transmission and delivery
+- Receiver status monitoring with real event processing
+- Response action execution and security state tracking
+
+Use Looking Glass for all other protocol families.
+
+## Related
+
+- [Flow Walkthroughs](/using/flow-walkthroughs/)
+- [Protocol Catalog](/using/protocol-catalog/)

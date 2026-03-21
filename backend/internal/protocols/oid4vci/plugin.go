@@ -24,11 +24,9 @@ import (
 )
 
 const (
-	defaultCredentialConfigurationID = "UniversityDegreeCredential"
-	defaultCredentialVCT             = "https://protocolsoup.com/credentials/university_degree"
-	tokenTTL                         = 10 * time.Minute
-	nonceTTL                         = 5 * time.Minute
-	deferredReadyDelay               = 3 * time.Second
+	tokenTTL           = 10 * time.Minute
+	nonceTTL           = 5 * time.Minute
+	deferredReadyDelay = 3 * time.Second
 )
 
 type offerRecord struct {
@@ -70,7 +68,7 @@ type issuanceTransaction struct {
 	Model      models.VCIssuanceTransaction
 	Subject    string
 	ReadyAt    time.Time
-	Credential string
+	Credential interface{}
 }
 
 // Plugin implements OpenID for Verifiable Credential Issuance.
@@ -82,6 +80,8 @@ type Plugin struct {
 	lookingGlass *lookingglass.Engine
 	baseURL      string
 	walletStore  *vc.WalletCredentialStore
+	credentialConfigurations map[string]credentialConfiguration
+	issuerDrivers            map[string]credentialIssuerDriver
 
 	mu                   sync.RWMutex
 	offers               map[string]*offerRecord
@@ -99,16 +99,17 @@ func NewPlugin() *Plugin {
 			ID:          "oid4vci",
 			Name:        "OpenID4VCI",
 			Version:     "0.1.0",
-			Description: "OpenID for Verifiable Credential Issuance with SD-JWT VC",
-			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt"},
-			RFCs:        []string{"OpenID4VCI 1.0", "OAuth 2.0", "SD-JWT VC"},
+			Description: "OpenID for Verifiable Credential Issuance with multi-format VC support",
+			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt", "mso-mdoc", "jwt-vc"},
+			RFCs:        []string{"OpenID4VCI 1.0", "OAuth 2.0", "SD-JWT VC", "VC Data Model 2.0"},
 		}),
-		offers:               make(map[string]*offerRecord),
-		offersByPreAuthCode:  make(map[string]string),
-		accessGrants:         make(map[string]*accessGrant),
-		issuanceTransactions: make(map[string]*issuanceTransaction),
-		wallets:              make(map[string]*walletIdentity),
-		walletsByUserID:      make(map[string]string),
+		credentialConfigurations: defaultCredentialConfigurationRegistry(),
+		offers:                   make(map[string]*offerRecord),
+		offersByPreAuthCode:      make(map[string]string),
+		accessGrants:             make(map[string]*accessGrant),
+		issuanceTransactions:     make(map[string]*issuanceTransaction),
+		wallets:                  make(map[string]*walletIdentity),
+		walletsByUserID:          make(map[string]string),
 	}
 }
 
@@ -130,6 +131,13 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	}
 	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
 		p.lookingGlass = lg
+	}
+	p.issuerDrivers = map[string]credentialIssuerDriver{
+		credentialFormatDCSdJWT:    &sdJWTCredentialIssuerDriver{plugin: p},
+		credentialFormatJWTVCJSON:  &jwtVCCredentialIssuerDriver{plugin: p},
+		credentialFormatJWTVCJSONL: &jwtVCJSONLDCredentialIssuerDriver{plugin: p},
+		credentialFormatLDPVC:      &ldpVCCredentialIssuerDriver{plugin: p},
+		credentialFormatMSOMDOC:    &msoMDocCredentialIssuerDriver{plugin: p},
 	}
 	p.walletStore = vc.DefaultWalletCredentialStore()
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
@@ -180,129 +188,352 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "oid4vci-pre-authorized",
 			Name:        "OID4VCI Pre-Authorized Code",
-			Description: "Wallet resolves an offer URI, exchanges pre-authorized code for an access token, and requests an SD-JWT VC.",
+			Description: "Wallet resolves a credential offer URI, discovers issuer metadata, exchanges a pre-authorized code for an access token with c_nonce, and requests an SD-JWT VC bound to a proof JWT.",
 			Executable:  true,
 			Category:    "issuance",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
 					Name:        "Resolve Credential Offer",
-					Description: "Wallet resolves credential_offer_uri and validates issuer metadata relationship.",
+					Description: "Wallet receives credential_offer_uri out-of-band and resolves it by fetching the credential offer object from the Credential Issuer (OID4VCI §4.1).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
 					Parameters: map[string]string{
-						"credential_offer_uri": "Reference URI returned out-of-band to the wallet",
+						"credential_offer_uri": "Reference URI delivered out-of-band to the wallet",
 					},
 					Security: []string{
-						"Credential offer envelope must include exactly one of credential_offer or credential_offer_uri",
+						"Credential offer envelope must include exactly one of credential_offer or credential_offer_uri (XOR)",
+						"Offer must contain credential_issuer, credential_configuration_ids, and grants with pre-authorized_code",
 					},
 				},
 				{
 					Order:       2,
-					Name:        "Token Request (Pre-Authorized)",
-					Description: "Wallet uses the pre-authorized code to get a credential access token and c_nonce challenge.",
-					From:        "Wallet",
-					To:          "Authorization Server",
-					Type:        "request",
-					Parameters: map[string]string{
-						"grant_type":          "urn:ietf:params:oauth:grant-type:pre-authorized_code",
-						"pre-authorized_code": "Code from offer grants block",
-					},
-					Security: []string{
-						"If tx_code is required by the offer, token request must include tx_code",
-						"Token response should include c_nonce when nonce freshness checks are enforced",
-					},
-				},
-				{
-					Order:       3,
-					Name:        "Credential Request",
-					Description: "Wallet submits proof(s) with c_nonce binding and requests selected credential configuration.",
+					Name:        "Discover Issuer Metadata",
+					Description: "Wallet fetches Credential Issuer Metadata from /.well-known/openid-credential-issuer to discover supported credential configurations, endpoints, and proof requirements (OID4VCI §5).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
 					Parameters: map[string]string{
-						"credential_configuration_id": "Requested credential configuration",
-						"proofs":                      "Proof object(s) with jwt proof type",
+						"metadata_path": "/.well-known/openid-credential-issuer/{issuer_path}",
 					},
 					Security: []string{
-						"proofs are mandatory when proof_types_supported is declared",
-						"Proof audience and nonce must match issuer and fresh c_nonce challenge",
+						"Wallet must verify credential_issuer in metadata matches the offer's credential_issuer",
+						"Metadata must declare credential_configurations_supported for offered configuration IDs",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "Token Request (Pre-Authorized Code)",
+					Description: "Wallet exchanges the pre-authorized code from the offer's grant block for an access token at the token endpoint (OID4VCI §6.1).",
+					From:        "Wallet",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"grant_type":          "urn:ietf:params:oauth:grant-type:pre-authorized_code (REQUIRED)",
+						"pre-authorized_code": "Code from credential offer grants block (REQUIRED)",
+					},
+					Security: []string{
+						"Content-Type must be application/x-www-form-urlencoded",
+						"Pre-authorized code is single-use and expires within offer TTL",
+						"If offer grant includes tx_code object, token request must include tx_code",
 					},
 				},
 				{
 					Order:       4,
-					Name:        "Credential Issued",
-					Description: "Issuer returns SD-JWT VC serialization bound to verified proof context.",
+					Name:        "Token Response",
+					Description: "Authorization Server validates the pre-authorized code and returns an access token with a c_nonce challenge for proof binding (OID4VCI §6.2).",
+					From:        "Authorization Server",
+					To:          "Wallet",
+					Type:        "response",
+					Parameters: map[string]string{
+						"access_token":       "Bearer token authorizing credential issuance (REQUIRED)",
+						"token_type":         "Bearer (REQUIRED)",
+						"expires_in":         "Token lifetime in seconds",
+						"scope":              "Granted scope for credential issuance",
+						"c_nonce":            "Challenge nonce for proof JWT binding (REQUIRED when nonce freshness enforced)",
+						"c_nonce_expires_in": "Nonce lifetime in seconds",
+					},
+					Security: []string{
+						"Access token is bound to specific credential_configuration_ids from the offer",
+						"c_nonce must be used in the next credential request proof and is single-use",
+					},
+				},
+				{
+					Order:       5,
+					Name:        "Credential Request",
+					Description: "Wallet submits a credential request with proof JWT(s) bound to the active c_nonce and the issuer audience (OID4VCI §7).",
+					From:        "Wallet",
+					To:          "Credential Issuer",
+					Type:        "request",
+					Parameters: map[string]string{
+						"credential_configuration_id": "Requested credential configuration (REQUIRED)",
+						"proof / proofs":              "Proof object(s) with proof_type=jwt containing signed JWT (REQUIRED when proof_types_supported declared)",
+					},
+					Security: []string{
+						"Proof JWT header typ must be openid4vci-proof+jwt",
+						"Proof must include iss, sub, aud (issuer ID), nonce (active c_nonce), iat, exp, and cnf.jwk",
+						"Proof audience must match credential_issuer identifier",
+						"c_nonce is consumed on use — replayed or expired nonces are rejected",
+					},
+				},
+				{
+					Order:       6,
+					Name:        "Credential Response",
+					Description: "Credential Issuer validates proof key binding, nonce freshness, and audience, then returns the issued SD-JWT VC with a fresh c_nonce for subsequent requests (OID4VCI §7.3).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
+					Parameters: map[string]string{
+						"format":             "dc+sd-jwt (SD-JWT VC serialization)",
+						"credential":         "Issuer-signed JWT with selective disclosure segments",
+						"c_nonce":            "Next challenge nonce for any follow-up credential requests",
+						"c_nonce_expires_in": "Next nonce lifetime in seconds",
+					},
+					Security: []string{
+						"Credential must be signed by the issuer using advertised key material and algorithm",
+						"SD-JWT includes _sd digests for selectively disclosable claims",
+						"Wallet stores issued credential material securely for later presentation",
+					},
 				},
 			},
 		},
 		{
 			ID:          "oid4vci-pre-authorized-tx-code",
 			Name:        "OID4VCI Pre-Authorized Code + tx_code",
-			Description: "Same as pre-authorized flow but with transaction code enforcement.",
+			Description: "Pre-authorized credential issuance with mandatory transaction code enforcement at token exchange — the offer's grant block declares a tx_code object requiring wallet to include a user-entered code (OID4VCI §6.1).",
 			Executable:  true,
 			Category:    "issuance",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
-					Name:        "Resolve Offer with tx_code Constraint",
-					Description: "Offer declares a tx_code object requiring user-entered transaction code.",
+					Name:        "Resolve Credential Offer with tx_code",
+					Description: "Wallet resolves credential_offer_uri and observes the tx_code object in the pre-authorized_code grant, indicating a transaction code is required at token exchange (OID4VCI §4.1.1).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
+					Parameters: map[string]string{
+						"credential_offer_uri": "Reference URI delivered out-of-band to the wallet",
+					},
+					Security: []string{
+						"Offer grant must include tx_code object with description, length, and input_mode",
+						"Wallet must prompt user for the transaction code before proceeding to token exchange",
+					},
 				},
 				{
 					Order:       2,
-					Name:        "Token Request with tx_code",
-					Description: "Wallet includes tx_code alongside pre-authorized code to obtain access token.",
-					From:        "Wallet",
-					To:          "Authorization Server",
-					Type:        "request",
-				},
-				{
-					Order:       3,
-					Name:        "Credential Request",
-					Description: "Wallet sends proof bound to c_nonce and receives issued credential.",
+					Name:        "Discover Issuer Metadata",
+					Description: "Wallet fetches Credential Issuer Metadata to discover supported configurations, endpoints, and proof requirements (OID4VCI §5).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
+					Parameters: map[string]string{
+						"metadata_path": "/.well-known/openid-credential-issuer/{issuer_path}",
+					},
+					Security: []string{
+						"Metadata credential_issuer must match the offer's credential_issuer",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "Token Request with tx_code",
+					Description: "Wallet includes the user-entered tx_code alongside the pre-authorized code to obtain an access token (OID4VCI §6.1).",
+					From:        "Wallet",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"grant_type":          "urn:ietf:params:oauth:grant-type:pre-authorized_code (REQUIRED)",
+						"pre-authorized_code": "Code from credential offer grants block (REQUIRED)",
+						"tx_code":             "User-entered transaction code (REQUIRED when tx_code object present in offer)",
+					},
+					Security: []string{
+						"Missing or incorrect tx_code results in invalid_grant error",
+						"tx_code is delivered via an out-of-band channel (e.g., email, SMS)",
+						"Content-Type must be application/x-www-form-urlencoded",
+					},
+				},
+				{
+					Order:       4,
+					Name:        "Token Response",
+					Description: "Authorization Server validates pre-authorized code and tx_code, then returns access token with c_nonce challenge (OID4VCI §6.2).",
+					From:        "Authorization Server",
+					To:          "Wallet",
+					Type:        "response",
+					Parameters: map[string]string{
+						"access_token":       "Bearer token authorizing credential issuance (REQUIRED)",
+						"token_type":         "Bearer (REQUIRED)",
+						"c_nonce":            "Challenge nonce for proof JWT binding (REQUIRED)",
+						"c_nonce_expires_in": "Nonce lifetime in seconds",
+					},
+					Security: []string{
+						"Access token is bound to credential_configuration_ids from the offer",
+						"c_nonce is single-use and must appear in the proof JWT nonce claim",
+					},
+				},
+				{
+					Order:       5,
+					Name:        "Credential Request",
+					Description: "Wallet submits credential request with proof JWT bound to c_nonce and issuer audience (OID4VCI §7).",
+					From:        "Wallet",
+					To:          "Credential Issuer",
+					Type:        "request",
+					Parameters: map[string]string{
+						"credential_configuration_id": "Requested credential configuration (REQUIRED)",
+						"proof / proofs":              "Proof object(s) with proof_type=jwt (REQUIRED)",
+					},
+					Security: []string{
+						"Proof JWT typ must be openid4vci-proof+jwt",
+						"Proof must bind to active c_nonce and credential issuer audience",
+					},
+				},
+				{
+					Order:       6,
+					Name:        "Credential Response",
+					Description: "Credential Issuer validates proof and returns the issued SD-JWT VC with a fresh c_nonce (OID4VCI §7.3).",
+					From:        "Credential Issuer",
+					To:          "Wallet",
+					Type:        "response",
+					Parameters: map[string]string{
+						"format":     "dc+sd-jwt (SD-JWT VC serialization)",
+						"credential": "Issuer-signed JWT with selective disclosure segments",
+						"c_nonce":    "Next challenge nonce",
+					},
+					Security: []string{
+						"Credential is signed by the issuer and returned as SD-JWT VC serialization",
+					},
 				},
 			},
 		},
 		{
 			ID:          "oid4vci-deferred-issuance",
 			Name:        "OID4VCI Deferred Credential Issuance",
-			Description: "Wallet receives transaction_id and polls deferred_credential endpoint until issuance is ready.",
+			Description: "Full pre-authorized code flow where the credential endpoint returns a transaction_id for deferred issuance — wallet polls the deferred_credential endpoint until the credential is ready (OID4VCI §9).",
 			Executable:  true,
 			Category:    "issuance",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
-					Name:        "Initial Credential Request",
-					Description: "Issuer returns transaction_id instead of immediate credential.",
+					Name:        "Resolve Credential Offer",
+					Description: "Wallet resolves credential_offer_uri from the Credential Issuer. The offer uses a pre-authorized_code grant and the issuer marks issuance for deferred delivery (OID4VCI §4.1).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
+					Parameters: map[string]string{
+						"credential_offer_uri": "Reference URI delivered out-of-band to the wallet",
+					},
+					Security: []string{
+						"Offer envelope must include exactly one of credential_offer or credential_offer_uri",
+					},
 				},
 				{
 					Order:       2,
-					Name:        "Poll Deferred Endpoint",
-					Description: "Wallet polls deferred_credential endpoint using transaction_id.",
+					Name:        "Discover Issuer Metadata",
+					Description: "Wallet fetches Credential Issuer Metadata to discover supported configurations, token endpoint, nonce endpoint, and deferred_credential_endpoint (OID4VCI §5).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
+					Parameters: map[string]string{
+						"metadata_path": "/.well-known/openid-credential-issuer/{issuer_path}",
+					},
+					Security: []string{
+						"Metadata must declare deferred_credential_endpoint for deferred issuance support",
+					},
 				},
 				{
 					Order:       3,
-					Name:        "Deferred Credential Ready",
-					Description: "Issuer returns final credential once issuance backend marks transaction ready.",
+					Name:        "Token Request (Pre-Authorized Code)",
+					Description: "Wallet exchanges pre-authorized code for an access token with c_nonce (OID4VCI §6.1).",
+					From:        "Wallet",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"grant_type":          "urn:ietf:params:oauth:grant-type:pre-authorized_code (REQUIRED)",
+						"pre-authorized_code": "Code from credential offer grants block (REQUIRED)",
+					},
+					Security: []string{
+						"Content-Type must be application/x-www-form-urlencoded",
+					},
+				},
+				{
+					Order:       4,
+					Name:        "Token Response",
+					Description: "Authorization Server returns access token and c_nonce challenge for proof binding (OID4VCI §6.2).",
+					From:        "Authorization Server",
+					To:          "Wallet",
+					Type:        "response",
+					Parameters: map[string]string{
+						"access_token":       "Bearer token (REQUIRED)",
+						"c_nonce":            "Challenge nonce for proof binding (REQUIRED)",
+						"c_nonce_expires_in": "Nonce lifetime in seconds",
+					},
+					Security: []string{
+						"Access token lineage is verified on deferred polling — only the original token can retrieve the credential",
+					},
+				},
+				{
+					Order:       5,
+					Name:        "Credential Request",
+					Description: "Wallet submits credential request with proof JWT bound to c_nonce. Issuer accepts proof but defers credential delivery (OID4VCI §7).",
+					From:        "Wallet",
+					To:          "Credential Issuer",
+					Type:        "request",
+					Parameters: map[string]string{
+						"credential_configuration_id": "Requested credential configuration (REQUIRED)",
+						"proof / proofs":              "Proof object(s) with proof_type=jwt (REQUIRED)",
+					},
+					Security: []string{
+						"Proof JWT typ must be openid4vci-proof+jwt",
+						"Proof must bind to active c_nonce and credential issuer audience",
+					},
+				},
+				{
+					Order:       6,
+					Name:        "Deferred Credential Response",
+					Description: "Credential Issuer validates proof but responds with a transaction_id instead of an immediate credential, signalling deferred issuance (OID4VCI §9).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
+					Parameters: map[string]string{
+						"transaction_id":     "Opaque identifier for the pending issuance transaction (REQUIRED)",
+						"c_nonce":            "Next challenge nonce",
+						"c_nonce_expires_in": "Next nonce lifetime in seconds",
+					},
+					Security: []string{
+						"transaction_id is bound to the original access token — a different token cannot poll for this credential",
+					},
+				},
+				{
+					Order:       7,
+					Name:        "Poll Deferred Endpoint",
+					Description: "Wallet polls the deferred_credential endpoint with transaction_id until the credential is ready. Issuer returns issuance_pending while processing (OID4VCI §9.1).",
+					From:        "Wallet",
+					To:          "Credential Issuer",
+					Type:        "request",
+					Parameters: map[string]string{
+						"transaction_id": "Transaction ID from deferred credential response (REQUIRED)",
+						"Authorization":  "Bearer {access_token} (REQUIRED — must match original token lineage)",
+					},
+					Security: []string{
+						"Access token must match the token used in the original credential request",
+						"Wallet should poll according to server guidance and apply reasonable backoff",
+						"issuance_pending error indicates credential is not yet ready",
+					},
+				},
+				{
+					Order:       8,
+					Name:        "Credential Ready",
+					Description: "Credential Issuer returns the final SD-JWT VC once the issuance backend marks the transaction as ready (OID4VCI §9.1).",
+					From:        "Credential Issuer",
+					To:          "Wallet",
+					Type:        "response",
+					Parameters: map[string]string{
+						"format":     "dc+sd-jwt (SD-JWT VC serialization)",
+						"credential": "Issuer-signed JWT with selective disclosure segments",
+					},
+					Security: []string{
+						"Credential is identical to what would have been returned in an immediate response",
+						"Transaction is consumed — subsequent polls for the same transaction_id are rejected",
+					},
 				},
 			},
 		},
@@ -385,21 +616,7 @@ func (p *Plugin) metadataWellKnownPath() string {
 }
 
 func (p *Plugin) credentialConfigurationsSupported() map[string]map[string]interface{} {
-	return map[string]map[string]interface{}{
-		defaultCredentialConfigurationID: {
-			"format": "dc+sd-jwt",
-			"vct":    defaultCredentialVCT,
-			"scope":  "vc:university_degree",
-			"cryptographic_binding_methods_supported": []string{
-				"jwk",
-			},
-			"proof_types_supported": map[string]interface{}{
-				"jwt": map[string]interface{}{
-					"proof_signing_alg_values_supported": []string{"RS256"},
-				},
-			},
-		},
-	}
+	return credentialConfigurationsSupportedFromRegistry(p.credentialConfigurations)
 }
 
 func (p *Plugin) randomValue(size int) string {

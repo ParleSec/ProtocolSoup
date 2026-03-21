@@ -1,0 +1,19 @@
+apis:
+  gateway@v1:
+    root: openapi/v1/gateway.yaml
+  scim@v1:
+    root: openapi/v1/scim.yaml
+  federation@v1:
+    root: openapi/v1/federation.yaml
+  vc@v1:
+    root: openapi/v1/vc.yaml
+
+extends:
+  - recommended
+
+rules:
+  info-license: off
+  operation-operationId-unique: error
+  no-unused-components: warn
+  operation-4xx-response: off
+  operation-2xx-response: off

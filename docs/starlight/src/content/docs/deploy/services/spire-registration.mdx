@@ -1,0 +1,34 @@
+---
+title: "SPIRE Registration"
+description: "One-shot workload entry bootstrap for SPIRE."
+---
+
+# SPIRE Registration (`protocolsoup-spire-registration`)
+
+Image: `ghcr.io/parlesec/protocolsoup-spire-registration`
+
+## When To Use
+
+Run this one-shot container to create baseline SPIRE workload registration entries after SPIRE server is healthy.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| TCP port | None |
+| Socket | `/run/spire/sockets/server.sock` (read-only) |
+| Behavior | Runs once and exits with code `0` |
+
+## Run
+
+```bash
+docker run --rm \
+  -v spire-server-socket:/run/spire/sockets:ro \
+  ghcr.io/parlesec/protocolsoup-spire-registration:latest
+```
+
+## Operational Notes
+
+- Run after SPIRE server and SPIRE agent are healthy.
+- This is a bootstrap step, not a long-running service.
+- Review and adjust created workload entries to match your deployment topology.

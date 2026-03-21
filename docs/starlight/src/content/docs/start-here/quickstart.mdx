@@ -1,0 +1,88 @@
+---
+title: Quickstart
+description: Get ProtocolSoup running locally in under two minutes.
+---
+
+## Option 1: Full Stack (UI + All Protocol Services)
+
+Run the frontend, gateway, federation, SCIM, and SSF services together.
+
+### Prerequisites
+
+- Docker Desktop or Docker Engine with Compose
+- Available ports: `3000` (UI), `8080` (gateway/API), `8081` (SSF receiver)
+
+### Start
+
+```bash
+cd docker
+docker compose up -d
+```
+
+This starts five services:
+
+| Service | Port | Role |
+|---------|------|------|
+| frontend | 3000 | Browser UI with Looking Glass |
+| gateway | 8080 | API entrypoint, routes to protocol services |
+| federation-service | internal | OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP |
+| scim-service | internal | SCIM 2.0 provisioning |
+| ssf-service | internal | Shared Signals Framework |
+
+### Verify
+
+- UI: [http://localhost:3000](http://localhost:3000)
+- Health: [http://localhost:8080/health](http://localhost:8080/health)
+- API index: [http://localhost:8080/api](http://localhost:8080/api)
+
+### Add SPIFFE/SPIRE
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+This adds SPIRE Server, SPIRE Agent, workload registration, and the SPIFFE service.
+
+## Option 2: Single Service
+
+Run one protocol service in isolation for targeted testing.
+
+### Federation (OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP)
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolsoup-federation:latest
+```
+
+### SCIM
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SCIM_API_TOKEN=change-me \
+  ghcr.io/parlesec/protocolsoup-scim:latest
+```
+
+### SSF
+
+```bash
+docker run -p 8080:8080 -p 8081:8081 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolsoup-ssf:latest
+```
+
+## Option 3: Simple Monolith (No Service Splitting)
+
+```bash
+cd docker
+docker compose -f docker-compose.simple.yml up -d
+```
+
+Runs a single backend (OAuth 2.0, OIDC, SAML only) and frontend. No SPIFFE, SCIM, or SSF.
+
+## Next Steps
+
+- [What You Can Do](/using/what-you-can-do/) -- start running flows
+- [Deployment Models](/deploy/deployment-models/) -- compare deployment strategies
+- [Platform At A Glance](/start-here/platform-at-a-glance/) -- understand the architecture

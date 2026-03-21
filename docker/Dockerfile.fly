@@ -1,6 +1,6 @@
-# Fly.io Dockerfile - Combined frontend + backend + SPIRE Agent
-# This creates a single container that serves both the API, static frontend,
-# and includes a SPIRE Agent for workload identity with resilient attestation.
+# Fly.io Dockerfile - Combined Next.js frontend + backend + SPIRE Agent
+# This creates a single container that serves backend APIs and a Next.js runtime,
+# with SPIRE Agent support for workload identity.
 
 # ============================================
 # Stage 1: Build Frontend
@@ -19,6 +19,12 @@ RUN npm install --legacy-peer-deps
 COPY frontend/ .
 
 # Build the frontend
+ARG BACKEND_ORIGIN=http://127.0.0.1:8080
+ENV BACKEND_ORIGIN=$BACKEND_ORIGIN
+ARG NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_WS_BASE_URL=
+ENV NEXT_PUBLIC_WS_BASE_URL=$NEXT_PUBLIC_WS_BASE_URL
 ENV NODE_ENV=production
 RUN npm run build
 
@@ -56,13 +62,15 @@ FROM alpine:3.21
 WORKDIR /app
 
 # Install runtime dependencies
-RUN apk --no-cache add ca-certificates supervisor
+RUN apk --no-cache add ca-certificates nodejs supervisor
 
 # Copy the backend binary
 COPY --from=backend-builder /app/server .
 
-# Copy the frontend build to be served as static files
-COPY --from=frontend-builder /frontend/dist ./static
+# Copy Next.js standalone runtime and assets
+COPY --from=frontend-builder /frontend/.next/standalone ./frontend
+COPY --from=frontend-builder /frontend/.next/static ./frontend/.next/static
+COPY --from=frontend-builder /frontend/public ./frontend/public
 
 # Copy SPIRE Agent binary (and server binary for token generation if needed)
 COPY --from=spire-agent /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
@@ -88,7 +96,9 @@ RUN chmod +x /opt/spire/bin/start-agent.sh && \
 # Set environment variables
 ENV SHOWCASE_ENV=production
 ENV SHOWCASE_LISTEN_ADDR=:8080
-ENV SHOWCASE_STATIC_DIR=/app/static
+ENV SHOWCASE_FRONTEND_ORIGIN=http://127.0.0.1:3000
+ENV BACKEND_ORIGIN=http://127.0.0.1:8080
+ENV NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
 
 # Expose port
 EXPOSE 8080

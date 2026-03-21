@@ -1,10 +1,21 @@
+# VCS and CI
+.git
+.github
+
 # Dependencies
 **/node_modules
 **/vendor
 
+# Astro build cache
+**/.astro
+
 # Build outputs
+**/.next
 **/dist
 **/build
+**/.next
+**/*.tsbuildinfo
+**/.dccache
 **/*.exe
 **/*.exe~
 **/*.dll

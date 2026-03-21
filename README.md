@@ -272,7 +272,7 @@ ProtocolSoup/
 |------------|---------|---------|
 | React | 18.3 | UI framework |
 | TypeScript | 5.6 | Type safety |
-| Vite | 7.3 | Build tool |
+| Next.js | 16.x | SSR/SSG app framework (App Router) |
 | Tailwind CSS | 3.4 | Styling |
 | Framer Motion | 11.5 | Animations |
 | Zustand | 4.5 | State management |
@@ -290,12 +290,12 @@ ProtocolSoup/
 
 ## Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md) - System design and data flow
-- [Adding Protocols](docs/ADDING_PROTOCOLS.md) - Plugin development guide
-- [ACME Example Protocol](docs/EXAMPLE_ACME.md) - End-to-end contributor walkthrough
-- [SPIFFE/SPIRE Integration](docs/SPIFFE.md) - Workload identity setup
-- [Container Images](docs/packages/README.md) - GHCR package documentation
-- [Contributing](CONTRIBUTING.md) - Contributing guidelines
+- [Docs Home](https://docs.protocolsoup.com/) - Public docs portal
+- [Start Here](https://docs.protocolsoup.com/start-here/overview) - First-run orientation and setup
+- [Use ProtocolSoup](https://docs.protocolsoup.com/use-protocolsoup/what-you-can-do) - User flows and walkthroughs
+- [Container Images](https://docs.protocolsoup.com/ghcr/overview) - GHCR deployment guidance
+- [API Reference](https://docs.protocolsoup.com/api-reference/overview) - OpenAPI-backed integration docs
+- [Protocols](https://docs.protocolsoup.com/protocols/oauth2) - Standards-aligned protocol pages
 
 ---
 
@@ -340,6 +340,7 @@ npm run dev
 |----------|---------|-------------|
 | `SHOWCASE_LISTEN_ADDR` | `:8080` | Server listen address |
 | `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public base URL |
+| `SHOWCASE_FRONTEND_ORIGIN` | (empty) | Optional Next.js runtime origin for backend web-route proxying |
 | `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `SHOWCASE_SPIFFE_ENABLED` | `false` | Enable SPIFFE integration |
 | `SHOWCASE_SPIFFE_SOCKET_PATH` | `unix:///run/spire/sockets/agent.sock` | Workload API socket |
@@ -383,7 +384,7 @@ This starts:
 - **Federation** - OAuth 2.0, OIDC, SAML
 - **SCIM** - User and group provisioning
 - **SSF** - Shared Signals Framework
-- **Frontend** - React UI at `http://localhost:3000`
+- **Frontend** - Next.js App Router UI at `http://localhost:3000`
 - **Gateway API** - Available at `http://localhost:8080`
 
 ### SPIFFE/SPIRE Overlay
@@ -456,7 +457,7 @@ Pre-built container images are available from GitHub Container Registry. Use the
 | `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 provisioning | [scim.md](docs/packages/scim.md) |
 | `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework | [ssf.md](docs/packages/ssf.md) |
 | `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity | [spiffe.md](docs/packages/spiffe.md) |
-| `ghcr.io/parlesec/protocolsoup-frontend` | React frontend UI | [frontend.md](docs/packages/frontend.md) |
+| `ghcr.io/parlesec/protocolsoup-frontend` | Next.js App Router frontend UI | [frontend.md](docs/packages/frontend.md) |
 | `ghcr.io/parlesec/protocolsoup-vc` | OID4VCI + OID4VP verifiable credentials APIs | [vc.md](docs/packages/vc.md) |
 | `ghcr.io/parlesec/protocolsoup-wallet` | OID4VP wallet harness | [wallet.md](docs/packages/wallet.md) |
 | `ghcr.io/parlesec/protocolsoup-spire-server` | SPIRE Server (CA) | [spire-server.md](docs/packages/spire-server.md) |

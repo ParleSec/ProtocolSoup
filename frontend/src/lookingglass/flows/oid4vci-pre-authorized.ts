@@ -10,11 +10,14 @@
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
+import { decodeJWTWithoutValidation } from '../../utils/crypto'
 
 export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
   txCodeValue?: string
   deferred?: boolean
+  credentialConfigurationID?: string
+  credentialFormat?: string
 }
 
 export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
@@ -45,11 +48,19 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       const walletSubject = typeof offerData.wallet_subject === 'string' ? offerData.wallet_subject : undefined
       const proofJWT = await this.createProof(tokenData.c_nonce, walletSubject)
       const credentialResponse = await this.requestCredential(tokenData.access_token, proofJWT)
+      const deferredRetryAfterSeconds = this.parsePositiveInt(credentialResponse.deferred_retry_after_seconds)
 
       if (credentialResponse.transaction_id) {
-        await this.pollDeferredCredential(tokenData.access_token, credentialResponse.transaction_id)
+        await this.pollDeferredCredential(
+          tokenData.access_token,
+          credentialResponse.transaction_id,
+          deferredRetryAfterSeconds,
+        )
       } else if (typeof credentialResponse.credential === 'string') {
-        this.captureCredential(credentialResponse.credential)
+        this.captureCredential(credentialResponse.credential, {
+          format: this.selectedCredentialFormat(credentialResponse),
+          credentialConfigurationID: this.selectedCredentialConfigurationID(),
+        })
       }
 
       this.updateState({
@@ -88,6 +99,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       },
       body: JSON.stringify({
         tx_code_required: !!this.flowConfig.txCodeRequired,
+        credential_configuration_ids: [this.selectedCredentialConfigurationID()],
       }),
       step: 'Create pre-authorized credential offer',
       rfcReference: 'OpenID4VCI 1.0 Section 4',
@@ -244,6 +256,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       },
       privateKey,
     )
+    const decodedProofJWT = decodeJWTWithoutValidation(proofJWT)
 
     this.addVCArtifact({
       type: 'proof_jwt',
@@ -251,7 +264,9 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       format: 'openid4vci-proof+jwt',
       rfcReference: 'OpenID4VCI 1.0 Section 8.2',
       raw: proofJWT,
-      json: this.decodeJWTWithoutValidation(proofJWT),
+      json: decodedProofJWT
+        ? { header: decodedProofJWT.header, payload: decodedProofJWT.payload }
+        : {},
       metadata: {
         nonceBound: true,
         walletSubject: normalizedSubject,
@@ -271,7 +286,8 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        credential_configuration_id: 'UniversityDegreeCredential',
+        credential_configuration_id: this.selectedCredentialConfigurationID(),
+        format: this.selectedCredentialFormat(),
         proofs: [
           {
             proof_type: 'jwt',
@@ -290,37 +306,69 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
 
     const credentialData = data as Record<string, unknown>
     if (credentialData.transaction_id) {
+      const transactionID = String(credentialData.transaction_id)
+      const deferredRetryAfterSeconds = this.parsePositiveInt(credentialData.deferred_retry_after_seconds)
       this.addVCArtifact({
-        type: 'verification_result',
+        type: 'deferred_status',
         title: 'Deferred Issuance Transaction',
         format: 'oid4vci-deferred',
         rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
         metadata: {
-          transactionId: String(credentialData.transaction_id),
+          deferredFlow: true,
+          deferredStatus: 'transaction_created',
+          transactionId: transactionID,
           deferred: true,
+          deferredRetryAfterSeconds,
+          pollAttempt: 0,
         },
       })
       this.addEvent({
         type: 'info',
         title: 'Deferred Issuance Started',
-        description: `transaction_id: ${String(credentialData.transaction_id)}`,
-        data: credentialData,
+        description: deferredRetryAfterSeconds
+          ? `transaction_id: ${transactionID} initial retry hint: ${deferredRetryAfterSeconds}s`
+          : `transaction_id: ${transactionID}`,
+        data: {
+          transactionId: transactionID,
+          deferredRetryAfterSeconds,
+        },
       })
     }
     return credentialData
   }
 
-  private async pollDeferredCredential(accessToken: string, transactionID: unknown): Promise<void> {
+  private async pollDeferredCredential(
+    accessToken: string,
+    transactionID: unknown,
+    initialRetryAfterSeconds?: number,
+  ): Promise<void> {
     const transaction = String(transactionID || '')
     if (!transaction) {
       throw new Error('Deferred issuance returned empty transaction_id')
     }
 
     this.updateState({ currentStep: 'Polling deferred_credential endpoint' })
+    const maxAttempts = 8
+    const firstPollDelay = this.clampRetryAfterSeconds(initialRetryAfterSeconds)
+    if (firstPollDelay > 0) {
+      this.addEvent({
+        type: 'info',
+        title: 'Deferred Issuance Pending',
+        description: `Waiting ${firstPollDelay}s before first deferred poll`,
+        data: {
+          transactionId: transaction,
+          retryAfterSeconds: firstPollDelay,
+        },
+      })
+      await this.sleep(firstPollDelay * 1000)
+    }
 
     let attempts = 0
-    while (attempts < 5) {
+    while (attempts < maxAttempts) {
       attempts += 1
+      this.updateState({
+        currentStep: `Polling deferred_credential endpoint (${attempts}/${maxAttempts})`,
+      })
       const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/deferred_credential`, {
         headers: {
           Accept: 'application/json',
@@ -337,25 +385,138 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       if (response.ok) {
         const payload = data as Record<string, unknown>
         if (typeof payload.credential === 'string') {
-          this.captureCredential(payload.credential)
+          this.addVCArtifact({
+            type: 'deferred_status',
+            title: 'Deferred Issuance Completed',
+            format: 'oid4vci-deferred',
+            rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
+            metadata: {
+              deferredFlow: true,
+              deferredStatus: 'completed',
+              transactionId: transaction,
+              pollAttempt: attempts,
+              maxPollAttempts: maxAttempts,
+            },
+          })
+          this.captureCredential(payload.credential, {
+            format: this.selectedCredentialFormat(payload),
+            credentialConfigurationID: this.selectedCredentialConfigurationID(),
+            deferredFlow: true,
+            deferredStatus: 'completed',
+            deferredTransactionId: transaction,
+            deferredPollAttempts: attempts,
+            deferredMaxPollAttempts: maxAttempts,
+          })
+          this.addEvent({
+            type: 'info',
+            title: 'Deferred Issuance Completed',
+            description: `transaction_id: ${transaction} issued after ${attempts} poll attempt${attempts === 1 ? '' : 's'}`,
+            data: {
+              transactionId: transaction,
+              pollAttempt: attempts,
+              maxPollAttempts: maxAttempts,
+            },
+          })
           return
         }
+        throw new Error('Deferred credential response missing credential')
       } else {
         const errorData = data as Record<string, unknown>
         const errorCode = String(errorData.error || '')
         if (errorCode !== 'issuance_pending') {
           throw new Error(String(errorData.error_description || errorCode || `Deferred polling failed (${response.status})`))
         }
+        const retryAfterSeconds = this.extractDeferredRetryAfterSeconds(errorData, response)
+        this.addVCArtifact({
+          type: 'deferred_status',
+          title: 'Deferred Issuance Pending',
+          format: 'oid4vci-deferred',
+          rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
+          metadata: {
+            deferredFlow: true,
+            deferredStatus: 'pending',
+            transactionId: transaction,
+            pollAttempt: attempts,
+            maxPollAttempts: maxAttempts,
+            retryAfterSeconds,
+          },
+        })
+        this.addEvent({
+          type: 'info',
+          title: 'Deferred Issuance Still Pending',
+          description: `Issuer returned issuance_pending retrying in ${retryAfterSeconds}s`,
+          data: {
+            transactionId: transaction,
+            attempt: attempts,
+            retryAfterSeconds,
+          },
+        })
+        this.updateState({
+          currentStep: `Deferred issuance pending retrying in ${retryAfterSeconds}s (${attempts}/${maxAttempts})`,
+        })
+        await this.sleep(retryAfterSeconds * 1000)
+        continue
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await this.sleep(1000)
     }
 
+    this.addVCArtifact({
+      type: 'deferred_status',
+      title: 'Deferred Issuance Timed Out',
+      format: 'oid4vci-deferred',
+      rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
+      metadata: {
+        deferredFlow: true,
+        deferredStatus: 'timeout',
+        transactionId: transaction,
+        pollAttempt: attempts,
+        maxPollAttempts: maxAttempts,
+      },
+    })
     throw new Error('Deferred credential was not ready within retry window')
   }
 
-  private captureCredential(rawCredential: string): void {
+  private extractDeferredRetryAfterSeconds(errorData: Record<string, unknown>, response: Response): number {
+    const bodyRetryAfter = this.parsePositiveInt(errorData.retry_after_seconds)
+    if (bodyRetryAfter !== undefined) {
+      return this.clampRetryAfterSeconds(bodyRetryAfter)
+    }
+    const headerRetryAfter = this.parsePositiveInt(response.headers.get('Retry-After'))
+    if (headerRetryAfter !== undefined) {
+      return this.clampRetryAfterSeconds(headerRetryAfter)
+    }
+    return 1
+  }
+
+  private clampRetryAfterSeconds(value?: number): number {
+    if (value === undefined || !Number.isFinite(value)) {
+      return 0
+    }
+    return Math.max(0, Math.min(15, Math.floor(value)))
+  }
+
+  private parsePositiveInt(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value > 0 ? Math.floor(value) : undefined
+    }
+    if (typeof value === 'string') {
+      const parsed = Number.parseInt(value.trim(), 10)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed
+      }
+    }
+    return undefined
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, ms))
+  }
+
+  private captureCredential(rawCredential: string, additionalMetadata?: Record<string, unknown>): void {
     const issuerJWT = this.extractIssuerJWT(rawCredential)
+    const decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
+    const credentialFormat = String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'dc+sd-jwt'
     const decoded = this.decodeJwt(issuerJWT, 'access_token')
     this.updateState({
       decodedTokens: [...this.state.decodedTokens, decoded],
@@ -363,50 +524,53 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     const disclosureCount = rawCredential.split('~').filter(Boolean).length - 1
     this.addVCArtifact({
       type: 'credential',
-      title: 'Issued SD-JWT VC',
-      format: 'dc+sd-jwt',
+      title: `Issued ${credentialFormat} Credential`,
+      format: credentialFormat,
       rfcReference: 'OpenID4VCI 1.0 Section 8',
       raw: rawCredential,
-      json: this.decodeJWTWithoutValidation(issuerJWT),
+      json: decodedCredentialJWT
+        ? { header: decodedCredentialJWT.header, payload: decodedCredentialJWT.payload }
+        : {},
       metadata: {
         hasDisclosures: rawCredential.includes('~'),
         disclosureCount: disclosureCount > 0 ? disclosureCount : 0,
+        ...(additionalMetadata || {}),
       },
     })
     this.addEvent({
       type: 'token',
       title: 'Credential Received',
-      description: 'Issued SD-JWT VC captured from credential endpoint',
+      description: `Issued ${credentialFormat} credential captured from credential endpoint`,
       data: {
-        format: 'dc+sd-jwt',
+        format: credentialFormat,
         hasDisclosures: rawCredential.includes('~'),
       },
     })
   }
 
+  private selectedCredentialConfigurationID(): string {
+    const configured = String(this.flowConfig.credentialConfigurationID || '').trim()
+    if (configured) {
+      return configured
+    }
+    return 'UniversityDegreeCredential'
+  }
+
+  private selectedCredentialFormat(responsePayload?: Record<string, unknown>): string {
+    const responseFormat = responsePayload ? String(responsePayload.format || '').trim() : ''
+    if (responseFormat) {
+      return responseFormat
+    }
+    const configured = String(this.flowConfig.credentialFormat || '').trim()
+    if (configured) {
+      return configured
+    }
+    return 'dc+sd-jwt'
+  }
+
   private extractIssuerJWT(rawCredential: string): string {
     const segments = rawCredential.split('~')
     return segments[0] || rawCredential
-  }
-
-  private decodeJWTWithoutValidation(token: string): Record<string, unknown> {
-    try {
-      const [headerB64, payloadB64] = token.split('.')
-      if (!headerB64 || !payloadB64) {
-        return {}
-      }
-      const parsePart = (value: string): Record<string, unknown> => {
-        const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
-        const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-        return JSON.parse(atob(base64 + padding)) as Record<string, unknown>
-      }
-      return {
-        header: parsePart(headerB64),
-        payload: parsePart(payloadB64),
-      }
-    } catch {
-      return {}
-    }
   }
 
   private async getWalletSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string }> {
@@ -484,7 +648,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     if (direct) {
       return direct
     }
-    const legacy = String(offerData.tx_code_value || '').trim()
-    return legacy
+    const fallbackTxCode = String(offerData.tx_code_value || '').trim()
+    return fallbackTxCode
   }
 }

@@ -1,33 +1,37 @@
-# Production frontend build
+FROM node:20-alpine AS deps
+
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-
-# Copy package files
-COPY frontend/package.json ./
-
-# Install dependencies
-RUN npm install --legacy-peer-deps
-
-# Copy source code
-COPY frontend/ .
-
-# Set production environment
-ENV NODE_ENV=production
-ENV VITE_APP_ENV=production
-
-# Build the application with optimizations
+COPY --from=deps /app/node_modules ./node_modules
+COPY frontend/ ./
+ARG BACKEND_ORIGIN=http://localhost:8080
+ENV BACKEND_ORIGIN=$BACKEND_ORIGIN
+ARG NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_WS_BASE_URL=
+ENV NEXT_PUBLIC_WS_BASE_URL=$NEXT_PUBLIC_WS_BASE_URL
+ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-# Final stage - copy built assets to volume
-FROM alpine:3.21
+FROM node:20-alpine AS runner
 
 WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 
-# Copy built assets
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
-# Create a script to copy files to the volume
-CMD ["sh", "-c", "cp -r /app/dist/* /app/dist/"]
+EXPOSE 3000
+
+CMD ["node", "server.js"]
 
 

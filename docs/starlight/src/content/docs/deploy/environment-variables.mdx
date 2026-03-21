@@ -1,0 +1,65 @@
+---
+title: "Environment Variables"
+description: "Consolidated reference for all configuration variables across ProtocolSoup services."
+---
+
+# Environment Variables
+
+All ProtocolSoup backend services share a common set of core variables. Individual services add protocol-specific configuration on top.
+
+## Core Variables (All Backend Services)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public URL used in metadata, redirect URIs, and token issuer claims. Set this to your externally reachable URL. |
+| `SHOWCASE_LISTEN_ADDR` | `:8080` | Address and port the service binds to. |
+| `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated list of allowed CORS origins for browser clients. |
+| `SHOWCASE_ENV` | `demo` | Runtime environment. |
+| `SHOWCASE_MOCK_IDP` | `true` | Enable built-in mock identity provider with demo users and clients. |
+| `SHOWCASE_DEBUG` | `false` | Enable debug logging. |
+
+## Gateway
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FEDERATION_SERVICE_URL` | - | Upstream URL for the federation service. |
+| `SCIM_SERVICE_URL` | - | Upstream URL for the SCIM service. |
+| `SSF_SERVICE_URL` | - | Upstream URL for the SSF service. |
+| `SPIFFE_SERVICE_URL` | - | Upstream URL for the SPIFFE service. |
+| `VC_SERVICE_URL` | - | Upstream URL for the VC service (if separate from federation). |
+
+## SCIM Service
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCIM_API_TOKEN` | - | Bearer token required for all SCIM API requests. Set this to any string; clients must send it in the `Authorization: Bearer <token>` header. |
+
+## SSF Service
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SSF_RECEIVER_TOKEN` | - | Bearer token the receiver accepts for event delivery. |
+
+## SPIFFE Service
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SPIFFE_AGENT_SOCKET` | `/run/spire/sockets/agent/agent.sock` | Path to the SPIRE agent Workload API socket. Required for full SPIRE mode. |
+| `SPIFFE_TRUST_DOMAIN` | `protocolsoup.local` | SPIFFE trust domain. |
+
+## Wallet Service
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WALLET_TARGET_BASE_URL` | `https://protocolsoup.com` | URL of the VC verifier service for OID4VP submissions. |
+| `WALLET_ALLOWED_CORS_ORIGINS` | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins. |
+| `WALLET_DEFAULT_SUBJECT` | `did:example:wallet:alice` | Default DID subject for demo sessions. |
+| `WALLET_SESSION_TTL` | Server default | Go duration (e.g. `30m`) for session lifetime. |
+| `WALLET_STRICT_SESSION_ISOLATION` | `true` | Enforce strict session boundaries between demo runs. |
+
+## Usage Notes
+
+- **`SHOWCASE_BASE_URL` is the most important variable.** It determines the issuer, entity ID, redirect URIs, and metadata URLs across all protocols. Always set it to the URL your clients will actually use.
+- When running behind a reverse proxy or load balancer, set `SHOWCASE_BASE_URL` to the external URL (e.g. `https://protocolsoup.example.com`) rather than the internal address.
+- `SHOWCASE_CORS_ORIGINS` must include the origin of your frontend. If the UI is at `https://app.example.com`, add that origin.
+- For SCIM, set `SCIM_API_TOKEN` to any secret string. Clients must include `Authorization: Bearer <your-token>` on every request.

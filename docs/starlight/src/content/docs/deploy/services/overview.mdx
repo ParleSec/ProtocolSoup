@@ -1,0 +1,40 @@
+---
+title: "Service Catalog"
+description: "Find the right ProtocolSoup service for your use case."
+---
+
+# Service Catalog
+
+Each service page includes the runtime contract (ports, health checks), required configuration, a quickstart command, and operational notes.
+
+## Core Services
+
+| Service | Protocols | When To Use |
+|---------|-----------|-------------|
+| Gateway | All (via routing) | Single API entrypoint for multi-service deployments |
+| Federation | OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP | Most protocol testing in one image |
+| SCIM | SCIM 2.0 | User/group provisioning testing |
+| SSF | SSF, CAEP, RISC | Security event stream testing |
+| SPIFFE | SPIFFE/SPIRE | Workload identity testing |
+| VC | OID4VCI, OID4VP | Standalone verifiable credentials (no federation) |
+| Wallet | OID4VP | Wallet harness for presentation submission |
+| Frontend | All (UI) | Browser interface with Looking Glass |
+
+## SPIRE Infrastructure
+
+| Service | When To Use |
+|---------|-------------|
+| SPIRE Server | Trust domain authority for full SPIFFE mode |
+| SPIRE Agent | Workload API socket for SPIFFE-enabled workloads |
+| SPIRE Registration | One-shot workload entry creation |
+
+## Quick Selection
+
+- **Need everything behind one URL?** Start with **Gateway**.
+- **Need OAuth, OIDC, SAML, and VC together?** Use **Federation**.
+- **Need identity provisioning?** Use **SCIM**.
+- **Need security event streams?** Use **SSF**.
+- **Need verifiable credentials only?** Use **VC** with optional **Wallet**.
+- **Need workload identity?** Use **SPIFFE** with SPIRE services.
+
+Select the service you need from the pages in this tab.

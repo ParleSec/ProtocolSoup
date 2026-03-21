@@ -1,0 +1,62 @@
+---
+title: "Frontend"
+description: "Next.js App Router UI with Looking Glass and token inspector."
+---
+
+# Frontend (`protocolsoup-frontend`)
+
+Image: `ghcr.io/parlesec/protocolsoup-frontend`
+
+## When To Use
+
+Use frontend when you want the browser UI for flow execution, Looking Glass, and token inspection.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `3000` |
+| Health | Root path `GET /` |
+| Server | Next.js standalone server (`node server.js`) |
+| Stack | Next.js App Router, React 18, Tailwind CSS, Framer Motion, Zustand |
+
+## Dependency
+
+Frontend requires a backend/gateway service reachable at `BACKEND_ORIGIN` (for example `http://gateway:8080` on Docker Compose networks).
+
+Next.js rewrites HTTP traffic for these paths to backend: `/api`, `/oauth2`, `/oidc`, `/oid4vci`, `/oid4vp`, `/saml`, `/spiffe`, `/scim`, `/ssf`.
+
+WebSocket paths are intentionally **not** rewritten by Next. Route `/ws/*` at your edge proxy directly to backend.
+
+## Environment
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `BACKEND_ORIGIN` | Yes (outside local defaults) | `http://localhost:8080` | Backend origin for HTTP rewrites |
+| `NEXT_PUBLIC_SITE_URL` | Yes (production) | `https://protocolsoup.com` | Canonical public base URL for metadata/sitemaps |
+| `DOCS_SITE_URL` | No | `https://docs.protocolsoup.com` | Docs sitemap host for sitemap index |
+
+## Run
+
+Both containers must be on the same Docker network:
+
+```bash
+docker network create protocolsoup-net
+
+docker run -d --name gateway --network protocolsoup-net \
+  -p 8080:8080 ghcr.io/parlesec/protocolsoup-gateway:latest
+
+docker run -d --name frontend --network protocolsoup-net \
+  -e BACKEND_ORIGIN=http://gateway:8080 \
+  -e NEXT_PUBLIC_SITE_URL=http://localhost:3000 \
+  -p 3000:3000 ghcr.io/parlesec/protocolsoup-frontend:latest
+```
+
+If you use Docker Compose, the `docker-compose.yml` already configures this networking.
+
+## Operational Notes
+
+- If the UI loads but flows fail, verify gateway health at `http://localhost:8080/health`.
+- Verify `BACKEND_ORIGIN` matches reachable backend host/port from inside the frontend container.
+- WebSocket proxying is required for Looking Glass sessions (`/ws/lookingglass/{session}`) and should bypass Next rewrites.
+- In production, expose only the frontend publicly and keep gateway on an internal network.

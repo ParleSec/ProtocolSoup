@@ -1,0 +1,45 @@
+---
+title: "Release And Tag Policy"
+description: "Choose image tags based on stability, traceability, and environment requirements."
+---
+
+# Release And Tag Policy
+
+## Available Tags
+
+| Tag Pattern | Description | Mutability |
+|------------|-------------|------------|
+| `latest` | Current default branch build | Mutable |
+| `sha-*` | Git commit SHA for build traceability | Immutable |
+| `vX.Y.Z` | Semantic version release | Immutable |
+| `vX.Y` | Minor version (resolves to latest patch) | Mutable |
+| `vX` | Major version (resolves to latest minor) | Mutable |
+
+## Recommended Tags By Environment
+
+| Environment | Recommended Tag | Reason |
+|-------------|----------------|--------|
+| Local development | `latest` | Always current, fast iteration |
+| Shared testing | `vX.Y.Z` | Predictable, reproducible |
+| Staging | `vX.Y.Z` or `sha-*` | Exact version control |
+| Production-like | `@sha256:...` or `sha-*` | Immutable, auditable |
+
+## Compatibility
+
+- **Patch releases** (`vX.Y.Z` → `vX.Y.Z+1`): No runtime contract changes.
+- **Minor releases** (`vX.Y` → `vX.Y+1`): Additive, backward-compatible changes.
+- **Major releases** (`vX` → `vX+1`): May include breaking changes with migration notes.
+
+## Supply Chain Signals
+
+Each published image includes:
+
+- Multi-architecture build outputs
+- SBOM generation
+- Cosign provenance attestation
+- Trivy vulnerability scanning in CI
+
+## Related
+
+- [GHCR Overview](/deploy/overview/)
+- [Deployment Models](/deploy/deployment-models/)

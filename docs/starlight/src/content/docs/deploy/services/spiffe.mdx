@@ -1,0 +1,72 @@
+---
+title: "SPIFFE"
+description: "Workload identity with X.509 and JWT SVIDs."
+---
+
+# SPIFFE (`protocolsoup-spiffe`)
+
+Image: `ghcr.io/parlesec/protocolsoup-spiffe`
+
+## When To Use
+
+Use SPIFFE service for workload identity demonstrations: SVID retrieval, mTLS handshakes, JWT-SVID validation, and certificate rotation.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `8080` |
+| Health | `GET /health` |
+| Status | `GET /spiffe/status` |
+| Demo mode | Endpoints return 503 when SPIRE is not connected |
+| Full mode | Requires SPIRE agent socket and `SHOWCASE_SPIFFE_ENABLED=true` |
+
+## Key Endpoints
+
+- `GET /spiffe/.well-known/spiffe-bundle` -- trust bundle (JWKS format)
+- `GET /spiffe/svid/x509` -- X.509-SVID
+- `GET /spiffe/svid/x509/chain` -- X.509-SVID chain (PEM)
+- `GET /spiffe/svid/jwt` -- JWT-SVID
+- `GET /spiffe/svid/info` -- SVID metadata
+- `POST /spiffe/validate/jwt` -- validate JWT-SVID
+- `POST /spiffe/validate/x509` -- validate X.509-SVID
+- `GET /spiffe/workload` -- workload info
+- `GET /spiffe/trust-bundle` -- trust bundle info
+- `POST /spiffe/demo/mtls/call` -- mTLS demo call
+- `POST /spiffe/demo/jwt-auth/call` -- JWT auth demo call
+- `GET /spiffe/demo/rotation` -- certificate rotation demo
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External base URL |
+| `SHOWCASE_SPIFFE_ENABLED` | No | `false` | Enable full SPIRE-backed mode |
+| `SHOWCASE_SPIFFE_SOCKET_PATH` | No | `unix:///run/spire/sockets/agent.sock` | SPIRE agent socket |
+| `SHOWCASE_SPIFFE_TRUST_DOMAIN` | No | `protocolsoup.com` | Trust domain for SVID validation |
+| `SPIRE_SERVER_ADDRESS` | No | `spire-server:8081` | SPIRE server address (for mTLS demo) |
+
+## Run (Demo Mode)
+
+Demo mode does not require SPIRE infrastructure. Endpoints return 503 until SPIRE is connected.
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  ghcr.io/parlesec/protocolsoup-spiffe:latest
+```
+
+## Run (Full Mode)
+
+Requires the SPIFFE compose overlay or equivalent SPIRE infrastructure.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+## Operational Notes
+
+- Full mode requires SPIRE agent socket mounted at the configured socket path.
+- Keep SPIRE sockets internal and restricted to trusted workloads.
+- If SVID checks fail, verify trust domain alignment between agent, server, and registration entries.
+- The mTLS and JWT auth demos require a running SPIRE server at `SPIRE_SERVER_ADDRESS`.

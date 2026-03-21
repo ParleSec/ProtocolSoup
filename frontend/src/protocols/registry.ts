@@ -1,9 +1,5 @@
 /**
- * Protocol Registry - Frontend module system
- * 
- * This module provides a frontend registry for protocols that mirrors
- * the backend plugin architecture. It fetches protocol definitions
- * from the API and provides them to components.
+ * Protocol Registry - shared protocol types and presentation metadata
  */
 
 export interface FlowStep {
@@ -60,81 +56,6 @@ export interface Protocol {
   flows?: FlowDefinition[]
   inspectors?: Inspector[]
   demoScenarios?: DemoScenario[]
-}
-
-const API_BASE = '/api'
-
-/**
- * Fetch all registered protocols from the backend
- */
-export async function fetchProtocols(): Promise<Protocol[]> {
-  const response = await fetch(`${API_BASE}/protocols`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch protocols: ${response.statusText}`)
-  }
-  const data = await response.json()
-  return data.protocols
-}
-
-/**
- * Fetch a single protocol by ID
- */
-export async function fetchProtocol(id: string): Promise<Protocol> {
-  const response = await fetch(`${API_BASE}/protocols/${id}`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch protocol ${id}: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-/**
- * Fetch flows for a specific protocol
- */
-export async function fetchProtocolFlows(protocolId: string): Promise<FlowDefinition[]> {
-  const response = await fetch(`${API_BASE}/protocols/${protocolId}/flows`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch flows for ${protocolId}: ${response.statusText}`)
-  }
-  const data = await response.json()
-  return data.flows
-}
-
-/**
- * Start a demo session
- */
-export async function startDemo(protocolId: string, flowId: string): Promise<{
-  session_id: string
-  ws_endpoint: string
-  scenario: DemoScenario
-}> {
-  const response = await fetch(`${API_BASE}/protocols/${protocolId}/demo/${flowId}`, {
-    method: 'POST',
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to start demo: ${response.statusText}`)
-  }
-  return response.json()
-}
-
-/**
- * Decode a JWT token via the backend
- */
-export async function decodeToken(token: string): Promise<{
-  header: Record<string, unknown>
-  payload: Record<string, unknown>
-  signature: string
-  valid: boolean
-  errors?: string[]
-}> {
-  const response = await fetch(`${API_BASE}/lookingglass/decode`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token }),
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to decode token: ${response.statusText}`)
-  }
-  return response.json()
 }
 
 /**

@@ -171,11 +171,19 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
+      args:
+        BACKEND_ORIGIN: http://gateway:8080
+        NEXT_PUBLIC_SITE_URL: http://localhost:3000
+        NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8080
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-frontend:latest
     container_name: protocol-showcase-frontend
     ports:
       - "3000:3000"
+    environment:
+      - BACKEND_ORIGIN=http://gateway:8080
+      - NEXT_PUBLIC_SITE_URL=http://localhost:3000
+      - NEXT_PUBLIC_WS_BASE_URL=ws://localhost:8080
     depends_on:
       gateway:
         condition: service_healthy

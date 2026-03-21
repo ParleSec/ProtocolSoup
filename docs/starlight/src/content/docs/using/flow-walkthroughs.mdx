@@ -1,0 +1,63 @@
+---
+title: Flow Walkthroughs
+description: A repeatable method for executing any protocol flow and interpreting results.
+---
+
+Use this method to evaluate any flow with consistent evidence.
+
+## Repeatable Method
+
+1. **Choose a flow** from the [Protocol Catalog](/using/protocol-catalog/) and define the expected outcome.
+2. **Check prerequisites** -- some flows need an existing token (refresh, introspection), a prior credential (OID4VP), or SPIFFE mode enabled.
+3. **Execute** the flow in Looking Glass.
+4. **Inspect** the event timeline -- click each step to see full payloads.
+5. **Interpret** validation outcomes and security annotations.
+6. **Rerun** with one changed variable to confirm control behavior.
+
+## Recommended Starting Flows
+
+| Protocol | Flow | Why Start Here |
+|----------|------|---------------|
+| OAuth 2.0 | Authorization Code + PKCE | Core delegated authorization with modern security |
+| OIDC | Authorization Code + UserInfo | Identity layer on OAuth, ID token claims |
+| SAML 2.0 | SP-Initiated SSO | Enterprise SSO entry pattern, assertion inspection |
+| SCIM 2.0 | User Lifecycle | Full CRUD cycle with PATCH semantics |
+| SPIFFE | X.509-SVID Issuance | Workload identity fundamentals |
+| SSF | CAEP Session Revoked | Real-time security event stream with receiver response |
+| OID4VCI | Pre-Authorized Code | Credential issuance with SD-JWT VC |
+| OID4VP | DCQL + direct_post | Verifier request and wallet submission |
+
+## Interpreting Outcomes
+
+### Success
+
+Inspect the resulting artifacts:
+
+- **Tokens:** Verify claims, audience, issuer, expiry, and signature algorithm.
+- **Assertions:** Check subject, conditions, attribute statements.
+- **Credentials:** Validate VCT, selective disclosure claims, proof binding.
+- **SVIDs:** Confirm SPIFFE ID, trust domain, and certificate chain.
+
+### Validation Failure
+
+Check alignment of:
+
+- Nonce and state parameters
+- Audience restrictions
+- Signature keys and algorithms
+- Token expiry and not-before constraints
+- Redirect URI registration
+
+### Policy Denial
+
+A denied flow is not necessarily an error. It may indicate:
+
+- Correct scope enforcement (requesting a scope the client is not authorized for)
+- PKCE enforcement (missing or mismatched code verifier)
+- Consent requirements
+- Session policy enforcement (SSF receiver revoking a session)
+
+## Related
+
+- [Looking Glass](/using/looking-glass/)
+- [Protocol Catalog](/using/protocol-catalog/)

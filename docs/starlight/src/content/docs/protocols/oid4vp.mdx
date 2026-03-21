@@ -1,0 +1,106 @@
+---
+title: "OID4VP"
+description: "OpenID4VP verifier flows with DCQL request contracts, direct_post transports, and policy-based presentation evaluation."
+---
+
+# OID4VP
+
+## Standards
+
+- OpenID for Verifiable Presentations 1.0 (final)
+- OAuth 2.0 Authorization Framework (request/response parameter model)
+- JOSE (JWT/JWS/JWE processing for request objects and `direct_post.jwt`)
+- DID Core / did:web (for `decentralized_identifier` client_id scheme handling)
+
+## Available Flows
+
+| Flow ID | Name | Steps | Description |
+|---------|------|-------|-------------|
+| `oid4vp-direct-post` | DCQL + direct_post | 4 | Verifier creates signed request object, wallet fetches from `request_uri`, posts `vp_token` + `state` to `response_uri`, verifier validates and evaluates policy |
+| `oid4vp-direct-post-jwt` | DCQL + direct_post.jwt | 4 | Verifier creates signed request, wallet fetches from `request_uri`, posts encrypted JWE containing signed `oauth-authz-resp+jwt`, verifier decrypts and evaluates policy |
+
+## Demo Scenarios
+
+- **DCQL direct_post** -- Create request object, hand off to wallet, evaluate verifier policy
+- **DCQL direct_post.jwt** -- Same flow with encrypted response transport and inner JWT validation
+
+## Example DCQL Query
+
+Example DCQL query requesting a `university_degree` credential with `degree` and `graduation_year` claims:
+
+```json
+{
+  "credentials": [{
+    "id": "university_degree",
+    "claims": [
+      { "path": ["degree"] },
+      { "path": ["graduation_year"] }
+    ],
+    "meta": {
+      "vct_values": ["https://protocolsoup.com/credentials/university_degree"]
+    }
+  }]
+}
+```
+
+## Request and Response Contracts
+
+- Authorization request enforces XOR: exactly one of `dcql_query` or `scope`.
+- For `response_mode` `direct_post` and `direct_post.jwt`, `response_uri` is required and `redirect_uri` must be absent.
+- Request object header `typ` must be `oauth-authz-req+jwt`.
+- VP token header `typ` must be `vp+jwt`.
+- `direct_post.jwt` inner response header `typ` must be `oauth-authz-resp+jwt`.
+
+## Client ID Schemes
+
+- OpenID4VP defines multiple client identification schemes, including:
+  - `pre_registered` (e.g., verifier registered out-of-band)
+  - `redirect_uri` (e.g., verifier identified by redirect URI trust context)
+  - `decentralized_identifier` (e.g., DID-based verifier identification)
+  - `verifier_attestation`
+  - `x509_san_dns`
+  - `x509_hash`
+  - `openid_federation`
+- Verifier and wallet MUST apply scheme-specific trust validation rules for the chosen scheme.
+
+## Verifier Evaluation Flow (OID4VP §5, §6, §8)
+
+1. **Create Authorization Request** — Verifier builds a signed request object (`typ=oauth-authz-req+jwt`) containing `client_id`, `response_type=vp_token`, `response_mode`, `response_uri`, `dcql_query` (or `scope`), `nonce`, `state`, and `exp`. Publishes it at a `request_uri`.
+2. **Wallet Fetches Request Object** — Wallet fetches the signed request from `request_uri` via GET or POST. Validates JWT signature, `typ` header, and expiry before processing.
+3. **Wallet Submits Response** — Wallet evaluates DCQL query, selects matching credentials, creates signed `vp_token` (`typ=vp+jwt`), and submits to `response_uri`:
+   - `direct_post`: form-post `vp_token` + `state`
+   - `direct_post.jwt`: form-post encrypted `response` JWE containing signed inner JWT (`typ=oauth-authz-resp+jwt`) with `vp_token`, `state`, and audience bound to `response_uri`
+4. **Verifier Validates + Policy Decision** — Verifier resolves session by `state`, then validates:
+   - nonce binding (VP token nonce matches request nonce)
+   - audience binding (VP token audience includes `client_id`)
+   - token expiry
+   - holder binding (`iss`/`sub` matches wallet identity, `cnf.jkt` matches key thumbprint)
+  - credential evidence (issuer signature, subject binding, disclosure integrity, and trust policy checks)
+   - DCQL claim-path completeness (all required claim paths present in disclosed claims)
+5. **Result** — Policy decision is stored and returned as `allowed`/`denied` with `code`, `message`, `reasons`, and `reason_codes`.
+
+## Endpoints
+
+| Endpoint Role | Purpose |
+|---------------|---------|
+| Authorization Request Endpoint | Verifier creates and publishes a request object / request URI |
+| Request URI Retrieval Endpoint | Wallet fetches request object by `request_uri` |
+| Response URI Endpoint | Wallet submits `direct_post` or `direct_post.jwt` response payloads |
+| Verification Result Endpoint (optional) | Verifier exposes policy evaluation outcome to client tooling |
+
+## Illustrative Examples (Non-Normative)
+
+- `direct_post` response parameters: `state=<opaque-value>&vp_token=<compact-jws>`
+- `direct_post.jwt` response parameter: `response=<compact-jwe>` where the decrypted plaintext is an inner JWT with `typ=oauth-authz-resp+jwt`
+- VP token essentials: `typ=vp+jwt`, nonce bound to request nonce, audience bound to verifier `client_id`
+
+## What To Validate
+
+- Authorization request: signed request object with `typ=oauth-authz-req+jwt`, `client_id`, `response_mode`, `response_uri`, `nonce`, `state`, `exp`
+- DCQL contract: exactly one of `dcql_query` or `scope`; required claim paths derived from DCQL are enforced
+- Client identification: chosen client_id scheme follows OpenID4VP scheme-specific trust validation
+- `direct_post` response: `state` maps to active request and `vp_token` is present
+- `direct_post.jwt` response: decrypts successfully and inner JWT signature/type/audience/subject/expiry checks pass
+- VP token checks: `typ=vp+jwt`, nonce match, audience match, expiry valid, holder binding verified
+- Credential evidence checks: presented credential subject/issuer/signature/disclosures satisfy verifier trust policy and required claim paths
+- Policy output: verifier returns explicit decision with status, code, and reason details

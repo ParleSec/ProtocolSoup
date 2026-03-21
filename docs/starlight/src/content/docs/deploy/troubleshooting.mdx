@@ -1,0 +1,115 @@
+---
+title: "Troubleshooting"
+description: "Common issues and solutions when deploying or using ProtocolSoup services."
+---
+
+# Troubleshooting
+
+## UI loads but flows fail
+
+**Symptom:** The frontend renders but executing a flow returns errors or the Looking Glass timeline stays empty.
+
+**Cause:** The frontend cannot reach the gateway.
+
+**Fix:**
+1. Verify gateway health: `curl http://localhost:8080/health`
+2. If using `docker run`, ensure both containers are on the same Docker network and the gateway container is named `gateway` (the nginx config resolves `gateway:8080`).
+3. If using Docker Compose, the networking is automatic.
+
+## SPIFFE returns 503
+
+**Symptom:** SPIFFE flows return `503 Service Unavailable` or "SPIFFE not available".
+
+**Cause:** The SPIFFE service is running in demo mode without SPIRE infrastructure.
+
+**Fix:** Start the SPIRE overlay alongside the main stack:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+Demo mode only returns metadata and health. Full SVID issuance, mTLS, and attestation flows require SPIRE.
+
+## Empty protocol list in the gateway
+
+**Symptom:** `GET /api/protocols` returns an empty list or gateway reports `no_upstreams`.
+
+**Cause:** Gateway cannot reach upstream services.
+
+**Fix:**
+1. Check upstream health: `curl http://localhost:8080/health/upstreams`
+2. Verify the upstream environment variables are set correctly (e.g. `FEDERATION_SERVICE_URL`, `SCIM_SERVICE_URL`).
+3. Ensure upstream services are healthy before the gateway starts, or wait for the gateway to refresh (it polls upstreams periodically).
+
+## CORS errors in the browser console
+
+**Symptom:** Browser shows `Access-Control-Allow-Origin` errors when calling the API.
+
+**Cause:** The frontend origin is not in the service's CORS allow list.
+
+**Fix:** Set `SHOWCASE_CORS_ORIGINS` on every backend service to include your frontend URL:
+
+```bash
+SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+```
+
+If your frontend is at a custom domain, add that origin.
+
+## SCIM requests return 401
+
+**Symptom:** All SCIM API calls return `401 Unauthorized`.
+
+**Cause:** SCIM endpoints require a bearer token.
+
+**Fix:** Set `SCIM_API_TOKEN` on the SCIM service, then include it in every request:
+
+```bash
+curl -H "Authorization: Bearer <your-token>" \
+  http://localhost:8080/scim/v2/Users
+```
+
+## WebSocket connection fails for Looking Glass
+
+**Symptom:** Looking Glass events don't stream; WebSocket connection is refused or drops.
+
+**Cause:** Reverse proxy or load balancer is not forwarding WebSocket upgrades.
+
+**Fix:**
+- If using the default frontend image, WebSocket proxying is built into the nginx config (`/ws` path).
+- If using a custom reverse proxy, ensure it supports `Connection: upgrade` and `Upgrade: websocket` headers on the `/ws` path.
+- Check that the WebSocket path matches: `/ws/lookingglass/{session_id}`.
+
+## Containers exit with OOM
+
+**Symptom:** Containers restart or get killed due to out-of-memory errors.
+
+**Fix:** Backend services are lightweight Go binaries and typically need less than 256MB. The frontend nginx server needs minimal memory. If you see OOM in constrained environments:
+- Increase the container memory limit.
+- Run fewer services (use single-service mode instead of full stack).
+
+## Port conflicts
+
+**Symptom:** `bind: address already in use` when starting a service.
+
+**Cause:** Multiple services default to port 8080. When running services directly (not through compose), you need unique host ports.
+
+**Fix:** Map each service to a different host port:
+
+```bash
+docker run -p 8080:8080 ghcr.io/parlesec/protocolsoup-federation:latest
+docker run -p 8081:8080 ghcr.io/parlesec/protocolsoup-scim:latest
+docker run -p 8082:8080 ghcr.io/parlesec/protocolsoup-ssf:latest
+```
+
+When using Docker Compose, port mapping is handled automatically.
+
+## SSF receiver not receiving events
+
+**Symptom:** SSF push delivery runs but the receiver shows no events.
+
+**Cause:** The SSF receiver runs on a separate port (8081).
+
+**Fix:**
+1. Ensure port 8081 is exposed: `docker run -p 8080:8080 -p 8081:8081 ghcr.io/parlesec/protocolsoup-ssf:latest`
+2. Verify the receiver is listening: `curl http://localhost:8081/health`
+3. Check that `SSF_RECEIVER_TOKEN` matches between transmitter configuration and receiver authentication.

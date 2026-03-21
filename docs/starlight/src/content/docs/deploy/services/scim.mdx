@@ -1,0 +1,58 @@
+---
+title: "SCIM"
+description: "SCIM 2.0 user and group provisioning service."
+---
+
+# SCIM (`protocolsoup-scim`)
+
+Image: `ghcr.io/parlesec/protocolsoup-scim`
+
+## When To Use
+
+Use SCIM service for identity provisioning testing with SCIM-compatible IdPs, including user/group lifecycle operations, bulk provisioning, and filter queries.
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `8080` |
+| Health | `GET /health` |
+| SCIM base path | `/scim/v2` |
+| Storage | SQLite (seeded with demo data on init) |
+
+## SCIM Endpoints
+
+- `GET /scim/v2/ServiceProviderConfig`
+- `GET /scim/v2/ResourceTypes`, `GET /scim/v2/ResourceTypes/{id}`
+- `GET /scim/v2/Schemas`, `GET /scim/v2/Schemas/{id}`
+- `GET|POST /scim/v2/Users`, `GET|PUT|PATCH|DELETE /scim/v2/Users/{id}`
+- `GET|POST /scim/v2/Groups`, `GET|PUT|PATCH|DELETE /scim/v2/Groups/{id}`
+- `POST /scim/v2/Bulk`
+- `POST /scim/v2/.search`
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External base URL |
+| `SCIM_API_TOKEN` | No | - | Bearer token for authenticated requests |
+| `SCIM_DATA_DIR` | No | `./data` | SQLite database directory |
+| `SHOWCASE_ENV` | No | `development` | Environment mode |
+
+## Run
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SCIM_API_TOKEN=change-me \
+  -e SCIM_DATA_DIR=/app/data \
+  -v scim-data:/app/data \
+  ghcr.io/parlesec/protocolsoup-scim:latest
+```
+
+## Operational Notes
+
+- IdP connector URL is typically `http(s)://<host>/scim/v2`.
+- Demo data (users and groups) is seeded on first startup.
+- `SCIM_API_TOKEN` is checked via bearer auth middleware. Treat it as a credential.
+- Mount `SCIM_DATA_DIR` for persistent provisioning state across container restarts.

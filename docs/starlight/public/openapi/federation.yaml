@@ -1,0 +1,825 @@
+openapi: 3.1.0
+info:
+  title: ProtocolSoup Federation API
+  version: 1.0.0
+  summary: OAuth 2.0, OIDC, SAML, and VC protocol endpoints.
+  description: |
+    Public contract for the ProtocolSoup federation service.
+    This service exposes OAuth 2.0, OpenID Connect, SAML 2.0, and VC protocol modules mounted in the federation runtime.
+servers:
+  - url: https://protocolsoup.com
+    description: Production federation service
+security: []
+tags:
+  - name: Health
+    description: Service health and index endpoints.
+  - name: OAuth2
+    description: OAuth 2.0 authorization server endpoints.
+  - name: OIDC
+    description: OpenID Connect provider endpoints.
+  - name: SAML
+    description: SAML IdP endpoints.
+  - name: OID4VCI
+    description: Credential issuance endpoints.
+  - name: OID4VP
+    description: Verifiable presentation endpoints.
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Get service health
+      operationId: getFederationHealth
+      responses:
+        "200":
+          description: Health payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Service unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api:
+    get:
+      tags: [Health]
+      summary: Get API index
+      operationId: getFederationApiIndex
+      responses:
+        "200":
+          description: API index payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiIndexResponse"
+  /oauth2/authorize:
+    get:
+      tags: [OAuth2]
+      summary: OAuth2 authorization endpoint
+      operationId: oauth2AuthorizeGet
+      parameters:
+        - in: query
+          name: response_type
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: client_id
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: redirect_uri
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Authorization/login page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid request parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [OAuth2]
+      summary: OAuth2 authorization form submit
+      operationId: oauth2AuthorizePost
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                login_request_id:
+                  type: string
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "302":
+          description: Redirect to client callback with authorization result.
+        "400":
+          description: Invalid form submission.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /oauth2/token:
+    post:
+      tags: [OAuth2]
+      summary: OAuth2 token endpoint
+      operationId: oauth2Token
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                grant_type:
+                  type: string
+                  example: authorization_code
+                code:
+                  type: string
+                refresh_token:
+                  type: string
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+                redirect_uri:
+                  type: string
+                code_verifier:
+                  type: string
+      responses:
+        "200":
+          description: Access token response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthTokenResponse"
+              examples:
+                success:
+                  value:
+                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    token_type: Bearer
+                    expires_in: 3600
+                    refresh_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    scope: "openid profile email"
+        "400":
+          description: OAuth error response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Client authentication failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oauth2/introspect:
+    post:
+      tags: [OAuth2]
+      summary: Token introspection endpoint
+      operationId: oauth2Introspect
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                token_type_hint:
+                  type: string
+      responses:
+        "200":
+          description: Token active state.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid introspection request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oauth2/revoke:
+    post:
+      tags: [OAuth2]
+      summary: Token revocation endpoint
+      operationId: oauth2Revoke
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                token_type_hint:
+                  type: string
+      responses:
+        "200":
+          description: Revocation processed.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oauth2/demo/users:
+    get:
+      tags: [OAuth2]
+      summary: List demo users
+      operationId: oauth2DemoUsers
+      responses:
+        "200":
+          description: Demo user credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oauth2/demo/clients:
+    get:
+      tags: [OAuth2]
+      summary: List demo clients
+      operationId: oauth2DemoClients
+      responses:
+        "200":
+          description: Demo client credentials.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oidc/.well-known/openid-configuration:
+    get:
+      tags: [OIDC]
+      summary: OpenID Provider metadata
+      operationId: oidcDiscovery
+      responses:
+        "200":
+          description: Discovery document.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oidc/.well-known/jwks.json:
+    get:
+      tags: [OIDC]
+      summary: OIDC JWKS endpoint
+      operationId: oidcJwks
+      responses:
+        "200":
+          description: Public signing keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oidc/jwks:
+    get:
+      tags: [OIDC]
+      summary: OIDC JWKS alternate endpoint
+      operationId: oidcJwksAlternate
+      responses:
+        "200":
+          description: Public signing keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oidc/authorize:
+    get:
+      tags: [OIDC]
+      summary: OIDC authorization endpoint
+      operationId: oidcAuthorizeGet
+      parameters:
+        - in: query
+          name: response_type
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: client_id
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: redirect_uri
+          schema:
+            type: string
+          required: true
+        - in: query
+          name: scope
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Authorization/login page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid request parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+    post:
+      tags: [OIDC]
+      summary: OIDC authorization form submit
+      operationId: oidcAuthorizePost
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                login_request_id:
+                  type: string
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "302":
+          description: Redirect to callback.
+        "400":
+          description: Invalid form submission.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oidc/token:
+    post:
+      tags: [OIDC]
+      summary: OIDC token endpoint
+      operationId: oidcToken
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                grant_type:
+                  type: string
+                code:
+                  type: string
+                client_id:
+                  type: string
+                client_secret:
+                  type: string
+                redirect_uri:
+                  type: string
+                code_verifier:
+                  type: string
+      responses:
+        "200":
+          description: Token response including ID token.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/OAuthTokenResponse"
+                  - type: object
+                    properties:
+                      id_token:
+                        type: string
+        "400":
+          description: OAuth/OIDC error response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oidc/userinfo:
+    get:
+      tags: [OIDC]
+      summary: OIDC userinfo endpoint
+      operationId: oidcUserInfoGet
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User claims.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Invalid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+    post:
+      tags: [OIDC]
+      summary: OIDC userinfo endpoint (POST)
+      operationId: oidcUserInfoPost
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User claims.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: Invalid token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /saml/metadata:
+    get:
+      tags: [SAML]
+      summary: SAML metadata endpoint
+      operationId: samlMetadata
+      responses:
+        "200":
+          description: SAML IdP metadata XML.
+          content:
+            application/xml:
+              schema:
+                type: string
+            text/xml:
+              schema:
+                type: string
+  /saml/sso:
+    get:
+      tags: [SAML]
+      summary: SAML SSO endpoint (Redirect binding)
+      operationId: samlSsoGet
+      responses:
+        "200":
+          description: SSO response or redirect form.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid SAML request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      tags: [SAML]
+      summary: SAML SSO endpoint (POST binding)
+      operationId: samlSsoPost
+      responses:
+        "200":
+          description: SSO response.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid SAML request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /saml/acs:
+    post:
+      tags: [SAML]
+      summary: SAML assertion consumer endpoint
+      operationId: samlAcsPost
+      responses:
+        "200":
+          description: Assertion processed.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid assertion payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [SAML]
+      summary: SAML assertion consumer endpoint (GET)
+      operationId: samlAcsGet
+      responses:
+        "200":
+          description: Assertion processed.
+          content:
+            text/html:
+              schema:
+                type: string
+  /saml/slo:
+    get:
+      tags: [SAML]
+      summary: SAML single logout endpoint (GET)
+      operationId: samlSloGet
+      responses:
+        "200":
+          description: Logout processed.
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      tags: [SAML]
+      summary: SAML single logout endpoint (POST)
+      operationId: samlSloPost
+      responses:
+        "200":
+          description: Logout processed.
+          content:
+            text/html:
+              schema:
+                type: string
+  /saml/demo/users:
+    get:
+      tags: [SAML]
+      summary: List SAML demo users
+      operationId: samlDemoUsers
+      responses:
+        "200":
+          description: Demo users payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /.well-known/openid-credential-issuer/oid4vci:
+    get:
+      tags: [OID4VCI]
+      summary: Canonical OID4VCI issuer metadata
+      operationId: oid4vciIssuerMetadataCanonical
+      responses:
+        "200":
+          description: Issuer metadata document.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oid4vci/token:
+    post:
+      tags: [OID4VCI]
+      summary: OID4VCI token exchange endpoint
+      operationId: oid4vciToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Access token and nonce payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: OID4VCI contract violation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/credential:
+    post:
+      tags: [OID4VCI]
+      summary: OID4VCI credential issuance endpoint
+      operationId: oid4vciCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Issued credential response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid proof or request contract failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/request/create:
+    post:
+      tags: [OID4VP]
+      summary: Create OID4VP request object
+      operationId: oid4vpCreateRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            examples:
+              directPost:
+                value:
+                  response_mode: direct_post
+                  response_uri: https://protocolsoup.com/oid4vp/response
+      responses:
+        "200":
+          description: Request object creation response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid request contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/request/{requestID}:
+    get:
+      tags: [OID4VP]
+      summary: Fetch OID4VP request object
+      operationId: oid4vpGetRequest
+      parameters:
+        - in: path
+          name: requestID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Request object.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Request not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+    post:
+      tags: [OID4VP]
+      summary: Fetch OID4VP request object (POST transport)
+      operationId: oid4vpPostRequest
+      parameters:
+        - in: path
+          name: requestID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Request object.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Request not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/response:
+    post:
+      tags: [OID4VP]
+      summary: Wallet direct post response endpoint
+      operationId: oid4vpWalletResponse
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Verifier policy response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Invalid wallet response payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/result/{requestID}:
+    get:
+      tags: [OID4VP]
+      summary: Get verification result
+      operationId: oid4vpResult
+      parameters:
+        - in: path
+          name: requestID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verification status payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Result not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    OAuthError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: invalid_grant
+        error_description:
+          type: string
+          example: Authorization code has expired
+        error_uri:
+          type: string
+    OAuthTokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 3600
+        refresh_token:
+          type: string
+        scope:
+          type: string
+    HealthResponse:
+      type: object
+      required: [status, version, protocols]
+      properties:
+        status:
+          type: string
+          example: healthy
+        version:
+          type: string
+          example: 1.0.0
+        protocols:
+          type: array
+          items:
+            type: string
+    ApiIndexResponse:
+      type: object
+      required: [service, version, protocols, endpoints]
+      properties:
+        service:
+          type: string
+        version:
+          type: string
+        protocols:
+          type: array
+          items:
+            type: string
+        endpoints:
+          type: object
+          additionalProperties:
+            type: string

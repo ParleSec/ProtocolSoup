@@ -5,6 +5,11 @@ vendor/
 # Build outputs
 dist/
 build/
+.astro/
+.next/
+**/.next/
+*.tsbuildinfo
+**/.dccache
 *.exe
 *.exe~
 *.dll

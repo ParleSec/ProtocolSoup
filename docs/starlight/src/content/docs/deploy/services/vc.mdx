@@ -1,0 +1,67 @@
+---
+title: "VC"
+description: "Standalone OID4VCI issuer and OID4VP verifier."
+---
+
+# VC (`protocolsoup-vc`)
+
+Image: `ghcr.io/parlesec/protocolsoup-vc`
+
+## When To Use
+
+Use VC service when you want standalone OID4VCI and OID4VP capabilities without the broader federation stack (OAuth, OIDC, SAML).
+
+## Runtime Contract
+
+| Property | Value |
+|----------|-------|
+| Port | `8080` |
+| Health | `GET /health` |
+| API index | `GET /api` |
+| Credential format | `dc+sd-jwt` (SD-JWT VC) |
+| Credential type | `UniversityDegreeCredential` |
+
+## Key Endpoints
+
+### OID4VCI
+
+- `GET /.well-known/openid-credential-issuer/oid4vci` -- issuer metadata
+- `POST /oid4vci/offers/pre-authorized` -- create pre-authorized offer
+- `POST /oid4vci/offers/pre-authorized/by-value` -- offer by value
+- `POST /oid4vci/offers/pre-authorized/deferred` -- deferred offer
+- `POST /oid4vci/token` -- token endpoint
+- `POST /oid4vci/nonce` -- nonce endpoint
+- `POST /oid4vci/credential` -- credential request
+- `POST /oid4vci/deferred_credential` -- deferred credential
+
+### OID4VP
+
+- `POST /oid4vp/request/create` -- create authorization request
+- `GET|POST /oid4vp/request/{requestID}` -- authorization request
+- `POST /oid4vp/response` -- wallet response (`direct_post`, `direct_post.jwt`)
+- `GET /oid4vp/result/{requestID}` -- verification result
+
+## Configuration
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer/verifier metadata |
+| `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
+| `SHOWCASE_DATA_DIR` | No | - | State directory for wallet credentials and sessions |
+
+## Run
+
+```bash
+docker run -p 8080:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8080 \
+  -e SHOWCASE_DATA_DIR=/app/data \
+  -v vc-data:/app/data \
+  ghcr.io/parlesec/protocolsoup-vc:latest
+```
+
+## Operational Notes
+
+- Pair with the Wallet service (see Wallet page in this tab) for end-to-end OID4VP testing.
+- `SHOWCASE_BASE_URL` must match your public URL for correct issuer and verifier metadata.
+- Wallet credentials persist at `{SHOWCASE_DATA_DIR}/vc/wallet_credentials.json`.
+- Client ID schemes supported: `redirect_uri` and `did:web`.

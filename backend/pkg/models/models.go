@@ -199,7 +199,7 @@ type OID4VPPolicyDecision struct {
 	EvaluatedAt time.Time `json:"evaluated_at"`
 }
 
-// OID4VPCredentialEvidence captures verifier claim visibility for SD-JWT presentations.
+// OID4VPCredentialEvidence captures verifier claim visibility for presented credentials.
 type OID4VPCredentialEvidence struct {
 	Subject                   string                 `json:"subject,omitempty"`
 	Format                    string                 `json:"format,omitempty"`

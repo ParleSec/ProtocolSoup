@@ -1,0 +1,47 @@
+---
+title: "OpenID Connect"
+description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInfo."
+---
+
+# OpenID Connect (OIDC)
+
+## Standards
+
+- OpenID Connect Core 1.0
+- OpenID Connect Discovery 1.0
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `oidc_authorization_code` | Authorization Code | OIDC authentication with ID token |
+| `oidc_hybrid` | Hybrid Flow | Combined code + token response (Section 3.3) |
+| `oidc_implicit` | Implicit (Legacy) | Browser-based OIDC flow |
+| `oidc_userinfo` | UserInfo | Claims retrieval from the UserInfo endpoint |
+| `oidc_discovery` | Discovery | OpenID Provider metadata and JWKS resolution |
+| `interaction-code` | Interaction Code | Interactive authorization with PKCE |
+
+## Demo Scenarios
+
+- **Login with OpenID Connect** -- Full OIDC authentication flow
+- **ID Token Deep Dive** -- Token decoding and claims inspection
+- **Discovery Document Exploration** -- Provider metadata resolution
+
+## Endpoints
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/oidc/.well-known/openid-configuration` | GET | Discovery document |
+| `/oidc/.well-known/jwks.json` | GET | JSON Web Key Set |
+| `/oidc/jwks` | GET | JWKS alias |
+| `/oidc/authorize` | GET, POST | Authorization endpoint |
+| `/oidc/token` | POST | Token endpoint (returns ID token) |
+| `/oidc/userinfo` | GET, POST | UserInfo endpoint |
+
+## What To Validate
+
+- ID token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `nonce`, `at_hash`
+- Discovery fields: `issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`
+- JWKS: key type, algorithm, key ID alignment with token header
+- UserInfo: scope-dependent claims, subject consistency with ID token
+- Hybrid: multiple response types in a single authorization request

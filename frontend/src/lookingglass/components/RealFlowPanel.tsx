@@ -13,7 +13,7 @@ import {
   ChevronRight, Fingerprint, Code, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ElementType } from 'react'
 import type { 
   FlowExecutorState, 
   FlowEvent, 
@@ -21,8 +21,8 @@ import type {
   DecodedToken 
 } from '../flows'
 import type { WireCapturedExchange } from '../types'
-import { TLSInspector } from '../../components/lookingglass/TLSInspector'
-import { VCInspector } from '../../components/lookingglass/VCInspector'
+import { TLSInspector } from './inspectors/TLSInspector'
+import { VCInspector } from './inspectors/VCInspector'
 
 // ============================================================================
 // Main Panel Component
@@ -83,6 +83,21 @@ export function RealFlowPanel({
     { label: 'Expiry', ok: Boolean(verificationChecks.expiryValidated) },
     { label: 'Holder binding', ok: Boolean(verificationChecks.holderBindingVerified) },
   ]
+  const latestDeferredArtifact = state?.vcArtifacts
+    ? [...state.vcArtifacts].reverse().find((artifact) => artifact.type === 'deferred_status')
+    : null
+  const deferredMetadata = (latestDeferredArtifact?.metadata || {}) as Record<string, unknown>
+  const deferredStatus = String(deferredMetadata.deferredStatus || '').trim()
+  const deferredTransactionID = String(
+    deferredMetadata.transactionId
+      || deferredMetadata.transaction_id
+      || deferredMetadata.deferredTransactionId
+      || '',
+  ).trim()
+  const deferredPollAttempt = toOptionalInt(deferredMetadata.pollAttempt ?? deferredMetadata.deferredPollAttempts)
+  const deferredMaxPollAttempts = toOptionalInt(deferredMetadata.maxPollAttempts ?? deferredMetadata.deferredMaxPollAttempts)
+  const deferredRetryAfterSeconds = toOptionalInt(deferredMetadata.retryAfterSeconds ?? deferredMetadata.deferredRetryAfterSeconds)
+  const deferredStatusStyle = deferredStatusStyleConfig(deferredStatus)
 
   const statusConfig = {
     idle: { icon: Play, color: 'text-surface-400', bg: 'bg-surface-800', label: 'Ready to Execute' },
@@ -152,6 +167,9 @@ export function RealFlowPanel({
             </div>
             <div className="min-w-0">
               <p className={`text-xs sm:text-sm font-medium ${currentStatus.color}`}>{currentStatus.label}</p>
+              {state?.currentStep && (
+                <p className="text-[11px] text-surface-400 mt-0.5">{state.currentStep}</p>
+              )}
             </div>
           </div>
           
@@ -248,6 +266,30 @@ export function RealFlowPanel({
               Failure reasons: {verificationReasons.join(', ')}
             </div>
           )}
+        </div>
+      )}
+
+      {latestDeferredArtifact && (
+        <div className={`p-3 rounded-lg border ${deferredStatusStyle.container}`}>
+          <div className={`text-sm font-medium ${deferredStatusStyle.text}`}>
+            Deferred issuance {deferredStatusStyle.label}
+          </div>
+          {deferredTransactionID && (
+            <div className="text-xs text-surface-300 mt-1 break-all">
+              transaction_id: <code className="text-surface-200">{deferredTransactionID}</code>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-3 mt-1 text-xs text-surface-300">
+            {deferredPollAttempt !== undefined && (
+              <span>
+                poll attempt: {deferredPollAttempt}
+                {deferredMaxPollAttempts !== undefined ? `/${deferredMaxPollAttempts}` : ''}
+              </span>
+            )}
+            {deferredRetryAfterSeconds !== undefined && (
+              <span>retry after: {deferredRetryAfterSeconds}s</span>
+            )}
+          </div>
         </div>
       )}
 
@@ -361,7 +403,7 @@ function EventsList({ events }: { events: FlowEvent[] }) {
     )
   }
 
-  const eventConfig: Record<FlowEvent['type'], { icon: React.ElementType; color: string }> = {
+  const eventConfig: Record<FlowEvent['type'], { icon: ElementType; color: string }> = {
     info: { icon: Info, color: 'text-blue-400 bg-blue-500/10' },
     request: { icon: Send, color: 'text-cyan-400 bg-cyan-500/10' },
     response: { icon: ArrowDownLeft, color: 'text-green-400 bg-green-500/10' },
@@ -773,7 +815,7 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
     )
   }
 
-  const tokenConfig: Record<DecodedToken['type'], { label: string; shortLabel: string; color: string; icon: React.ElementType }> = {
+  const tokenConfig: Record<DecodedToken['type'], { label: string; shortLabel: string; color: string; icon: ElementType }> = {
     access_token: { label: 'Access Token', shortLabel: 'Access', color: 'text-green-400', icon: Key },
     id_token: { label: 'ID Token (OIDC)', shortLabel: 'ID Token', color: 'text-orange-400', icon: Fingerprint },
     refresh_token: { label: 'Refresh Token', shortLabel: 'Refresh', color: 'text-blue-400', icon: RotateCcw },
@@ -907,6 +949,54 @@ function ParamRow({ label, value, color, truncate }: { label: string; value: str
       <CopyButton text={value} />
     </div>
   )
+}
+
+function deferredStatusStyleConfig(status: string): { label: string; text: string; container: string } {
+  switch (status) {
+    case 'transaction_created':
+      return {
+        label: 'started',
+        text: 'text-blue-300',
+        container: 'bg-blue-500/5 border-blue-500/20',
+      }
+    case 'pending':
+      return {
+        label: 'pending',
+        text: 'text-amber-200',
+        container: 'bg-amber-500/5 border-amber-500/20',
+      }
+    case 'completed':
+      return {
+        label: 'completed',
+        text: 'text-green-300',
+        container: 'bg-green-500/5 border-green-500/20',
+      }
+    case 'timeout':
+      return {
+        label: 'timed out',
+        text: 'text-red-300',
+        container: 'bg-red-500/5 border-red-500/20',
+      }
+    default:
+      return {
+        label: status || 'in progress',
+        text: 'text-surface-200',
+        container: 'bg-surface-900/50 border-white/10',
+      }
+  }
+}
+
+function toOptionalInt(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.floor(value)
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value.trim(), 10)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+  return undefined
 }
 
 // ============================================================================

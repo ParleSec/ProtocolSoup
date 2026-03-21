@@ -1,0 +1,234 @@
+---
+---
+
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Interactive API reference for all ProtocolSoup services." />
+    <meta name="theme-color" content="#a855f7" />
+    <title>API Reference | ProtocolSoup</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #0a0a0f; color: #e4e4e7; }
+
+      .api-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.625rem 1.25rem;
+        background: #0a0a0f;
+        border-bottom: 1px solid #1a1a24;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      }
+
+      .api-topbar a {
+        color: #a1a1aa;
+        text-decoration: none;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        transition: color 0.15s;
+      }
+
+      .api-topbar a:hover { color: #e4e4e7; }
+
+      .api-topbar .logo {
+        font-size: 1.125rem;
+        font-weight: 800;
+        color: #e4e4e7;
+        letter-spacing: -0.03em;
+        font-family: system-ui, -apple-system, sans-serif;
+      }
+
+      .api-topbar .logo span { color: #a855f7; }
+
+      .api-topbar .sep {
+        color: #2a2a34;
+        font-size: 0.875rem;
+      }
+
+      .api-topbar .title {
+        color: #71717a;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        font-family: 'Space Grotesk', system-ui, sans-serif;
+        letter-spacing: -0.01em;
+      }
+
+      .api-topbar nav {
+        margin-left: auto;
+        display: flex;
+        gap: 1.25rem;
+      }
+
+      .service-tabs {
+        display: flex;
+        align-items: center;
+        gap: 0;
+        background: #12121a;
+        border-bottom: 1px solid #1a1a24;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        padding: 0 1rem;
+      }
+
+      .service-tabs .tab-label {
+        color: #71717a;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 0.625rem 0.75rem;
+        white-space: nowrap;
+      }
+
+      .service-tabs a {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.625rem 1rem;
+        color: #a1a1aa;
+        text-decoration: none;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        transition: color 0.15s, background 0.15s;
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+      }
+
+      .service-tabs a:hover {
+        color: #e4e4e7;
+        background: rgba(255,255,255,0.03);
+      }
+
+      .service-tabs a.active {
+        color: #e4e4e7;
+        border-bottom-color: #a855f7;
+      }
+
+      .service-tabs a .badge {
+        display: inline-block;
+        font-size: 0.625rem;
+        font-weight: 700;
+        padding: 0.1rem 0.375rem;
+        border-radius: 3px;
+        line-height: 1.3;
+      }
+
+      .service-tabs a .badge.gw { background: rgba(249,115,22,0.15); color: #f97316; }
+      .service-tabs a .badge.fed { background: rgba(168,85,247,0.15); color: #a855f7; }
+      .service-tabs a .badge.scim { background: rgba(6,182,212,0.15); color: #06b6d4; }
+      .service-tabs a .badge.vc { background: rgba(16,185,129,0.15); color: #10b981; }
+
+      #scalar-ref {
+        height: calc(100vh - 82px);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="api-topbar">
+      <a href="/" class="logo">Protocol<span>Soup</span></a>
+      <span class="sep">/</span>
+      <span class="title">API Reference</span>
+      <nav>
+        <a href="/api/overview/">Guides</a>
+        <a href="/api/integration-patterns/">Patterns</a>
+        <a href="/">Back to Docs</a>
+      </nav>
+    </div>
+
+    <div class="service-tabs" id="service-tabs">
+      <span class="tab-label">Service</span>
+      <a href="#gateway" data-source="gateway" class="active">
+        <span class="badge gw">GW</span> Gateway
+      </a>
+      <a href="#federation" data-source="federation">
+        <span class="badge fed">FED</span> Federation
+      </a>
+      <a href="#scim" data-source="scim">
+        <span class="badge scim">SCIM</span> SCIM
+      </a>
+      <a href="#vc" data-source="vc">
+        <span class="badge vc">VC</span> Verifiable Credentials
+      </a>
+    </div>
+
+    <div id="scalar-ref"></div>
+
+    <script is:inline src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest"></script>
+    <script is:inline>
+      var sources = [
+        { title: 'Gateway API', slug: 'gateway', url: 'https://docs.protocolsoup.com/openapi/gateway.yaml' },
+        { title: 'Federation API', slug: 'federation', url: 'https://docs.protocolsoup.com/openapi/federation.yaml' },
+        { title: 'SCIM API', slug: 'scim', url: 'https://docs.protocolsoup.com/openapi/scim.yaml' },
+        { title: 'VC API', slug: 'vc', url: 'https://docs.protocolsoup.com/openapi/vc.yaml' },
+      ];
+
+      var initialSlug = window.location.hash.replace('#', '') || 'gateway';
+      var initialIdx = sources.findIndex(function(s) { return s.slug === initialSlug; });
+      if (initialIdx < 0) initialIdx = 0;
+
+      function setActiveTab(slug) {
+        document.querySelectorAll('#service-tabs a').forEach(function(a) {
+          a.classList.toggle('active', a.dataset.source === slug);
+        });
+      }
+
+      setActiveTab(sources[initialIdx].slug);
+
+      var scalarInstance = Scalar.createApiReference('#scalar-ref', {
+        theme: 'purple',
+        darkMode: true,
+        hideDownloadButton: false,
+        hideTestRequestButton: false,
+        proxyUrl: 'https://proxy.scalar.com',
+        defaultHttpClient: { targetKey: 'shell', clientKey: 'curl' },
+        sources: sources,
+        source: initialIdx,
+      });
+
+      document.getElementById('service-tabs').addEventListener('click', function(e) {
+        var tab = e.target.closest('a[data-source]');
+        if (!tab) return;
+        e.preventDefault();
+        var slug = tab.dataset.source;
+        var idx = sources.findIndex(function(s) { return s.slug === slug; });
+        if (idx < 0) return;
+
+        setActiveTab(slug);
+        window.location.hash = slug;
+
+        if (scalarInstance && scalarInstance.updateSource) {
+          scalarInstance.updateSource(idx);
+        } else if (scalarInstance && scalarInstance.update) {
+          scalarInstance.update({ source: idx });
+        } else {
+          document.getElementById('scalar-ref').innerHTML = '';
+          scalarInstance = Scalar.createApiReference('#scalar-ref', {
+            theme: 'purple',
+            darkMode: true,
+            hideDownloadButton: false,
+            hideTestRequestButton: false,
+            proxyUrl: 'https://proxy.scalar.com',
+            defaultHttpClient: { targetKey: 'shell', clientKey: 'curl' },
+            sources: sources,
+            source: idx,
+          });
+        }
+      });
+
+      window.addEventListener('hashchange', function() {
+        var slug = window.location.hash.replace('#', '');
+        var idx = sources.findIndex(function(s) { return s.slug === slug; });
+        if (idx >= 0) setActiveTab(slug);
+      });
+    </script>
+  </body>
+</html>

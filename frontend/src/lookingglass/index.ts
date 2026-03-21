@@ -24,20 +24,7 @@ export {
   type RealFlowExecutorResult,
 } from './hooks'
 
-// Legacy executor (for backwards compatibility)
-export {
-  FlowExecutor,
-  useFlowExecutor,
-  DEFAULT_EXECUTOR_CONFIG,
-  type FlowExecutionConfig,
-  type FlowExecutionState,
-  type CapturedRequest,
-  type CapturedResponse,
-  type DecodedToken,
-  type ExecutionEvent,
-} from './executor'
-
-// NEW: Flow-specific executors (RFC-compliant real protocol execution)
+// Flow-specific executors (RFC-compliant real protocol execution)
 export {
   // Factory
   createFlowExecutor,
