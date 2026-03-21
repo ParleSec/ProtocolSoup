@@ -1354,48 +1354,6 @@ func extractCredentialSubjectClaims(credentialClaims jwt.MapClaims) map[string]i
 	return claims
 }
 
-func extractRequiredDCQLClaimPaths(rawDCQLQuery string) []string {
-	trimmed := strings.TrimSpace(rawDCQLQuery)
-	if trimmed == "" {
-		return nil
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return nil
-	}
-	rawCredentials, _ := payload["credentials"].([]interface{})
-	required := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, rawCredential := range rawCredentials {
-		credentialObject, _ := rawCredential.(map[string]interface{})
-		rawClaims, _ := credentialObject["claims"].([]interface{})
-		for _, rawClaim := range rawClaims {
-			claimObject, _ := rawClaim.(map[string]interface{})
-			rawPath, _ := claimObject["path"].([]interface{})
-			segments := make([]string, 0, len(rawPath))
-			for _, rawSegment := range rawPath {
-				segment, _ := rawSegment.(string)
-				segment = strings.TrimSpace(segment)
-				if segment == "" {
-					continue
-				}
-				segments = append(segments, segment)
-			}
-			if len(segments) == 0 {
-				continue
-			}
-			path := strings.Join(segments, ".")
-			if _, exists := seen[path]; exists {
-				continue
-			}
-			seen[path] = struct{}{}
-			required = append(required, path)
-		}
-	}
-	sort.Strings(required)
-	return required
-}
-
 func hasClaimPath(claims map[string]interface{}, claimPath string) bool {
 	segments := strings.Split(strings.TrimSpace(claimPath), ".")
 	if len(segments) == 0 {

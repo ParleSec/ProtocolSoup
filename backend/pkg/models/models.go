@@ -215,10 +215,10 @@ type OID4VPCredentialEvidence struct {
 
 // OID4VPVerificationResult stores structured verification output for VP processing.
 type OID4VPVerificationResult struct {
-	NonceValidated        bool                 `json:"nonce_validated"`
-	AudienceValidated     bool                 `json:"audience_validated"`
-	ExpiryValidated       bool                 `json:"expiry_validated"`
-	HolderBindingVerified bool                 `json:"holder_binding_verified"`
+	NonceValidated        bool                       `json:"nonce_validated"`
+	AudienceValidated     bool                       `json:"audience_validated"`
+	ExpiryValidated       bool                       `json:"expiry_validated"`
+	HolderBindingVerified bool                       `json:"holder_binding_verified"`
 	CredentialEvidence    *OID4VPCredentialEvidence  `json:"credential_evidence,omitempty"`
 	CredentialEvidenceSet []OID4VPCredentialEvidence `json:"credential_evidence_set,omitempty"`
 	Policy                OID4VPPolicyDecision       `json:"policy"`

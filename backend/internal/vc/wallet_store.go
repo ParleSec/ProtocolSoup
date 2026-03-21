@@ -18,7 +18,7 @@ type WalletCredentialRecord struct {
 	Subject                   string     `json:"subject"`
 	Format                    string     `json:"format,omitempty"`
 	CredentialConfigurationID string     `json:"credential_configuration_id,omitempty"`
-	VCT                       string     `json:"vct,omitempty"`
+	VCT                       string     `json:"vct"`
 	Doctype                   string     `json:"doctype,omitempty"`
 	CredentialTypes           []string   `json:"credential_types,omitempty"`
 	CredentialJWT             string     `json:"credential_jwt"`
@@ -30,7 +30,7 @@ type WalletCredentialRecord struct {
 	UpdatedAt                 time.Time  `json:"updated_at"`
 }
 
-// WalletCredentialStore keeps wallet credential records by subject and credential key.
+// WalletCredentialStore keeps wallet credential records by subject and VCT.
 type WalletCredentialStore struct {
 	mu          sync.RWMutex
 	credentials map[string]map[string]WalletCredentialRecord
@@ -110,10 +110,11 @@ func (s *WalletCredentialStore) Put(record WalletCredentialRecord) bool {
 
 	now := time.Now().UTC()
 	record.Subject = subject
-	record.Format = format
-	record.CredentialConfigurationID = configID
+	record.Format = strings.TrimSpace(record.Format)
+	record.CredentialConfigurationID = strings.TrimSpace(record.CredentialConfigurationID)
 	record.VCT = vct
-	record.Doctype = doctype
+	record.Doctype = strings.TrimSpace(record.Doctype)
+	record.CredentialTypes = normalizeUniqueStringSlice(record.CredentialTypes)
 	record.CredentialJWT = credential
 	if strings.TrimSpace(record.IssuerSignedJWT) == "" {
 		if parsed, err := ParseSDJWTEnvelope(credential); err == nil {
@@ -376,4 +377,21 @@ func readWalletSnapshot(path string) (*walletCredentialStoreSnapshot, error) {
 		snapshot.Credentials = make(map[string]map[string]WalletCredentialRecord)
 	}
 	return &snapshot, nil
+}
+
+func normalizeUniqueStringSlice(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := strings.TrimSpace(value)
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		result = append(result, normalized)
+	}
+	return result
 }
