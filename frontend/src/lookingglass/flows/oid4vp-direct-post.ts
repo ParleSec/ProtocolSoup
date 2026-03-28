@@ -14,6 +14,8 @@ export interface OID4VPDirectPostConfig extends FlowExecutorConfig {
   responseMode?: 'direct_post' | 'direct_post.jwt'
   dcqlQueryJSON?: string
   scopeAlias?: string
+  clientID?: string
+  clientIDScheme?: string
 }
 
 export class OID4VPDirectPostExecutor extends FlowExecutorBase {
@@ -133,6 +135,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     this.updateState({ currentStep: 'Creating verifier authorization request' })
 
     const responseMode = this.flowConfig.responseMode || 'direct_post'
+    const configuredClientID = String(this.flowConfig.clientID || '').trim()
+    const configuredClientIDScheme = String(this.flowConfig.clientIDScheme || '').trim()
     const defaultDCQLQuery = {
       credentials: [
         {
@@ -161,6 +165,12 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     const requestPayload: Record<string, unknown> = {
       response_mode: responseMode,
       response_uri: `${window.location.origin}${this.config.baseUrl}/response`,
+    }
+    if (configuredClientID) {
+      requestPayload.client_id = configuredClientID
+    }
+    if (configuredClientIDScheme) {
+      requestPayload.client_id_scheme = configuredClientIDScheme
     }
     if (configuredScopeAlias) {
       requestPayload.scope = configuredScopeAlias
@@ -211,6 +221,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
           ? { header: decodedRequestJWT.header, payload: decodedRequestJWT.payload }
           : {},
         metadata: {
+          clientID: String(requestData.client_id || configuredClientID || ''),
+          clientIDScheme: String(requestData.client_id_scheme || configuredClientIDScheme || ''),
           responseMode,
           requestURI,
           trustMode,
@@ -231,6 +243,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
           deepLink,
           qrPayload: deepLink || requestURI,
           requestURI,
+          clientID: String(requestData.client_id || configuredClientID || ''),
+          clientIDScheme: String(requestData.client_id_scheme || configuredClientIDScheme || ''),
           responseMode,
           trustMode,
           didWebAllowedHosts,

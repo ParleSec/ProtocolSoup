@@ -16,6 +16,8 @@ export {
   type FlowEvent,
   type CapturedExchange,
   type DecodedToken,
+  type VCArtifact,
+  type VCArtifactType,
   type FlowStateListener,
 } from './base'
 

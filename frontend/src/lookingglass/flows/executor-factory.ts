@@ -393,6 +393,10 @@ export interface ExecutorFactoryConfig {
   oid4vpDCQLQueryJSON?: string
   /** OID4VP scope alias override */
   oid4vpScopeAlias?: string
+  /** OID4VP verifier client_id override */
+  oid4vpClientID?: string
+  /** OID4VP verifier client_id_scheme override */
+  oid4vpClientIDScheme?: string
 }
 
 /**
@@ -428,6 +432,12 @@ export function createFlowExecutor(
   }
   if (typeof config.oid4vpScopeAlias === 'string' && config.oid4vpScopeAlias.trim().length > 0) {
     extraParams.oid4vp_scope_alias = config.oid4vpScopeAlias.trim()
+  }
+  if (typeof config.oid4vpClientID === 'string' && config.oid4vpClientID.trim().length > 0) {
+    extraParams.oid4vp_client_id = config.oid4vpClientID.trim()
+  }
+  if (typeof config.oid4vpClientIDScheme === 'string' && config.oid4vpClientIDScheme.trim().length > 0) {
+    extraParams.oid4vp_client_id_scheme = config.oid4vpClientIDScheme.trim()
   }
   if (Object.keys(extraParams).length > 0) {
     baseConfig.extraParams = extraParams
@@ -502,14 +512,32 @@ export function createFlowExecutor(
   if (flowId.startsWith('oid4vp-')) {
     const dcqlQueryJSON = baseConfig.extraParams?.oid4vp_dcql_query
     const scopeAlias = baseConfig.extraParams?.oid4vp_scope_alias
+    const clientID = baseConfig.extraParams?.oid4vp_client_id
+    const clientIDScheme = baseConfig.extraParams?.oid4vp_client_id_scheme
     ;(fullConfig as {
       dcqlQueryJSON?: string
       scopeAlias?: string
+      clientID?: string
+      clientIDScheme?: string
     }).dcqlQueryJSON = dcqlQueryJSON
     ;(fullConfig as {
       dcqlQueryJSON?: string
       scopeAlias?: string
+      clientID?: string
+      clientIDScheme?: string
     }).scopeAlias = scopeAlias
+    ;(fullConfig as {
+      dcqlQueryJSON?: string
+      scopeAlias?: string
+      clientID?: string
+      clientIDScheme?: string
+    }).clientID = clientID
+    ;(fullConfig as {
+      dcqlQueryJSON?: string
+      scopeAlias?: string
+      clientID?: string
+      clientIDScheme?: string
+    }).clientIDScheme = clientIDScheme
   }
 
   // Handle Token Introspection flow

@@ -452,6 +452,7 @@ import {
   type FlowExecutorBase,
   type FlowExecutorState,
   type ExecutorFactoryConfig,
+  type VCArtifact,
 } from './flows'
 
 export interface UseRealFlowExecutorOptions {
@@ -489,6 +490,10 @@ export interface UseRealFlowExecutorOptions {
   oid4vpDCQLQueryJSON?: string
   /** OID4VP scope alias override (mutually exclusive with dcql_query) */
   oid4vpScopeAlias?: string
+  /** OID4VP verifier client_id override */
+  oid4vpClientID?: string
+  /** OID4VP verifier client_id_scheme override */
+  oid4vpClientIDScheme?: string
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
 }
@@ -502,6 +507,8 @@ export interface RealFlowExecutorResult {
   abort: () => void
   /** Reset to initial state */
   reset: () => void
+  /** Inject a VC artifact from outside the executor (e.g. wallet lifecycle events). */
+  injectVCArtifact: (artifact: Omit<VCArtifact, 'id' | 'timestamp'>) => void
   /** Whether currently executing */
   isExecuting: boolean
   /** Flow info */
@@ -750,6 +757,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       oid4vciCredentialFormat: options.oid4vciCredentialFormat,
       oid4vpDCQLQueryJSON: options.oid4vpDCQLQueryJSON,
       oid4vpScopeAlias: options.oid4vpScopeAlias,
+      oid4vpClientID: options.oid4vpClientID,
+      oid4vpClientIDScheme: options.oid4vpClientIDScheme,
       lookingGlassSessionId: options.lookingGlassSessionId,
     }
 
@@ -799,6 +808,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.oid4vciCredentialFormat,
     options.oid4vpDCQLQueryJSON,
     options.oid4vpScopeAlias,
+    options.oid4vpClientID,
+    options.oid4vpClientIDScheme,
     options.lookingGlassSessionId,
   ])
 
@@ -827,6 +838,10 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     executorRef.current?.reset()
   }, [])
 
+  const injectVCArtifact = useCallback((artifact: Omit<VCArtifact, 'id' | 'timestamp'>) => {
+    executorRef.current?.injectVCArtifact(artifact)
+  }, [])
+
   const isExecuting = state?.status === 'executing' || state?.status === 'awaiting_user'
 
   return {
@@ -834,6 +849,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     execute,
     abort,
     reset,
+    injectVCArtifact,
     isExecuting,
     flowInfo,
     requirements,

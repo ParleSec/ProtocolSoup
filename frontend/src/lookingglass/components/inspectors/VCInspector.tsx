@@ -1,5 +1,6 @@
 import { useMemo, useState, type ElementType } from 'react'
 import {
+  Activity,
   Check,
   Clock,
   Copy,
@@ -98,6 +99,24 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
                     {deferredIssuance.retryAfterSeconds !== undefined && (
                       <span>Retry after: {deferredIssuance.retryAfterSeconds}s</span>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {artifact.type === 'wallet_lifecycle' && artifact.json && typeof artifact.json === 'object' && !Array.isArray(artifact.json) && (
+                <div className="p-2 rounded bg-teal-500/5 border border-teal-500/20 space-y-1.5">
+                  <div className="text-xs text-teal-300 font-medium">Wallet Internal Event</div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+                    {Object.entries(artifact.json as Record<string, unknown>).map(([key, value]) => (
+                      <div key={key} className="flex items-baseline gap-1.5">
+                        <span className="text-surface-400 shrink-0">{key}:</span>
+                        <span className="text-surface-200 font-mono break-all">
+                          {typeof value === 'object' && value !== null
+                            ? JSON.stringify(value)
+                            : String(value ?? 'n/a')}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -240,6 +259,8 @@ function artifactIcon(type: VCArtifact['type']): { icon: ElementType; fg: string
   switch (type) {
     case 'wallet_handoff':
       return { icon: QrCode, fg: 'text-cyan-400', bg: 'bg-cyan-500/10' }
+    case 'wallet_lifecycle':
+      return { icon: Activity, fg: 'text-teal-400', bg: 'bg-teal-500/10' }
     case 'credential':
       return { icon: KeyRound, fg: 'text-emerald-400', bg: 'bg-emerald-500/10' }
     case 'verification_result':

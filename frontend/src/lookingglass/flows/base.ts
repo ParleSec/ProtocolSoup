@@ -119,6 +119,7 @@ export type VCArtifactType =
   | 'credential'
   | 'request_object'
   | 'wallet_handoff'
+  | 'wallet_lifecycle'
   | 'vp_token'
   | 'verification_result'
   | 'deferred_status'
@@ -210,6 +211,11 @@ export abstract class FlowExecutorBase {
       exchanges: [...this.state.exchanges, fullExchange],
     })
     return fullExchange
+  }
+
+  /** Inject a VC artifact from outside the executor (e.g. wallet lifecycle events). */
+  public injectVCArtifact(artifact: Omit<VCArtifact, 'id' | 'timestamp'>): VCArtifact {
+    return this.addVCArtifact(artifact)
   }
 
   /** Add a VC artifact (request objects, credentials, handoff payloads, policy evidence). */

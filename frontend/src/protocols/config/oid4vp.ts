@@ -101,30 +101,9 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
     ),
   },
   {
-    id: 'degree-mso-mdoc',
-    label: 'Degree mso_mdoc',
-    description: 'Requests holder identity and department from mso_mdoc profile.',
-    query: JSON.stringify(
-      {
-        credentials: [
-          {
-            id: 'university_degree_mdoc',
-            format: 'mso_mdoc',
-            meta: {
-              doctype_values: ['org.iso.18013.5.1.mDL'],
-            },
-            claims: [{ path: ['given_name'] }, { path: ['family_name'] }, { path: ['department'] }],
-          },
-        ],
-      },
-      null,
-      2,
-    ),
-  },
-  {
     id: 'multi-format-matrix',
     label: 'Multi-format matrix',
-    description: 'Demonstrates DCQL constraints over sd-jwt and mso_mdoc credential slots.',
+    description: 'Demonstrates DCQL constraints across sd-jwt, jwt_vc_json, and ldp_vc credential slots.',
     query: JSON.stringify(
       {
         credentials: [
@@ -137,12 +116,12 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
             claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
           },
           {
-            id: 'university_degree_mdoc',
-            format: 'mso_mdoc',
+            id: 'university_degree_jwt',
+            format: 'jwt_vc_json',
             meta: {
-              doctype_values: ['org.iso.18013.5.1.mDL'],
+              vct_values: ['https://protocolsoup.com/credentials/university_degree'],
             },
-            claims: [{ path: ['given_name'] }, { path: ['family_name'] }],
+            claims: [{ path: ['department'] }, { path: ['given_name'] }],
           },
         ],
       },

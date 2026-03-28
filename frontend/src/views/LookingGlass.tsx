@@ -43,7 +43,6 @@ const OID4VCI_CREDENTIAL_PROFILES = [
   { id: 'UniversityDegreeCredentialJWT', format: 'jwt_vc_json', label: 'jwt_vc_json' },
   { id: 'UniversityDegreeCredentialJWTLD', format: 'jwt_vc_json-ld', label: 'jwt_vc_json-ld' },
   { id: 'UniversityDegreeCredentialLDP', format: 'ldp_vc', label: 'ldp_vc' },
-  { id: 'UniversityDegreeCredentialMDOC', format: 'mso_mdoc', label: 'mso_mdoc' },
 ] as const
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
@@ -103,6 +102,8 @@ export function LookingGlass() {
     OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
   )
   const [oid4vpScopeAliasInput, setOID4VPScopeAliasInput] = useState('')
+  const [oid4vpClientIDScheme, setOID4VPClientIDScheme] = useState<'redirect_uri' | 'verifier_attestation' | 'x509_san_dns'>('redirect_uri')
+  const [oid4vpClientIDInput, setOID4VPClientIDInput] = useState('')
   const [oid4vpWalletMode, setOID4VPWalletMode] = useState<'one_click' | 'stepwise'>('one_click')
   const [oid4vpStepwiseVPToken, setOID4VPStepwiseVPToken] = useState('')
   const [oid4vpStepwiseLastStep, setOID4VPStepwiseLastStep] = useState('')
@@ -263,6 +264,12 @@ export function LookingGlass() {
   const oid4vpScopeAliasForExecutor = isOID4VPFlow && oid4vpQueryMode === 'scope'
     ? oid4vpScopeAliasInput.trim()
     : undefined
+  const oid4vpClientIDForExecutor = isOID4VPFlow
+    ? oid4vpClientIDInput.trim() || undefined
+    : undefined
+  const oid4vpClientIDSchemeForExecutor = isOID4VPFlow
+    ? oid4vpClientIDScheme
+    : undefined
 
   const realExecutor = useRealFlowExecutor({
     protocolId: selectedProtocol?.id || null,
@@ -280,6 +287,8 @@ export function LookingGlass() {
     oid4vciCredentialFormat: isOID4VCIFlow ? selectedOID4VCICredentialProfile.format : undefined,
     oid4vpDCQLQueryJSON: oid4vpDCQLQueryForExecutor,
     oid4vpScopeAlias: oid4vpScopeAliasForExecutor,
+    oid4vpClientID: oid4vpClientIDForExecutor,
+    oid4vpClientIDScheme: oid4vpClientIDSchemeForExecutor,
     lookingGlassSessionId: wireSessionId || undefined,
   })
   const status = realExecutor.state?.status || 'idle'
@@ -330,6 +339,16 @@ export function LookingGlass() {
     const requestMetadata = (oid4vpRequestObjectArtifact?.metadata || {}) as Record<string, unknown>
     const handoffMetadata = (walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
     return String(requestMetadata.responseMode || handoffMetadata.responseMode || 'direct_post').trim()
+  }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
+  const oid4vpRequestClientID = useMemo(() => {
+    const requestMetadata = (oid4vpRequestObjectArtifact?.metadata || {}) as Record<string, unknown>
+    const handoffMetadata = (walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
+    return String(requestMetadata.clientID || handoffMetadata.clientID || '').trim()
+  }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
+  const oid4vpRequestClientIDScheme = useMemo(() => {
+    const requestMetadata = (oid4vpRequestObjectArtifact?.metadata || {}) as Record<string, unknown>
+    const handoffMetadata = (walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
+    return String(requestMetadata.clientIDScheme || handoffMetadata.clientIDScheme || '').trim()
   }, [oid4vpRequestObjectArtifact, walletHandoffArtifact])
 
   const normalizedOID4VPCredentialJWTInput = useMemo(
@@ -636,6 +655,22 @@ export function LookingGlass() {
     setOID4VPWalletModalOpen(false)
   }, [oid4vpWalletSubmitPending])
 
+  const injectWalletLifecycleEvents = useCallback((responsePayload: Record<string, unknown> | null) => {
+    if (!responsePayload) return
+    const events = responsePayload._looking_glass_events
+    if (!Array.isArray(events)) return
+    for (const event of events) {
+      if (!event || typeof event !== 'object') continue
+      const ev = event as Record<string, unknown>
+      realExecutor.injectVCArtifact({
+        type: 'wallet_lifecycle',
+        title: String(ev.title || ev.type || 'Wallet Event'),
+        format: String(ev.type || ''),
+        json: (ev.data && typeof ev.data === 'object' ? ev.data : {}) as Record<string, unknown>,
+      })
+    }
+  }, [realExecutor])
+
   const submitOID4VPWalletInteraction = useCallback(async () => {
     const walletSubject = oid4vpWalletSubjectInput.trim()
     const credentialJWT = normalizedOID4VPCredentialJWTInput
@@ -681,6 +716,7 @@ export function LookingGlass() {
           ),
         )
       }
+      injectWalletLifecycleEvents(responsePayload)
       const upstreamStatus = Number(responsePayload?.upstream_status || 0)
       const credentialSource = String(responsePayload?.credential_source || '').trim()
       const effectiveWalletSubject = String(responsePayload?.wallet_subject || walletSubject || '').trim()
@@ -730,6 +766,7 @@ export function LookingGlass() {
     selectedOID4VCICredentialProfile.id,
     wireSessionId,
     executeFlow,
+    injectWalletLifecycleEvents,
   ])
 
   const executeOID4VPWalletStep = useCallback(async (
@@ -792,6 +829,7 @@ export function LookingGlass() {
         )
       }
 
+      injectWalletLifecycleEvents(responsePayload)
       const nextVPToken = String(responsePayload?.vp_token || '').trim()
       if (step === 'build_presentation' && nextVPToken) {
         setOID4VPStepwiseVPToken(nextVPToken)
@@ -839,6 +877,7 @@ export function LookingGlass() {
     oid4vpResponseMode,
     oid4vpStepwiseVPToken,
     executeFlow,
+    injectWalletLifecycleEvents,
   ])
 
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
@@ -1421,6 +1460,31 @@ export function LookingGlass() {
                   Configure either <code className="text-violet-300">dcql_query</code> or a scope alias (mutually exclusive per OpenID4VP).
                 </p>
 
+                <div className="mb-3 space-y-2 rounded-lg border border-white/10 bg-surface-950/60 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-[11px] sm:text-xs text-surface-400">Verifier trust profile</label>
+                    <select
+                      value={oid4vpClientIDScheme}
+                      onChange={(event) => setOID4VPClientIDScheme(event.target.value as 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns')}
+                      className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
+                    >
+                      <option value="redirect_uri">redirect_uri</option>
+                      <option value="verifier_attestation">verifier_attestation</option>
+                      <option value="x509_san_dns">x509_san_dns</option>
+                    </select>
+                  </div>
+                  <input
+                    type="text"
+                    value={oid4vpClientIDInput}
+                    onChange={(event) => setOID4VPClientIDInput(event.target.value)}
+                    placeholder="Optional client_id override. Leave blank to use the verifier default for the selected scheme."
+                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                  />
+                  <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+                    `verifier_attestation` uses a live attestation issuer and JWKS. `x509_san_dns` requires the verifier deployment to have a real certificate chain and private key configured.
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <button
                     type="button"
@@ -1640,6 +1704,16 @@ export function LookingGlass() {
                 <summary className="cursor-pointer font-medium">
                   Verifier trust mode: {humanizeOID4VPTrustMode(oid4vpTrustMode)}
                 </summary>
+                {!!oid4vpRequestClientIDScheme && (
+                  <div className="text-surface-300 mt-2">
+                    client_id_scheme: <code>{oid4vpRequestClientIDScheme}</code>
+                  </div>
+                )}
+                {!!oid4vpRequestClientID && (
+                  <div className="text-surface-300 mt-2">
+                    client_id: <code>{oid4vpRequestClientID}</code>
+                  </div>
+                )}
                 {oid4vpDidWebAllowedHosts.length > 0 && (
                   <div className="text-surface-300 mt-2">
                     did:web host allowlist: <code>{oid4vpDidWebAllowedHosts.join(', ')}</code>
