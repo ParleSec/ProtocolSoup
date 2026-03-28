@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -205,6 +206,8 @@ func (s *JWTService) ValidateToken(tokenString string) (jwt.MapClaims, error) {
 			return s.keySet.RSAPublicKey(), nil
 		case *jwt.SigningMethodECDSA:
 			return s.keySet.ECPublicKey(), nil
+		case *jwt.SigningMethodEd25519:
+			return s.keySet.Ed25519PublicKey(), nil
 		default:
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -311,6 +314,8 @@ func VerifySignatureWithKey(tokenString string, key interface{}) (bool, error) {
 		method = jwt.SigningMethodES384
 	case "ES512":
 		method = jwt.SigningMethodES512
+	case "EdDSA":
+		method = jwt.SigningMethodEdDSA
 	default:
 		return false, fmt.Errorf("unsupported algorithm: %s", alg)
 	}
@@ -342,6 +347,9 @@ func (s *JWTService) GetPublicKeyForToken(tokenString string) (interface{}, stri
 	if kid == s.keySet.ECKeyID() {
 		return s.keySet.ECPublicKey(), alg, nil
 	}
+	if kid == s.keySet.Ed25519KeyID() {
+		return s.keySet.Ed25519PublicKey(), alg, nil
+	}
 
 	// Fallback based on algorithm
 	if strings.HasPrefix(alg, "RS") {
@@ -349,6 +357,9 @@ func (s *JWTService) GetPublicKeyForToken(tokenString string) (interface{}, stri
 	}
 	if strings.HasPrefix(alg, "ES") {
 		return s.keySet.ECPublicKey(), alg, nil
+	}
+	if alg == "EdDSA" {
+		return s.keySet.Ed25519PublicKey(), alg, nil
 	}
 
 	return nil, alg, errors.New("unable to determine key for token")
@@ -412,4 +423,9 @@ func ParseECPublicKeyFromJWK(jwk JWK) (*ecdsa.PublicKey, error) {
 		X:     new(big.Int).SetBytes(xBytes),
 		Y:     new(big.Int).SetBytes(yBytes),
 	}, nil
+}
+
+// ParseEd25519PublicKeyFromJWK parses an Ed25519 public key from JWK.
+func ParseEd25519PublicKeyFromJWK(jwk JWK) (ed25519.PublicKey, error) {
+	return ParseOKPPublicKeyFromJWK(jwk)
 }

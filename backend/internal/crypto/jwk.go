@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
@@ -110,6 +111,8 @@ func (jwk *JWK) ToPublicKey() (interface{}, error) {
 		return jwk.toRSAPublicKey()
 	case "EC":
 		return jwk.toECPublicKey()
+	case "OKP":
+		return jwk.toOKPPublicKey()
 	default:
 		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
 	}
@@ -173,6 +176,24 @@ func (jwk *JWK) toECPublicKey() (*ecdsa.PublicKey, error) {
 	}, nil
 }
 
+func (jwk *JWK) toOKPPublicKey() (ed25519.PublicKey, error) {
+	if jwk.Crv == "" || jwk.X == "" {
+		return nil, errors.New("missing OKP key parameters")
+	}
+	if jwk.Crv != "Ed25519" {
+		return nil, fmt.Errorf("unsupported OKP curve: %s", jwk.Crv)
+	}
+
+	keyBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode okp x coordinate: %w", err)
+	}
+	if len(keyBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid Ed25519 public key length %d", len(keyBytes))
+	}
+	return ed25519.PublicKey(keyBytes), nil
+}
+
 // JWKFromRSAPublicKey creates a JWK from an RSA public key
 func JWKFromRSAPublicKey(pub *rsa.PublicKey, kid string) JWK {
 	return JWK{
@@ -211,6 +232,18 @@ func JWKFromECPublicKey(pub *ecdsa.PublicKey, kid string) JWK {
 	}
 }
 
+// JWKFromEd25519PublicKey creates a JWK from an Ed25519 public key.
+func JWKFromEd25519PublicKey(pub ed25519.PublicKey, kid string) JWK {
+	return JWK{
+		Kty: "OKP",
+		Use: "sig",
+		Kid: kid,
+		Alg: "EdDSA",
+		Crv: "Ed25519",
+		X:   base64.RawURLEncoding.EncodeToString(pub),
+	}
+}
+
 // ValidateJWK performs basic validation on a JWK
 func ValidateJWK(jwk JWK) error {
 	if jwk.Kty == "" {
@@ -225,6 +258,13 @@ func ValidateJWK(jwk JWK) error {
 	case "EC":
 		if jwk.Crv == "" || jwk.X == "" || jwk.Y == "" {
 			return errors.New("EC key missing crv, x, or y parameter")
+		}
+	case "OKP":
+		if jwk.Crv == "" || jwk.X == "" {
+			return errors.New("OKP key missing crv or x parameter")
+		}
+		if jwk.Crv != "Ed25519" {
+			return fmt.Errorf("unsupported OKP curve: %s", jwk.Crv)
 		}
 	default:
 		return fmt.Errorf("unsupported key type: %s", jwk.Kty)
@@ -262,7 +302,28 @@ func (jwk *JWK) GetInfo() JWKInfo {
 	if jwk.Kty == "EC" {
 		info.Curve = jwk.Crv
 	}
+	if jwk.Kty == "OKP" {
+		info.Curve = jwk.Crv
+	}
 
 	return info
 }
 
+// ParseOKPPublicKeyFromJWK parses an OKP public key from JWK.
+func ParseOKPPublicKeyFromJWK(jwk JWK) (ed25519.PublicKey, error) {
+	if jwk.Kty != "OKP" {
+		return nil, errors.New("not an OKP key")
+	}
+	if jwk.Crv != "Ed25519" {
+		return nil, fmt.Errorf("unsupported OKP curve: %s", jwk.Crv)
+	}
+
+	keyBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode okp x coordinate: %w", err)
+	}
+	if len(keyBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("invalid Ed25519 public key length %d", len(keyBytes))
+	}
+	return ed25519.PublicKey(keyBytes), nil
+}

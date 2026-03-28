@@ -2,6 +2,7 @@ package crypto
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -14,17 +15,19 @@ import (
 	"time"
 )
 
-// KeySet manages cryptographic keys for the showcase
+// KeySet manages RSA, EC, and Ed25519 keys for the showcase.
 type KeySet struct {
-	rsaKey    *rsa.PrivateKey
-	ecKey     *ecdsa.PrivateKey
-	rsaKeyID  string
-	ecKeyID   string
-	createdAt time.Time
-	mu        sync.RWMutex
+	rsaKey       *rsa.PrivateKey
+	ecKey        *ecdsa.PrivateKey
+	ed25519Key   ed25519.PrivateKey
+	rsaKeyID     string
+	ecKeyID      string
+	ed25519KeyID string
+	createdAt    time.Time
+	mu           sync.RWMutex
 }
 
-// NewKeySet generates a new key set with RSA and EC keys
+// NewKeySet generates a new key set with RSA, EC, and Ed25519 keys.
 func NewKeySet() (*KeySet, error) {
 	// Generate RSA key (2048 bits for demo purposes)
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -38,16 +41,25 @@ func NewKeySet() (*KeySet, error) {
 		return nil, fmt.Errorf("failed to generate EC key: %w", err)
 	}
 
+	// Generate Ed25519 key
+	_, ed25519Key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate Ed25519 key: %w", err)
+	}
+
 	// Generate key IDs
 	rsaKeyID := generateKeyID("rsa")
 	ecKeyID := generateKeyID("ec")
+	ed25519KeyID := generateKeyID("okp")
 
 	return &KeySet{
-		rsaKey:    rsaKey,
-		ecKey:     ecKey,
-		rsaKeyID:  rsaKeyID,
-		ecKeyID:   ecKeyID,
-		createdAt: time.Now(),
+		rsaKey:       rsaKey,
+		ecKey:        ecKey,
+		ed25519Key:   ed25519Key,
+		rsaKeyID:     rsaKeyID,
+		ecKeyID:      ecKeyID,
+		ed25519KeyID: ed25519KeyID,
+		createdAt:    time.Now(),
 	}, nil
 }
 
@@ -100,6 +112,28 @@ func (ks *KeySet) ECKeyID() string {
 	return ks.ecKeyID
 }
 
+// Ed25519PrivateKey returns the Ed25519 private key.
+func (ks *KeySet) Ed25519PrivateKey() ed25519.PrivateKey {
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+	return ks.ed25519Key
+}
+
+// Ed25519PublicKey returns the Ed25519 public key.
+func (ks *KeySet) Ed25519PublicKey() ed25519.PublicKey {
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+	publicKey, _ := ks.ed25519Key.Public().(ed25519.PublicKey)
+	return publicKey
+}
+
+// Ed25519KeyID returns the Ed25519 key ID.
+func (ks *KeySet) Ed25519KeyID() string {
+	ks.mu.RLock()
+	defer ks.mu.RUnlock()
+	return ks.ed25519KeyID
+}
+
 // JWK represents a JSON Web Key
 type JWK struct {
 	Kty string `json:"kty"`           // Key Type
@@ -111,10 +145,11 @@ type JWK struct {
 	N string `json:"n,omitempty"` // Modulus
 	E string `json:"e,omitempty"` // Exponent
 
-	// EC specific
+	// EC / OKP specific
 	Crv string `json:"crv,omitempty"` // Curve
-	X   string `json:"x,omitempty"`   // X Coordinate
-	Y   string `json:"y,omitempty"`   // Y Coordinate
+	X   string `json:"x,omitempty"`   // Public key value / X coordinate
+	Y   string `json:"y,omitempty"`   // Y Coordinate for EC keys
+	D   string `json:"d,omitempty"`   // Private key value for private JWKs
 }
 
 // JWKS represents a JSON Web Key Set
@@ -131,6 +166,7 @@ func (ks *KeySet) PublicJWKS() JWKS {
 		Keys: []JWK{
 			ks.rsaPublicJWK(),
 			ks.ecPublicJWK(),
+			ks.ed25519PublicJWK(),
 		},
 	}
 }
@@ -162,6 +198,19 @@ func (ks *KeySet) ecPublicJWK() JWK {
 	}
 }
 
+// ed25519PublicJWK creates a JWK from the Ed25519 public key.
+func (ks *KeySet) ed25519PublicJWK() JWK {
+	pub := ks.Ed25519PublicKey()
+	return JWK{
+		Kty: "OKP",
+		Use: "sig",
+		Kid: ks.ed25519KeyID,
+		Alg: "EdDSA",
+		Crv: "Ed25519",
+		X:   base64.RawURLEncoding.EncodeToString(pub),
+	}
+}
+
 // GetJWKByID returns a specific JWK by key ID
 func (ks *KeySet) GetJWKByID(kid string) (JWK, bool) {
 	ks.mu.RLock()
@@ -172,6 +221,8 @@ func (ks *KeySet) GetJWKByID(kid string) (JWK, bool) {
 		return ks.rsaPublicJWK(), true
 	case ks.ecKeyID:
 		return ks.ecPublicJWK(), true
+	case ks.ed25519KeyID:
+		return ks.ed25519PublicJWK(), true
 	default:
 		return JWK{}, false
 	}
@@ -194,10 +245,18 @@ func (ks *KeySet) Rotate() error {
 		return fmt.Errorf("failed to generate EC key: %w", err)
 	}
 
+	// Generate new Ed25519 key
+	_, ed25519Key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("failed to generate Ed25519 key: %w", err)
+	}
+
 	ks.rsaKey = rsaKey
 	ks.ecKey = ecKey
+	ks.ed25519Key = ed25519Key
 	ks.rsaKeyID = generateKeyID("rsa")
 	ks.ecKeyID = generateKeyID("ec")
+	ks.ed25519KeyID = generateKeyID("okp")
 	ks.createdAt = time.Now()
 
 	return nil
@@ -228,6 +287,12 @@ func (jwk JWK) Thumbprint() string {
 			"x":   jwk.X,
 			"y":   jwk.Y,
 		}
+	case "OKP":
+		canonical = map[string]string{
+			"crv": jwk.Crv,
+			"kty": jwk.Kty,
+			"x":   jwk.X,
+		}
 	default:
 		return ""
 	}
@@ -236,4 +301,3 @@ func (jwk JWK) Thumbprint() string {
 	hash := sha256.Sum256(data)
 	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
-
