@@ -1,8 +1,14 @@
 package vc
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	cryptorand "crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // WalletCredentialRecord stores a wallet-held credential and trust material.
@@ -35,6 +42,7 @@ type WalletCredentialStore struct {
 	mu          sync.RWMutex
 	credentials map[string]map[string]WalletCredentialRecord
 	dataPath    string
+	secret      string
 }
 
 var defaultWalletCredentialStore = NewWalletCredentialStore()
@@ -55,6 +63,24 @@ type walletCredentialStoreSnapshot struct {
 	Credentials map[string]map[string]WalletCredentialRecord `json:"credentials"`
 	UpdatedAt   time.Time                                    `json:"updated_at"`
 }
+
+type encryptedWalletCredentialStoreSnapshot struct {
+	Version    int    `json:"version"`
+	Algorithm  string `json:"alg"`
+	KDF        string `json:"kdf"`
+	Iterations int    `json:"iterations"`
+	Salt       string `json:"salt"`
+	Nonce      string `json:"nonce"`
+	Ciphertext string `json:"ciphertext"`
+}
+
+const (
+	walletStoreEncryptionVersion    = 1
+	walletStoreEncryptionAlgorithm  = "AES-256-GCM"
+	walletStoreEncryptionKDF        = "PBKDF2-SHA256"
+	walletStorePBKDF2Iterations     = 210000
+	walletStorePBKDF2DerivedKeySize = 32
+)
 
 // EnablePersistence configures a durable JSON store path for issuance lineage.
 func (s *WalletCredentialStore) EnablePersistence(path string) error {
@@ -87,6 +113,16 @@ func (s *WalletCredentialStore) DisablePersistence() {
 	}
 	s.mu.Lock()
 	s.dataPath = ""
+	s.mu.Unlock()
+}
+
+// SetEncryptionKey configures an optional passphrase for encrypting persisted snapshots.
+func (s *WalletCredentialStore) SetEncryptionKey(secret string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.secret = strings.TrimSpace(secret)
 	s.mu.Unlock()
 }
 
@@ -325,7 +361,7 @@ func (s *WalletCredentialStore) syncFromDiskLocked() error {
 	if s == nil || strings.TrimSpace(s.dataPath) == "" {
 		return nil
 	}
-	snapshot, err := readWalletSnapshot(s.dataPath)
+	snapshot, err := readWalletSnapshot(s.dataPath, s.secret)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -348,7 +384,7 @@ func (s *WalletCredentialStore) persistLocked() error {
 		Credentials: s.credentials,
 		UpdatedAt:   time.Now().UTC(),
 	}
-	serialized, err := json.Marshal(snapshot)
+	serialized, err := marshalWalletSnapshot(snapshot, s.secret)
 	if err != nil {
 		return err
 	}
@@ -359,7 +395,7 @@ func (s *WalletCredentialStore) persistLocked() error {
 	return os.Rename(tempPath, s.dataPath)
 }
 
-func readWalletSnapshot(path string) (*walletCredentialStoreSnapshot, error) {
+func readWalletSnapshot(path string, secret string) (*walletCredentialStoreSnapshot, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -369,14 +405,14 @@ func readWalletSnapshot(path string) (*walletCredentialStoreSnapshot, error) {
 			Credentials: make(map[string]map[string]WalletCredentialRecord),
 		}, nil
 	}
-	var snapshot walletCredentialStoreSnapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil {
+	snapshot, err := unmarshalWalletSnapshot(raw, secret)
+	if err != nil {
 		return nil, err
 	}
 	if snapshot.Credentials == nil {
 		snapshot.Credentials = make(map[string]map[string]WalletCredentialRecord)
 	}
-	return &snapshot, nil
+	return snapshot, nil
 }
 
 func normalizeUniqueStringSlice(values []string) []string {
@@ -394,4 +430,99 @@ func normalizeUniqueStringSlice(values []string) []string {
 		result = append(result, normalized)
 	}
 	return result
+}
+
+func marshalWalletSnapshot(snapshot walletCredentialStoreSnapshot, secret string) ([]byte, error) {
+	serialized, err := json.Marshal(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(secret) == "" {
+		return serialized, nil
+	}
+
+	salt := make([]byte, 16)
+	if _, err := cryptorand.Read(salt); err != nil {
+		return nil, err
+	}
+	key := pbkdf2.Key([]byte(secret), salt, walletStorePBKDF2Iterations, walletStorePBKDF2DerivedKeySize, sha256.New)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := cryptorand.Read(nonce); err != nil {
+		return nil, err
+	}
+	ciphertext := aead.Seal(nil, nonce, serialized, nil)
+	envelope := encryptedWalletCredentialStoreSnapshot{
+		Version:    walletStoreEncryptionVersion,
+		Algorithm:  walletStoreEncryptionAlgorithm,
+		KDF:        walletStoreEncryptionKDF,
+		Iterations: walletStorePBKDF2Iterations,
+		Salt:       base64.RawURLEncoding.EncodeToString(salt),
+		Nonce:      base64.RawURLEncoding.EncodeToString(nonce),
+		Ciphertext: base64.RawURLEncoding.EncodeToString(ciphertext),
+	}
+	return json.Marshal(envelope)
+}
+
+func unmarshalWalletSnapshot(raw []byte, secret string) (*walletCredentialStoreSnapshot, error) {
+	var encryptedEnvelope encryptedWalletCredentialStoreSnapshot
+	if err := json.Unmarshal(raw, &encryptedEnvelope); err == nil &&
+		strings.TrimSpace(encryptedEnvelope.Ciphertext) != "" &&
+		strings.TrimSpace(encryptedEnvelope.Nonce) != "" {
+		if strings.TrimSpace(secret) == "" {
+			return nil, fmt.Errorf("wallet snapshot is encrypted and requires WALLET_PERSISTENCE_KEY")
+		}
+		if encryptedEnvelope.Algorithm != "" && encryptedEnvelope.Algorithm != walletStoreEncryptionAlgorithm {
+			return nil, fmt.Errorf("unsupported wallet snapshot algorithm %q", encryptedEnvelope.Algorithm)
+		}
+		if encryptedEnvelope.KDF != "" && encryptedEnvelope.KDF != walletStoreEncryptionKDF {
+			return nil, fmt.Errorf("unsupported wallet snapshot kdf %q", encryptedEnvelope.KDF)
+		}
+		if encryptedEnvelope.Iterations <= 0 {
+			encryptedEnvelope.Iterations = walletStorePBKDF2Iterations
+		}
+		salt, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(encryptedEnvelope.Salt))
+		if err != nil {
+			return nil, fmt.Errorf("decode wallet snapshot salt: %w", err)
+		}
+		nonce, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(encryptedEnvelope.Nonce))
+		if err != nil {
+			return nil, fmt.Errorf("decode wallet snapshot nonce: %w", err)
+		}
+		ciphertext, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(encryptedEnvelope.Ciphertext))
+		if err != nil {
+			return nil, fmt.Errorf("decode wallet snapshot ciphertext: %w", err)
+		}
+		key := pbkdf2.Key([]byte(secret), salt, encryptedEnvelope.Iterations, walletStorePBKDF2DerivedKeySize, sha256.New)
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return nil, err
+		}
+		aead, err := cipher.NewGCM(block)
+		if err != nil {
+			return nil, err
+		}
+		plaintext, err := aead.Open(nil, nonce, ciphertext, nil)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt wallet snapshot: %w", err)
+		}
+		var snapshot walletCredentialStoreSnapshot
+		if err := json.Unmarshal(plaintext, &snapshot); err != nil {
+			return nil, err
+		}
+		return &snapshot, nil
+	}
+
+	var snapshot walletCredentialStoreSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return nil, err
+	}
+	return &snapshot, nil
 }

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 )
 
 // SDJWTEnvelope is the parsed structure for an SD-JWT VC serialization.
@@ -18,11 +20,11 @@ type SDJWTEnvelope struct {
 
 // SDJWTDisclosure is a decoded SD-JWT disclosure tuple.
 type SDJWTDisclosure struct {
-	Salt      string      `json:"salt"`
-	ClaimName string      `json:"claim_name"`
+	Salt       string      `json:"salt"`
+	ClaimName  string      `json:"claim_name"`
 	ClaimValue interface{} `json:"claim_value"`
-	Encoded   string      `json:"encoded"`
-	Digest    string      `json:"digest"`
+	Encoded    string      `json:"encoded"`
+	Digest     string      `json:"digest"`
 }
 
 // ParseSDJWTEnvelope parses "~" separated SD-JWT serialization into structured parts.
@@ -30,6 +32,15 @@ func ParseSDJWTEnvelope(raw string) (*SDJWTEnvelope, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, fmt.Errorf("sd-jwt value is required")
+	}
+	if !strings.Contains(trimmed, "~") {
+		decoded, err := intcrypto.DecodeTokenWithoutValidation(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("sd-jwt issuer-signed jwt decode: %w", err)
+		}
+		if strings.TrimSpace(formatStringSDJWT(decoded.Header["typ"])) != "vc+sd-jwt" {
+			return nil, fmt.Errorf("value is not an sd-jwt serialization")
+		}
 	}
 
 	parts := strings.Split(trimmed, "~")
@@ -211,4 +222,9 @@ func randomDisclosureSalt() (string, error) {
 
 func isJWTLike(value string) bool {
 	return strings.Count(value, ".") == 2
+}
+
+func formatStringSDJWT(value interface{}) string {
+	stringValue, _ := value.(string)
+	return stringValue
 }
