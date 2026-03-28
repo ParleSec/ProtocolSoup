@@ -1198,8 +1198,6 @@ func asString(value interface{}) string {
 		return typed
 	case fmt.Stringer:
 		return typed.String()
-	case json.Number:
-		return typed.String()
 	default:
 		return ""
 	}

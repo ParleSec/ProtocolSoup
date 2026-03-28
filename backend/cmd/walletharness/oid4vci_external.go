@@ -1032,27 +1032,22 @@ func (s *walletHarnessServer) resolveExternalAuthorizationServerMetadata(
 		}
 	}
 
-	var attemptErrors []string
 	for _, candidate := range candidates {
 		for _, wellKnownName := range []string{"oauth-authorization-server", "openid-configuration"} {
 			candidateURLs, err := wellKnownMetadataURLCandidates(candidate, wellKnownName)
 			if err != nil {
-				attemptErrors = append(attemptErrors, fmt.Sprintf("%s (%s): %v", candidate, wellKnownName, err))
 				continue
 			}
 			for _, candidateURL := range candidateURLs {
 				payload, fetchErr := s.fetchJSONDocument(ctx, candidateURL, "application/json", lookingGlassSessionID)
 				if fetchErr != nil {
-					attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", candidateURL, fetchErr))
 					continue
 				}
 				tokenEndpoint := strings.TrimSpace(asString(payload["token_endpoint"]))
 				if tokenEndpoint == "" {
-					attemptErrors = append(attemptErrors, fmt.Sprintf("%s: metadata is missing token_endpoint", candidateURL))
 					continue
 				}
 				if issuer := strings.TrimSpace(asString(payload["issuer"])); issuer != "" && !sameURLIdentifier(issuer, candidate) {
-					attemptErrors = append(attemptErrors, fmt.Sprintf("%s: metadata issuer %q does not match authorization server %q", candidateURL, issuer, candidate))
 					continue
 				}
 				return &resolvedAuthorizationServerMetadata{

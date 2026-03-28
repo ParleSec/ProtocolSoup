@@ -957,9 +957,6 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 
 	upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, strings.TrimSpace(req.LookingGlassSessionID))
 	if err != nil {
-		lgEvents = append(lgEvents, newWalletEvent("submission_result", "Submission Failed", map[string]interface{}{
-			"error": err.Error(),
-		}))
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
@@ -1157,9 +1154,6 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 
 	upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, req.LookingGlassSessionID)
 	if err != nil {
-		lgEvents = append(lgEvents, newWalletEvent("submission_result", "Submission Failed", map[string]interface{}{
-			"error": err.Error(),
-		}))
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
@@ -2499,9 +2493,6 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		var submitLGEvents []walletLifecycleEvent
 		upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, req.LookingGlassSessionID)
 		if err != nil {
-			submitLGEvents = append(submitLGEvents, newWalletEvent("submission_result", "Submission Failed", map[string]interface{}{
-				"error": err.Error(),
-			}))
 			writeJSON(w, http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
@@ -2718,111 +2709,6 @@ func filterSDJWTDisclosures(rawCredential string, requestedClaims []string) (str
 	}
 	sort.Strings(selectedClaims)
 	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, selectedDisclosures, envelope.KeyBindingJWT), selectedClaims, nil
-}
-
-func buildSDJWTPresentationWithKBJWT(
-	wallet *walletMaterial,
-	issuerSignedJWT string,
-	selectedDisclosures []string,
-	nonce string,
-	audience string,
-) (string, error) {
-	// Build the SD-JWT serialization without KB-JWT to compute sd_hash
-	sdJWTWithoutKB := vc.BuildSDJWTSerialization(issuerSignedJWT, selectedDisclosures, "")
-	if !strings.HasSuffix(sdJWTWithoutKB, "~") {
-		sdJWTWithoutKB += "~"
-	}
-	sdHashRaw := sha256.Sum256([]byte(sdJWTWithoutKB))
-	sdHash := base64.RawURLEncoding.EncodeToString(sdHashRaw[:])
-
-	now := time.Now().UTC()
-	kbClaims := jwt.MapClaims{
-		"aud":     audience,
-		"nonce":   nonce,
-		"iat":     now.Unix(),
-		"sd_hash": sdHash,
-	}
-	kbJWT, err := walletSignToken(wallet, kbClaims, map[string]interface{}{"typ": "kb+jwt"})
-	if err != nil {
-		return "", fmt.Errorf("sign kb-jwt: %w", err)
-	}
-	return vc.BuildSDJWTSerialization(issuerSignedJWT, selectedDisclosures, kbJWT), nil
-}
-
-func (s *walletHarnessServer) postErrorToVerifier(
-	ctx context.Context,
-	wallet *walletMaterial,
-	requestContext *resolvedRequestContext,
-	errorCode string,
-	errorDescription string,
-	lookingGlassSessionID string,
-) (string, error) {
-	if requestContext == nil {
-		return "false", fmt.Errorf("request context is required for error response")
-	}
-
-	form := url.Values{}
-	form.Set("state", requestContext.State)
-
-	if requestContext.ResponseMode == "direct_post.jwt" {
-		innerClaims := jwt.MapClaims{
-			"error":             errorCode,
-			"error_description": errorDescription,
-			"state":             requestContext.State,
-			"iat":               time.Now().UTC().Unix(),
-			"exp":               time.Now().UTC().Add(3 * time.Minute).Unix(),
-			"jti":               randomValue(20),
-		}
-		if wallet != nil {
-			innerClaims["iss"] = wallet.Subject
-			innerClaims["sub"] = wallet.Subject
-		}
-		innerClaims["aud"] = requestContext.ResponseURI
-
-		innerJWT, err := walletSignToken(wallet, innerClaims, map[string]interface{}{"typ": "oauth-authz-resp+jwt"})
-		if err != nil {
-			form.Set("error", errorCode)
-			form.Set("error_description", errorDescription)
-			return s.postFormToVerifier(ctx, requestContext, form, lookingGlassSessionID, "best_effort")
-		}
-
-		encryptedResponse, err := s.encryptForVerifier(innerJWT)
-		if err != nil {
-			form.Set("error", errorCode)
-			form.Set("error_description", errorDescription)
-			return s.postFormToVerifier(ctx, requestContext, form, lookingGlassSessionID, "best_effort")
-		}
-		form.Set("response", encryptedResponse)
-		return s.postFormToVerifier(ctx, requestContext, form, lookingGlassSessionID, "confirmed")
-	}
-
-	form.Set("error", errorCode)
-	form.Set("error_description", errorDescription)
-	return s.postFormToVerifier(ctx, requestContext, form, lookingGlassSessionID, "confirmed")
-}
-
-func (s *walletHarnessServer) postFormToVerifier(
-	ctx context.Context,
-	requestContext *resolvedRequestContext,
-	form url.Values,
-	lookingGlassSessionID string,
-	notifyStatus string,
-) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestContext.ResponseURI, strings.NewReader(form.Encode()))
-	if err != nil {
-		return "false", fmt.Errorf("build error response request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if lookingGlassSessionID != "" {
-		req.Header.Set("X-Looking-Glass-Session", lookingGlassSessionID)
-	}
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "false", fmt.Errorf("error response POST failed: %w", err)
-	}
-	defer resp.Body.Close()
-	io.ReadAll(resp.Body)
-	return notifyStatus, nil
 }
 
 func matchWalletCredentialsToDCQL(credentials map[string]walletCredentialMaterial, dcqlQueryRaw string) ([]walletCredentialMaterial, []string) {
@@ -3052,10 +2938,6 @@ func (s *walletHarnessServer) submitToVerifier(
 		}
 	}
 	return upstreamResp.StatusCode, decodedBody, nil
-}
-
-func (s *walletHarnessServer) resolveRequestContext(requestID string, requestJWT string) (*resolvedRequestContext, error) {
-	return s.resolveRequestContextWithOptions(requestID, requestJWT, false)
 }
 
 func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string, requestJWT string, allowExternal bool) (*resolvedRequestContext, error) {
@@ -4107,21 +3989,6 @@ func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration)
 		return false, nil
 	}
 	return time.Until(parsedCredential.ExpiresAt) <= minRemaining, nil
-}
-
-func toUnixTimestamp(raw interface{}) (int64, error) {
-	switch value := raw.(type) {
-	case float64:
-		return int64(value), nil
-	case int64:
-		return value, nil
-	case int:
-		return int64(value), nil
-	case json.Number:
-		return value.Int64()
-	default:
-		return 0, fmt.Errorf("unsupported numeric timestamp type %T", raw)
-	}
 }
 
 func walletUserIDFromSubject(subject string) string {

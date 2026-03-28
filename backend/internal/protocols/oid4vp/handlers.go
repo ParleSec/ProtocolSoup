@@ -1410,55 +1410,6 @@ func findStoredCredentialLineage(
 	return vc.WalletCredentialRecord{}, false
 }
 
-func inferCredentialFormat(decodedCredential *crypto.DecodedToken) string {
-	if decodedCredential == nil {
-		return ""
-	}
-	if typ, ok := decodedCredential.Header["typ"].(string); ok {
-		switch strings.TrimSpace(typ) {
-		case "vc+sd-jwt":
-			return credentialFormatDCSdJWT
-		case "vc+ldp-jwt":
-			return credentialFormatLDPVC
-		}
-	}
-	vcObject, _ := decodedCredential.Payload["vc"].(map[string]interface{})
-	if credentialSubject, ok := vcObject["credentialSubject"].(map[string]interface{}); ok {
-		if _, hasSD := credentialSubject["_sd"]; hasSD {
-			return credentialFormatDCSdJWT
-		}
-	}
-	if _, hasContext := vcObject["@context"]; hasContext {
-		return credentialFormatJWTVCJSONL
-	}
-	return credentialFormatJWTVCJSON
-}
-
-func extractCredentialTypeValues(credentialClaims jwt.MapClaims) []string {
-	vcObject, _ := credentialClaims["vc"].(map[string]interface{})
-	return normalizeStringSlice(vcObject["type"])
-}
-
-func normalizeStringSlice(raw interface{}) []string {
-	values := make([]string, 0)
-	switch typed := raw.(type) {
-	case string:
-		if normalized := strings.TrimSpace(typed); normalized != "" {
-			values = append(values, normalized)
-		}
-	case []interface{}:
-		for _, item := range typed {
-			itemString, _ := item.(string)
-			itemString = strings.TrimSpace(itemString)
-			if itemString == "" {
-				continue
-			}
-			values = append(values, itemString)
-		}
-	}
-	return dedupeStrings(values)
-}
-
 func parseDCQLCredentialRequirements(rawDCQLQuery string) []dcqlCredentialRequirement {
 	return vc.ParseDCQLCredentialRequirements(rawDCQLQuery)
 }
@@ -1520,43 +1471,6 @@ func dedupeStrings(values []string) []string {
 		result = append(result, normalized)
 	}
 	return result
-}
-
-func intersectsStringSlice(left []string, right []string) bool {
-	if len(left) == 0 || len(right) == 0 {
-		return false
-	}
-	lookup := make(map[string]struct{}, len(right))
-	for _, value := range right {
-		normalized := strings.TrimSpace(value)
-		if normalized == "" {
-			continue
-		}
-		lookup[normalized] = struct{}{}
-	}
-	for _, value := range left {
-		normalized := strings.TrimSpace(value)
-		if normalized == "" {
-			continue
-		}
-		if _, ok := lookup[normalized]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func containsString(values []string, target string) bool {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return false
-	}
-	for _, value := range values {
-		if strings.TrimSpace(value) == target {
-			return true
-		}
-	}
-	return false
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1636,39 +1550,6 @@ func finalizePolicyDecision(result *models.OID4VPVerificationResult) {
 	}
 	result.Policy.Code = result.Policy.ReasonCodes[0]
 	result.Policy.Message = "Presentation denied: " + result.Policy.Reasons[0]
-}
-
-func credentialDigestAllowList(credentialClaims jwt.MapClaims) []string {
-	allowList := make([]string, 0)
-	vcObject, _ := credentialClaims["vc"].(map[string]interface{})
-	credentialSubject, _ := vcObject["credentialSubject"].(map[string]interface{})
-	rawDigests, _ := credentialSubject["_sd"].([]interface{})
-	for _, item := range rawDigests {
-		if digest, ok := item.(string); ok {
-			normalized := strings.TrimSpace(digest)
-			if normalized != "" {
-				allowList = append(allowList, normalized)
-			}
-		}
-	}
-	return allowList
-}
-
-func extractCredentialSubjectClaims(credentialClaims jwt.MapClaims) map[string]interface{} {
-	claims := make(map[string]interface{})
-	vcObject, _ := credentialClaims["vc"].(map[string]interface{})
-	credentialSubject, _ := vcObject["credentialSubject"].(map[string]interface{})
-	for claimName, claimValue := range credentialSubject {
-		if claimName == "_sd" || claimName == "_sd_alg" {
-			continue
-		}
-		claims[claimName] = claimValue
-	}
-	return claims
-}
-
-func hasClaimPath(claims map[string]interface{}, claimPath string) bool {
-	return vc.HasClaimPath(claims, claimPath)
 }
 
 func credentialVerificationKeyFromJWK(jwk crypto.JWK) (interface{}, string, error) {
