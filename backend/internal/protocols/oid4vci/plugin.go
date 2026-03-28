@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -75,11 +76,11 @@ type issuanceTransaction struct {
 type Plugin struct {
 	*plugin.BasePlugin
 
-	mockIDP      *mockidp.MockIdP
-	keySet       *crypto.KeySet
-	lookingGlass *lookingglass.Engine
-	baseURL      string
-	walletStore  *vc.WalletCredentialStore
+	mockIDP                  *mockidp.MockIdP
+	keySet                   *crypto.KeySet
+	lookingGlass             *lookingglass.Engine
+	baseURL                  string
+	walletStore              *vc.WalletCredentialStore
 	credentialConfigurations map[string]credentialConfiguration
 	issuerDrivers            map[string]credentialIssuerDriver
 
@@ -100,7 +101,7 @@ func NewPlugin() *Plugin {
 			Name:        "OpenID4VCI",
 			Version:     "0.1.0",
 			Description: "OpenID for Verifiable Credential Issuance with multi-format VC support",
-			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt", "mso-mdoc", "jwt-vc"},
+			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt", "jwt-vc", "ldp-vc"},
 			RFCs:        []string{"OpenID4VCI 1.0", "OAuth 2.0", "SD-JWT VC", "VC Data Model 2.0"},
 		}),
 		credentialConfigurations: defaultCredentialConfigurationRegistry(),
@@ -137,9 +138,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		credentialFormatJWTVCJSON:  &jwtVCCredentialIssuerDriver{plugin: p},
 		credentialFormatJWTVCJSONL: &jwtVCJSONLDCredentialIssuerDriver{plugin: p},
 		credentialFormatLDPVC:      &ldpVCCredentialIssuerDriver{plugin: p},
-		credentialFormatMSOMDOC:    &msoMDocCredentialIssuerDriver{plugin: p},
 	}
 	p.walletStore = vc.DefaultWalletCredentialStore()
+	p.walletStore.SetEncryptionKey(strings.TrimSpace(os.Getenv("WALLET_PERSISTENCE_KEY")))
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
 		storePath := filepath.Join(dataDir, "vc", "wallet_credentials.json")
 		if err := p.walletStore.EnablePersistence(storePath); err != nil {

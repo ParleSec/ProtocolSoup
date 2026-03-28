@@ -427,15 +427,15 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 
 	p.mu.Lock()
 	p.accessGrants[accessToken] = &accessGrant{
-		Token:    accessToken,
-		Subject:  wallet.Subject,
-		WalletID: wallet.ID,
+		Token:                      accessToken,
+		Subject:                    wallet.Subject,
+		WalletID:                   wallet.ID,
 		CredentialConfigurationIDs: authorizedCredentialConfigurations,
-		CNonce:     nonce,
-		CNonceUsed: false,
-		OfferID:    "authorization_code",
-		Deferred:   false,
-		ExpiresAt:  time.Now().UTC().Add(tokenTTL),
+		CNonce:                     nonce,
+		CNonceUsed:                 false,
+		OfferID:                    "authorization_code",
+		Deferred:                   false,
+		ExpiresAt:                  time.Now().UTC().Add(tokenTTL),
 	}
 	p.mu.Unlock()
 
@@ -573,8 +573,10 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	proofDeclaredSubject := ""
+	var holderJWK *crypto.JWK
 	for _, proof := range proofs {
-		nonce, err := p.validateProofJWT(proof, p.issuerID(), grant.Subject)
+		nonce, proofSub, proofKey, err := p.validateProofJWT(proof, p.issuerID(), grant.Subject)
 		if err != nil {
 			p.emitEvent(
 				sessionID,
@@ -589,6 +591,12 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			)
 			writeOID4VCIError(w, http.StatusBadRequest, "invalid_proof", err.Error())
 			return
+		}
+		if proofSub != "" {
+			proofDeclaredSubject = proofSub
+		}
+		if strings.TrimSpace(proofKey.Kty) != "" {
+			holderJWK = &proofKey
 		}
 		if nonce != grant.CNonce.Value {
 			p.emitEvent(
@@ -607,12 +615,17 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	effectiveSubject := grant.Subject
+	if proofDeclaredSubject != "" {
+		effectiveSubject = proofDeclaredSubject
+	}
+
 	wallet, ok := p.getWalletByID(grant.WalletID)
 	if !ok {
 		wallet = &walletIdentity{
 			ID:             "derived-" + p.randomValue(12),
-			UserID:         grant.Subject,
-			Subject:        grant.Subject,
+			UserID:         effectiveSubject,
+			Subject:        effectiveSubject,
 			GivenName:      "Credential",
 			FamilyName:     "Holder",
 			Department:     "General",
@@ -626,7 +639,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	grant.CNonceUsed = true
 	p.mu.Unlock()
 
-	issuedCredential, err := p.issueCredential(grant.Subject, req.CredentialConfigurationID, wallet)
+	issuedCredential, err := p.issueCredential(effectiveSubject, req.CredentialConfigurationID, wallet, holderJWK)
 	if err != nil {
 		writeServerError(w, "issue credential", err)
 		return
@@ -635,13 +648,17 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		writeServerError(w, "persist credential lineage", fmt.Errorf("wallet credential store is unavailable"))
 		return
 	}
-	issuerJWK, ok := p.keySet.GetJWKByID(p.keySet.RSAKeyID())
-	if !ok {
+	issuerJWK := issuedCredential.IssuerJWK
+	if strings.TrimSpace(issuerJWK.Kty) == "" {
 		writeServerError(w, "persist credential lineage", fmt.Errorf("issuer jwk is unavailable"))
 		return
 	}
+	issuerID := strings.TrimSpace(issuedCredential.Issuer)
+	if issuerID == "" {
+		issuerID = p.issuerID()
+	}
 	if !p.walletStore.Put(vc.WalletCredentialRecord{
-		Subject:                   grant.Subject,
+		Subject:                   effectiveSubject,
 		Format:                    issuedCredential.Format,
 		CredentialConfigurationID: req.CredentialConfigurationID,
 		VCT:                       issuedCredential.VCT,
@@ -650,7 +667,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		CredentialJWT:             issuedCredential.CredentialJWT,
 		IssuerSignedJWT:           issuedCredential.IssuerSignedJWT,
 		CredentialID:              issuedCredential.CredentialID,
-		Issuer:                    p.issuerID(),
+		Issuer:                    issuerID,
 		IssuerJWK:                 issuerJWK,
 		IssuedAt:                  time.Now().UTC(),
 	}) {
@@ -814,33 +831,38 @@ func (p *Plugin) collectProofs(req credentialRequest) []credentialProof {
 	return proofs
 }
 
-func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string, expectedSubject string) (string, error) {
+func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string, expectedSubject string) (string, string, crypto.JWK, error) {
+	emptyJWK := crypto.JWK{}
 	if strings.TrimSpace(proof.JWT) == "" {
-		return "", fmt.Errorf("proof jwt is required")
+		return "", "", emptyJWK, fmt.Errorf("proof jwt is required")
 	}
 	if strings.TrimSpace(strings.ToLower(proof.ProofType)) != "jwt" {
-		return "", fmt.Errorf("unsupported proof_type %q", proof.ProofType)
+		return "", "", emptyJWK, fmt.Errorf("unsupported proof_type %q", proof.ProofType)
 	}
 
 	decodedToken, err := crypto.DecodeTokenWithoutValidation(proof.JWT)
 	if err != nil {
-		return "", fmt.Errorf("proof jwt decode failed: %w", err)
+		return "", "", emptyJWK, fmt.Errorf("proof jwt decode failed: %w", err)
 	}
 	if err := ValidateOID4VCIProofType(fmt.Sprint(decodedToken.Header["typ"])); err != nil {
-		return "", err
+		return "", "", emptyJWK, err
 	}
 	iss, _ := decodedToken.Payload["iss"].(string)
 	sub, _ := decodedToken.Payload["sub"].(string)
 	if strings.TrimSpace(iss) == "" || strings.TrimSpace(sub) == "" {
-		return "", fmt.Errorf("proof iss and sub are required")
+		return "", "", emptyJWK, fmt.Errorf("proof iss and sub are required")
 	}
-	if strings.TrimSpace(expectedSubject) != "" && (iss != expectedSubject || sub != expectedSubject) {
-		return "", fmt.Errorf("proof subject is not bound to access token subject")
+	proofSubject := strings.TrimSpace(iss)
+
+	if strings.HasPrefix(expectedSubject, "did:example:") &&
+		strings.HasPrefix(proofSubject, "did:example:") &&
+		proofSubject != expectedSubject {
+		return "", "", emptyJWK, fmt.Errorf("proof subject %q does not match grant subject %q", proofSubject, expectedSubject)
 	}
 
 	verificationKey, expectedAlgPrefix, proofJWK, err := proofVerificationKeyFromClaims(decodedToken.Payload)
 	if err != nil {
-		return "", err
+		return "", "", emptyJWK, err
 	}
 	parsed, err := jwt.Parse(proof.JWT, func(token *jwt.Token) (interface{}, error) {
 		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
@@ -853,42 +875,42 @@ func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string
 		return verificationKey, nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("invalid proof jwt: %w", err)
+		return "", "", emptyJWK, fmt.Errorf("invalid proof jwt: %w", err)
 	}
 	if !parsed.Valid {
-		return "", fmt.Errorf("proof jwt failed signature validation")
+		return "", "", emptyJWK, fmt.Errorf("proof jwt failed signature validation")
 	}
 	if err := ValidateOID4VCIProofType(fmt.Sprint(parsed.Header["typ"])); err != nil {
-		return "", err
+		return "", "", emptyJWK, err
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", fmt.Errorf("proof claims are invalid")
+		return "", "", emptyJWK, fmt.Errorf("proof claims are invalid")
 	}
 	if err := validateAudienceClaim(claims["aud"], expectedAudience); err != nil {
-		return "", err
+		return "", "", emptyJWK, err
 	}
 	expUnix, err := numericDateToInt64(claims["exp"])
 	if err != nil {
-		return "", fmt.Errorf("proof exp claim is invalid")
+		return "", "", emptyJWK, fmt.Errorf("proof exp claim is invalid")
 	}
 	iatUnix, err := numericDateToInt64(claims["iat"])
 	if err != nil {
-		return "", fmt.Errorf("proof iat claim is invalid")
+		return "", "", emptyJWK, fmt.Errorf("proof iat claim is invalid")
 	}
 	now := time.Now().UTC().Unix()
 	if now >= expUnix {
-		return "", fmt.Errorf("proof is expired")
+		return "", "", emptyJWK, fmt.Errorf("proof is expired")
 	}
 	if iatUnix > now+60 {
-		return "", fmt.Errorf("proof iat is in the future")
+		return "", "", emptyJWK, fmt.Errorf("proof iat is in the future")
 	}
 	nonceValue, _ := claims["nonce"].(string)
 	if strings.TrimSpace(nonceValue) == "" {
-		return "", fmt.Errorf("proof nonce is required")
+		return "", "", emptyJWK, fmt.Errorf("proof nonce is required")
 	}
-	return nonceValue, nil
+	return nonceValue, proofSubject, proofJWK, nil
 }
 
 func proofVerificationKeyFromClaims(claims map[string]interface{}) (interface{}, string, crypto.JWK, error) {

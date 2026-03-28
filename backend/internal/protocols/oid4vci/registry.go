@@ -13,7 +13,6 @@ const (
 
 const (
 	credentialFormatDCSdJWT    = "dc+sd-jwt"
-	credentialFormatMSOMDOC    = "mso_mdoc"
 	credentialFormatJWTVCJSON  = "jwt_vc_json"
 	credentialFormatJWTVCJSONL = "jwt_vc_json-ld"
 	credentialFormatLDPVC      = "ldp_vc"
@@ -118,20 +117,9 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			CredentialTypes:           []string{"VerifiableCredential", "UniversityDegreeCredential"},
 			Contexts:                  []string{"https://www.w3.org/2018/credentials/v1"},
 			BindingMethodsSupported:   []string{"jwk"},
-			ProofSigningAlgsSupported: []string{"RS256"},
-			CredentialSigningAlgs:     []string{"RS256"},
+			ProofSigningAlgsSupported: []string{"ES256"},
+			CredentialSigningAlgs:     []string{"ES256"},
 			SupportedDisplayName:      "University Degree (LDP VC profile)",
-		},
-		"UniversityDegreeCredentialMDOC": {
-			ID:                        "UniversityDegreeCredentialMDOC",
-			Format:                    credentialFormatMSOMDOC,
-			Scope:                     defaultCredentialScope,
-			Doctype:                   "org.iso.18013.5.1.mDL",
-			CredentialTypes:           []string{"org.iso.18013.5.1.mDL"},
-			BindingMethodsSupported:   []string{"jwk"},
-			ProofSigningAlgsSupported: []string{"RS256"},
-			CredentialSigningAlgs:     []string{"RS256"},
-			SupportedDisplayName:      "mDoc style university profile",
 		},
 	}
 

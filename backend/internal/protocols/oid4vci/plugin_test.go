@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -121,7 +122,6 @@ func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T)
 		"UniversityDegreeCredentialJWT":   "jwt_vc_json",
 		"UniversityDegreeCredentialJWTLD": "jwt_vc_json-ld",
 		"UniversityDegreeCredentialLDP":   "ldp_vc",
-		"UniversityDegreeCredentialMDOC":  "mso_mdoc",
 	}
 	for configurationID, expectedFormat := range expectedFormats {
 		rawConfiguration, ok := configurations[configurationID]
@@ -148,7 +148,6 @@ func TestCredentialIssuanceSupportsMultipleFormats(t *testing.T) {
 		{name: "jwt-vc-json", credentialConfigurationID: "UniversityDegreeCredentialJWT", format: "jwt_vc_json"},
 		{name: "jwt-vc-json-ld", credentialConfigurationID: "UniversityDegreeCredentialJWTLD", format: "jwt_vc_json-ld"},
 		{name: "ldp-vc", credentialConfigurationID: "UniversityDegreeCredentialLDP", format: "ldp_vc"},
-		{name: "mso-mdoc", credentialConfigurationID: "UniversityDegreeCredentialMDOC", format: "mso_mdoc"},
 	}
 	for _, testCase := range testCases {
 		testCase := testCase
@@ -210,7 +209,7 @@ func TestCredentialIssuanceRejectsFormatConfigurationMismatch(t *testing.T) {
 	defer server.Close()
 
 	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
-		"credential_configuration_ids": []string{"UniversityDegreeCredentialMDOC"},
+		"credential_configuration_ids": []string{"UniversityDegreeCredentialLDP"},
 	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
@@ -233,7 +232,7 @@ func TestCredentialIssuanceRejectsFormatConfigurationMismatch(t *testing.T) {
 		t,
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
-			"credential_configuration_id": "UniversityDegreeCredentialMDOC",
+			"credential_configuration_id": "UniversityDegreeCredentialLDP",
 			"format":                      "jwt_vc_json",
 			"proofs": []map[string]interface{}{
 				{
@@ -714,6 +713,16 @@ func decodeJSONMap(t *testing.T, resp *http.Response) map[string]interface{} {
 
 func asString(t *testing.T, value interface{}) string {
 	t.Helper()
-	str, _ := value.(string)
-	return str
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case map[string]interface{}, []interface{}:
+		serialized, err := json.Marshal(typed)
+		if err != nil {
+			t.Fatalf("marshal json value: %v", err)
+		}
+		return string(serialized)
+	default:
+		return fmt.Sprint(value)
+	}
 }

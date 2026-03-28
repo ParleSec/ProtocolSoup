@@ -1,11 +1,16 @@
 package oid4vci
 
 import (
+	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -19,10 +24,12 @@ type issuedCredential struct {
 	VCT             string
 	Doctype         string
 	CredentialTypes []string
+	Issuer          string
+	IssuerJWK       crypto.JWK
 }
 
 type credentialIssuerDriver interface {
-	IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity) (*issuedCredential, error)
+	IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity, holderJWK *crypto.JWK) (*issuedCredential, error)
 }
 
 type sdJWTCredentialIssuerDriver struct {
@@ -41,11 +48,8 @@ type ldpVCCredentialIssuerDriver struct {
 	plugin *Plugin
 }
 
-type msoMDocCredentialIssuerDriver struct {
-	plugin *Plugin
-}
 
-func (p *Plugin) issueCredential(subject string, configurationID string, wallet *walletIdentity) (*issuedCredential, error) {
+func (p *Plugin) issueCredential(subject string, configurationID string, wallet *walletIdentity, holderJWK *crypto.JWK) (*issuedCredential, error) {
 	if p == nil {
 		return nil, fmt.Errorf("plugin is unavailable")
 	}
@@ -61,7 +65,7 @@ func (p *Plugin) issueCredential(subject string, configurationID string, wallet 
 	if !ok {
 		return nil, fmt.Errorf("unsupported format %q", configuration.Format)
 	}
-	issued, err := driver.IssueCredential(subject, configuration, wallet)
+	issued, err := driver.IssueCredential(subject, configuration, wallet, holderJWK)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +84,7 @@ func (p *Plugin) issueCredential(subject string, configurationID string, wallet 
 	return issued, nil
 }
 
-func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity) (*issuedCredential, error) {
+func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity, holderJWK *crypto.JWK) (*issuedCredential, error) {
 	if d == nil || d.plugin == nil {
 		return nil, fmt.Errorf("sd-jwt credential issuer driver is unavailable")
 	}
@@ -123,9 +127,20 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 		"jti": credentialID,
 		"vct": configuration.VCT,
 		"vc": map[string]interface{}{
+			"@context":          credentialContexts(configuration),
 			"type":              credentialTypes(configuration),
 			"credentialSubject": credentialSubject,
 		},
+	}
+	if holderJWK != nil && strings.TrimSpace(holderJWK.Kty) != "" {
+		cnf := map[string]interface{}{
+			"jwk": *holderJWK,
+		}
+		thumbprint := strings.TrimSpace(holderJWK.Thumbprint())
+		if thumbprint != "" {
+			cnf["jkt"] = thumbprint
+		}
+		claims["cnf"] = cnf
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -134,6 +149,10 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 	issuerSignedJWT, err := token.SignedString(d.plugin.keySet.RSAPrivateKey())
 	if err != nil {
 		return nil, err
+	}
+	issuerJWK, ok := d.plugin.keySet.GetJWKByID(d.plugin.keySet.RSAKeyID())
+	if !ok {
+		return nil, fmt.Errorf("issuer rsa jwk is unavailable")
 	}
 
 	serialized := vc.BuildSDJWTSerialization(issuerSignedJWT, disclosureSegments, "")
@@ -145,24 +164,22 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 		CredentialID:    credentialID,
 		VCT:             configuration.VCT,
 		CredentialTypes: credentialTypes(configuration),
+		Issuer:          d.plugin.issuerID(),
+		IssuerJWK:       issuerJWK,
 	}, nil
 }
 
-func (d *jwtVCCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity) (*issuedCredential, error) {
+func (d *jwtVCCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity, _ *crypto.JWK) (*issuedCredential, error) {
 	return issueJWTBackedCredential(d.plugin, "vc+jwt", subject, configuration, wallet, false, false)
 }
 
-func (d *jwtVCJSONLDCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity) (*issuedCredential, error) {
+func (d *jwtVCJSONLDCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity, _ *crypto.JWK) (*issuedCredential, error) {
 	return issueJWTBackedCredential(d.plugin, "vc+jwt", subject, configuration, wallet, true, false)
 }
 
-func (d *ldpVCCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity) (*issuedCredential, error) {
-	return issueJWTBackedCredential(d.plugin, "vc+ldp-jwt", subject, configuration, wallet, true, true)
-}
-
-func (d *msoMDocCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity) (*issuedCredential, error) {
+func (d *ldpVCCredentialIssuerDriver) IssueCredential(subject string, configuration credentialConfiguration, wallet *walletIdentity, _ *crypto.JWK) (*issuedCredential, error) {
 	if d == nil || d.plugin == nil {
-		return nil, fmt.Errorf("mso_mdoc credential issuer driver is unavailable")
+		return nil, fmt.Errorf("ldp_vc credential issuer driver is unavailable")
 	}
 	if d.plugin.keySet == nil {
 		return nil, fmt.Errorf("keyset is unavailable")
@@ -170,37 +187,83 @@ func (d *msoMDocCredentialIssuerDriver) IssueCredential(subject string, configur
 	if wallet == nil {
 		return nil, fmt.Errorf("wallet context is required")
 	}
+
 	now := time.Now().UTC()
 	credentialID := d.plugin.randomValue(24)
-	claims := jwt.MapClaims{
-		"iss":      nowIssuer(d.plugin.issuerID()),
-		"sub":      subject,
-		"iat":      now.Unix(),
-		"nbf":      now.Unix(),
-		"exp":      now.Add(20 * time.Minute).Unix(),
-		"jti":      credentialID,
-		"doctype":  strings.TrimSpace(configuration.Doctype),
-		"mdoc":     map[string]interface{}{"namespaces": walletSelectiveClaims(wallet)},
-		"vct":      strings.TrimSpace(configuration.VCT),
-		"format":   credentialFormatMSOMDOC,
-		"profile":  "openid4vci-mso-mdoc",
-		"evidence": map[string]interface{}{"proof_type": "issuer_signed"},
+	issuerJWK, ok := d.plugin.keySet.GetJWKByID(d.plugin.keySet.ECKeyID())
+	if !ok {
+		return nil, fmt.Errorf("issuer ec jwk is unavailable")
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["typ"] = "mdoc+jwt"
-	token.Header["kid"] = d.plugin.keySet.RSAKeyID()
-	signed, err := token.SignedString(d.plugin.keySet.RSAPrivateKey())
+	issuerDID, err := vc.DIDJWKFromJSON(issuerJWK)
+	if err != nil {
+		return nil, fmt.Errorf("derive issuer did:jwk: %w", err)
+	}
+	expiry := now.Add(20 * time.Minute)
+	credential := map[string]interface{}{
+		"@context":          credentialContexts(configuration),
+		"id":                strings.TrimRight(d.plugin.issuerID(), "/") + "/credentials/" + credentialID,
+		"type":              credentialTypes(configuration),
+		"issuer": map[string]interface{}{
+			"id":   issuerDID,
+			"name": "ProtocolSoup Issuer",
+		},
+		"issuanceDate":      now.Format(time.RFC3339),
+		"validFrom":         now.Format(time.RFC3339),
+		"expirationDate":    expiry.Format(time.RFC3339),
+		"validUntil":        expiry.Format(time.RFC3339),
+		"credentialSubject": walletFullCredentialSubject(subject, wallet),
+		"credentialStatus": map[string]interface{}{
+			"id":                   strings.TrimRight(d.plugin.issuerID(), "/") + "/credentials/" + credentialID + "/status",
+			"type":                 "StatusList2021Entry",
+			"statusPurpose":        "revocation",
+			"statusListIndex":      "0",
+			"statusListCredential": strings.TrimRight(d.plugin.issuerID(), "/") + "/status-list",
+		},
+	}
+	if strings.TrimSpace(configuration.VCT) != "" {
+		credential["vct"] = strings.TrimSpace(configuration.VCT)
+	}
+	securedCredential, err := vc.SecureDataIntegrityDocument(
+		credential,
+		map[string]interface{}{
+			"created":            now.Format(time.RFC3339),
+			"proofPurpose":       "assertionMethod",
+			"verificationMethod": vc.DefaultVerificationMethodID(issuerDID),
+		},
+		issuerJWK,
+		func(data []byte) ([]byte, error) {
+			digest := sha256.Sum256(data)
+			rValue, sValue, signErr := ecdsa.Sign(rand.Reader, d.plugin.keySet.ECPrivateKey(), digest[:])
+			if signErr != nil {
+				return nil, signErr
+			}
+			componentSize := 32
+			signature := make([]byte, componentSize*2)
+			rBytes := rValue.Bytes()
+			sBytes := sValue.Bytes()
+			copy(signature[componentSize-len(rBytes):componentSize], rBytes)
+			copy(signature[len(signature)-len(sBytes):], sBytes)
+			return signature, nil
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
+	serialized, err := json.Marshal(securedCredential)
+	if err != nil {
+		return nil, err
+	}
+	serializedCredential := strings.TrimSpace(string(serialized))
 	return &issuedCredential{
 		Format:          configuration.Format,
-		Credential:      signed,
-		CredentialJWT:   signed,
-		IssuerSignedJWT: signed,
+		Credential:      securedCredential,
+		CredentialJWT:   serializedCredential,
+		IssuerSignedJWT: serializedCredential,
 		CredentialID:    credentialID,
-		Doctype:         configuration.Doctype,
+		VCT:             configuration.VCT,
 		CredentialTypes: credentialTypes(configuration),
+		Issuer:          issuerDID,
+		IssuerJWK:       issuerJWK,
 	}, nil
 }
 
@@ -225,6 +288,10 @@ func issueJWTBackedCredential(
 
 	now := time.Now().UTC()
 	credentialID := p.randomValue(24)
+	issuerJWK, ok := p.keySet.GetJWKByID(p.keySet.RSAKeyID())
+	if !ok {
+		return nil, fmt.Errorf("issuer rsa jwk is unavailable")
+	}
 	credentialSubject := walletFullCredentialSubject(subject, wallet)
 	vcClaim := map[string]interface{}{
 		"type":              credentialTypes(configuration),
@@ -267,6 +334,8 @@ func issueJWTBackedCredential(
 		CredentialID:    credentialID,
 		VCT:             configuration.VCT,
 		CredentialTypes: credentialTypes(configuration),
+		Issuer:          p.issuerID(),
+		IssuerJWK:       issuerJWK,
 	}, nil
 }
 
@@ -303,4 +372,3 @@ func credentialContexts(configuration credentialConfiguration) []string {
 	}
 	return append([]string{}, configuration.Contexts...)
 }
-
