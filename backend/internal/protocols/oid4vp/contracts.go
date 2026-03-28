@@ -28,6 +28,22 @@ var prefixedClientIDSchemes = map[string]ClientIDScheme{
 	"verifier_attestation":     ClientIDSchemeVerifierAttestation,
 }
 
+// ParseClientIDSchemeName resolves a raw client_id_scheme name to a known profile.
+func ParseClientIDSchemeName(raw string) (ClientIDScheme, error) {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return ClientIDSchemeUnknown, fmt.Errorf("client_id_scheme is required")
+	}
+	if normalized == string(ClientIDSchemePreRegistered) {
+		return ClientIDSchemePreRegistered, nil
+	}
+	scheme, ok := prefixedClientIDSchemes[normalized]
+	if !ok {
+		return ClientIDSchemeUnknown, fmt.Errorf("client_id_scheme %q is not supported", normalized)
+	}
+	return scheme, nil
+}
+
 // DefaultMVPClientIDSchemeSet returns the initial OID4VP client_id scheme allowlist.
 func DefaultMVPClientIDSchemeSet() map[ClientIDScheme]struct{} {
 	return map[ClientIDScheme]struct{}{

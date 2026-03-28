@@ -3,7 +3,16 @@ package oid4vp
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -65,6 +74,84 @@ func TestDirectPostJWTFlowEndToEnd(t *testing.T) {
 	assertPolicyAllowed(t, resultPayload)
 }
 
+func TestDirectPostJWTFlowAcceptsRawJSONLDPresentation(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	holderKeySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("new holder key set: %v", err)
+	}
+	holderJWK, found := holderKeySet.GetJWKByID(holderKeySet.ECKeyID())
+	if !found {
+		t.Fatalf("holder ec jwk is unavailable")
+	}
+	holderDID, err := vc.DIDJWKFromJSON(holderJWK)
+	if err != nil {
+		t.Fatalf("derive holder did:jwk: %v", err)
+	}
+
+	issuerKeySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("new issuer key set: %v", err)
+	}
+	issuerJWK, found := issuerKeySet.GetJWKByID(issuerKeySet.ECKeyID())
+	if !found {
+		t.Fatalf("issuer ec jwk is unavailable")
+	}
+	issuerDID, err := vc.DIDJWKFromJSON(issuerJWK)
+	if err != nil {
+		t.Fatalf("derive issuer did:jwk: %v", err)
+	}
+
+	rawCredential := createRawLDPCredential(t, issuerKeySet, issuerJWK, issuerDID, holderDID)
+	if !vc.DefaultWalletCredentialStore().Put(vc.WalletCredentialRecord{
+		Subject:                   holderDID,
+		Format:                    "ldp_vc",
+		CredentialConfigurationID: "UniversityDegreeCredentialLDP",
+		VCT:                       testCredentialVCT,
+		CredentialTypes:           []string{"VerifiableCredential", "UniversityDegreeCredential"},
+		CredentialJWT:             rawCredential,
+		IssuerSignedJWT:           rawCredential,
+		CredentialID:              "cred-ldp-raw",
+		Issuer:                    issuerDID,
+		IssuerJWK:                 issuerJWK,
+		IssuedAt:                  time.Now().UTC(),
+	}) {
+		t.Fatalf("persist raw ldp_vc lineage failed")
+	}
+
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post.jwt", map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id":     "credential_requirement",
+				"format": "ldp_vc",
+				"meta": map[string]interface{}{
+					"type_values": []string{"UniversityDegreeCredential"},
+				},
+				"claims": []map[string]interface{}{
+					{
+						"path": []string{"degree"},
+					},
+				},
+			},
+		},
+	})
+	vpToken := createRawLDPPresentationToken(t, createPayload, holderKeySet, holderDID, rawCredential)
+	form := url.Values{}
+	form.Set("state", asVPString(createPayload["state"]))
+	form.Set("response", createEncryptedResponseJWTWithEC(t, env.KeySet, createPayload, holderKeySet, holderDID, vpToken))
+
+	formResp, err := http.PostForm(env.Server.URL+"/oid4vp/response", form)
+	if err != nil {
+		t.Fatalf("post raw json-ld wallet response failed: %v", err)
+	}
+	assertVPStatus(t, formResp, http.StatusOK)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	assertPolicyAllowed(t, resultPayload)
+}
+
 func TestCreateAuthorizationRequestRejectsDCQLAndScopeTogether(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -85,6 +172,205 @@ func TestCreateAuthorizationRequestRejectsDCQLAndScopeTogether(t *testing.T) {
 	errorPayload := decodeVPJSONMap(t, createResp)
 	if asVPString(errorPayload["error"]) != "invalid_request" {
 		t.Fatalf("expected invalid_request error")
+	}
+}
+
+func TestCreateAuthorizationRequestBuildsVerifierAttestationRequestObject(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequestPayload(t, env.Server.URL, map[string]interface{}{
+		"client_id_scheme": "verifier_attestation",
+		"response_mode":    "direct_post",
+		"response_uri":     env.Server.URL + "/oid4vp/response",
+	})
+	if asVPString(createPayload["client_id_scheme"]) != "verifier_attestation" {
+		t.Fatalf("expected verifier_attestation client_id_scheme, got %q", asVPString(createPayload["client_id_scheme"]))
+	}
+
+	requestJWT := asVPString(createPayload["request"])
+	decodedRequest, err := crypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
+	}
+	attestationJWT := asVPString(decodedRequest.Header["jwt"])
+	if attestationJWT == "" {
+		t.Fatalf("expected verifier attestation jwt in request JOSE header")
+	}
+
+	decodedAttestation, err := crypto.DecodeTokenWithoutValidation(attestationJWT)
+	if err != nil {
+		t.Fatalf("DecodeTokenWithoutValidation(attestation): %v", err)
+	}
+	if asVPString(decodedAttestation.Header["typ"]) != "verifier-attestation+jwt" {
+		t.Fatalf("unexpected verifier attestation typ %q", asVPString(decodedAttestation.Header["typ"]))
+	}
+	expectedIssuer := env.Server.URL + "/oid4vp/verifier-attestation"
+	if asVPString(decodedAttestation.Payload["iss"]) != expectedIssuer {
+		t.Fatalf("unexpected verifier attestation issuer %q", asVPString(decodedAttestation.Payload["iss"]))
+	}
+	expectedClientSubject := stripClientIDSchemePrefixValue(asVPString(createPayload["client_id"]), ClientIDSchemeVerifierAttestation)
+	if asVPString(decodedAttestation.Payload["sub"]) != expectedClientSubject {
+		t.Fatalf("unexpected verifier attestation sub %q", asVPString(decodedAttestation.Payload["sub"]))
+	}
+	redirectURIs, ok := decodedAttestation.Payload["redirect_uris"].([]interface{})
+	if !ok || len(redirectURIs) != 1 || asVPString(redirectURIs[0]) != env.Server.URL+"/oid4vp/response" {
+		t.Fatalf("unexpected redirect_uris claim %v", decodedAttestation.Payload["redirect_uris"])
+	}
+
+	metadataResp, err := http.Get(expectedIssuer + "/.well-known/openid-configuration")
+	if err != nil {
+		t.Fatalf("fetch verifier attestation metadata: %v", err)
+	}
+	assertVPStatus(t, metadataResp, http.StatusOK)
+	metadataPayload := decodeVPJSONMap(t, metadataResp)
+
+	jwksResp, err := http.Get(asVPString(metadataPayload["jwks_uri"]))
+	if err != nil {
+		t.Fatalf("fetch verifier attestation jwks: %v", err)
+	}
+	assertVPStatus(t, jwksResp, http.StatusOK)
+	defer jwksResp.Body.Close()
+
+	var issuerJWKS crypto.JWKS
+	if err := json.NewDecoder(jwksResp.Body).Decode(&issuerJWKS); err != nil {
+		t.Fatalf("decode verifier attestation jwks: %v", err)
+	}
+	issuerJWK, err := issuerJWKS.GetKeyByID(asVPString(decodedAttestation.Header["kid"]))
+	if err != nil {
+		t.Fatalf("GetKeyByID(attestation kid): %v", err)
+	}
+	issuerPublicKey, err := issuerJWK.ToPublicKey()
+	if err != nil {
+		t.Fatalf("ToPublicKey(attestation jwk): %v", err)
+	}
+	if verified, err := crypto.VerifySignatureWithKey(attestationJWT, issuerPublicKey); err != nil || !verified {
+		t.Fatalf("VerifySignatureWithKey(attestation): verified=%v err=%v", verified, err)
+	}
+
+	cnf, ok := decodedAttestation.Payload["cnf"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected cnf claim")
+	}
+	requestSignerJWK := jwkFromVPValue(t, cnf["jwk"])
+	requestSignerPublicKey, err := requestSignerJWK.ToPublicKey()
+	if err != nil {
+		t.Fatalf("ToPublicKey(request signer jwk): %v", err)
+	}
+	if verified, err := crypto.VerifySignatureWithKey(requestJWT, requestSignerPublicKey); err != nil || !verified {
+		t.Fatalf("VerifySignatureWithKey(request): verified=%v err=%v", verified, err)
+	}
+}
+
+func TestCreateAuthorizationRequestBuildsVerifierAttestationRequestObjectWithConfiguredIssuerKey(t *testing.T) {
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	t.Setenv(verifierAttestationPrivateKeyEnv, encodeECDSAPrivateKeyPEM(t, issuerKey))
+
+	expectedIssuerJWK := crypto.JWKFromECPublicKey(&issuerKey.PublicKey, "")
+	expectedIssuerJWK.Kid = expectedIssuerJWK.Thumbprint()
+
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequestPayload(t, env.Server.URL, map[string]interface{}{
+		"client_id_scheme": "verifier_attestation",
+		"response_mode":    "direct_post",
+		"response_uri":     env.Server.URL + "/oid4vp/response",
+	})
+
+	requestJWT := asVPString(createPayload["request"])
+	decodedRequest, err := crypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
+	}
+	attestationJWT := asVPString(decodedRequest.Header["jwt"])
+	if attestationJWT == "" {
+		t.Fatalf("expected verifier attestation jwt in request JOSE header")
+	}
+	decodedAttestation, err := crypto.DecodeTokenWithoutValidation(attestationJWT)
+	if err != nil {
+		t.Fatalf("DecodeTokenWithoutValidation(attestation): %v", err)
+	}
+	if asVPString(decodedAttestation.Header["kid"]) != expectedIssuerJWK.Kid {
+		t.Fatalf("unexpected verifier attestation kid %q", asVPString(decodedAttestation.Header["kid"]))
+	}
+
+	metadataResp, err := http.Get(env.Server.URL + "/oid4vp/verifier-attestation/.well-known/openid-configuration")
+	if err != nil {
+		t.Fatalf("fetch verifier attestation metadata: %v", err)
+	}
+	assertVPStatus(t, metadataResp, http.StatusOK)
+	metadataPayload := decodeVPJSONMap(t, metadataResp)
+
+	jwksResp, err := http.Get(asVPString(metadataPayload["jwks_uri"]))
+	if err != nil {
+		t.Fatalf("fetch verifier attestation jwks: %v", err)
+	}
+	assertVPStatus(t, jwksResp, http.StatusOK)
+	defer jwksResp.Body.Close()
+
+	var issuerJWKS crypto.JWKS
+	if err := json.NewDecoder(jwksResp.Body).Decode(&issuerJWKS); err != nil {
+		t.Fatalf("decode verifier attestation jwks: %v", err)
+	}
+	issuerJWK, err := issuerJWKS.GetKeyByID(expectedIssuerJWK.Kid)
+	if err != nil {
+		t.Fatalf("GetKeyByID(expected kid): %v", err)
+	}
+	if issuerJWK.Thumbprint() != expectedIssuerJWK.Thumbprint() {
+		t.Fatalf("unexpected configured verifier attestation jwk thumbprint %q", issuerJWK.Thumbprint())
+	}
+	issuerPublicKey, err := issuerJWK.ToPublicKey()
+	if err != nil {
+		t.Fatalf("ToPublicKey(configured issuer jwk): %v", err)
+	}
+	if verified, err := crypto.VerifySignatureWithKey(attestationJWT, issuerPublicKey); err != nil || !verified {
+		t.Fatalf("VerifySignatureWithKey(attestation): verified=%v err=%v", verified, err)
+	}
+}
+
+func TestCreateAuthorizationRequestBuildsX509SANDNSRequestObject(t *testing.T) {
+	verifierKey, certificateChain := createECDSACertificateChain(t, []string{"verifier.example"}, "Verifier Certificate")
+	t.Setenv(x509SANDNSClientIDEnv, "x509_san_dns:verifier.example")
+	t.Setenv(x509SANDNSCertificateChainPEMEnv, encodeCertificateChainPEM(certificateChain))
+	t.Setenv(x509SANDNSPrivateKeyPEMEnv, encodeECDSAPrivateKeyPEM(t, verifierKey))
+
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequestPayload(t, env.Server.URL, map[string]interface{}{
+		"client_id_scheme": "x509_san_dns",
+		"response_mode":    "direct_post",
+		"response_uri":     "https://verifier.example/oid4vp/response",
+	})
+	if asVPString(createPayload["client_id"]) != "x509_san_dns:verifier.example" {
+		t.Fatalf("unexpected x509_san_dns client_id %q", asVPString(createPayload["client_id"]))
+	}
+
+	requestJWT := asVPString(createPayload["request"])
+	decodedRequest, err := crypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
+	}
+	if _, ok := decodedRequest.Header["x5c"].([]interface{}); !ok {
+		t.Fatalf("expected x5c header, got %T", decodedRequest.Header["x5c"])
+	}
+	certificates, err := crypto.ParseX5CCertificateChain(decodedRequest.Header["x5c"])
+	if err != nil {
+		t.Fatalf("ParseX5CCertificateChain: %v", err)
+	}
+	leaf, err := crypto.ValidateCertificateChain(certificates, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ValidateCertificateChain: %v", err)
+	}
+	if err := leaf.VerifyHostname("verifier.example"); err != nil {
+		t.Fatalf("VerifyHostname(verifier.example): %v", err)
+	}
+	if verified, err := crypto.VerifySignatureWithKey(requestJWT, verifierKey.Public()); err != nil || !verified {
+		t.Fatalf("VerifySignatureWithKey(request): verified=%v err=%v", verified, err)
 	}
 }
 
@@ -338,14 +624,6 @@ func TestDirectPostPolicyAllowsDCQLAcrossSupportedFormats(t *testing.T) {
 				},
 			},
 		},
-		{
-			name:                      "mso-mdoc",
-			credentialConfigurationID: "UniversityDegreeCredentialMDOC",
-			format:                    "mso_mdoc",
-			meta: map[string]interface{}{
-				"doctype_values": []string{"org.iso.18013.5.1.mDL"},
-			},
-		},
 	}
 
 	for _, testCase := range testCases {
@@ -380,41 +658,6 @@ func TestDirectPostPolicyAllowsDCQLAcrossSupportedFormats(t *testing.T) {
 			resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
 			assertPolicyAllowed(t, resultPayload)
 		})
-	}
-}
-
-func TestDirectPostPolicyDeniesDCQLDoctypeMismatchForMSOMDOC(t *testing.T) {
-	env := newCombinedVCServer(t)
-	defer env.Server.Close()
-
-	wallet := issueCredentialForWalletWithSelection(
-		t,
-		env.Server.URL,
-		"alice-mdoc",
-		"UniversityDegreeCredentialMDOC",
-		"mso_mdoc",
-	)
-	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", map[string]interface{}{
-		"credentials": []map[string]interface{}{
-			{
-				"id":     "mdoc_requirement",
-				"format": "mso_mdoc",
-				"meta": map[string]interface{}{
-					"doctype_values": []string{"org.iso.18013.5.1.fake"},
-				},
-			},
-		},
-	})
-	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
-
-	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
-	policyObj := extractVPPolicy(t, resultPayload)
-	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
-		t.Fatalf("expected denied policy decision")
-	}
-	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
-	if !containsVPReasonCode(reasonCodes, "dcql_meta_mismatch") {
-		t.Fatalf("expected dcql_meta_mismatch reason code, got %v", reasonCodes)
 	}
 }
 
@@ -929,6 +1172,159 @@ func createEncryptedResponseJWT(
 	return serialized
 }
 
+func createEncryptedResponseJWTWithEC(
+	t *testing.T,
+	verifierKeySet *crypto.KeySet,
+	createPayload map[string]interface{},
+	walletKeySet *crypto.KeySet,
+	walletSubject string,
+	vpToken string,
+) string {
+	t.Helper()
+	pubJWK, found := walletKeySet.GetJWKByID(walletKeySet.ECKeyID())
+	if !found {
+		t.Fatalf("wallet ec jwk is unavailable")
+	}
+	now := time.Now().UTC()
+	innerClaims := jwt.MapClaims{
+		"iss":      walletSubject,
+		"sub":      walletSubject,
+		"aud":      asVPString(createPayload["response_uri"]),
+		"state":    asVPString(createPayload["state"]),
+		"vp_token": vpToken,
+		"iat":      now.Unix(),
+		"exp":      now.Add(3 * time.Minute).Unix(),
+		"jti":      "resp-ec-" + walletSubject,
+		"cnf": map[string]interface{}{
+			"jwk": pubJWK,
+			"jkt": pubJWK.Thumbprint(),
+		},
+	}
+	innerToken := jwt.NewWithClaims(jwt.SigningMethodES256, innerClaims)
+	innerToken.Header["typ"] = "oauth-authz-resp+jwt"
+	innerToken.Header["kid"] = walletKeySet.ECKeyID()
+	signedInner, err := innerToken.SignedString(walletKeySet.ECPrivateKey())
+	if err != nil {
+		t.Fatalf("sign ec response jwt: %v", err)
+	}
+
+	encrypter, err := jose.NewEncrypter(
+		jose.A256GCM,
+		jose.Recipient{
+			Algorithm: jose.RSA_OAEP,
+			Key:       verifierKeySet.RSAPublicKey(),
+		},
+		(&jose.EncrypterOptions{}).WithContentType("JWT"),
+	)
+	if err != nil {
+		t.Fatalf("create encrypter: %v", err)
+	}
+	object, err := encrypter.Encrypt([]byte(signedInner))
+	if err != nil {
+		t.Fatalf("encrypt ec response jwt: %v", err)
+	}
+	serialized, err := object.CompactSerialize()
+	if err != nil {
+		t.Fatalf("serialize jwe: %v", err)
+	}
+	return serialized
+}
+
+func createRawLDPCredential(
+	t *testing.T,
+	issuerKeySet *crypto.KeySet,
+	issuerJWK crypto.JWK,
+	issuerDID string,
+	holderDID string,
+) string {
+	t.Helper()
+	credential, err := vc.SecureDataIntegrityDocument(
+		map[string]interface{}{
+			"@context":       []string{"https://www.w3.org/2018/credentials/v1"},
+			"id":             "urn:uuid:raw-ldp-vc",
+			"type":           []string{"VerifiableCredential", "UniversityDegreeCredential"},
+			"issuer":         issuerDID,
+			"issuanceDate":   time.Now().UTC().Format(time.RFC3339),
+			"expirationDate": time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
+			"credentialSubject": map[string]interface{}{
+				"id":         holderDID,
+				"degree":     "BSc",
+				"given_name": "Alice",
+			},
+			"vct": testCredentialVCT,
+		},
+		map[string]interface{}{
+			"created":            time.Now().UTC().Format(time.RFC3339),
+			"proofPurpose":       "assertionMethod",
+			"verificationMethod": vc.DefaultVerificationMethodID(issuerDID),
+		},
+		issuerJWK,
+		func(data []byte) ([]byte, error) {
+			return signECDSAProofBytes(issuerKeySet.ECPrivateKey(), data)
+		},
+	)
+	if err != nil {
+		t.Fatalf("secure raw ldp credential: %v", err)
+	}
+	serialized, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatalf("marshal raw ldp credential: %v", err)
+	}
+	return string(serialized)
+}
+
+func createRawLDPPresentationToken(
+	t *testing.T,
+	createPayload map[string]interface{},
+	holderKeySet *crypto.KeySet,
+	holderDID string,
+	rawCredential string,
+) string {
+	t.Helper()
+	holderJWK, found := holderKeySet.GetJWKByID(holderKeySet.ECKeyID())
+	if !found {
+		t.Fatalf("holder ec jwk is unavailable")
+	}
+	format, ok := vc.DefaultCredentialFormatRegistry().Lookup("ldp_vc")
+	if !ok {
+		t.Fatalf("ldp_vc format handler is unavailable")
+	}
+	result, err := format.BuildPresentation(vc.PresentationBuildInput{
+		Credential:               rawCredential,
+		Holder:                   holderDID,
+		HolderPublicJWK:          holderJWK,
+		HolderVerificationMethod: vc.DefaultVerificationMethodID(holderDID),
+		Audience:                 asVPString(createPayload["client_id"]),
+		Nonce:                    asVPString(createPayload["nonce"]),
+		ProofSigner: func(data []byte) ([]byte, error) {
+			return signECDSAProofBytes(holderKeySet.ECPrivateKey(), data)
+		},
+	})
+	if err != nil {
+		t.Fatalf("build raw ldp presentation: %v", err)
+	}
+	return result.VPToken
+}
+
+func signECDSAProofBytes(privateKey interface{}, data []byte) ([]byte, error) {
+	key, ok := privateKey.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("expected *ecdsa.PrivateKey, got %T", privateKey)
+	}
+	digest := sha256.Sum256(data)
+	rValue, sValue, err := ecdsa.Sign(rand.Reader, key, digest[:])
+	if err != nil {
+		return nil, err
+	}
+	componentSize := 32
+	signature := make([]byte, componentSize*2)
+	rBytes := rValue.Bytes()
+	sBytes := sValue.Bytes()
+	copy(signature[componentSize-len(rBytes):componentSize], rBytes)
+	copy(signature[len(signature)-len(sBytes):], sBytes)
+	return signature, nil
+}
+
 func filterCredentialDisclosures(t *testing.T, credentialJWT string, requestedClaims []string) string {
 	t.Helper()
 	envelope, err := vc.ParseSDJWTEnvelope(credentialJWT)
@@ -1101,8 +1497,15 @@ func newCombinedVCServerWithOptions(t *testing.T, options combinedServerOptions)
 	router.Route("/oid4vp", func(r chi.Router) {
 		vpPlugin.RegisterRoutes(r)
 	})
+	server := httptest.NewServer(router)
+	vpPlugin.baseURL = server.URL
+	vpPlugin.didWebAllowedHosts = vpPlugin.allowedDIDWebHosts()
+	vpPlugin.trustResolver = NewDIDWebResolver(vpPlugin.didWebAllowedHosts)
+	if err := vpPlugin.configureVerifierIdentities(); err != nil {
+		t.Fatalf("reconfigure oid4vp verifier identities: %v", err)
+	}
 	return &combinedServer{
-		Server: httptest.NewServer(router),
+		Server: server,
 		KeySet: keySet,
 	}
 }
@@ -1151,8 +1554,18 @@ func decodeVPJSONMap(t *testing.T, resp *http.Response) map[string]interface{} {
 }
 
 func asVPString(value interface{}) string {
-	str, _ := value.(string)
-	return str
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case map[string]interface{}, []interface{}:
+		serialized, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		return string(serialized)
+	default:
+		return fmt.Sprint(value)
+	}
 }
 
 func containsVPReason(reasons []interface{}, expected string) bool {
@@ -1171,4 +1584,81 @@ func containsVPReasonCode(codes []interface{}, expected string) bool {
 		}
 	}
 	return false
+}
+
+func jwkFromVPValue(t *testing.T, raw interface{}) crypto.JWK {
+	t.Helper()
+	serialized, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatalf("marshal jwk value: %v", err)
+	}
+	var jwk crypto.JWK
+	if err := json.Unmarshal(serialized, &jwk); err != nil {
+		t.Fatalf("unmarshal jwk value: %v", err)
+	}
+	return jwk
+}
+
+func createECDSACertificateChain(t *testing.T, dnsNames []string, commonName string) (*ecdsa.PrivateKey, [][]byte) {
+	t.Helper()
+
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ca key: %v", err)
+	}
+	now := time.Now().UTC()
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: commonName + " Root CA"},
+		NotBefore:             now.Add(-5 * time.Minute),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	caCertificateDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate(ca): %v", err)
+	}
+	caCertificate, err := x509.ParseCertificate(caCertificateDER)
+	if err != nil {
+		t.Fatalf("x509.ParseCertificate(ca): %v", err)
+	}
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate leaf key: %v", err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: commonName},
+		DNSNames:              dnsNames,
+		NotBefore:             now.Add(-5 * time.Minute),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	leafCertificateDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCertificate, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate(leaf): %v", err)
+	}
+	return leafKey, [][]byte{leafCertificateDER, caCertificateDER}
+}
+
+func encodeCertificateChainPEM(chain [][]byte) string {
+	var builder strings.Builder
+	for _, certificateDER := range chain {
+		_ = pem.Encode(&builder, &pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})
+	}
+	return builder.String()
+}
+
+func encodeECDSAPrivateKeyPEM(t *testing.T, key *ecdsa.PrivateKey) string {
+	t.Helper()
+	privateKeyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("x509.MarshalECPrivateKey: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateKeyDER}))
 }

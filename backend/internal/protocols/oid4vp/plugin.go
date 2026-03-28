@@ -72,6 +72,8 @@ type Plugin struct {
 	trustResolver            TrustResolver
 	supportedClientIDSchemes map[ClientIDScheme]struct{}
 	didWebAllowedHosts       []string
+	verifierAttestation      *verifierAttestationIssuer
+	x509SANDNSSigner         *x509RequestSigner
 
 	mu              sync.RWMutex
 	requests        map[string]*requestSession
@@ -112,6 +114,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.lookingGlass = lg
 	}
 	p.walletStore = vc.DefaultWalletCredentialStore()
+	p.walletStore.SetEncryptionKey(strings.TrimSpace(os.Getenv("WALLET_PERSISTENCE_KEY")))
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
 		storePath := filepath.Join(dataDir, "vc", "wallet_credentials.json")
 		if err := p.walletStore.EnablePersistence(storePath); err != nil {
@@ -120,6 +123,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	}
 	p.didWebAllowedHosts = p.allowedDIDWebHosts()
 	p.trustResolver = NewDIDWebResolver(p.didWebAllowedHosts)
+	if err := p.configureVerifierIdentities(); err != nil {
+		return fmt.Errorf("configure verifier identities: %w", err)
+	}
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
 		requestPath := filepath.Join(dataDir, "vc", "oid4vp_request_sessions.json")
 		if err := p.loadRequestState(requestPath); err != nil {
@@ -141,6 +147,9 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/request/create", p.handleCreateAuthorizationRequest)
 	router.Get("/request/{requestID}", p.handleGetAuthorizationRequest)
 	router.Post("/request/{requestID}", p.handlePostAuthorizationRequest)
+	router.Get("/verifier-attestation/.well-known/openid-configuration", p.handleVerifierAttestationOpenIDConfiguration)
+	router.Get("/verifier-attestation/.well-known/oauth-authorization-server", p.handleVerifierAttestationAuthorizationServerMetadata)
+	router.Get("/verifier-attestation/jwks", p.handleVerifierAttestationJWKS)
 	router.Post("/response", p.handleWalletResponse)
 	router.Get("/result/{requestID}", p.handleGetVerificationResult)
 }
@@ -235,12 +244,12 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Verifier",
 					Type:        "internal",
 					Parameters: map[string]string{
-						"nonce_binding":     "VP token nonce must match request nonce",
-						"audience_binding":  "VP token audience must include client_id",
-						"expiry_check":      "VP token must not be expired",
-						"holder_binding":    "iss/sub must match wallet identity, cnf.jkt must match key thumbprint",
+						"nonce_binding":       "VP token nonce must match request nonce",
+						"audience_binding":    "VP token audience must include client_id",
+						"expiry_check":        "VP token must not be expired",
+						"holder_binding":      "iss/sub must match wallet identity, cnf.jkt must match key thumbprint",
 						"credential_evidence": "Presented credential issuer, signature, subject, and disclosed claims must satisfy verifier trust policy",
-						"dcql_claims":       "All required claim paths from DCQL query must be present in disclosed claims",
+						"dcql_claims":         "All required claim paths from DCQL query must be present in disclosed claims",
 					},
 					Security: []string{
 						"Policy decision is stored as allowed/denied with reason codes",
