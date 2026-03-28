@@ -8,7 +8,7 @@ RUN npm ci
 
 WORKDIR /repo
 COPY wallet-ui/ ./wallet-ui/
-COPY backend/cmd/walletharness/static ./backend/cmd/walletharness/static
+RUN mkdir -p /repo/backend/cmd/walletharness/static
 RUN cd wallet-ui && npm run build
 
 FROM golang:1.24-alpine AS builder

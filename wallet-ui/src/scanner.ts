@@ -145,7 +145,6 @@ export interface WalletScanner {
 }
 
 export function createWalletScanner(): WalletScanner {
-  const scannerWindow = window as WindowWithScannerSupport
   let active = false
   let scanner: ScannerHandle | null = null
   let html5Availability: 'unknown' | 'ready' | 'unavailable' = 'unknown'
@@ -170,9 +169,10 @@ export function createWalletScanner(): WalletScanner {
     onDecoded: ScanDecodeCallback,
     onStatus?: ScanStatusCallback,
   ): Promise<boolean> {
-    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    if (typeof window === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
       return false
     }
+    const scannerWindow = window as WindowWithScannerSupport
 
     const BarcodeDetectorImpl = scannerWindow.BarcodeDetector
     if (!BarcodeDetectorImpl) {
@@ -270,6 +270,10 @@ export function createWalletScanner(): WalletScanner {
   }
 
   async function ensureHtml5QrcodeAvailable(): Promise<boolean> {
+    if (typeof window === 'undefined') {
+      return false
+    }
+    const scannerWindow = window as WindowWithScannerSupport
     if (scannerWindow.Html5Qrcode) {
       html5Availability = 'ready'
       return true
@@ -306,6 +310,7 @@ export function createWalletScanner(): WalletScanner {
     onStatus?: ScanStatusCallback,
   ): Promise<boolean> {
     const html5Loaded = await ensureHtml5QrcodeAvailable()
+    const scannerWindow = (typeof window !== 'undefined' ? window : {}) as WindowWithScannerSupport
     if (!html5Loaded || !scannerWindow.Html5Qrcode) {
       return false
     }
