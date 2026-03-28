@@ -9,6 +9,7 @@ primary_region = "syd"
   WALLET_TARGET_BASE_URL = "https://protocolsoup.com"
   WALLET_DEFAULT_SUBJECT = "did:example:wallet:alice"
   WALLET_ALLOWED_CORS_ORIGINS = "https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev"
+  WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS = "https://protocolsoup.com/oid4vp/verifier-attestation"
 
 [http_service]
   internal_port = 8080

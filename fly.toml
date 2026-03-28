@@ -35,6 +35,16 @@ primary_region = 'syd'
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
 # - SCIM_API_TOKEN: Bearer token for SCIM authentication
+#
+# Optional OID4VP verifier_attestation secrets:
+# - OID4VP_VERIFIER_ATTESTATION_ISSUER: override attestation issuer URL (defaults to <SHOWCASE_BASE_URL>/oid4vp/verifier-attestation)
+# - OID4VP_VERIFIER_ATTESTATION_CLIENT_ID: override verifier_attestation client_id (defaults to verifier_attestation:<public-host>)
+# - OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM: PEM-encoded stable signing key for verifier attestation JWT/JWKS continuity across restarts
+#
+# Optional OID4VP x509_san_dns verifier secrets:
+# - OID4VP_X509_SANDNS_CLIENT_ID: x509_san_dns verifier identifier (for example x509_san_dns:verifier.protocolsoup.com)
+# - OID4VP_X509_SANDNS_CERT_CHAIN_PEM: PEM-encoded certificate chain for request-object signing
+# - OID4VP_X509_SANDNS_PRIVATE_KEY_PEM: PEM-encoded private key matching the leaf certificate
 
 [http_service]
   internal_port = 8080

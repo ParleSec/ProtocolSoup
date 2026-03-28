@@ -56,6 +56,18 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `WALLET_DEFAULT_SUBJECT` | `did:example:wallet:alice` | Default DID subject for demo sessions. |
 | `WALLET_SESSION_TTL` | Server default | Go duration (e.g. `30m`) for session lifetime. |
 | `WALLET_STRICT_SESSION_ISOLATION` | `true` | Enforce strict session boundaries between demo runs. |
+| `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` | `(empty)` | Comma-separated issuer URLs the wallet trusts for `verifier_attestation` request validation. |
+
+## OID4VP Verifier (VC And Federation Services)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OID4VP_VERIFIER_ATTESTATION_ISSUER` | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL published for verifier attestation metadata and JWKS. |
+| `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | `verifier_attestation:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=verifier_attestation`. |
+| `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS. Set this in production so attestation validation survives restarts and deploys. |
+| `OID4VP_X509_SANDNS_CLIENT_ID` | `(unset)` | Verifier `client_id` used when `client_id_scheme=x509_san_dns`. Must match a DNS SAN on the configured leaf certificate. |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | `(unset)` | PEM-encoded certificate chain added to the request object's `x5c` JOSE header. |
+| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | `(unset)` | PEM-encoded private key matching the leaf certificate used for `x509_san_dns` request signing. |
 
 ## Usage Notes
 
@@ -63,3 +75,4 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 - When running behind a reverse proxy or load balancer, set `SHOWCASE_BASE_URL` to the external URL (e.g. `https://protocolsoup.example.com`) rather than the internal address.
 - `SHOWCASE_CORS_ORIGINS` must include the origin of your frontend. If the UI is at `https://app.example.com`, add that origin.
 - For SCIM, set `SCIM_API_TOKEN` to any secret string. Clients must include `Authorization: Bearer <your-token>` on every request.
+- To enable real `verifier_attestation` OID4VP flows, publish the verifier issuer URL from the verifier service and add that issuer to the wallet's `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` allow-list.

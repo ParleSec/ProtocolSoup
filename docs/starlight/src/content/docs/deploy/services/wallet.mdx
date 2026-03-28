@@ -28,6 +28,7 @@ Use wallet service to simulate wallet-side OID4VP presentation submission agains
 | `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default DID subject for demo sessions |
 | `WALLET_SESSION_TTL` | No | Go duration (e.g. `30m`) | Session lifetime; omit for server default |
 | `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Enforce strict session boundaries between demo runs |
+| `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` | No | `(empty)` | Comma-separated issuer URLs the wallet trusts for `verifier_attestation` request validation |
 
 ## Run
 
@@ -43,3 +44,4 @@ docker run -p 8081:8080 \
 - `WALLET_TARGET_BASE_URL` must point to the VC service or federation service running OID4VP.
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
+- Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.

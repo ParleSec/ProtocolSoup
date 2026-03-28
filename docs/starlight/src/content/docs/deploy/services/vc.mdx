@@ -38,6 +38,8 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 
 - `POST /oid4vp/request/create` -- create authorization request
 - `GET|POST /oid4vp/request/{requestID}` -- authorization request
+- `GET /oid4vp/verifier-attestation/.well-known/openid-configuration` -- verifier attestation issuer metadata
+- `GET /oid4vp/verifier-attestation/jwks` -- verifier attestation issuer JWKS
 - `POST /oid4vp/response` -- wallet response (`direct_post`, `direct_post.jwt`)
 - `GET /oid4vp/result/{requestID}` -- verification result
 
@@ -48,6 +50,12 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 | `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer/verifier metadata |
 | `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
 | `SHOWCASE_DATA_DIR` | No | - | State directory for wallet credentials and sessions |
+| `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
+| `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
+| `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |
+| `OID4VP_X509_SANDNS_CLIENT_ID` | No | - | `x509_san_dns` verifier identifier; must match a DNS SAN in the leaf certificate |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | No | - | PEM-encoded certificate chain used for `x509_san_dns` request signing |
+| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | No | - | PEM-encoded private key matching the configured leaf certificate |
 
 ## Run
 
@@ -64,4 +72,5 @@ docker run -p 8080:8080 \
 - Pair with the Wallet service (see Wallet page in this tab) for end-to-end OID4VP testing.
 - `SHOWCASE_BASE_URL` must match your public URL for correct issuer and verifier metadata.
 - Wallet credentials persist at `{SHOWCASE_DATA_DIR}/vc/wallet_credentials.json`.
-- Client ID schemes supported: `redirect_uri` and `did:web`.
+- Client ID schemes supported: `redirect_uri`, `did:web`, `verifier_attestation`, and `x509_san_dns` when the corresponding verifier identity material is configured.
+- Set `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` in production so verifier attestation JWKS and signed request objects remain verifiable across restarts and deploys.
