@@ -11,7 +11,8 @@ build/
 **/.next/
 **/_next/
 **/out/
-backend/cmd/walletharness/static/
+backend/cmd/walletharness/static/*
+!backend/cmd/walletharness/static/.gitkeep
 *.tsbuildinfo
 **/.dccache
 *.exe
