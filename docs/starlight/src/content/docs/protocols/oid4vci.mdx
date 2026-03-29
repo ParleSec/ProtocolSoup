@@ -10,6 +10,8 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 - OpenID for Verifiable Credential Issuance 1.0 (final)
 - OAuth 2.0 Authorization Framework (token and grant semantics)
 - SD-JWT VC profile (`dc+sd-jwt` credential format)
+- W3C Verifiable Credentials Data Model 1.1 / 2.0 (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` formats)
+- W3C VC Data Integrity 1.0 (`ecdsa-rdfc-2019`, `eddsa-rdfc-2022` cryptosuites for `ldp_vc`)
 
 ## Available Flows
 
@@ -30,7 +32,7 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 | Property | Value |
 |----------|-------|
 | Credential configuration selection | Wallet chooses from `credential_configurations_supported` (e.g., one configuration describing a university degree VC type) |
-| Credential format | `dc+sd-jwt` (SD-JWT VC) |
+| Credential formats | `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
 | Proof container | `proof` or `proofs` with `proof_type: jwt` (e.g., `{"proof_type":"jwt","jwt":"<compact-jws>"}`) |
 | Proof JWT header type | `openid4vci-proof+jwt` |
 | Proof JWT required claims | `iss`, `sub`, `aud`, `nonce`, `iat`, `exp`, `cnf.jwk` |

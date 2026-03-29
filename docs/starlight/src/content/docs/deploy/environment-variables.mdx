@@ -65,9 +65,9 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL published for verifier attestation metadata and JWKS. |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | `verifier_attestation:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=verifier_attestation`. |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS. Set this in production so attestation validation survives restarts and deploys. |
-| `OID4VP_X509_SANDNS_CLIENT_ID` | `(unset)` | Verifier `client_id` used when `client_id_scheme=x509_san_dns`. Must match a DNS SAN on the configured leaf certificate. |
-| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | `(unset)` | PEM-encoded certificate chain added to the request object's `x5c` JOSE header. |
-| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | `(unset)` | PEM-encoded private key matching the leaf certificate used for `x509_san_dns` request signing. |
+| `OID4VP_X509_SANDNS_CLIENT_ID` | `x509_san_dns:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=x509_san_dns`. Must match a DNS SAN on the leaf certificate. |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | Ephemeral self-signed chain | PEM-encoded certificate chain added to the request object's `x5c` JOSE header. When unset, an ephemeral CA + leaf chain is generated at startup using the deployment hostname as the leaf SAN. |
+| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | Ephemeral key | PEM-encoded private key matching the leaf certificate used for `x509_san_dns` request signing. When unset, generated alongside the ephemeral chain. Set both PEM variables in production for certificate continuity across restarts. |
 
 ## Usage Notes
 
@@ -76,3 +76,4 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 - `SHOWCASE_CORS_ORIGINS` must include the origin of your frontend. If the UI is at `https://app.example.com`, add that origin.
 - For SCIM, set `SCIM_API_TOKEN` to any secret string. Clients must include `Authorization: Bearer <your-token>` on every request.
 - To enable real `verifier_attestation` OID4VP flows, publish the verifier issuer URL from the verifier service and add that issuer to the wallet's `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` allow-list.
+- `x509_san_dns` works out of the box. When the PEM env vars are unset, an ephemeral ECDSA P-256 CA + leaf certificate chain is generated at startup with the leaf SAN bound to the deployment hostname from `SHOWCASE_BASE_URL`. Provide your own PEM chain and key for production certificate continuity.

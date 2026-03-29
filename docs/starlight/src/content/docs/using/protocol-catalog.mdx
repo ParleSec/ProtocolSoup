@@ -101,7 +101,9 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | Pre-Authorized + tx_code | Issuance with transaction code challenge |
 | Deferred Issuance | Credential issued asynchronously |
 
-**Credential type:** UniversityDegreeCredential (SD-JWT VC, `dc+sd-jwt` format)
+**Credential type:** UniversityDegreeCredential
+
+**Credential formats:** `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity with `ecdsa-rdfc-2019` / `eddsa-rdfc-2022` cryptosuites)
 
 ## OID4VP
 
@@ -112,7 +114,7 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | DCQL + direct_post | DCQL query with direct_post response mode |
 | DCQL + direct_post.jwt | DCQL query with encrypted JWT response |
 
-**Client ID schemes:** `redirect_uri`, `did:web`
+**Client ID schemes:** `redirect_uri`, `did:web` (`decentralized_identifier`), `verifier_attestation`, `x509_san_dns`
 
 ## Related
 

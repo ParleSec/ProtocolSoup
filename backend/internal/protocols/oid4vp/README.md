@@ -13,6 +13,8 @@ This implementation provides:
 - **VP Token Validation**: Signature, `typ=vp+jwt`, nonce, audience, expiry, and holder-binding checks
 - **Credential Evidence**: Produces deterministic verifier diagnostics and reason codes
 - **DID:web Trust Resolution**: Runtime trust checks for decentralized identifier client IDs
+- **Verifier Attestation**: Signed attestation JWTs with published JWKS for `verifier_attestation` scheme
+- **X.509 SAN DNS**: PKIX chain validation with ephemeral auto-provisioning for `x509_san_dns` scheme
 - **Durable Session State**: Optional persistence of request sessions and verification outcomes
 - **Looking Glass Integration**: Live events for request generation, wallet submission, and policy decisions
 
@@ -31,6 +33,7 @@ The OID4VP implementation is mounted as plugin ID `oid4vp` in the backend protoc
 | `plugin.go` | Plugin lifecycle, route registration, request session persistence, flow definitions |
 | `handlers.go` | Request creation/retrieval, wallet response processing, verifier policy evaluation |
 | `trust.go` | DID:web trust resolver and DID document validation |
+| `verifier_identity.go` | Verifier identity signers for `verifier_attestation` and `x509_san_dns` schemes, including ephemeral certificate auto-provisioning |
 | `contracts.go` | OID4VP contract checks (`dcql_query` xor scope, response mode constraints, type headers) |
 | `plugin_test.go` | OID4VP behavior, security, and regression tests |
 
@@ -84,18 +87,35 @@ Failures are emitted with deterministic machine-readable reason codes (for examp
 
 ## Trust Model
 
-### Supported `client_id` Schemes (MVP profile)
+### Supported `client_id` Schemes
 
 - `redirect_uri`
 - `decentralized_identifier` (`did:web`)
+- `verifier_attestation`
+- `x509_san_dns`
 
-For `decentralized_identifier:did:web` client IDs:
+#### `decentralized_identifier` (did:web)
 
 - DID document URL is derived from DID syntax
 - DID document is fetched and validated at runtime
 - Document `id` must match presented DID
 - Verification material must be present (`authentication`, `assertionMethod`, or `verificationMethod`)
 - Host allowlist controls where DID resolution is permitted
+
+#### `verifier_attestation`
+
+- Verifier signs request objects with an attestation key pair
+- Attestation issuer metadata and JWKS are published at `.well-known/openid-configuration` under the attestation issuer URL
+- Wallet validates the attestation JWT against the published JWKS
+- Ephemeral in-memory key used by default; set `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` for production continuity
+
+#### `x509_san_dns` (OpenID4VP Section 5.9)
+
+- Request object carries an `x5c` JOSE header with the certificate chain
+- Wallet validates PKIX chain, verifies leaf SAN matches `client_id` DNS name, confirms `response_uri` host matches, and verifies JWT signature against leaf public key
+- The `client_id_scheme` claim is included in the signed request object
+- When `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` and `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` are unset, an ephemeral ECDSA P-256 self-signed CA + leaf chain is auto-generated at startup with the leaf SAN bound to the deployment hostname
+- Set the PEM env vars in production for certificate continuity across restarts
 
 ## State Persistence
 
@@ -123,6 +143,12 @@ Verifier policy denials are returned as successful transport responses with poli
 |----------|-------------|---------|
 | `SHOWCASE_BASE_URL` | Base URL used for generated `request_uri` and verifier endpoints | `http://localhost:8080` |
 | `SHOWCASE_DATA_DIR` | Durable state root for request and wallet credential persistence | (unset) |
+| `OID4VP_VERIFIER_ATTESTATION_ISSUER` | Issuer URL for `verifier_attestation` metadata and JWKS | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` |
+| `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | Verifier `client_id` for `verifier_attestation` scheme | `verifier_attestation:<host>` |
+| `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | PEM-encoded signing key for verifier attestation JWTs | Ephemeral in-memory key |
+| `OID4VP_X509_SANDNS_CLIENT_ID` | Verifier `client_id` for `x509_san_dns` scheme | `x509_san_dns:<host>` |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | PEM-encoded certificate chain for `x5c` JOSE header | Ephemeral self-signed chain |
+| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | PEM-encoded private key matching the leaf certificate | Ephemeral key |
 
 ## Development Notes
 
@@ -135,3 +161,5 @@ Verifier policy denials are returned as successful transport responses with poli
 - OpenID for Verifiable Presentations 1.0
 - JOSE (JWT/JWS/JWE) profiles used for request and response transport
 - DCQL request contract semantics used by verifier request generation
+- RFC 5280 / PKIX (X.509 certificate chain validation for `x509_san_dns`)
+- DID Core / did:web (for `decentralized_identifier` trust resolution)

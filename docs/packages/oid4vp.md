@@ -35,6 +35,7 @@ OpenID for Verifiable Presentations (OID4VP 1.0) verifier endpoints exposed by t
 - `direct_post.jwt` responses are wallet-signed, verifier-encrypted, and decrypted/validated in live handler logic (`typ`, subject, audience, expiry).
 - Policy decisions are derived from actual VP token validation results, including `vp+jwt` type checks, subject/key holder binding, and presented credential verification against wallet-held issuance state.
 - For `decentralized_identifier` client IDs, verifier trust resolution performs live did:web document fetch and ID/material validation.
+- For `x509_san_dns` client IDs, the request object carries an `x5c` JOSE header with the certificate chain. The wallet validates the PKIX chain, verifies the leaf SAN matches the `client_id` DNS name, confirms the `response_uri` host matches, and verifies the JWT signature against the leaf public key.
 - Looking Glass includes security-warning evidence for denied presentations.
 
 ## Failure Semantics

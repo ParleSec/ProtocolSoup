@@ -11,6 +11,7 @@ description: "OpenID4VP verifier flows with DCQL request contracts, direct_post 
 - OAuth 2.0 Authorization Framework (request/response parameter model)
 - JOSE (JWT/JWS/JWE processing for request objects and `direct_post.jwt`)
 - DID Core / did:web (for `decentralized_identifier` client_id scheme handling)
+- RFC 5280 / PKIX (X.509 certificate chain validation for `x509_san_dns`)
 
 ## Available Flows
 
@@ -53,15 +54,35 @@ Example DCQL query requesting a `university_degree` credential with `degree` and
 
 ## Client ID Schemes
 
-- OpenID4VP defines multiple client identification schemes, including:
-  - `pre_registered` (e.g., verifier registered out-of-band)
-  - `redirect_uri` (e.g., verifier identified by redirect URI trust context)
-  - `decentralized_identifier` (e.g., DID-based verifier identification)
-  - `verifier_attestation`
-  - `x509_san_dns`
-  - `x509_hash`
-  - `openid_federation`
-- Verifier and wallet MUST apply scheme-specific trust validation rules for the chosen scheme.
+OpenID4VP defines multiple client identification schemes. ProtocolSoup implements the following:
+
+### `redirect_uri`
+
+Verifier identity is established by the redirect URI trust context. The `client_id` equals the `response_uri`.
+
+### `decentralized_identifier` (did:web)
+
+Verifier identity is resolved via DID document. The DID document is fetched and validated at runtime -- `id` must match the presented DID, and verification material must be present in `authentication`, `assertionMethod`, or `verificationMethod`.
+
+### `verifier_attestation`
+
+Verifier presents a signed attestation JWT. The verifier's attestation issuer publishes OpenID discovery metadata and JWKS. The wallet validates the attestation JWT against the published JWKS.
+
+### `x509_san_dns` (OpenID4VP Section 5.9)
+
+Verifier identity is bound to a DNS name via X.509 certificate Subject Alternative Name. The request object carries an `x5c` JOSE header containing the certificate chain. Trust validation requires:
+
+1. PKIX chain validation (leaf signed by CA, validity period, key usage)
+2. Leaf certificate DNS SAN matches the `client_id` DNS name
+3. `response_uri` hostname matches the `client_id` DNS name
+4. JWT signature verifies against the leaf certificate public key
+5. The `client_id_scheme` claim is present in the signed request object
+
+When no certificate material is configured via environment variables, the verifier auto-provisions an ephemeral ECDSA P-256 self-signed CA + leaf chain at startup, with the leaf SAN bound to the deployment hostname.
+
+### Not implemented
+
+- `pre_registered`, `x509_hash`, `openid_federation` are defined in the spec but not currently implemented.
 
 ## Verifier Evaluation Flow (OID4VP §5, §6, §8)
 

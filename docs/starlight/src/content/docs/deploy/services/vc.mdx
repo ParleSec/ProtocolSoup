@@ -18,7 +18,7 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 | Port | `8080` |
 | Health | `GET /health` |
 | API index | `GET /api` |
-| Credential format | `dc+sd-jwt` (SD-JWT VC) |
+| Credential formats | `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
 | Credential type | `UniversityDegreeCredential` |
 
 ## Key Endpoints
@@ -53,9 +53,9 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |
-| `OID4VP_X509_SANDNS_CLIENT_ID` | No | - | `x509_san_dns` verifier identifier; must match a DNS SAN in the leaf certificate |
-| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | No | - | PEM-encoded certificate chain used for `x509_san_dns` request signing |
-| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | No | - | PEM-encoded private key matching the configured leaf certificate |
+| `OID4VP_X509_SANDNS_CLIENT_ID` | No | `x509_san_dns:<public-host>` | `x509_san_dns` verifier identifier; must match a DNS SAN in the leaf certificate |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | No | Ephemeral self-signed chain | PEM-encoded certificate chain for `x509_san_dns` request signing. When unset, an ephemeral CA + leaf chain is auto-generated at startup. |
+| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | No | Ephemeral key | PEM-encoded private key matching the leaf certificate. When unset, generated alongside the ephemeral chain. |
 
 ## Run
 
@@ -72,5 +72,6 @@ docker run -p 8080:8080 \
 - Pair with the Wallet service (see Wallet page in this tab) for end-to-end OID4VP testing.
 - `SHOWCASE_BASE_URL` must match your public URL for correct issuer and verifier metadata.
 - Wallet credentials persist at `{SHOWCASE_DATA_DIR}/vc/wallet_credentials.json`.
-- Client ID schemes supported: `redirect_uri`, `did:web`, `verifier_attestation`, and `x509_san_dns` when the corresponding verifier identity material is configured.
+- Client ID schemes supported: `redirect_uri`, `did:web`, `verifier_attestation`, and `x509_san_dns`. Both `verifier_attestation` and `x509_san_dns` auto-provision ephemeral keys/certificates when their PEM env vars are unset.
 - Set `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` in production so verifier attestation JWKS and signed request objects remain verifiable across restarts and deploys.
+- Set `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` and `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` in production for stable x509_san_dns certificate continuity.
