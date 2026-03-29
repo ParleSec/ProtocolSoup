@@ -153,17 +153,18 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	now := time.Now().UTC()
 	requestID := p.randomValue(24)
 	requestClaims := jwt.MapClaims{
-		"iss":           req.ClientID,
-		"aud":           "wallet",
-		"client_id":     req.ClientID,
-		"response_type": "vp_token",
-		"response_mode": req.ResponseMode,
-		"response_uri":  req.ResponseURI,
-		"nonce":         nonce,
-		"state":         state,
-		"iat":           now.Unix(),
-		"exp":           now.Add(requestObjectTTL).Unix(),
-		"jti":           requestID,
+		"iss":              req.ClientID,
+		"aud":              "wallet",
+		"client_id":        req.ClientID,
+		"client_id_scheme": string(clientIDScheme),
+		"response_type":    "vp_token",
+		"response_mode":    req.ResponseMode,
+		"response_uri":     req.ResponseURI,
+		"nonce":            nonce,
+		"state":            state,
+		"iat":              now.Unix(),
+		"exp":              now.Add(requestObjectTTL).Unix(),
+		"jti":              requestID,
 	}
 	if req.Scope != "" {
 		requestClaims["scope"] = req.Scope
@@ -209,23 +210,28 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	}
 	p.mu.Unlock()
 
+	eventData := map[string]interface{}{
+		"request_id":            requestID,
+		"client_id":             req.ClientID,
+		"client_id_scheme":      string(clientIDScheme),
+		"response_mode":         req.ResponseMode,
+		"response_uri":          req.ResponseURI,
+		"has_dcql_query":        dcqlQuery != "",
+		"scope_alias":           req.Scope,
+		"nonce":                 nonce,
+		"state":                 state,
+		"trust_mode":            p.trustMode(),
+		"did_web_allowed_hosts": p.didWebAllowedHosts,
+	}
+	if clientIDScheme == ClientIDSchemeX509SANDNS && p.x509SANDNSSigner != nil {
+		eventData["x509_chain"] = p.describeX509Chain()
+	}
+
 	p.emitEvent(
 		sessionID,
 		lookingglass.EventTypeFlowStep,
 		"OID4VP Authorization Request Created",
-		map[string]interface{}{
-			"request_id":            requestID,
-			"client_id":             req.ClientID,
-			"client_id_scheme":      string(clientIDScheme),
-			"response_mode":         req.ResponseMode,
-			"response_uri":          req.ResponseURI,
-			"has_dcql_query":        dcqlQuery != "",
-			"scope_alias":           req.Scope,
-			"nonce":                 nonce,
-			"state":                 state,
-			"trust_mode":            p.trustMode(),
-			"did_web_allowed_hosts": p.didWebAllowedHosts,
-		},
+		eventData,
 		append(
 			append(
 				append(

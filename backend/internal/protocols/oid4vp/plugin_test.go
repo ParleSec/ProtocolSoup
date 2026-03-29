@@ -374,6 +374,108 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSRequestObject(t *testing.T) {
 	}
 }
 
+func TestGenerateEphemeralX509Chain(t *testing.T) {
+	certificates, leafKey, err := generateEphemeralX509Chain("verifier.example")
+	if err != nil {
+		t.Fatalf("generateEphemeralX509Chain: %v", err)
+	}
+	if len(certificates) != 2 {
+		t.Fatalf("expected 2-cert chain (leaf + CA), got %d", len(certificates))
+	}
+
+	leaf := certificates[0]
+	if leaf.Subject.CommonName != "verifier.example" {
+		t.Fatalf("expected leaf CN=verifier.example, got %q", leaf.Subject.CommonName)
+	}
+	if err := leaf.VerifyHostname("verifier.example"); err != nil {
+		t.Fatalf("VerifyHostname(verifier.example): %v", err)
+	}
+	if leaf.IsCA {
+		t.Fatalf("leaf certificate must not be a CA")
+	}
+
+	caCert := certificates[1]
+	if caCert.Subject.CommonName != "ProtocolSoup Ephemeral CA" {
+		t.Fatalf("expected CA CN=ProtocolSoup Ephemeral CA, got %q", caCert.Subject.CommonName)
+	}
+	if !caCert.IsCA {
+		t.Fatalf("root certificate must be a CA")
+	}
+	if caCert.CheckSignatureFrom(caCert) != nil {
+		t.Fatalf("expected self-signed CA certificate")
+	}
+
+	validatedLeaf, err := crypto.ValidateCertificateChain(certificates, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ValidateCertificateChain: %v", err)
+	}
+	if validatedLeaf.SerialNumber.Cmp(leaf.SerialNumber) != 0 {
+		t.Fatalf("validated leaf serial mismatch")
+	}
+
+	if err := verifyPrivateKeyMatchesCertificate(leaf, leafKey); err != nil {
+		t.Fatalf("private key does not match leaf: %v", err)
+	}
+}
+
+func TestCreateAuthorizationRequestBuildsX509SANDNSEphemeralChain(t *testing.T) {
+	certificates, leafKey, err := generateEphemeralX509Chain("verifier.example")
+	if err != nil {
+		t.Fatalf("generateEphemeralX509Chain: %v", err)
+	}
+	t.Setenv(x509SANDNSClientIDEnv, "x509_san_dns:verifier.example")
+	t.Setenv(x509SANDNSCertificateChainPEMEnv, encodeCertificateChainPEM(marshalCertificateChainDER(certificates)))
+	t.Setenv(x509SANDNSPrivateKeyPEMEnv, encodeECDSAPrivateKeyPEM(t, leafKey))
+
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequestPayload(t, env.Server.URL, map[string]interface{}{
+		"client_id_scheme": "x509_san_dns",
+		"response_mode":    "direct_post",
+		"response_uri":     "https://verifier.example/oid4vp/response",
+	})
+	clientID := asVPString(createPayload["client_id"])
+	if clientID != "x509_san_dns:verifier.example" {
+		t.Fatalf("unexpected x509_san_dns client_id %q", clientID)
+	}
+
+	requestJWT := asVPString(createPayload["request"])
+	decodedRequest, err := crypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
+	}
+	rawX5C, ok := decodedRequest.Header["x5c"].([]interface{})
+	if !ok || len(rawX5C) != 2 {
+		t.Fatalf("expected x5c header with 2 certificates, got %v", decodedRequest.Header["x5c"])
+	}
+
+	parsedCerts, err := crypto.ParseX5CCertificateChain(decodedRequest.Header["x5c"])
+	if err != nil {
+		t.Fatalf("ParseX5CCertificateChain: %v", err)
+	}
+	leaf, err := crypto.ValidateCertificateChain(parsedCerts, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ValidateCertificateChain: %v", err)
+	}
+	if err := leaf.VerifyHostname("verifier.example"); err != nil {
+		t.Fatalf("VerifyHostname(verifier.example): %v", err)
+	}
+
+	clientIDScheme := asVPString(decodedRequest.Payload["client_id_scheme"])
+	if clientIDScheme != "x509_san_dns" {
+		t.Fatalf("expected client_id_scheme=x509_san_dns in JWT claims, got %q", clientIDScheme)
+	}
+}
+
+func marshalCertificateChainDER(certs []*x509.Certificate) [][]byte {
+	chain := make([][]byte, len(certs))
+	for i, c := range certs {
+		chain[i] = c.Raw
+	}
+	return chain
+}
+
 func TestDirectPostPolicyDenialForNonceMismatch(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()

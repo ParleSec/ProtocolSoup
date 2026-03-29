@@ -5,11 +5,15 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -141,8 +145,9 @@ func resolveVerifierAttestationSigningMaterial(rawPrivateKey string) (interface{
 func newX509RequestSigner(baseURL string) (*x509RequestSigner, error) {
 	rawCertificateChain := strings.TrimSpace(os.Getenv(x509SANDNSCertificateChainPEMEnv))
 	rawPrivateKey := strings.TrimSpace(os.Getenv(x509SANDNSPrivateKeyPEMEnv))
+
 	if rawCertificateChain == "" && rawPrivateKey == "" {
-		return nil, nil
+		return newEphemeralX509RequestSigner(baseURL)
 	}
 	if rawCertificateChain == "" || rawPrivateKey == "" {
 		return nil, fmt.Errorf("x509_san_dns signing requires both %s and %s", x509SANDNSCertificateChainPEMEnv, x509SANDNSPrivateKeyPEMEnv)
@@ -174,11 +179,83 @@ func newX509RequestSigner(baseURL string) (*x509RequestSigner, error) {
 	if err := verifyPrivateKeyMatchesCertificate(certificates[0], privateKey); err != nil {
 		return nil, fmt.Errorf("x509_san_dns private key does not match leaf certificate: %w", err)
 	}
+	log.Printf("[oid4vp] x509_san_dns: using provisioned certificate chain (leaf SAN: %s)", clientDNSName)
 	return &x509RequestSigner{
 		clientID:     clientID,
 		certificates: certificates,
 		privateKey:   privateKey,
 	}, nil
+}
+
+func newEphemeralX509RequestSigner(baseURL string) (*x509RequestSigner, error) {
+	hostname := verifierIdentityHostname(baseURL)
+	if !isDNSNameHost(hostname) {
+		return nil, nil
+	}
+	clientID := string(ClientIDSchemeX509SANDNS) + ":" + hostname
+
+	certificates, leafKey, err := generateEphemeralX509Chain(hostname)
+	if err != nil {
+		return nil, fmt.Errorf("generate ephemeral x509_san_dns chain: %w", err)
+	}
+	log.Printf("[oid4vp] x509_san_dns: generated ephemeral certificate chain (leaf SAN: %s, CA: %s, expires: %s)",
+		hostname, certificates[1].Subject.CommonName, certificates[0].NotAfter.Format(time.RFC3339))
+	return &x509RequestSigner{
+		clientID:     clientID,
+		certificates: certificates,
+		privateKey:   leafKey,
+	}, nil
+}
+
+func generateEphemeralX509Chain(hostname string) ([]*x509.Certificate, *ecdsa.PrivateKey, error) {
+	now := time.Now().UTC()
+
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate CA key: %w", err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "ProtocolSoup Ephemeral CA", Organization: []string{"ProtocolSoup"}},
+		NotBefore:             now.Add(-5 * time.Minute),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create CA certificate: %w", err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA certificate: %w", err)
+	}
+
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate leaf key: %w", err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(2),
+		Subject:               pkix.Name{CommonName: hostname, Organization: []string{"ProtocolSoup"}},
+		DNSNames:              []string{hostname},
+		NotBefore:             now.Add(-5 * time.Minute),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create leaf certificate: %w", err)
+	}
+	leafCert, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse leaf certificate: %w", err)
+	}
+
+	return []*x509.Certificate{leafCert, caCert}, leafKey, nil
 }
 
 func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme) string {
@@ -496,6 +573,44 @@ func jwkFromPublicKey(publicKey interface{}, kid string) (intcrypto.JWK, error) 
 	default:
 		return intcrypto.JWK{}, fmt.Errorf("unsupported public key type %T", publicKey)
 	}
+}
+
+func (p *Plugin) describeX509Chain() map[string]interface{} {
+	if p.x509SANDNSSigner == nil || len(p.x509SANDNSSigner.certificates) == 0 {
+		return nil
+	}
+	certs := p.x509SANDNSSigner.certificates
+	leaf := certs[0]
+
+	method, _ := signingMethodForPrivateKey(p.x509SANDNSSigner.privateKey)
+	sigAlg := "unknown"
+	if method != nil {
+		sigAlg = method.Alg()
+	}
+
+	chain := map[string]interface{}{
+		"chain_depth":     len(certs),
+		"signing_algorithm": sigAlg,
+		"leaf": map[string]interface{}{
+			"subject":        leaf.Subject.CommonName,
+			"issuer":         leaf.Issuer.CommonName,
+			"dns_names":      leaf.DNSNames,
+			"serial":         leaf.SerialNumber.String(),
+			"not_before":     leaf.NotBefore.Format(time.RFC3339),
+			"not_after":      leaf.NotAfter.Format(time.RFC3339),
+			"public_key_algorithm": leaf.PublicKeyAlgorithm.String(),
+		},
+	}
+	if len(certs) > 1 {
+		root := certs[len(certs)-1]
+		chain["root"] = map[string]interface{}{
+			"subject":     root.Subject.CommonName,
+			"issuer":      root.Issuer.CommonName,
+			"self_signed": root.CheckSignatureFrom(root) == nil,
+			"not_after":   root.NotAfter.Format(time.RFC3339),
+		}
+	}
+	return chain
 }
 
 func (s *x509RequestSigner) x5cHeader() []string {

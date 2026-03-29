@@ -1481,7 +1481,7 @@ export function LookingGlass() {
                     className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                   />
                   <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
-                    `verifier_attestation` uses a live attestation issuer and JWKS. `x509_san_dns` requires the verifier deployment to have a real certificate chain and private key configured.
+                    <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS. <code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS name via X.509 certificate SAN — auto-provisions an ephemeral CA + leaf chain when no external certificates are configured.
                   </p>
                 </div>
 

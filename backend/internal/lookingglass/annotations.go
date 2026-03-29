@@ -237,15 +237,15 @@ func (l *AnnotationLibrary) OID4VPAnnotations() map[string][]Annotation {
 				Severity:    "warning",
 			},
 		},
-		"client_id_scheme": {
-			{
-				Type:        AnnotationTypeBestPractice,
-				Title:       "MVP Client ID Scheme Matrix",
-				Description: "MVP currently supports redirect_uri and decentralized_identifier client_id schemes with explicit rejects for unsupported schemes.",
-				Reference:   "OpenID4VP 1.0 Section 5.9",
-				Severity:    "info",
-			},
+	"client_id_scheme": {
+		{
+			Type:        AnnotationTypeBestPractice,
+			Title:       "Client ID Scheme Matrix",
+			Description: "Supports redirect_uri, decentralized_identifier, verifier_attestation, and x509_san_dns client_id schemes. x509_san_dns binds verifier identity to a DNS name via X.509 certificate SAN, with the leaf certificate and chain transmitted in the request object x5c JOSE header.",
+			Reference:   "OpenID4VP 1.0 Section 5.9",
+			Severity:    "info",
 		},
+	},
 		"nonce_binding": {
 			{
 				Type:        AnnotationTypeSecurityHint,
