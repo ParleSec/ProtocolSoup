@@ -224,7 +224,9 @@ ProtocolSoup/
 │           ├── saml/               # SAML 2.0 SSO & SLO
 │           ├── scim/               # SCIM 2.0 user/group provisioning
 │           ├── spiffe/             # SPIFFE/SPIRE handlers
-│           └── ssf/                # Shared Signals Framework
+│           ├── ssf/                # Shared Signals Framework
+│           ├── oid4vci/            # OID4VCI credential issuance
+│           └── oid4vp/             # OID4VP verifiable presentations
 ├── frontend/
 │   └── src/
 │       ├── components/             # Shared UI components
@@ -381,7 +383,7 @@ docker compose up -d
 
 This starts:
 - **Gateway** - Aggregates `/api` and routes protocol paths
-- **Federation** - OAuth 2.0, OIDC, SAML
+- **Federation** - OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP
 - **SCIM** - User and group provisioning
 - **SSF** - Shared Signals Framework
 - **Frontend** - Next.js App Router UI at `http://localhost:3000`
@@ -453,7 +455,7 @@ Pre-built container images are available from GitHub Container Registry. Use the
 | Image | Description | Docs |
 |-------|-------------|------|
 | `ghcr.io/parlesec/protocolsoup-gateway` | API Gateway | [gateway.md](docs/packages/gateway.md) |
-| `ghcr.io/parlesec/protocolsoup-federation` | OAuth 2.0, OIDC, SAML | [federation.md](docs/packages/federation.md) |
+| `ghcr.io/parlesec/protocolsoup-federation` | OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP | [federation.md](docs/packages/federation.md) |
 | `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 provisioning | [scim.md](docs/packages/scim.md) |
 | `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework | [ssf.md](docs/packages/ssf.md) |
 | `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity | [spiffe.md](docs/packages/spiffe.md) |

@@ -16,7 +16,7 @@ tags:
   - name: OID4VCI
     description: Credential issuance and token exchange endpoints.
   - name: OID4VP
-    description: Request object and wallet response verification endpoints.
+    description: Request object and wallet response verification endpoints supporting redirect_uri, decentralized_identifier (did:web), verifier_attestation, and x509_san_dns client ID schemes.
 paths:
   /health:
     get:
@@ -310,28 +310,97 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
-  /oid4vp/request/create:
-    post:
+  /oid4vp/verifier-attestation/.well-known/openid-configuration:
+    get:
       tags: [OID4VP]
-      summary: Create OID4VP request object
-      operationId: vcCreateOid4vpRequest
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
+      summary: Verifier attestation OpenID discovery
+      operationId: vcVerifierAttestationDiscovery
+      description: Returns the OpenID Provider-style discovery document for the verifier attestation issuer, including the JWKS URI.
       responses:
         "200":
-          description: Request object payload.
+          description: Verifier attestation issuer metadata.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+        "404":
+          description: Verifier attestation not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/verifier-attestation/.well-known/oauth-authorization-server:
+    get:
+      tags: [OID4VP]
+      summary: Verifier attestation AS metadata
+      operationId: vcVerifierAttestationASMetadata
+      description: Returns OAuth 2.0 Authorization Server metadata for the verifier attestation issuer.
+      responses:
+        "200":
+          description: Verifier attestation AS metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Verifier attestation not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vp/verifier-attestation/jwks:
+    get:
+      tags: [OID4VP]
+      summary: Verifier attestation JWKS
+      operationId: vcVerifierAttestationJwks
+      description: Returns the JSON Web Key Set containing the verifier attestation signing key(s). Used by wallets to validate verifier_attestation request object signatures.
+      responses:
+        "200":
+          description: Verifier attestation JWKS.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oid4vp/request/create:
+    post:
+      tags: [OID4VP]
+      summary: Create OID4VP authorization request object
+      operationId: vcCreateOid4vpRequest
+      description: |
+        Creates a signed authorization request object (`typ=oauth-authz-req+jwt`).
+        The verifier signs the request using the key material associated with the chosen `client_id_scheme`.
+        For `x509_san_dns`, the `x5c` JOSE header carries the certificate chain.
+        For `verifier_attestation`, the verifier attestation JWT is included.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAuthorizationRequest"
+            examples:
+              directPost:
+                summary: DCQL direct_post with redirect_uri scheme
+                value:
+                  response_mode: direct_post
+                  response_uri: https://protocolsoup.com/oid4vp/response
+              directPostJwt:
+                summary: DCQL direct_post.jwt with x509_san_dns scheme
+                value:
+                  client_id_scheme: x509_san_dns
+                  response_mode: direct_post.jwt
+                  response_uri: https://protocolsoup.com/oid4vp/response
+      responses:
+        "200":
+          description: Request object creation response with request_uri and signed request JWT.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAuthorizationResponse"
         "400":
-          description: Invalid request contract.
+          description: Invalid request contract (missing fields, unsupported scheme, DCQL+scope conflict).
           content:
             application/json:
               schema:
@@ -388,25 +457,31 @@ paths:
   /oid4vp/response:
     post:
       tags: [OID4VP]
-      summary: Wallet response callback endpoint
+      summary: Wallet response endpoint (direct_post / direct_post.jwt)
       operationId: vcHandleWalletResponse
+      description: |
+        Accepts wallet VP submissions. For `direct_post`, the wallet sends `vp_token` and `state`.
+        For `direct_post.jwt`, the wallet sends an encrypted `response` JWE containing a signed inner JWT.
+        Accepts both `application/json` and `application/x-www-form-urlencoded`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: "#/components/schemas/WalletResponsePayload"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/WalletResponsePayload"
       responses:
         "200":
-          description: Verifier policy result.
+          description: Verifier policy result with decision, reason codes, and validation flags.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
         "400":
-          description: Invalid wallet response.
+          description: Invalid wallet response payload or unknown session state.
           content:
             application/json:
               schema:
@@ -473,6 +548,80 @@ components:
           type: array
           items:
             type: string
+    CreateAuthorizationRequest:
+      type: object
+      required: [response_mode, response_uri]
+      properties:
+        client_id:
+          type: string
+          description: Verifier client identifier. When omitted, derived from the chosen scheme and server configuration.
+        client_id_scheme:
+          type: string
+          enum: [redirect_uri, decentralized_identifier, verifier_attestation, x509_san_dns]
+          description: Client identification scheme per OpenID4VP Section 5. Determines how the request object is signed and how the wallet validates verifier identity.
+        response_mode:
+          type: string
+          enum: [direct_post, direct_post.jwt]
+          description: VP token delivery mode.
+        response_uri:
+          type: string
+          format: uri
+          description: URI where the wallet submits the VP response.
+        redirect_uri:
+          type: string
+          format: uri
+          description: Must be absent when response_mode is direct_post or direct_post.jwt.
+        scope:
+          type: string
+          description: Scope alias (mutually exclusive with dcql_query).
+        dcql_query:
+          type: object
+          additionalProperties: true
+          description: Digital Credentials Query Language object specifying required credentials and claim paths.
+    CreateAuthorizationResponse:
+      type: object
+      properties:
+        request_uri:
+          type: string
+          format: uri
+          description: URI the wallet fetches to retrieve the signed request object.
+        request_uri_method:
+          type: string
+          example: get
+        request:
+          type: string
+          description: Compact JWS of the signed authorization request object (typ=oauth-authz-req+jwt).
+        response_mode:
+          type: string
+        response_uri:
+          type: string
+        state:
+          type: string
+        nonce:
+          type: string
+        client_id:
+          type: string
+        client_id_scheme:
+          type: string
+        expires_in_seconds:
+          type: integer
+        dcql_query_supplied:
+          type: boolean
+        trust_mode:
+          type: string
+    WalletResponsePayload:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          description: Opaque state value matching the authorization request.
+        vp_token:
+          type: string
+          description: Compact JWS VP token (for direct_post response mode).
+        response:
+          type: string
+          description: Compact JWE containing signed inner JWT (for direct_post.jwt response mode).
     ApiIndexResponse:
       type: object
       required: [service, version, protocols, endpoints]

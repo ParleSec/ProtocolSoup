@@ -66,7 +66,7 @@ Verifier identity is resolved via DID document. The DID document is fetched and 
 
 ### `verifier_attestation`
 
-Verifier presents a signed attestation JWT. The verifier's attestation issuer publishes OpenID discovery metadata and JWKS. The wallet validates the attestation JWT against the published JWKS.
+Verifier presents a signed attestation JWT. The verifier's attestation issuer publishes OpenID discovery metadata and JWKS. The wallet validates the attestation JWT against the published JWKS. When `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` is unset, an ephemeral in-memory key is auto-provisioned at startup.
 
 ### `x509_san_dns` (OpenID4VP Section 5.9)
 
@@ -106,6 +106,9 @@ When no certificate material is configured via environment variables, the verifi
 |---------------|---------|
 | Authorization Request Endpoint | Verifier creates and publishes a request object / request URI |
 | Request URI Retrieval Endpoint | Wallet fetches request object by `request_uri` |
+| Verifier Attestation Discovery | OpenID discovery metadata for the verifier attestation issuer |
+| Verifier Attestation AS Metadata | OAuth 2.0 Authorization Server metadata for the attestation issuer |
+| Verifier Attestation JWKS | Public signing keys used to validate `verifier_attestation` request objects |
 | Response URI Endpoint | Wallet submits `direct_post` or `direct_post.jwt` response payloads |
 | Verification Result Endpoint (optional) | Verifier exposes policy evaluation outcome to client tooling |
 

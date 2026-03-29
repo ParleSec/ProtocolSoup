@@ -18,7 +18,7 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 | Port | `8080` |
 | Health | `GET /health` |
 | API index | `GET /api` |
-| Credential formats | `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
+| Credential formats | `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity with `ecdsa-rdfc-2019` / `eddsa-rdfc-2022`) |
 | Credential type | `UniversityDegreeCredential` |
 
 ## Key Endpoints
@@ -39,6 +39,7 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 - `POST /oid4vp/request/create` -- create authorization request
 - `GET|POST /oid4vp/request/{requestID}` -- authorization request
 - `GET /oid4vp/verifier-attestation/.well-known/openid-configuration` -- verifier attestation issuer metadata
+- `GET /oid4vp/verifier-attestation/.well-known/oauth-authorization-server` -- verifier attestation AS metadata
 - `GET /oid4vp/verifier-attestation/jwks` -- verifier attestation issuer JWKS
 - `POST /oid4vp/response` -- wallet response (`direct_post`, `direct_post.jwt`)
 - `GET /oid4vp/result/{requestID}` -- verification result

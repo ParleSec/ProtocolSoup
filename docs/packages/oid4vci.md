@@ -38,7 +38,7 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
 
 - Access tokens are issued by issuer keys; proof JWTs are signed by wallet keys and verified against `cnf.jwk`.
 - Proof JWT header `typ` is validated as `openid4vci-proof+jwt` before credential issuance.
-- `credential` responses return real SD-JWT VC style artifacts from live handler execution using wallet-bound subject data.
+- `credential` responses return real artifacts in the negotiated format (`dc+sd-jwt`, `jwt_vc_json`, `jwt_vc_json-ld`, or `ldp_vc`) from live handler execution using wallet-bound subject data.
 - Issued credentials are persisted into a shared wallet credential store for downstream OID4VP presentation lineage.
 - `c_nonce` freshness is enforced at runtime (`invalid_nonce` on stale replay/mismatch).
 - Looking Glass events are emitted from real request handling, including security rejections.

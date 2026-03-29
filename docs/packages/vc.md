@@ -66,6 +66,9 @@
 
 - `POST /oid4vp/request/create`
 - `GET|POST /oid4vp/request/{requestID}`
+- `GET /oid4vp/verifier-attestation/.well-known/openid-configuration`
+- `GET /oid4vp/verifier-attestation/.well-known/oauth-authorization-server`
+- `GET /oid4vp/verifier-attestation/jwks`
 - `POST /oid4vp/response`
 - `GET /oid4vp/result/{requestID}`
 

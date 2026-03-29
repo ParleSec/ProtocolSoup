@@ -26,6 +26,9 @@ OpenID for Verifiable Presentations (OID4VP 1.0) verifier endpoints exposed by t
 | `/request/create` | `POST` | Create OID4VP request object |
 | `/request/{requestID}` | `GET` | Retrieve request object by URI |
 | `/request/{requestID}` | `POST` | Retrieve request object by POST |
+| `/verifier-attestation/.well-known/openid-configuration` | `GET` | Verifier attestation OpenID discovery |
+| `/verifier-attestation/.well-known/oauth-authorization-server` | `GET` | Verifier attestation AS metadata |
+| `/verifier-attestation/jwks` | `GET` | Verifier attestation JWKS |
 | `/response` | `POST` | Wallet submission endpoint (`direct_post` / `direct_post.jwt`) |
 | `/result/{requestID}` | `GET` | Fetch verifier policy result |
 
@@ -34,8 +37,10 @@ OpenID for Verifiable Presentations (OID4VP 1.0) verifier endpoints exposed by t
 - Request objects are signed with verifier keys, while VP and `direct_post.jwt` response signatures are validated against wallet keys.
 - `direct_post.jwt` responses are wallet-signed, verifier-encrypted, and decrypted/validated in live handler logic (`typ`, subject, audience, expiry).
 - Policy decisions are derived from actual VP token validation results, including `vp+jwt` type checks, subject/key holder binding, and presented credential verification against wallet-held issuance state.
+- For `redirect_uri` client IDs, the `client_id` equals the `response_uri` and trust is established by the URI context.
 - For `decentralized_identifier` client IDs, verifier trust resolution performs live did:web document fetch and ID/material validation.
-- For `x509_san_dns` client IDs, the request object carries an `x5c` JOSE header with the certificate chain. The wallet validates the PKIX chain, verifies the leaf SAN matches the `client_id` DNS name, confirms the `response_uri` host matches, and verifies the JWT signature against the leaf public key.
+- For `verifier_attestation` client IDs, the verifier signs request objects with an attestation key pair and publishes JWKS at the attestation issuer URL. Ephemeral key auto-provisioned when `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` is unset.
+- For `x509_san_dns` client IDs, the request object carries an `x5c` JOSE header with the certificate chain. The wallet validates the PKIX chain, verifies the leaf SAN matches the `client_id` DNS name, confirms the `response_uri` host matches, and verifies the JWT signature against the leaf public key. Ephemeral self-signed CA + leaf chain auto-provisioned when PEM env vars are unset.
 - Looking Glass includes security-warning evidence for denied presentations.
 
 ## Failure Semantics
