@@ -276,6 +276,15 @@ func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme) string {
 
 func (p *Plugin) validateVerifierIdentityRequest(scheme ClientIDScheme, clientID string, responseURI string) error {
 	switch scheme {
+	case ClientIDSchemeRedirectURI:
+		// OID4VP Section 5.9.3: for redirect_uri scheme, the client_id value
+		// (after prefix) IS the response_uri
+		clientValue := stripClientIDSchemePrefixValue(clientID, ClientIDSchemeRedirectURI)
+		if clientValue != "" && strings.TrimSpace(responseURI) != "" {
+			if clientValue != strings.TrimSpace(responseURI) {
+				return fmt.Errorf("response_uri %q must match redirect_uri client_id value %q", responseURI, clientValue)
+			}
+		}
 	case ClientIDSchemeVerifierAttestation:
 		if p.verifierAttestation == nil {
 			return fmt.Errorf("verifier_attestation is not configured")
@@ -382,8 +391,12 @@ func (p *Plugin) handleVerifierAttestationOpenIDConfiguration(w http.ResponseWri
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"issuer":   p.verifierAttestation.issuer,
-		"jwks_uri": p.verifierAttestation.issuer + "/jwks",
+		"issuer":                                p.verifierAttestation.issuer,
+		"jwks_uri":                              p.verifierAttestation.issuer + "/jwks",
+		"response_types_supported":              []string{"vp_token"},
+		"vp_formats_supported":                  defaultVPFormatsSupported(),
+		"token_endpoint_auth_methods_supported": []string{"private_key_jwt"},
+		"request_object_signing_alg_values_supported": []string{"ES256", "RS256", "EdDSA"},
 	})
 }
 

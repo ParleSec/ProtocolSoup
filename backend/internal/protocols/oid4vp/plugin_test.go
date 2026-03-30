@@ -32,8 +32,9 @@ import (
 )
 
 type combinedServer struct {
-	Server *httptest.Server
-	KeySet *crypto.KeySet
+	Server   *httptest.Server
+	KeySet   *crypto.KeySet
+	vpPlugin *Plugin
 }
 
 type combinedServerOptions struct {
@@ -1607,8 +1608,9 @@ func newCombinedVCServerWithOptions(t *testing.T, options combinedServerOptions)
 		t.Fatalf("reconfigure oid4vp verifier identities: %v", err)
 	}
 	return &combinedServer{
-		Server: server,
-		KeySet: keySet,
+		Server:   server,
+		KeySet:   keySet,
+		vpPlugin: vpPlugin,
 	}
 }
 
@@ -1699,6 +1701,157 @@ func jwkFromVPValue(t *testing.T, raw interface{}) crypto.JWK {
 		t.Fatalf("unmarshal jwk value: %v", err)
 	}
 	return jwk
+}
+
+// --- OID4VP spec compliance tests ---
+
+func TestExpiredRequestObjectServedReturnsError(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	requestID := asVPString(createPayload["request_id"])
+
+	// Manually expire the session
+	env.vpPlugin.mu.Lock()
+	if session, ok := env.vpPlugin.requests[requestID]; ok {
+		session.ExpiresAt = time.Now().UTC().Add(-1 * time.Minute)
+	}
+	env.vpPlugin.mu.Unlock()
+
+	getResp, err := http.Get(env.Server.URL + "/oid4vp/request/" + requestID)
+	if err != nil {
+		t.Fatalf("GET request object failed: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for expired request, got %d", getResp.StatusCode)
+	}
+
+	postResp, err := http.Post(env.Server.URL+"/oid4vp/request/"+requestID, "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatalf("POST request object failed: %v", err)
+	}
+	defer postResp.Body.Close()
+	if postResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for expired POST request, got %d", postResp.StatusCode)
+	}
+}
+
+func TestRequestObjectTypHeaderValidatedByVerifier(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	requestID := asVPString(createPayload["request_id"])
+
+	// Tamper the stored request JWT to have a wrong typ header
+	env.vpPlugin.mu.Lock()
+	if session, ok := env.vpPlugin.requests[requestID]; ok {
+		badClaims := jwt.MapClaims{"iss": "test", "exp": time.Now().Add(5 * time.Minute).Unix()}
+		badToken := jwt.NewWithClaims(jwt.SigningMethodRS256, badClaims)
+		badToken.Header["typ"] = "invalid-typ"
+		badJWT, _ := badToken.SignedString(env.KeySet.RSAPrivateKey())
+		session.RequestJWT = badJWT
+	}
+	env.vpPlugin.mu.Unlock()
+
+	resp, err := http.Get(env.Server.URL + "/oid4vp/request/" + requestID)
+	if err != nil {
+		t.Fatalf("GET request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid typ, got %d", resp.StatusCode)
+	}
+}
+
+func TestRedirectURISchemeResponseURIMustMatchClientID(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	resp := postVPJSON(t, env.Server.URL+"/oid4vp/request/create", map[string]interface{}{
+		"client_id":     "redirect_uri:" + env.Server.URL + "/oid4vp/response",
+		"response_mode": "direct_post",
+		"response_uri":  "https://evil.example/response",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for mismatched response_uri, got %d", resp.StatusCode)
+	}
+	payload := decodeVPJSONMap(t, resp)
+	if asVPString(payload["error"]) != "invalid_client" {
+		t.Fatalf("expected invalid_client error, got %q", asVPString(payload["error"]))
+	}
+}
+
+func TestRequestObjectContainsClientMetadataWithVPFormats(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	requestJWT := asVPString(createPayload["request"])
+	decodedRequest, err := crypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	clientMetadata, ok := decodedRequest.Payload["client_metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected client_metadata in request claims")
+	}
+	vpFormats, ok := clientMetadata["vp_formats_supported"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected vp_formats_supported in client_metadata")
+	}
+	for _, format := range []string{"dc+sd-jwt", "jwt_vc_json", "jwt_vc_json-ld", "ldp_vc"} {
+		if _, ok := vpFormats[format]; !ok {
+			t.Fatalf("expected %q in vp_formats_supported", format)
+		}
+	}
+}
+
+func TestVerifierAttestationDiscoveryIncludesExtendedMetadata(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	resp, err := http.Get(env.Server.URL + "/oid4vp/verifier-attestation/.well-known/openid-configuration")
+	if err != nil {
+		t.Fatalf("fetch metadata: %v", err)
+	}
+	assertVPStatus(t, resp, http.StatusOK)
+	metadata := decodeVPJSONMap(t, resp)
+
+	if _, ok := metadata["response_types_supported"]; !ok {
+		t.Fatalf("expected response_types_supported")
+	}
+	if _, ok := metadata["vp_formats_supported"]; !ok {
+		t.Fatalf("expected vp_formats_supported")
+	}
+	if _, ok := metadata["request_object_signing_alg_values_supported"]; !ok {
+		t.Fatalf("expected request_object_signing_alg_values_supported")
+	}
+}
+
+func TestSessionExpiryPruningEvictsOldSessions(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	requestID := asVPString(createPayload["request_id"])
+
+	env.vpPlugin.mu.Lock()
+	if session, ok := env.vpPlugin.requests[requestID]; ok {
+		session.ExpiresAt = time.Now().UTC().Add(-30 * time.Minute)
+	}
+	env.vpPlugin.mu.Unlock()
+
+	env.vpPlugin.evictExpiredSessions()
+
+	env.vpPlugin.mu.RLock()
+	_, exists := env.vpPlugin.requests[requestID]
+	env.vpPlugin.mu.RUnlock()
+	if exists {
+		t.Fatalf("expected expired session to be evicted")
+	}
 }
 
 func createECDSACertificateChain(t *testing.T, dnsNames []string, commonName string) (*ecdsa.PrivateKey, [][]byte) {

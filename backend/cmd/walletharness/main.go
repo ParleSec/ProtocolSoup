@@ -124,6 +124,7 @@ type resolvedRequestEnvelope struct {
 	RequestJWT       string
 	RequestURI       string
 	RequestID        string
+	URIClientID      string
 	DecodedHeader    map[string]interface{}
 	DecodedPayload   map[string]interface{}
 	RequestURISource string
@@ -1262,7 +1263,7 @@ func (s *walletHarnessServer) resolveWalletPresentationContext(
 	if err != nil {
 		return nil, nil, trustEvaluation{}, err
 	}
-	requestContext, err := s.resolveRequestContextWithOptions(envelope.RequestID, envelope.RequestJWT, true)
+	requestContext, err := s.resolveRequestContextWithOptions(envelope.RequestID, envelope.RequestJWT, true, envelope.URIClientID)
 	if err != nil {
 		return nil, nil, trustEvaluation{}, err
 	}
@@ -1323,11 +1324,13 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 	requestID := strings.TrimSpace(req.RequestID)
 	requestSource := ""
 
+	uriClientID := ""
 	if openID4VPURI != "" {
-		uriRequestURI, uriRequestJWT, err := parseOpenID4VPURI(openID4VPURI)
+		uriRequestURI, uriRequestJWT, parsedClientID, err := parseOpenID4VPURI(openID4VPURI)
 		if err != nil {
 			return nil, err
 		}
+		uriClientID = parsedClientID
 		if requestURI == "" && uriRequestURI != "" {
 			requestURI = uriRequestURI
 			requestSource = "openid4vp_uri"
@@ -1368,6 +1371,10 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 	if err != nil {
 		return nil, fmt.Errorf("decode request object jwt: %w", err)
 	}
+	// OID4VP Section 5.9.3/5.10.1: request objects MUST use typ "oauth-authz-req+jwt"
+	if typHeader := strings.TrimSpace(asString(decodedRequest.Header["typ"])); typHeader != "oauth-authz-req+jwt" {
+		return nil, fmt.Errorf("request object typ header must be oauth-authz-req+jwt, got %q", typHeader)
+	}
 	if requestID == "" {
 		requestID = strings.TrimSpace(asString(decodedRequest.Payload["jti"]))
 	}
@@ -1387,31 +1394,33 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 		RequestJWT:       requestJWT,
 		RequestURI:       requestURI,
 		RequestID:        requestID,
+		URIClientID:      uriClientID,
 		DecodedHeader:    header,
 		DecodedPayload:   payload,
 		RequestURISource: requestSource,
 	}, nil
 }
 
-func parseOpenID4VPURI(raw string) (string, string, error) {
+func parseOpenID4VPURI(raw string) (requestURI string, requestJWT string, clientID string, err error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", "", fmt.Errorf("openid4vp_uri is required")
+		return "", "", "", fmt.Errorf("openid4vp_uri is required")
 	}
-	parsedURI, err := url.Parse(trimmed)
-	if err != nil {
-		return "", "", fmt.Errorf("invalid openid4vp_uri: %w", err)
+	parsedURI, parseErr := url.Parse(trimmed)
+	if parseErr != nil {
+		return "", "", "", fmt.Errorf("invalid openid4vp_uri: %w", parseErr)
 	}
 	if !strings.EqualFold(parsedURI.Scheme, "openid4vp") {
-		return "", "", fmt.Errorf("unsupported URI scheme %q expected openid4vp", parsedURI.Scheme)
+		return "", "", "", fmt.Errorf("unsupported URI scheme %q expected openid4vp", parsedURI.Scheme)
 	}
 	query := parsedURI.Query()
-	requestURI := strings.TrimSpace(query.Get("request_uri"))
-	requestJWT := strings.TrimSpace(query.Get("request"))
+	requestURI = strings.TrimSpace(query.Get("request_uri"))
+	requestJWT = strings.TrimSpace(query.Get("request"))
+	clientID = strings.TrimSpace(query.Get("client_id"))
 	if requestURI == "" && requestJWT == "" {
-		return "", "", fmt.Errorf("openid4vp_uri must include request_uri or request parameter")
+		return "", "", "", fmt.Errorf("openid4vp_uri must include request_uri or request parameter")
 	}
-	return requestURI, requestJWT, nil
+	return requestURI, requestJWT, clientID, nil
 }
 
 func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
@@ -1744,8 +1753,17 @@ func (s *walletHarnessServer) verifyVerifierAttestationRequestObjectSignature(
 	if !s.isTrustedVerifierAttestationIssuer(issuer) {
 		return "", fmt.Errorf("verifier attestation issuer %q is not trusted", issuer)
 	}
-	if _, ok := decodedAttestation.Payload["exp"]; !ok {
+	expVal, expPresent := decodedAttestation.Payload["exp"]
+	if !expPresent {
 		return "", fmt.Errorf("verifier attestation exp claim is required")
+	}
+	expFloat, ok := expVal.(float64)
+	if !ok {
+		return "", fmt.Errorf("verifier attestation exp claim is not a valid number")
+	}
+	const attestationClockSkew = 30 * time.Second
+	if time.Unix(int64(expFloat), 0).Before(time.Now().Add(-attestationClockSkew)) {
+		return "", fmt.Errorf("verifier attestation has expired (exp=%d)", int64(expFloat))
 	}
 	originalClientID := stripClientIDSchemePrefix(requestContext.ClientID, "verifier_attestation")
 	if originalClientID == "" {
@@ -2940,7 +2958,7 @@ func (s *walletHarnessServer) submitToVerifier(
 	return upstreamResp.StatusCode, decodedBody, nil
 }
 
-func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string, requestJWT string, allowExternal bool) (*resolvedRequestContext, error) {
+func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string, requestJWT string, allowExternal bool, uriClientID ...string) (*resolvedRequestContext, error) {
 	decodedRequest, err := intcrypto.DecodeTokenWithoutValidation(requestJWT)
 	if err != nil {
 		return nil, fmt.Errorf("decode request object jwt: %w", err)
@@ -3010,8 +3028,31 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 	if clientID == "" {
 		return nil, fmt.Errorf("request object is missing client_id")
 	}
+	// OID4VP Section 5.10: URI client_id and request object client_id MUST be identical
+	if len(uriClientID) > 0 && uriClientID[0] != "" {
+		if uriClientID[0] != clientID {
+			return nil, fmt.Errorf("request object client_id %q does not match URI client_id %q", clientID, uriClientID[0])
+		}
+	}
 	if nonce == "" {
 		return nil, fmt.Errorf("request object is missing nonce")
+	}
+
+	// OID4VP Section 5.2: validate request object exp/iat temporal claims
+	const requestClockSkew = 60 * time.Second
+	if expVal, ok := decodedRequest.Payload["exp"]; ok {
+		if expFloat, fok := expVal.(float64); fok {
+			if time.Unix(int64(expFloat), 0).Before(time.Now().Add(-requestClockSkew)) {
+				return nil, fmt.Errorf("request object has expired (exp=%d)", int64(expFloat))
+			}
+		}
+	}
+	if iatVal, ok := decodedRequest.Payload["iat"]; ok {
+		if iatFloat, fok := iatVal.(float64); fok {
+			if time.Unix(int64(iatFloat), 0).After(time.Now().Add(requestClockSkew)) {
+				return nil, fmt.Errorf("request object iat is in the future (iat=%d)", int64(iatFloat))
+			}
+		}
 	}
 
 	var presDef map[string]interface{}

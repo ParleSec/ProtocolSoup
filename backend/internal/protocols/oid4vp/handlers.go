@@ -29,13 +29,14 @@ const (
 )
 
 type createAuthorizationRequest struct {
-	ClientID       string          `json:"client_id"`
-	ClientIDScheme string          `json:"client_id_scheme,omitempty"`
-	ResponseMode   string          `json:"response_mode"`
-	ResponseURI    string          `json:"response_uri"`
-	RedirectURI    string          `json:"redirect_uri,omitempty"`
-	Scope          string          `json:"scope,omitempty"`
-	DCQLQuery      json.RawMessage `json:"dcql_query,omitempty"`
+	ClientID       string                 `json:"client_id"`
+	ClientIDScheme string                 `json:"client_id_scheme,omitempty"`
+	ResponseMode   string                 `json:"response_mode"`
+	ResponseURI    string                 `json:"response_uri"`
+	RedirectURI    string                 `json:"redirect_uri,omitempty"`
+	Scope          string                 `json:"scope,omitempty"`
+	DCQLQuery      json.RawMessage        `json:"dcql_query,omitempty"`
+	ClientMetadata map[string]interface{} `json:"client_metadata,omitempty"`
 }
 
 type walletResponsePayload struct {
@@ -64,6 +65,15 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		return
 	}
 
+	req.ResponseMode = strings.TrimSpace(req.ResponseMode)
+	if req.ResponseMode == "" {
+		req.ResponseMode = "direct_post"
+	}
+	req.ResponseURI = strings.TrimSpace(req.ResponseURI)
+	if req.ResponseURI == "" {
+		req.ResponseURI = p.verifierBaseURL() + "/response"
+	}
+
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	req.ClientIDScheme = strings.TrimSpace(req.ClientIDScheme)
 	requestedClientIDScheme := ClientIDSchemeUnknown
@@ -88,15 +98,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		}
 	}
 	if req.ClientID == "" {
-		req.ClientID = defaultVerifierClientID
-	}
-	req.ResponseMode = strings.TrimSpace(req.ResponseMode)
-	if req.ResponseMode == "" {
-		req.ResponseMode = "direct_post"
-	}
-	req.ResponseURI = strings.TrimSpace(req.ResponseURI)
-	if req.ResponseURI == "" {
-		req.ResponseURI = p.verifierBaseURL() + "/response"
+		req.ClientID = string(ClientIDSchemeRedirectURI) + ":" + req.ResponseURI
 	}
 
 	dcqlQuery := strings.TrimSpace(string(req.DCQLQuery))
@@ -177,6 +179,16 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		}
 		requestClaims["dcql_query"] = dcqlObject
 	}
+
+	// OID4VP Section 5.1/11.1: include client_metadata with vp_formats_supported
+	clientMetadata := req.ClientMetadata
+	if clientMetadata == nil {
+		clientMetadata = make(map[string]interface{})
+	}
+	if _, hasFormats := clientMetadata["vp_formats_supported"]; !hasFormats {
+		clientMetadata["vp_formats_supported"] = defaultVPFormatsSupported()
+	}
+	requestClaims["client_metadata"] = clientMetadata
 
 	requestJWT, err := p.signAuthorizationRequestObject(clientIDScheme, req.ClientID, requestClaims, req.ResponseURI)
 	if err != nil {
@@ -318,17 +330,32 @@ func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.R
 		writeOID4VPError(w, http.StatusNotFound, "invalid_request_uri", "request object not found")
 		return
 	}
+	if time.Now().UTC().After(session.ExpiresAt) {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_uri", "request object expired")
+		return
+	}
 	if err := validateRequestObjectTyp(session.RequestJWT); err != nil {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_object", err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	// OID4VP Section 5.10: parse wallet_nonce from POST body if present
+	walletNonce := strings.TrimSpace(r.FormValue("wallet_nonce"))
+	walletMetadata := strings.TrimSpace(r.FormValue("wallet_metadata"))
+
+	response := map[string]interface{}{
 		"request":             session.RequestJWT,
 		"request_id":          requestID,
 		"request_uri_method":  "post",
 		"dcql_query_supplied": session.DCQLQuery != "",
-	})
+	}
+	if walletNonce != "" {
+		response["wallet_nonce"] = walletNonce
+	}
+	if walletMetadata != "" {
+		response["wallet_metadata"] = walletMetadata
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
@@ -778,30 +805,33 @@ func (p *Plugin) evaluateJSONLDPresentation(session *requestSession, vpToken str
 		finalizePolicyDecision(result)
 		return result
 	}
-	proof := proofs[0]
-	if challenge := strings.TrimSpace(asString(proof["challenge"])); challenge == session.Nonce {
-		result.NonceValidated = true
-	} else {
-		addPolicyReason(result, "nonce_mismatch", "presentation proof challenge mismatch")
-	}
-	if audienceIncludes(proof["domain"], session.ClientID) {
-		result.AudienceValidated = true
-	} else {
-		addPolicyReason(result, "audience_mismatch", "presentation proof domain mismatch")
-	}
-	result.ExpiryValidated = true
-	if expiresAt, err := time.Parse(time.RFC3339, strings.TrimSpace(asString(proof["expires"]))); err == nil && !expiresAt.IsZero() {
-		result.ExpiryValidated = expiresAt.After(time.Now().UTC())
-		if !result.ExpiryValidated {
-			addPolicyReason(result, "vp_token_expired", "presentation proof expired")
+	for _, proof := range proofs {
+		if challenge := strings.TrimSpace(asString(proof["challenge"])); challenge == session.Nonce {
+			result.NonceValidated = true
+		}
+		if audienceIncludes(proof["domain"], session.ClientID) {
+			result.AudienceValidated = true
+		}
+		if expiresAt, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(asString(proof["expires"]))); parseErr == nil && !expiresAt.IsZero() {
+			if expiresAt.Before(time.Now().UTC()) {
+				addPolicyReason(result, "vp_token_expired", "presentation proof expired")
+			}
+		}
+		verificationMethodID := proofVerificationMethodID(proof["verificationMethod"])
+		if verificationMethodBoundToHolder(verificationMethodID, walletContext.Subject) {
+			result.HolderBindingVerified = true
 		}
 	}
-	verificationMethodID := proofVerificationMethodID(proof["verificationMethod"])
-	if verificationMethodBoundToHolder(verificationMethodID, walletContext.Subject) {
-		result.HolderBindingVerified = true
-	} else {
-		addPolicyReason(result, "holder_binding_mismatch", "presentation proof verificationMethod is not bound to the holder")
+	if !result.NonceValidated {
+		addPolicyReason(result, "nonce_mismatch", "no presentation proof matched the expected challenge")
 	}
+	if !result.AudienceValidated {
+		addPolicyReason(result, "audience_mismatch", "no presentation proof matched the expected domain")
+	}
+	if !result.HolderBindingVerified {
+		addPolicyReason(result, "holder_binding_mismatch", "no presentation proof verificationMethod is bound to the holder")
+	}
+	result.ExpiryValidated = !containsPolicyCode(result, "vp_token_expired")
 
 	presentedCredentials, err := extractPresentedCredentialEnvelopes(vpObject)
 	if err != nil {
@@ -931,6 +961,26 @@ func validateRequestObjectTyp(requestJWT string) error {
 	}
 	typRaw, _ := decodedToken.Header["typ"].(string)
 	return ValidateRequestObjectType(typRaw)
+}
+
+func defaultVPFormatsSupported() map[string]interface{} {
+	return map[string]interface{}{
+		credentialFormatDCSdJWT: map[string]interface{}{
+			"sd-jwt_alg_values": []string{"ES256"},
+			"kb-jwt_alg_values": []string{"ES256"},
+		},
+		credentialFormatJWTVCJSON: map[string]interface{}{
+			"alg_values_supported": []string{"ES256", "RS256", "EdDSA"},
+		},
+		credentialFormatJWTVCJSONL: map[string]interface{}{
+			"alg_values_supported": []string{"ES256", "RS256", "EdDSA"},
+		},
+		credentialFormatLDPVC: map[string]interface{}{
+			"proof_type_values_supported": []string{
+				"DataIntegrityProof",
+			},
+		},
+	}
 }
 
 func claimExpiryIsValid(rawExp interface{}) bool {
@@ -1543,6 +1593,18 @@ func addPolicyReason(result *models.OID4VPVerificationResult, code string, messa
 	}
 	result.Policy.ReasonCodes = append(result.Policy.ReasonCodes, normalizedCode)
 	result.Policy.Reasons = append(result.Policy.Reasons, normalizedMessage)
+}
+
+func containsPolicyCode(result *models.OID4VPVerificationResult, code string) bool {
+	if result == nil {
+		return false
+	}
+	for _, rc := range result.Policy.ReasonCodes {
+		if rc == code {
+			return true
+		}
+	}
+	return false
 }
 
 func finalizePolicyDecision(result *models.OID4VPVerificationResult) {

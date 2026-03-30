@@ -423,7 +423,7 @@ func TestExtractPublicKeyFromMethodSupportsOKP(t *testing.T) {
 }
 
 func TestParseOpenID4VPURIExtractsRequestURI(t *testing.T) {
-	requestURI, requestJWT, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123")
+	requestURI, requestJWT, _, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123")
 	if err != nil {
 		t.Fatalf("parseOpenID4VPURI: %v", err)
 	}

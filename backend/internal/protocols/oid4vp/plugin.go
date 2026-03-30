@@ -79,6 +79,8 @@ type Plugin struct {
 	requests        map[string]*requestSession
 	requestsByState map[string]string
 	requestDataPath string
+
+	stopPruning chan struct{}
 }
 
 // NewPlugin creates a new OID4VP plugin instance.
@@ -133,13 +135,53 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		}
 		p.requestDataPath = requestPath
 	}
+	p.stopPruning = make(chan struct{})
+	go p.pruneExpiredSessions()
 	return nil
 }
 
 // Shutdown closes plugin lifecycle resources.
 func (p *Plugin) Shutdown(ctx context.Context) error {
 	_ = ctx
+	if p.stopPruning != nil {
+		close(p.stopPruning)
+	}
 	return nil
+}
+
+func (p *Plugin) pruneExpiredSessions() {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.stopPruning:
+			return
+		case <-ticker.C:
+			p.evictExpiredSessions()
+		}
+	}
+}
+
+func (p *Plugin) evictExpiredSessions() {
+	now := time.Now().UTC()
+	grace := 2 * requestObjectTTL
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	var evicted int
+	for id, session := range p.requests {
+		if now.After(session.ExpiresAt.Add(grace)) {
+			delete(p.requests, id)
+			if session.State != "" {
+				delete(p.requestsByState, session.State)
+			}
+			evicted++
+		}
+	}
+	if evicted > 0 {
+		_ = p.persistRequestStateLocked()
+	}
 }
 
 // RegisterRoutes registers OID4VP verifier endpoints.
