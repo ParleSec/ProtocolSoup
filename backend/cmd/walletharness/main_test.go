@@ -861,6 +861,70 @@ func rawLDPCredentialWithClaims(t *testing.T, subject string) string {
 	return string(serialized)
 }
 
+func TestInferCredentialFormatFromVPRequestDCQLFormat(t *testing.T) {
+	testCases := []struct {
+		name             string
+		format           string
+		expectedConfigID string
+	}{
+		{"dc+sd-jwt", "dc+sd-jwt", "UniversityDegreeCredential"},
+		{"jwt_vc_json", "jwt_vc_json", "UniversityDegreeCredentialJWT"},
+		{"jwt_vc_json-ld", "jwt_vc_json-ld", "UniversityDegreeCredentialJWTLD"},
+		{"ldp_vc", "ldp_vc", "UniversityDegreeCredentialLDP"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			envelope := &resolvedRequestEnvelope{
+				DecodedPayload: map[string]interface{}{
+					"dcql_query": map[string]interface{}{
+						"credentials": []interface{}{
+							map[string]interface{}{
+								"id":     "test_cred",
+								"format": tc.format,
+							},
+						},
+					},
+				},
+			}
+			format, configID := inferCredentialFormatFromVPRequest(envelope)
+			if format != tc.format {
+				t.Fatalf("expected format %q, got %q", tc.format, format)
+			}
+			if configID != tc.expectedConfigID {
+				t.Fatalf("expected config ID %q, got %q", tc.expectedConfigID, configID)
+			}
+		})
+	}
+}
+
+func TestInferCredentialFormatFromVPRequestNoFormat(t *testing.T) {
+	envelope := &resolvedRequestEnvelope{
+		DecodedPayload: map[string]interface{}{
+			"dcql_query": map[string]interface{}{
+				"credentials": []interface{}{
+					map[string]interface{}{
+						"id": "test_cred",
+					},
+				},
+			},
+		},
+	}
+	format, configID := inferCredentialFormatFromVPRequest(envelope)
+	if format != "" {
+		t.Fatalf("expected empty format, got %q", format)
+	}
+	if configID != "" {
+		t.Fatalf("expected empty config ID, got %q", configID)
+	}
+}
+
+func TestInferCredentialFormatFromVPRequestNilEnvelope(t *testing.T) {
+	format, configID := inferCredentialFormatFromVPRequest(nil)
+	if format != "" || configID != "" {
+		t.Fatalf("expected empty results for nil envelope, got format=%q configID=%q", format, configID)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == strings.TrimSpace(target) {

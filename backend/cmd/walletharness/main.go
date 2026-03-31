@@ -501,7 +501,7 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 		}))
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resolveResponse := map[string]interface{}{
 		"request_id":            requestContext.RequestID,
 		"request_uri":           envelope.RequestURI,
 		"request":               envelope.RequestJWT,
@@ -518,7 +518,12 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 		"request_payload":       envelope.DecodedPayload,
 		"trust":                 trust,
 		"_looking_glass_events": lgEvents,
-	})
+	}
+	if inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope); inferredFormat != "" {
+		resolveResponse["inferred_credential_format"] = inferredFormat
+		resolveResponse["inferred_credential_configuration_id"] = inferredConfigID
+	}
+	writeJSON(w, http.StatusOK, resolveResponse)
 }
 
 func (s *walletHarnessServer) handleAPISession(w http.ResponseWriter, r *http.Request) {
@@ -697,21 +702,6 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credentialSelectionOptions{
-		ProvidedCredentialJWT: strings.TrimSpace(req.CredentialJWT),
-		CredentialID:          strings.TrimSpace(req.CredentialID),
-		CredentialFormat:      strings.TrimSpace(req.CredentialFormat),
-		CredentialConfigID:    strings.TrimSpace(req.CredentialConfigID),
-		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
-	})
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":             "wallet_submission_failed",
-			"error_description": err.Error(),
-		})
-		return
-	}
-
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -727,6 +717,30 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		})
 		return
 	}
+
+	credOpts := credentialSelectionOptions{
+		ProvidedCredentialJWT: strings.TrimSpace(req.CredentialJWT),
+		CredentialID:          strings.TrimSpace(req.CredentialID),
+		CredentialFormat:      strings.TrimSpace(req.CredentialFormat),
+		CredentialConfigID:    strings.TrimSpace(req.CredentialConfigID),
+		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
+	}
+	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+		if inferredFormat != "" {
+			credOpts.CredentialFormat = inferredFormat
+			credOpts.CredentialConfigID = inferredConfigID
+		}
+	}
+	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
 	matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 	if matchSummary.QueryType != "" && !matchSummary.Matched {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -870,21 +884,6 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credentialSelectionOptions{
-		ProvidedCredentialJWT: strings.TrimSpace(req.CredentialJWT),
-		CredentialID:          strings.TrimSpace(req.CredentialID),
-		CredentialFormat:      strings.TrimSpace(req.CredentialFormat),
-		CredentialConfigID:    strings.TrimSpace(req.CredentialConfigID),
-		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
-	})
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":             "wallet_submission_failed",
-			"error_description": err.Error(),
-		})
-		return
-	}
-
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -900,6 +899,30 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		})
 		return
 	}
+
+	credOpts := credentialSelectionOptions{
+		ProvidedCredentialJWT: strings.TrimSpace(req.CredentialJWT),
+		CredentialID:          strings.TrimSpace(req.CredentialID),
+		CredentialFormat:      strings.TrimSpace(req.CredentialFormat),
+		CredentialConfigID:    strings.TrimSpace(req.CredentialConfigID),
+		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
+	}
+	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+		if inferredFormat != "" {
+			credOpts.CredentialFormat = inferredFormat
+			credOpts.CredentialConfigID = inferredConfigID
+		}
+	}
+	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
 	matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 	if matchSummary.QueryType != "" && !matchSummary.Matched {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -2727,6 +2750,52 @@ func filterSDJWTDisclosures(rawCredential string, requestedClaims []string) (str
 	}
 	sort.Strings(selectedClaims)
 	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, selectedDisclosures, envelope.KeyBindingJWT), selectedClaims, nil
+}
+
+// inferCredentialFormatFromVPRequest extracts the expected credential format and configuration ID from a resolved VP request envelope.
+// It examines the DCQL query for an explicit format constraint, and falls back to vp_formats_supported in client_metadata to pick the most specific match.
+func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope) (format string, configID string) {
+	if envelope == nil || envelope.DecodedPayload == nil {
+		return "", ""
+	}
+
+	if rawQuery := envelope.DecodedPayload["dcql_query"]; rawQuery != nil {
+		queryBytes, err := json.Marshal(rawQuery)
+		if err == nil {
+			requirements := vc.ParseDCQLCredentialRequirements(string(queryBytes))
+			for _, req := range requirements {
+				if req.Format != "" {
+					return req.Format, formatToDefaultConfigurationID(req.Format)
+				}
+			}
+		}
+	}
+
+	if clientMetadata, ok := envelope.DecodedPayload["client_metadata"].(map[string]interface{}); ok {
+		if vpFormats, ok := clientMetadata["vp_formats_supported"].(map[string]interface{}); ok {
+			for _, candidate := range []string{"dc+sd-jwt", "jwt_vc_json", "jwt_vc_json-ld", "ldp_vc"} {
+				if _, supported := vpFormats[candidate]; supported {
+					return candidate, formatToDefaultConfigurationID(candidate)
+				}
+			}
+		}
+	}
+	return "", ""
+}
+
+func formatToDefaultConfigurationID(format string) string {
+	switch format {
+	case "dc+sd-jwt":
+		return "UniversityDegreeCredential"
+	case "jwt_vc_json":
+		return "UniversityDegreeCredentialJWT"
+	case "jwt_vc_json-ld":
+		return "UniversityDegreeCredentialJWTLD"
+	case "ldp_vc":
+		return "UniversityDegreeCredentialLDP"
+	default:
+		return ""
+	}
 }
 
 func matchWalletCredentialsToDCQL(credentials map[string]walletCredentialMaterial, dcqlQueryRaw string) ([]walletCredentialMaterial, []string) {

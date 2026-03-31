@@ -95,6 +95,8 @@ type ResolveResponse = {
   request_header?: Record<string, unknown>
   request_payload?: Record<string, unknown>
   trust?: TrustPayload
+  inferred_credential_format?: string
+  inferred_credential_configuration_id?: string
 }
 
 type PreviewResponse = {
@@ -567,6 +569,10 @@ export default function WalletApp() {
         const response = await apiRequest<ResolveResponse>('/api/resolve', 'POST', payload)
         setResolved(response); setPreview(null); setResult(null)
         setPendingAuthorizationURL(''); setSelectedDisclosureClaims([]); setExternalTrustApproval(false)
+        if (response.inferred_credential_format) {
+          const match = ISSUE_FORMAT_OPTIONS.find((opt) => opt.format === response.inferred_credential_format)
+          if (match) setSelectedIssueFormat(match.format)
+        }
         setActiveView('review')
         setBanner('Request object resolved', 'success')
       } finally { resolveInFlightRef.current = false; setResolveInFlight(false) }
