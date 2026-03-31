@@ -258,8 +258,12 @@ func generateEphemeralX509Chain(hostname string) ([]*x509.Certificate, *ecdsa.Pr
 	return []*x509.Certificate{leafCert, caCert}, leafKey, nil
 }
 
-func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme) string {
+func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme, responseURI string) string {
 	switch scheme {
+	case ClientIDSchemeRedirectURI:
+		if uri := strings.TrimSpace(responseURI); uri != "" {
+			return string(ClientIDSchemeRedirectURI) + ":" + uri
+		}
 	case ClientIDSchemeVerifierAttestation:
 		if p.verifierAttestation != nil {
 			return p.verifierAttestation.clientID
@@ -268,8 +272,6 @@ func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme) string {
 		if p.x509SANDNSSigner != nil {
 			return p.x509SANDNSSigner.clientID
 		}
-	case ClientIDSchemeRedirectURI:
-		return defaultVerifierClientID
 	}
 	return ""
 }
@@ -277,13 +279,18 @@ func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme) string {
 func (p *Plugin) validateVerifierIdentityRequest(scheme ClientIDScheme, clientID string, responseURI string) error {
 	switch scheme {
 	case ClientIDSchemeRedirectURI:
-		// OID4VP Section 5.9.3: for redirect_uri scheme, the client_id value
-		// (after prefix) IS the response_uri
+		// OID4VP Section 5.9.3: for redirect_uri scheme the client_id value
+		// after the scheme prefix MUST equal the response_uri.
 		clientValue := stripClientIDSchemePrefixValue(clientID, ClientIDSchemeRedirectURI)
-		if clientValue != "" && strings.TrimSpace(responseURI) != "" {
-			if clientValue != strings.TrimSpace(responseURI) {
-				return fmt.Errorf("response_uri %q must match redirect_uri client_id value %q", responseURI, clientValue)
-			}
+		normalizedResponseURI := strings.TrimSpace(responseURI)
+		if clientValue == "" {
+			return fmt.Errorf("redirect_uri client_id %q is missing the URI value after scheme prefix", clientID)
+		}
+		if normalizedResponseURI == "" {
+			return fmt.Errorf("response_uri is required for redirect_uri client_id scheme")
+		}
+		if clientValue != normalizedResponseURI {
+			return fmt.Errorf("response_uri %q must match redirect_uri client_id value %q", normalizedResponseURI, clientValue)
 		}
 	case ClientIDSchemeVerifierAttestation:
 		if p.verifierAttestation == nil {

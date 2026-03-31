@@ -24,8 +24,7 @@ import (
 )
 
 const (
-	defaultVerifierClientID = "redirect_uri:https://verifier.protocolsoup.local/callback"
-	requestObjectTTL        = 5 * time.Minute
+	requestObjectTTL = 5 * time.Minute
 )
 
 var defaultDCQLQuery = map[string]interface{}{

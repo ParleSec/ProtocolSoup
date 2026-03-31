@@ -1095,21 +1095,6 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credentialSelectionOptions{
-		ProvidedCredentialJWT: req.CredentialJWT,
-		CredentialID:          req.CredentialID,
-		CredentialFormat:      req.CredentialFormat,
-		CredentialConfigID:    req.CredentialConfigID,
-		LookingGlassSessionID: req.LookingGlassSessionID,
-	})
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"error":             "wallet_submission_failed",
-			"error_description": err.Error(),
-		})
-		return
-	}
-
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), apiWalletRequest{
 		RequestID:  req.RequestID,
 		RequestJWT: req.Request,
@@ -1128,6 +1113,30 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
+
+	credOpts := credentialSelectionOptions{
+		ProvidedCredentialJWT: req.CredentialJWT,
+		CredentialID:          req.CredentialID,
+		CredentialFormat:      req.CredentialFormat,
+		CredentialConfigID:    req.CredentialConfigID,
+		LookingGlassSessionID: req.LookingGlassSessionID,
+	}
+	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+		if inferredFormat != "" {
+			credOpts.CredentialFormat = inferredFormat
+			credOpts.CredentialConfigID = inferredConfigID
+		}
+	}
+	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_submission_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
+
 	matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 	if matchSummary.QueryType != "" && !matchSummary.Matched {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -2356,20 +2365,6 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			})
 			return
 		}
-		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credentialSelectionOptions{
-			ProvidedCredentialJWT: req.CredentialJWT,
-			CredentialID:          req.CredentialID,
-			CredentialFormat:      req.CredentialFormat,
-			CredentialConfigID:    req.CredentialConfigID,
-			LookingGlassSessionID: req.LookingGlassSessionID,
-		})
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": err.Error(),
-			})
-			return
-		}
 		envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), apiWalletRequest{
 			RequestID:  req.RequestID,
 			RequestJWT: req.Request,
@@ -2384,6 +2379,28 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		if err := s.ensurePresentationRequestTrust(trust, false, false); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		buildCredOpts := credentialSelectionOptions{
+			ProvidedCredentialJWT: req.CredentialJWT,
+			CredentialID:          req.CredentialID,
+			CredentialFormat:      req.CredentialFormat,
+			CredentialConfigID:    req.CredentialConfigID,
+			LookingGlassSessionID: req.LookingGlassSessionID,
+		}
+		if buildCredOpts.CredentialFormat == "" && buildCredOpts.CredentialConfigID == "" {
+			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+			if inferredFormat != "" {
+				buildCredOpts.CredentialFormat = inferredFormat
+				buildCredOpts.CredentialConfigID = inferredConfigID
+			}
+		}
+		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, buildCredOpts)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
 			})
 			return
@@ -2461,20 +2478,6 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			})
 			return
 		}
-		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credentialSelectionOptions{
-			ProvidedCredentialJWT: req.CredentialJWT,
-			CredentialID:          req.CredentialID,
-			CredentialFormat:      req.CredentialFormat,
-			CredentialConfigID:    req.CredentialConfigID,
-			LookingGlassSessionID: req.LookingGlassSessionID,
-		})
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": err.Error(),
-			})
-			return
-		}
 		envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), apiWalletRequest{
 			RequestID:  req.RequestID,
 			RequestJWT: req.Request,
@@ -2489,6 +2492,28 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
+				"error_description": err.Error(),
+			})
+			return
+		}
+		submitCredOpts := credentialSelectionOptions{
+			ProvidedCredentialJWT: req.CredentialJWT,
+			CredentialID:          req.CredentialID,
+			CredentialFormat:      req.CredentialFormat,
+			CredentialConfigID:    req.CredentialConfigID,
+			LookingGlassSessionID: req.LookingGlassSessionID,
+		}
+		if submitCredOpts.CredentialFormat == "" && submitCredOpts.CredentialConfigID == "" {
+			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+			if inferredFormat != "" {
+				submitCredOpts.CredentialFormat = inferredFormat
+				submitCredOpts.CredentialConfigID = inferredConfigID
+			}
+		}
+		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, submitCredOpts)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
 			})
 			return
@@ -2977,7 +3002,9 @@ func (s *walletHarnessServer) submitToVerifier(
 	}
 
 	form := url.Values{}
-	form.Set("state", requestContext.State)
+	if requestContext.State != "" {
+		form.Set("state", requestContext.State)
+	}
 	if requestContext.ResponseMode == "direct_post.jwt" {
 		if !requestContext.Trusted {
 			return 0, nil, fmt.Errorf("direct_post.jwt is only supported for trusted verifier callbacks")
@@ -3057,13 +3084,8 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		responseURI = strings.TrimSpace(asString(decodedRequest.Payload["redirect_uri"]))
 	}
 	clientID := strings.TrimSpace(asString(decodedRequest.Payload["client_id"]))
-	if responseURI == "" && clientID != "" {
-		if parsed, parseErr := url.ParseRequestURI(clientID); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
-			responseURI = clientID
-		}
-	}
 	if responseURI == "" {
-		return nil, fmt.Errorf("request object is missing response_uri (tried response_uri, redirect_uri, and client_id)")
+		return nil, fmt.Errorf("request object is missing response_uri")
 	}
 	parsedResponseURI, err := url.ParseRequestURI(responseURI)
 	if err != nil {
@@ -3090,9 +3112,6 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		}
 	}
 	state := strings.TrimSpace(asString(decodedRequest.Payload["state"]))
-	if state == "" {
-		state = randomValue(24)
-	}
 	nonce := strings.TrimSpace(asString(decodedRequest.Payload["nonce"]))
 	if clientID == "" {
 		return nil, fmt.Errorf("request object is missing client_id")

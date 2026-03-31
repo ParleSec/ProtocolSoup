@@ -85,7 +85,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		}
 		requestedClientIDScheme = scheme
 		if req.ClientID == "" {
-			req.ClientID = p.defaultClientIDForScheme(scheme)
+			req.ClientID = p.defaultClientIDForScheme(scheme, req.ResponseURI)
 			if req.ClientID == "" {
 				writeOID4VPError(
 					w,
@@ -98,7 +98,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		}
 	}
 	if req.ClientID == "" {
-		req.ClientID = string(ClientIDSchemeRedirectURI) + ":" + req.ResponseURI
+		req.ClientID = p.defaultClientIDForScheme(ClientIDSchemeRedirectURI, req.ResponseURI)
 	}
 
 	dcqlQuery := strings.TrimSpace(string(req.DCQLQuery))
