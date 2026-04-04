@@ -4,6 +4,7 @@
 
 export { ProtocolSelector } from './ProtocolSelector'
 export { RealFlowPanel } from './RealFlowPanel'
+export { StepCards } from './StepCards'
 export { OID4VPWalletModal } from './OID4VPWalletModal'
 export { FlowButton, TokenButton } from './ActionButtons'
 export { FlowDiagram } from './FlowDiagram'

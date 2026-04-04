@@ -102,6 +102,8 @@ export interface FlowEvent {
   /** RFC section this event relates to */
   rfcReference?: string
   data?: Record<string, unknown>
+  /** Flow phase this event belongs to (auto-set from currentStep) */
+  phase?: string
 }
 
 export interface DecodedToken {
@@ -191,11 +193,12 @@ export abstract class FlowExecutorBase {
   }
 
   /** Add an event to the timeline */
-  protected addEvent(event: Omit<FlowEvent, 'id' | 'timestamp'>): void {
+  protected addEvent(event: Omit<FlowEvent, 'id' | 'timestamp' | 'phase'>): void {
     const fullEvent: FlowEvent = {
       ...event,
       id: crypto.randomUUID(),
       timestamp: new Date(),
+      phase: this.state.currentStep,
     }
     this.updateState({
       events: [...this.state.events, fullEvent],
@@ -297,6 +300,7 @@ export abstract class FlowExecutorBase {
         method,
         url,
         hasBody: !!options.body,
+        exchangeId: exchange.id,
       },
     })
 
@@ -343,6 +347,7 @@ export abstract class FlowExecutorBase {
         status: response.status,
         duration,
         hasBody: !!data,
+        exchangeId: exchange.id,
       },
     })
 

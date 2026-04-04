@@ -8,21 +8,21 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Play, Square, RotateCcw, CheckCircle, XCircle, Clock,
-  Send, ArrowDownLeft, Key, Shield, AlertTriangle, Info,
+  Send, ArrowDownLeft, Key, Shield, AlertTriangle,
   Lock, Eye, EyeOff, Copy, Check, ChevronDown,
-  ChevronRight, Fingerprint, Code, Book, User, Server, FileText,
+  ChevronRight, Fingerprint, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useEffect, useState, type ElementType } from 'react'
+import { useEffect, useState, useRef, useCallback, type ElementType } from 'react'
 import type { 
   FlowExecutorState, 
-  FlowEvent, 
   CapturedExchange,
   DecodedToken 
 } from '../flows'
 import type { WireCapturedExchange } from '../types'
 import { TLSInspector } from './inspectors/TLSInspector'
 import { VCInspector } from './inspectors/VCInspector'
+import { StepCards } from './StepCards'
 
 // ============================================================================
 // Main Panel Component
@@ -68,7 +68,23 @@ export function RealFlowPanel({
   showTLSContext = false,
   showVCTab = false,
 }: RealFlowPanelProps) {
-  const [activeTab, setActiveTab] = useState<'events' | 'http' | 'wire' | 'tokens' | 'vc'>('events')
+  const [activeTab, setActiveTab] = useState<'flow' | 'http' | 'wire' | 'tokens' | 'vc'>('flow')
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const eventCount = (state?.events.length || 0) + (wireExchanges.length)
+
+  const handleScrollContainer = useCallback(() => {
+    if (!scrollContainerRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current
+    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 80
+  }, [])
+
+  useEffect(() => {
+    if (isNearBottomRef.current && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
+    }
+  }, [eventCount])
+
   const latestVerificationArtifact = state?.vcArtifacts
     ? [...state.vcArtifacts].reverse().find((artifact) => artifact.type === 'verification_result')
     : null
@@ -115,7 +131,7 @@ export function RealFlowPanel({
   // will show an error when executed if the config is missing
   const hasUnmetRequirements = false
   const tabs = [
-    { id: 'events', label: 'Events', count: state?.events.length || 0, icon: Zap },
+    { id: 'flow', label: 'Flow', count: state?.events.length || 0, icon: Zap },
     { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
     { id: 'http', label: 'Client', count: state?.exchanges.length || 0, icon: ArrowDownLeft },
     { id: 'tokens', label: 'Tokens', count: state?.decodedTokens.length || 0, icon: Key },
@@ -127,7 +143,7 @@ export function RealFlowPanel({
 
   useEffect(() => {
     if (!showVCTab && activeTab === 'vc') {
-      setActiveTab('events')
+      setActiveTab('flow')
     }
   }, [activeTab, showVCTab])
 
@@ -320,16 +336,28 @@ export function RealFlowPanel({
       </div>
 
       {/* Tab Content */}
-      <div className="min-h-[300px] sm:min-h-[400px] max-h-[450px] sm:max-h-[600px] overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScrollContainer}
+        className="min-h-[300px] sm:min-h-[400px] max-h-[450px] sm:max-h-[600px] overflow-y-auto scroll-smooth"
+      >
         <AnimatePresence mode="wait">
-          {activeTab === 'events' && (
+          {activeTab === 'flow' && (
             <motion.div
-              key="events"
+              key="flow"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
             >
-              <EventsList events={state?.events || []} />
+              <StepCards
+                events={state?.events || []}
+                exchanges={state?.exchanges || []}
+                wireExchanges={wireExchanges}
+                decodedTokens={state?.decodedTokens || []}
+                status={state?.status || 'idle'}
+                currentStep={state?.currentStep || ''}
+                showTLSContext={showTLSContext}
+              />
             </motion.div>
           )}
           {activeTab === 'http' && (
@@ -388,82 +416,7 @@ export function RealFlowPanel({
   )
 }
 
-// ============================================================================
-// Events List with RFC References
-// ============================================================================
 
-function EventsList({ events }: { events: FlowEvent[] }) {
-  if (events.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <Info className="w-12 h-12 text-surface-600 mb-3" />
-        <p className="text-surface-400">No events yet</p>
-        <p className="text-surface-400 text-sm">Execute the flow to see RFC-compliant events</p>
-      </div>
-    )
-  }
-
-  const eventConfig: Record<FlowEvent['type'], { icon: ElementType; color: string }> = {
-    info: { icon: Info, color: 'text-blue-400 bg-blue-500/10' },
-    request: { icon: Send, color: 'text-cyan-400 bg-cyan-500/10' },
-    response: { icon: ArrowDownLeft, color: 'text-green-400 bg-green-500/10' },
-    token: { icon: Key, color: 'text-yellow-400 bg-yellow-500/10' },
-    crypto: { icon: Lock, color: 'text-purple-400 bg-purple-500/10' },
-    security: { icon: Shield, color: 'text-orange-400 bg-orange-500/10' },
-    user_action: { icon: User, color: 'text-pink-400 bg-pink-500/10' },
-    error: { icon: AlertTriangle, color: 'text-red-400 bg-red-500/10' },
-    rfc: { icon: Book, color: 'text-indigo-400 bg-indigo-500/10' },
-  }
-
-  return (
-    <div className="space-y-2">
-      {events.map((event, index) => {
-        const config = eventConfig[event.type]
-        const Icon = config.icon
-        const [textColor, bgColor] = config.color.split(' ')
-
-        return (
-          <motion.div
-            key={event.id}
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: index * 0.03 }}
-            className="p-3 rounded-lg bg-surface-900/50 border border-white/5"
-          >
-            <div className="flex items-start gap-3">
-              <div className={`p-1.5 rounded-lg ${bgColor}`}>
-                <Icon className={`w-4 h-4 ${textColor}`} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="font-medium text-white text-sm">{event.title}</h4>
-                  <span className="text-xs text-surface-400 shrink-0">
-                    {event.timestamp.toLocaleTimeString()}
-                  </span>
-                </div>
-                <p className="text-sm text-surface-400 mt-0.5">{event.description}</p>
-                
-                {/* RFC Reference Badge */}
-                {event.rfcReference && (
-                  <div className="mt-2">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-indigo-500/10 text-indigo-400 font-mono">
-                      <Book className="w-3 h-3" />
-                      {event.rfcReference}
-                    </span>
-                  </div>
-                )}
-                
-                {event.data && Object.keys(event.data).length > 0 && (
-                  <ExpandableData data={event.data} />
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )
-      })}
-    </div>
-  )
-}
 
 // ============================================================================
 // HTTP Exchanges List
@@ -1002,38 +955,6 @@ function toOptionalInt(value: unknown): number | undefined {
 // ============================================================================
 // Utility Components
 // ============================================================================
-
-function ExpandableData({ data }: { data: Record<string, unknown> }) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  
-  if (Object.keys(data).length === 0) return null
-
-  return (
-    <div className="mt-2">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-1 text-xs text-surface-400 hover:text-surface-300 transition-colors"
-      >
-        <Code className="w-3 h-3" />
-        {isExpanded ? 'Hide' : 'Show'} data
-        {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-      </button>
-      
-      <AnimatePresence>
-        {isExpanded && (
-          <motion.pre
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="mt-2 p-2 rounded bg-surface-950 text-xs font-mono text-surface-400 overflow-x-auto"
-          >
-            {JSON.stringify(data, null, 2)}
-          </motion.pre>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
