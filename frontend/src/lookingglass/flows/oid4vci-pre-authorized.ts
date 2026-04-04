@@ -14,7 +14,6 @@ import { decodeJWTWithoutValidation } from '../../utils/crypto'
 
 export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
-  txCodeValue?: string
   deferred?: boolean
   credentialConfigurationID?: string
   credentialFormat?: string
@@ -258,12 +257,9 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       'pre-authorized_code': preAuthorizedCode,
     }
     if (this.flowConfig.txCodeRequired) {
-      let txCode = String(this.flowConfig.txCodeValue || '').trim()
+      const txCode = this.extractTxCodeFromOffer(offerData)
       if (!txCode) {
-        txCode = this.extractTxCodeFromOffer(offerData)
-      }
-      if (!txCode) {
-        throw new Error('Offer requires tx_code; provide txCodeValue from the out-of-band channel')
+        throw new Error('Offer requires tx_code but issuer did not return a tx_code_oob_value')
       }
       body.tx_code = txCode
     }

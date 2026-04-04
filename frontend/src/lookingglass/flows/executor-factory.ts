@@ -383,8 +383,6 @@ export interface ExecutorFactoryConfig {
   tokenTypeHint?: 'access_token' | 'refresh_token'
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
-  /** OID4VCI transaction code for tx_code flow variants */
-  txCodeValue?: string
   /** OID4VCI credential configuration override */
   oid4vciCredentialConfigurationID?: string
   /** OID4VCI credential format override */
@@ -495,11 +493,8 @@ export function createFlowExecutor(
     }
   }
 
-  // Handle OID4VCI tx_code flow variants
+  // Handle OID4VCI credential configuration overrides
   if (flowId.startsWith('oid4vci-')) {
-    if (config.txCodeValue) {
-      (fullConfig as OID4VCIPreAuthorizedConfig).txCodeValue = config.txCodeValue
-    }
     if (config.oid4vciCredentialConfigurationID) {
       (fullConfig as OID4VCIPreAuthorizedConfig).credentialConfigurationID = config.oid4vciCredentialConfigurationID
     }

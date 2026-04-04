@@ -480,8 +480,6 @@ export interface UseRealFlowExecutorOptions {
   token?: string
   /** Access token (for UserInfo endpoint) */
   accessToken?: string
-  /** OID4VCI transaction code (for tx_code constrained issuance) */
-  txCodeValue?: string
   /** OID4VCI credential configuration override */
   oid4vciCredentialConfigurationID?: string
   /** OID4VCI credential format override */
@@ -752,7 +750,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       bearerToken: options.bearerToken,
       token: options.token,
       accessToken: options.accessToken,
-      txCodeValue: options.txCodeValue,
       oid4vciCredentialConfigurationID: options.oid4vciCredentialConfigurationID,
       oid4vciCredentialFormat: options.oid4vciCredentialFormat,
       oid4vpDCQLQueryJSON: options.oid4vpDCQLQueryJSON,
@@ -803,7 +800,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.flowId,
     options.token,
     options.accessToken,
-    options.txCodeValue,
     options.oid4vciCredentialConfigurationID,
     options.oid4vciCredentialFormat,
     options.oid4vpDCQLQueryJSON,

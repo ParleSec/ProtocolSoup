@@ -77,9 +77,6 @@ export function LookingGlass() {
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
-  const [vciTxCodeInput, setVciTxCodeInput] = useState('')
-  const [vciTxCodeLoading, setVciTxCodeLoading] = useState(false)
-  const [vciTxCodeSource, setVciTxCodeSource] = useState<string | null>(null)
   const [oid4vciCredentialConfigurationID, setOID4VCICredentialConfigurationID] = useState('UniversityDegreeCredential')
   const [wireSessionId, setWireSessionId] = useState<string | null>(null)
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
@@ -170,7 +167,7 @@ export function LookingGlass() {
   const isTokenBasedFlow = isTokenIntrospectionFlow || isTokenRevocationFlow || isUserInfoFlow
   const isSCIMFlow = selectedProtocol?.id === 'scim'
   const isOID4VCIFlow = selectedProtocol?.id === 'oid4vci'
-  const isOID4VCITxCodeFlow = selectedProtocol?.id === 'oid4vci' && flowId === 'oid4vci-pre-authorized-tx-code'
+
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
   const hasFlowConfigurationInputs = isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
@@ -282,7 +279,6 @@ export function LookingGlass() {
     token: (isTokenIntrospectionFlow || isTokenRevocationFlow) ? activeToken : undefined,
     accessToken: isUserInfoFlow ? activeToken : undefined,
     bearerToken: isSCIMFlow ? scimBearerToken : undefined,
-    txCodeValue: isOID4VCITxCodeFlow ? vciTxCodeInput : undefined,
     oid4vciCredentialConfigurationID: isOID4VCIFlow ? selectedOID4VCICredentialProfile.id : undefined,
     oid4vciCredentialFormat: isOID4VCIFlow ? selectedOID4VCICredentialProfile.format : undefined,
     oid4vpDCQLQueryJSON: oid4vpDCQLQueryForExecutor,
@@ -456,82 +452,6 @@ export function LookingGlass() {
     }
   }, [isOID4VPFlow, walletHandoffArtifact, status])
 
-  const latestCapturedOID4VCITxCode = useMemo(() => {
-    const artifacts = realExecutor.state?.vcArtifacts || []
-    for (let i = artifacts.length - 1; i >= 0; i -= 1) {
-      const metadata = artifacts[i].metadata || {}
-      const txCode = String(metadata.txCodeOOBValue || metadata.txCodeValue || '').trim()
-      if (txCode) {
-        return txCode
-      }
-    }
-    return ''
-  }, [realExecutor.state?.vcArtifacts])
-
-  useEffect(() => {
-    if (!isOID4VCITxCodeFlow || vciTxCodeInput.trim() || !latestCapturedOID4VCITxCode) {
-      return
-    }
-    setVciTxCodeInput(latestCapturedOID4VCITxCode)
-    setVciTxCodeSource('captured from a previous issuer offer step in this session')
-  }, [isOID4VCITxCodeFlow, latestCapturedOID4VCITxCode, vciTxCodeInput])
-
-  useEffect(() => {
-    if (!isOID4VCITxCodeFlow || vciTxCodeInput.trim()) {
-      return
-    }
-
-    let cancelled = false
-    setVciTxCodeLoading(true)
-    setVciTxCodeSource(null)
-
-    fetch('/oid4vci/offers/pre-authorized', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        tx_code_required: true,
-      }),
-    })
-      .then(async (response) => {
-        const payload = await response.json().catch(() => null) as Record<string, unknown> | null
-        if (!response.ok) {
-          throw new Error(String(payload?.error_description || payload?.error || `Prefill request failed (${response.status})`))
-        }
-        return payload || {}
-      })
-      .then((payload) => {
-        if (cancelled) return
-        const txCode = String(payload.tx_code_oob_value || payload.tx_code_value || '').trim()
-        if (!txCode) {
-          setVciTxCodeSource('issuer pre-step did not return a tx_code value')
-          return
-        }
-        setVciTxCodeInput(txCode)
-        const offerID = String(payload.offer_id || '').trim()
-        setVciTxCodeSource(
-          offerID
-            ? `prefilled from issuer offer pre-step (${offerID})`
-            : 'prefilled from issuer offer pre-step',
-        )
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        const message = error instanceof Error ? error.message : 'Automatic tx_code prefill failed'
-        setVciTxCodeSource(message)
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setVciTxCodeLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [isOID4VCITxCodeFlow, vciTxCodeInput])
 
   // Store tokens from completed flows
   useEffect(() => {
@@ -897,9 +817,6 @@ export function LookingGlass() {
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-    setVciTxCodeInput('')
-    setVciTxCodeLoading(false)
-    setVciTxCodeSource(null)
     setOID4VPWalletModalOpen(false)
     setOID4VPLastPromptedRequestID('')
     setOID4VPWalletSubmitPending(false)
@@ -930,9 +847,6 @@ export function LookingGlass() {
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-    setVciTxCodeInput('')
-    setVciTxCodeLoading(false)
-    setVciTxCodeSource(null)
     setOID4VPWalletModalOpen(false)
     setOID4VPLastPromptedRequestID('')
     setOID4VPWalletSubmitPending(false)
@@ -951,7 +865,6 @@ export function LookingGlass() {
     setWireSessionError(null)
     setPendingExecute(false)
     setInspectedToken('')
-    setVciTxCodeLoading(false)
     setOID4VPWalletModalOpen(false)
     setOID4VPLastPromptedRequestID('')
     setOID4VPWalletSubmitPending(false)
@@ -1053,7 +966,6 @@ export function LookingGlass() {
         setWireSessionError(null)
         setPendingExecute(false)
         setInspectedToken('')
-        setVciTxCodeInput('')
         setOID4VPWalletModalOpen(false)
         setOID4VPLastPromptedRequestID('')
         setOID4VPWalletSubmitPending(false)
@@ -1371,40 +1283,6 @@ export function LookingGlass() {
           </motion.div>
         )}
 
-        {isOID4VCITxCodeFlow && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
-          >
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
-              <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
-              <span className="text-xs sm:text-sm font-medium text-surface-300">OID4VCI tx_code</span>
-            </div>
-            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-              This value is prefilled from the issuer out-of-band offer step and reused from prior flow capture when available.
-            </p>
-            <input
-              type="text"
-              value={vciTxCodeInput}
-              onChange={(e) => setVciTxCodeInput(e.target.value)}
-              placeholder={vciTxCodeLoading ? 'Prefilling tx_code from issuer offer...' : 'e.g. 123456'}
-              disabled={vciTxCodeLoading}
-              className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 transition-all"
-            />
-            {!!vciTxCodeSource && (
-              <p className="mt-2 text-[10px] sm:text-xs text-cyan-400 leading-relaxed">
-                {vciTxCodeSource}
-              </p>
-            )}
-            {!vciTxCodeLoading && !vciTxCodeInput.trim() && (
-              <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
-                ⚠️ tx_code is required before token exchange for this flow.
-              </p>
-            )}
-          </motion.div>
-        )}
 
         {showVCTab && (
           <motion.div

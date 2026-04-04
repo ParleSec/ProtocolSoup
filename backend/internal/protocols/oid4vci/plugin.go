@@ -680,6 +680,19 @@ func (p *Plugin) randomValue(size int) string {
 	return base64.RawURLEncoding.EncodeToString(raw)[:size]
 }
 
+func (p *Plugin) randomNumericCode(length int) string {
+	if length <= 0 {
+		length = 6
+	}
+	raw := make([]byte, length)
+	_, _ = rand.Read(raw)
+	code := make([]byte, length)
+	for i := 0; i < length; i++ {
+		code[i] = '0' + raw[i]%10
+	}
+	return string(code)
+}
+
 func (p *Plugin) getOrCreateWallet(userID string) (*walletIdentity, error) {
 	normalizedUserID := strings.TrimSpace(userID)
 	if normalizedUserID == "" {

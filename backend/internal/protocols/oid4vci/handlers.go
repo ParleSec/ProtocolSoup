@@ -124,7 +124,7 @@ func (p *Plugin) handleCreateOffer(w http.ResponseWriter, r *http.Request, byVal
 	txCodeValue := ""
 	var txCodeObject *models.VCTxCode
 	if req.TxCodeRequired {
-		txCodeValue = "123456"
+		txCodeValue = p.randomNumericCode(6)
 		txCodeObject = &models.VCTxCode{
 			Description: "Transaction code delivered via out-of-band channel",
 			Length:      6,
