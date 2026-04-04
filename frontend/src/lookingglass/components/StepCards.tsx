@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { useState, useEffect, useRef, useMemo, type ElementType } from 'react'
+import { useState, useMemo, type ElementType } from 'react'
 import {
   CheckCircle, XCircle, Clock, Send, ArrowDownLeft, Key, Shield,
   AlertTriangle, Info, Lock, ChevronDown, ChevronRight, Book,
@@ -260,16 +260,47 @@ function StepCard({ phase, showTLSContext }: { phase: ResolvedPhase; showTLSCont
     return m
   }, [phase.wireCaptures])
 
-  const renderedExchangeIds = useRef(new Set<string>())
-  const tokenQueue = useRef([...phase.tokens])
+  const renderPlan = useMemo(() => {
+    const seenExchangeIds = new Set<string>()
+    const tokenQ = [...phase.tokens]
 
-  useEffect(() => {
-    renderedExchangeIds.current = new Set<string>()
-    tokenQueue.current = [...phase.tokens]
-  }, [phase.tokens])
+    return phase.events.map(event => {
+      if (event.type === 'request') {
+        const eid = event.data?.exchangeId as string | undefined
+        if (eid && seenExchangeIds.has(eid)) return { kind: 'skip' as const, event }
+        if (eid) seenExchangeIds.add(eid)
 
-  renderedExchangeIds.current = new Set<string>()
-  tokenQueue.current = [...phase.tokens]
+        const exchange = eid ? exchangeMap.get(eid) : undefined
+        const responseEvent = eid
+          ? phase.events.find(e => e.type === 'response' && e.data?.exchangeId === eid)
+          : undefined
+        const wireKey = exchange ? `${exchange.request.method}:${extractPath(exchange.request.url)}` : undefined
+        const wire = wireKey ? wireByUrl.get(wireKey) : undefined
+
+        return { kind: 'http_exchange' as const, event, exchange, responseEvent, wire }
+      }
+
+      if (event.type === 'response') {
+        const eid = event.data?.exchangeId as string | undefined
+        if (eid && seenExchangeIds.has(eid)) return { kind: 'skip' as const, event }
+        return { kind: 'annotation' as const, event }
+      }
+
+      if (event.type === 'token') {
+        return { kind: 'token' as const, event, decoded: tokenQ.shift() }
+      }
+
+      if (event.type === 'error') {
+        return { kind: 'error' as const, event }
+      }
+
+      if (event.type === 'user_action') {
+        return { kind: 'user_action' as const, event }
+      }
+
+      return { kind: 'annotation' as const, event }
+    })
+  }, [phase.events, phase.tokens, exchangeMap, wireByUrl])
 
   return (
     <div className={`rounded-xl bg-surface-900/50 border border-l-2 overflow-hidden transition-all duration-300 ${statusAccent[phase.status]} ${
@@ -309,51 +340,35 @@ function StepCard({ phase, showTLSContext }: { phase: ResolvedPhase; showTLSCont
 
       {/* Card body */}
       <div className="px-3 sm:px-4 py-2.5 space-y-2">
-        {phase.events.map(event => {
-          if (event.type === 'request') {
-            const eid = event.data?.exchangeId as string | undefined
-            if (eid && renderedExchangeIds.current.has(eid)) return null
-            if (eid) renderedExchangeIds.current.add(eid)
+        {renderPlan.map(item => {
+          if (item.kind === 'skip') return null
 
-            const exchange = eid ? exchangeMap.get(eid) : undefined
-            const responseEvent = eid
-              ? phase.events.find(e => e.type === 'response' && e.data?.exchangeId === eid)
-              : undefined
-            const wireKey = exchange ? `${exchange.request.method}:${extractPath(exchange.request.url)}` : undefined
-            const wire = wireKey ? wireByUrl.get(wireKey) : undefined
-
+          if (item.kind === 'http_exchange') {
             return (
               <HttpExchangeBlock
-                key={event.id}
-                requestEvent={event}
-                responseEvent={responseEvent}
-                exchange={exchange}
-                wire={wire}
+                key={item.event.id}
+                requestEvent={item.event}
+                responseEvent={item.responseEvent}
+                exchange={item.exchange}
+                wire={item.wire}
                 showTLSContext={showTLSContext}
               />
             )
           }
 
-          if (event.type === 'response') {
-            const eid = event.data?.exchangeId as string | undefined
-            if (eid && renderedExchangeIds.current.has(eid)) return null
-            return <AnnotationRow key={event.id} event={event} />
+          if (item.kind === 'token') {
+            return <TokenBlock key={item.event.id} event={item.event} decoded={item.decoded} />
           }
 
-          if (event.type === 'token') {
-            const token = tokenQueue.current.shift()
-            return <TokenBlock key={event.id} event={event} decoded={token} />
+          if (item.kind === 'error') {
+            return <ErrorBlock key={item.event.id} event={item.event} />
           }
 
-          if (event.type === 'error') {
-            return <ErrorBlock key={event.id} event={event} />
+          if (item.kind === 'user_action') {
+            return <UserActionRow key={item.event.id} event={item.event} />
           }
 
-          if (event.type === 'user_action') {
-            return <UserActionRow key={event.id} event={event} />
-          }
-
-          return <AnnotationRow key={event.id} event={event} />
+          return <AnnotationRow key={item.event.id} event={item.event} />
         })}
 
         {/* Orphan wire exchanges not matched to any client exchange */}
