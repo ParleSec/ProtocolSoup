@@ -181,12 +181,14 @@ func TestIssueFromExternalIssuerImportsCredential(t *testing.T) {
 			return
 		}
 
-		proof, ok := payload["proof"].(map[string]interface{})
-		if !ok {
-			http.Error(w, "missing proof object", http.StatusBadRequest)
-			return
+		var proofJWT string
+		if proofsArr, ok := payload["proofs"].([]interface{}); ok && len(proofsArr) > 0 {
+			if first, ok := proofsArr[0].(map[string]interface{}); ok {
+				proofJWT = strings.TrimSpace(asString(first["jwt"]))
+			}
+		} else if singleProof, ok := payload["proof"].(map[string]interface{}); ok {
+			proofJWT = strings.TrimSpace(asString(singleProof["jwt"]))
 		}
-		proofJWT := strings.TrimSpace(asString(proof["jwt"]))
 		if proofJWT == "" {
 			http.Error(w, "missing proof jwt", http.StatusBadRequest)
 			return
@@ -409,12 +411,14 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		proof, ok := payload["proof"].(map[string]interface{})
-		if !ok {
-			http.Error(w, "missing proof object", http.StatusBadRequest)
-			return
+		var proofJWT string
+		if proofsArr, ok := payload["proofs"].([]interface{}); ok && len(proofsArr) > 0 {
+			if first, ok := proofsArr[0].(map[string]interface{}); ok {
+				proofJWT = strings.TrimSpace(asString(first["jwt"]))
+			}
+		} else if singleProof, ok := payload["proof"].(map[string]interface{}); ok {
+			proofJWT = strings.TrimSpace(asString(singleProof["jwt"]))
 		}
-		proofJWT := strings.TrimSpace(asString(proof["jwt"]))
 		if proofJWT == "" {
 			http.Error(w, "missing proof jwt", http.StatusBadRequest)
 			return

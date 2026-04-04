@@ -21,6 +21,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -3515,6 +3516,15 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	if err := json.Unmarshal(credentialBody, &credentialPayload); err != nil {
 		return nil, fmt.Errorf("decode credential response: %w", err)
 	}
+
+	if txID := strings.TrimSpace(asString(credentialPayload["transaction_id"])); txID != "" {
+		deferredPayload, err := s.pollDeferredCredential(ctx, accessToken, txID, options.LookingGlassSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("deferred credential polling failed: %w", err)
+		}
+		credentialPayload = deferredPayload
+	}
+
 	credentialJWT, err := credentialPayloadToString(credentialPayload["credential"])
 	if err != nil {
 		return nil, err
@@ -3534,6 +3544,64 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		CredentialFormat:   credentialFormat,
 		CredentialConfigID: credentialConfigID,
 	}, nil
+}
+
+const deferredMaxRetries = 10
+const deferredDefaultBackoff = 5 * time.Second
+
+func (s *walletHarnessServer) pollDeferredCredential(
+	ctx context.Context,
+	accessToken string,
+	transactionID string,
+	lookingGlassSessionID string,
+) (map[string]interface{}, error) {
+	deferredURL := s.issuerBaseURL + "/oid4vci/deferred_credential"
+
+	for attempt := 0; attempt < deferredMaxRetries; attempt++ {
+		backoff := deferredDefaultBackoff
+		reqBody, _ := json.Marshal(map[string]string{"transaction_id": transactionID})
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, deferredURL, strings.NewReader(string(reqBody)))
+		if err != nil {
+			return nil, fmt.Errorf("build deferred request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+accessToken)
+		if strings.TrimSpace(lookingGlassSessionID) != "" {
+			req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
+		}
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("deferred credential request failed: %w", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			var payload map[string]interface{}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				return nil, fmt.Errorf("decode deferred credential response: %w", err)
+			}
+			return payload, nil
+		}
+
+		if resp.StatusCode == http.StatusAccepted {
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if seconds, err := strconv.Atoi(ra); err == nil && seconds > 0 {
+					backoff = time.Duration(seconds) * time.Second
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+				continue
+			}
+		}
+
+		return nil, fmt.Errorf("deferred credential returned %d: %s", resp.StatusCode, oneLine(string(body)))
+	}
+	return nil, fmt.Errorf("deferred credential not ready after %d retries", deferredMaxRetries)
 }
 
 func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(

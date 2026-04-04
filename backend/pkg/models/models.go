@@ -27,17 +27,18 @@ type Client struct {
 
 // AuthorizationCode represents an OAuth authorization code
 type AuthorizationCode struct {
-	Code                string    `json:"code"`
-	ClientID            string    `json:"client_id"`
-	UserID              string    `json:"user_id"`
-	RedirectURI         string    `json:"redirect_uri"`
-	Scope               string    `json:"scope"`
-	State               string    `json:"state"`
-	Nonce               string    `json:"nonce,omitempty"` // For OIDC
-	CodeChallenge       string    `json:"code_challenge,omitempty"`
-	CodeChallengeMethod string    `json:"code_challenge_method,omitempty"`
-	ExpiresAt           time.Time `json:"expires_at"`
-	CreatedAt           time.Time `json:"created_at"`
+	Code                       string    `json:"code"`
+	ClientID                   string    `json:"client_id"`
+	UserID                     string    `json:"user_id"`
+	RedirectURI                string    `json:"redirect_uri"`
+	Scope                      string    `json:"scope"`
+	State                      string    `json:"state"`
+	Nonce                      string    `json:"nonce,omitempty"`
+	CodeChallenge              string    `json:"code_challenge,omitempty"`
+	CodeChallengeMethod        string    `json:"code_challenge_method,omitempty"`
+	CredentialConfigurationIDs []string  `json:"credential_configuration_ids,omitempty"`
+	ExpiresAt                  time.Time `json:"expires_at"`
+	CreatedAt                  time.Time `json:"created_at"`
 }
 
 // TokenResponse represents an OAuth token response

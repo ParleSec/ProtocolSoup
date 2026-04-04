@@ -60,6 +60,8 @@ export interface FlowExecutorState {
     codeVerifier?: string
     codeChallenge?: string
     deviceCode?: string
+    transactionId?: string
+    deferredAccessToken?: string
   }
   /** Error details if any */
   error?: {

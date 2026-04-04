@@ -1214,9 +1214,11 @@ func (s *walletHarnessServer) requestExternalCredential(
 		requestBody["format"] = strings.TrimSpace(credentialFormat)
 	}
 	if strings.TrimSpace(proofJWT) != "" {
-		requestBody["proof"] = map[string]interface{}{
-			"proof_type": "jwt",
-			"jwt":        strings.TrimSpace(proofJWT),
+		requestBody["proofs"] = []map[string]interface{}{
+			{
+				"proof_type": "jwt",
+				"jwt":        strings.TrimSpace(proofJWT),
+			},
 		}
 	}
 

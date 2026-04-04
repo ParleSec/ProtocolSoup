@@ -37,6 +37,7 @@ type offerRecord struct {
 	TxCodeValue    string
 	WalletID       string
 	Deferred       bool
+	Exchanged      bool
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 }
@@ -91,6 +92,8 @@ type Plugin struct {
 	issuanceTransactions map[string]*issuanceTransaction
 	wallets              map[string]*walletIdentity
 	walletsByUserID      map[string]string
+
+	stopPruning chan struct{}
 }
 
 // NewPlugin creates a new OID4VCI plugin instance.
@@ -147,13 +150,61 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 			return fmt.Errorf("initialize wallet credential store persistence: %w", err)
 		}
 	}
+
+	p.stopPruning = make(chan struct{})
+	go p.pruneExpiredIssuanceState()
+
 	return nil
 }
 
 // Shutdown stops plugin lifecycle resources.
 func (p *Plugin) Shutdown(ctx context.Context) error {
 	_ = ctx
+	if p.stopPruning != nil {
+		close(p.stopPruning)
+	}
 	return nil
+}
+
+func (p *Plugin) pruneExpiredIssuanceState() {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.stopPruning:
+			return
+		case <-ticker.C:
+			p.evictExpiredIssuanceState()
+		}
+	}
+}
+
+func (p *Plugin) evictExpiredIssuanceState() {
+	now := time.Now().UTC()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	for id, record := range p.offers {
+		if now.After(record.ExpiresAt) {
+			delete(p.offers, id)
+			for code, offerID := range p.offersByPreAuthCode {
+				if offerID == id {
+					delete(p.offersByPreAuthCode, code)
+				}
+			}
+		}
+	}
+	for token, grant := range p.accessGrants {
+		if now.After(grant.ExpiresAt) {
+			delete(p.accessGrants, token)
+		}
+	}
+	for txID, tx := range p.issuanceTransactions {
+		staleCutoff := tx.ReadyAt.Add(30 * time.Minute)
+		if now.After(staleCutoff) {
+			delete(p.issuanceTransactions, txID)
+		}
+	}
 }
 
 // RegisterRoutes registers OID4VCI endpoints.

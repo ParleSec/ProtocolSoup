@@ -295,6 +295,9 @@ export function LookingGlass() {
   const isOID4VPAwaitingResult =
     selectedProtocol?.id === 'oid4vp' &&
     status === 'awaiting_user'
+  const isOID4VCIDeferredAwaiting =
+    selectedProtocol?.id === 'oid4vci' &&
+    status === 'awaiting_user'
 
   const executeFlow = realExecutor.execute
   const resetFlow = realExecutor.reset
@@ -1625,6 +1628,16 @@ export function LookingGlass() {
                   >
                     <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     <span className="hidden sm:inline">Check Result</span>
+                    <span className="sm:hidden">Check</span>
+                  </button>
+                )}
+                {isOID4VCIDeferredAwaiting && (
+                  <button
+                    onClick={handleExecute}
+                    className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-300 text-xs sm:text-sm font-medium hover:from-amber-500/30 hover:to-orange-500/30 transition-all"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    <span className="hidden sm:inline">Check Status</span>
                     <span className="sm:hidden">Check</span>
                   </button>
                 )}

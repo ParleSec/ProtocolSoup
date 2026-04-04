@@ -392,7 +392,7 @@ func TestDeferredIssuancePendingReturnsRetryHints(t *testing.T) {
 			"Authorization": "Bearer " + accessToken,
 		},
 	)
-	assertStatus(t, pendingResp, http.StatusBadRequest)
+	assertStatus(t, pendingResp, http.StatusAccepted)
 	retryAfterHeader := strings.TrimSpace(pendingResp.Header.Get("Retry-After"))
 	if retryAfterHeader == "" {
 		t.Fatalf("expected Retry-After header on issuance_pending response")

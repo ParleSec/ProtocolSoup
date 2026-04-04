@@ -60,10 +60,20 @@ func (p *Plugin) handleCredentialIssuerMetadata(w http.ResponseWriter, r *http.R
 	metadata := map[string]interface{}{
 		"credential_issuer":                   issuerID,
 		"authorization_servers":               []string{issuerID},
+		"token_endpoint":                      issuerID + "/token",
 		"credential_endpoint":                 issuerID + "/credential",
 		"deferred_credential_endpoint":        issuerID + "/deferred_credential",
 		"nonce_endpoint":                      nonceEndpoint,
 		"credential_configurations_supported": p.credentialConfigurationsSupported(),
+		"display": []map[string]interface{}{
+			{
+				"name":   "ProtocolSoup Credential Issuer",
+				"locale": "en-US",
+			},
+		},
+		"credential_response_encryption": map[string]interface{}{
+			"required": false,
+		},
 	}
 
 	p.emitEvent(
@@ -254,6 +264,10 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "unknown pre-authorized code")
 		return
 	}
+	if record.Exchanged {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "pre-authorized code has already been exchanged")
+		return
+	}
 	if time.Now().UTC().After(record.ExpiresAt) {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "pre-authorized code expired")
 		return
@@ -306,6 +320,8 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 	}
 
 	p.mu.Lock()
+	record.Exchanged = true
+	delete(p.offersByPreAuthCode, preAuthorizedCode)
 	p.accessGrants[accessToken] = &accessGrant{
 		Token:                      accessToken,
 		Subject:                    wallet.Subject,
@@ -372,12 +388,14 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 
 	client, exists := p.mockIDP.GetClient(clientID)
 	if !exists {
-		writeOID4VCIError(w, http.StatusBadRequest, "invalid_client", "unknown client")
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
 		return
 	}
 	if !client.Public {
 		if _, err := p.mockIDP.ValidateClient(clientID, clientSecret); err != nil {
-			writeOID4VCIError(w, http.StatusBadRequest, "invalid_client", "client authentication failed")
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
 			return
 		}
 	}
@@ -388,7 +406,10 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		return
 	}
 
-	authorizedCredentialConfigurationIDs := sortedCredentialConfigurationIDs(p.credentialConfigurations)
+	authorizedCredentialConfigurationIDs := authCode.CredentialConfigurationIDs
+	if len(authorizedCredentialConfigurationIDs) == 0 {
+		authorizedCredentialConfigurationIDs = sortedCredentialConfigurationIDs(p.credentialConfigurations)
+	}
 	if len(authorizedCredentialConfigurationIDs) == 0 {
 		authorizedCredentialConfigurationIDs = []string{defaultCredentialConfigurationID}
 	}
@@ -468,6 +489,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 }
 
 func (p *Plugin) handleNonce(w http.ResponseWriter, r *http.Request) {
+	sessionID := p.getSessionFromRequest(r)
 	accessToken, err := parseBearerToken(r)
 	if err != nil {
 		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", err.Error())
@@ -487,16 +509,31 @@ func (p *Plugin) handleNonce(w http.ResponseWriter, r *http.Request) {
 		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", "access token expired")
 		return
 	}
+	previousNonce := grant.CNonce.Value
 	grant.CNonce = models.VCNonce{
 		Value:     p.randomValue(24),
 		IssuedAt:  time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(nonceTTL),
 	}
 	grant.CNonceUsed = false
+	newNonce := grant.CNonce.Value
 	p.mu.Unlock()
 
+	p.emitEvent(
+		sessionID,
+		lookingglass.EventTypeFlowStep,
+		"Nonce Rotated",
+		map[string]interface{}{
+			"previous_nonce":     previousNonce,
+			"new_nonce":          newNonce,
+			"c_nonce_expires_in": int(nonceTTL.Seconds()),
+			"offer_id":           grant.OfferID,
+		},
+		p.vcAnnotation("c_nonce")...,
+	)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"c_nonce":            grant.CNonce.Value,
+		"c_nonce":            newNonce,
 		"c_nonce_expires_in": int(nonceTTL.Seconds()),
 	})
 }
@@ -523,7 +560,8 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.CredentialConfigurationID == "" {
-		req.CredentialConfigurationID = defaultCredentialConfigurationID
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_configuration_id is required")
+		return
 	}
 	credentialConfiguration, supported := p.credentialConfigurations[req.CredentialConfigurationID]
 	if !supported {
@@ -758,6 +796,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request) {
+	sessionID := p.getSessionFromRequest(r)
 	accessToken, err := parseBearerToken(r)
 	if err != nil {
 		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", err.Error())
@@ -797,8 +836,22 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		if retryAfterSeconds < 1 {
 			retryAfterSeconds = 1
 		}
+
+		p.emitEvent(
+			sessionID,
+			lookingglass.EventTypeFlowStep,
+			"Deferred Credential Pending",
+			map[string]interface{}{
+				"transaction_id":      req.TransactionID,
+				"retry_after_seconds": retryAfterSeconds,
+				"ready_at":            transaction.ReadyAt.Format(time.RFC3339),
+				"format":              transaction.Model.Format,
+			},
+			p.vcAnnotation("deferred_credential")...,
+		)
+
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
 			"error":               "issuance_pending",
 			"error_description":   "credential is not ready yet",
 			"retry_after_seconds": retryAfterSeconds,
@@ -806,15 +859,40 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	nextNonce := models.VCNonce{
+		Value:     p.randomValue(24),
+		IssuedAt:  now,
+		ExpiresAt: now.Add(nonceTTL),
+	}
+
 	p.mu.Lock()
 	transaction.Model.Status = "issued"
 	transaction.Model.UpdatedAt = now
 	delete(p.issuanceTransactions, req.TransactionID)
+	if grant, ok := p.accessGrants[accessToken]; ok {
+		grant.CNonce = nextNonce
+		grant.CNonceUsed = false
+	}
 	p.mu.Unlock()
 
+	p.emitEvent(
+		sessionID,
+		lookingglass.EventTypeFlowStep,
+		"Deferred Credential Issued",
+		map[string]interface{}{
+			"transaction_id":     req.TransactionID,
+			"format":             transaction.Model.Format,
+			"c_nonce":            nextNonce.Value,
+			"c_nonce_expires_in": int(nonceTTL.Seconds()),
+		},
+		p.vcAnnotation("deferred_credential")...,
+	)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"format":     transaction.Model.Format,
-		"credential": transaction.Credential,
+		"format":             transaction.Model.Format,
+		"credential":         transaction.Credential,
+		"c_nonce":            nextNonce.Value,
+		"c_nonce_expires_in": int(nonceTTL.Seconds()),
 	})
 }
 
