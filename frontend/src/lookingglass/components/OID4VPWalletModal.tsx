@@ -16,14 +16,10 @@ interface OID4VPWalletModalProps {
   walletHandoffPayload: string
   walletHandoffQRCodeDataURL: string
   walletHandoffQRCodeError: string | null
-  capturedWalletSubject: string
   walletSubjectInput: string
   onWalletSubjectInputChange: (value: string) => void
-  onUseCapturedWalletSubject: () => void
-  capturedCredentialJWT: string
   credentialJWTInput: string
   onCredentialJWTInputChange: (value: string) => void
-  onUseCapturedCredentialJWT: () => void
   disclosureOptions: string[]
   selectedDisclosureClaims: string[]
   onToggleDisclosureClaim: (claimName: string) => void
@@ -49,14 +45,10 @@ export function OID4VPWalletModal({
   walletHandoffPayload,
   walletHandoffQRCodeDataURL,
   walletHandoffQRCodeError,
-  capturedWalletSubject,
   walletSubjectInput,
   onWalletSubjectInputChange,
-  onUseCapturedWalletSubject,
-  capturedCredentialJWT,
   credentialJWTInput,
   onCredentialJWTInputChange,
-  onUseCapturedCredentialJWT,
   disclosureOptions,
   selectedDisclosureClaims,
   onToggleDisclosureClaim,
@@ -154,17 +146,7 @@ export function OID4VPWalletModal({
           )}
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <label className="text-xs sm:text-sm font-medium text-surface-300">wallet_subject (optional)</label>
-              {capturedWalletSubject && (
-                <button
-                  onClick={onUseCapturedWalletSubject}
-                  className="text-[11px] sm:text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
-                >
-                  Use captured value
-                </button>
-              )}
-            </div>
+            <label className="text-xs sm:text-sm font-medium text-surface-300">wallet_subject (optional)</label>
             <input
               type="text"
               value={walletSubjectInput}
@@ -175,17 +157,7 @@ export function OID4VPWalletModal({
           </div>
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <label className="text-xs sm:text-sm font-medium text-surface-300">credential_jwt (optional)</label>
-              {capturedCredentialJWT && (
-                <button
-                  onClick={onUseCapturedCredentialJWT}
-                  className="text-[11px] sm:text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
-                >
-                  Use captured value
-                </button>
-              )}
-            </div>
+            <label className="text-xs sm:text-sm font-medium text-surface-300">credential_jwt (optional)</label>
             <textarea
               value={credentialJWTInput}
               onChange={(event) => onCredentialJWTInputChange(event.target.value)}

@@ -84,8 +84,6 @@ export function LookingGlass() {
   const [handoffCopied, setHandoffCopied] = useState(false)
   const [oid4vpWalletHandoffQRCodeObjectURL, setOID4VPWalletHandoffQRCodeObjectURL] = useState('')
   const [oid4vpWalletHandoffQRCodeError, setOID4VPWalletHandoffQRCodeError] = useState<string | null>(null)
-  const [capturedVCWalletSubject, setCapturedVCWalletSubject] = useState('')
-  const [capturedVCCredentialJWT, setCapturedVCCredentialJWT] = useState('')
   const [oid4vpWalletModalOpen, setOID4VPWalletModalOpen] = useState(false)
   const [oid4vpWalletSubjectInput, setOID4VPWalletSubjectInput] = useState('')
   const [oid4vpCredentialJWTInput, setOID4VPCredentialJWTInput] = useState('')
@@ -465,55 +463,8 @@ export function LookingGlass() {
     }
   }, [realExecutor.state?.status, realExecutor.state?.tokens.refreshToken, realExecutor.state?.tokens.accessToken])
 
-  useEffect(() => {
-    const artifacts = realExecutor.state?.vcArtifacts || []
-    if (artifacts.length === 0) {
-      return
-    }
-    let latestWalletSubject = ''
-    let latestCredentialJWT = ''
 
-    for (let i = artifacts.length - 1; i >= 0; i -= 1) {
-      const artifact = artifacts[i]
-      const metadata = (artifact.metadata || {}) as Record<string, unknown>
-      if (!latestWalletSubject) {
-        const metadataSubject = String(metadata.walletSubject || metadata.wallet_subject || '').trim()
-        if (metadataSubject) {
-          latestWalletSubject = metadataSubject
-        }
-      }
-      if (!latestCredentialJWT && artifact.type === 'credential' && typeof artifact.raw === 'string') {
-        const normalized = artifact.raw.trim()
-        if (normalized) {
-          latestCredentialJWT = normalized
-        }
-      }
-      if (latestWalletSubject && latestCredentialJWT) {
-        break
-      }
-    }
 
-    if (latestWalletSubject) {
-      setCapturedVCWalletSubject(prev => (prev === latestWalletSubject ? prev : latestWalletSubject))
-    }
-    if (latestCredentialJWT) {
-      setCapturedVCCredentialJWT(prev => (prev === latestCredentialJWT ? prev : latestCredentialJWT))
-    }
-  }, [realExecutor.state?.vcArtifacts])
-
-  useEffect(() => {
-    if (oid4vpWalletSubjectInput.trim() || !capturedVCWalletSubject) {
-      return
-    }
-    setOID4VPWalletSubjectInput(capturedVCWalletSubject)
-  }, [capturedVCWalletSubject, oid4vpWalletSubjectInput])
-
-  useEffect(() => {
-    if (oid4vpCredentialJWTInput.trim() || !capturedVCCredentialJWT) {
-      return
-    }
-    setOID4VPCredentialJWTInput(capturedVCCredentialJWT)
-  }, [capturedVCCredentialJWT, oid4vpCredentialJWTInput])
 
   useEffect(() => {
     if (oid4vpCredentialDisclosureOptions.length === 0) {
@@ -560,16 +511,10 @@ export function LookingGlass() {
   }, [selectedProtocol?.id])
 
   const openOID4VPWalletModal = useCallback(() => {
-    if (!oid4vpWalletSubjectInput.trim() && capturedVCWalletSubject) {
-      setOID4VPWalletSubjectInput(capturedVCWalletSubject)
-    }
-    if (!oid4vpCredentialJWTInput.trim() && capturedVCCredentialJWT) {
-      setOID4VPCredentialJWTInput(capturedVCCredentialJWT)
-    }
     setOID4VPWalletSubmitError(null)
     setOID4VPWalletSubmitMessage(null)
     setOID4VPWalletModalOpen(true)
-  }, [oid4vpWalletSubjectInput, capturedVCWalletSubject, oid4vpCredentialJWTInput, capturedVCCredentialJWT])
+  }, [])
 
   const closeOID4VPWalletModal = useCallback(() => {
     if (oid4vpWalletSubmitPending) {
@@ -1656,14 +1601,10 @@ export function LookingGlass() {
             walletHandoffPayload={oid4vpWalletHandoffPayload}
             walletHandoffQRCodeDataURL={oid4vpWalletHandoffQRCodeObjectURL}
             walletHandoffQRCodeError={oid4vpWalletHandoffQRCodeError}
-            capturedWalletSubject={capturedVCWalletSubject}
             walletSubjectInput={oid4vpWalletSubjectInput}
             onWalletSubjectInputChange={setOID4VPWalletSubjectInput}
-            onUseCapturedWalletSubject={() => setOID4VPWalletSubjectInput(capturedVCWalletSubject)}
-            capturedCredentialJWT={capturedVCCredentialJWT}
             credentialJWTInput={oid4vpCredentialJWTInput}
             onCredentialJWTInputChange={setOID4VPCredentialJWTInput}
-            onUseCapturedCredentialJWT={() => setOID4VPCredentialJWTInput(capturedVCCredentialJWT)}
             disclosureOptions={oid4vpCredentialDisclosureOptions}
             selectedDisclosureClaims={oid4vpDisclosureClaims}
             onToggleDisclosureClaim={(claimName) => {
