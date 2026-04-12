@@ -49,7 +49,7 @@ type x509RequestSigner struct {
 }
 
 func (p *Plugin) configureVerifierIdentities() error {
-	p.supportedClientIDSchemes = DefaultMVPClientIDSchemeSet()
+	p.supportedClientIDSchemes = DefaultClientIDSchemeSet()
 	if p.keySet == nil {
 		p.verifierAttestation = nil
 		p.x509SANDNSSigner = nil

@@ -26,7 +26,7 @@ interface DropdownPosition {
   width: number
 }
 
-const WIP_PROTOCOL_IDS = new Set(['oid4vci', 'oid4vp'])
+const WIP_PROTOCOL_IDS = new Set<string>([])
 const PROTOCOL_SELECTOR_ORDER = ['oauth2', 'oidc', 'oid4vci', 'oid4vp', 'saml', 'spiffe', 'ssf', 'scim']
 
 export function ProtocolSelector({

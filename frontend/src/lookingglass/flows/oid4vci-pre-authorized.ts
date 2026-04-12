@@ -92,7 +92,10 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       const offerData = await this.createOffer()
       await this.resolveOfferReference(offerData)
       const tokenData = await this.exchangeToken(offerData)
-      const walletSubject = typeof offerData.wallet_subject === 'string' ? offerData.wallet_subject : undefined
+      const walletSubject = typeof offerData.wallet_subject === 'string' ? offerData.wallet_subject.trim() : ''
+      if (!walletSubject) {
+        throw new Error('Offer response missing wallet_subject -- cannot create proof')
+      }
       const proofJWT = await this.createProof(tokenData.c_nonce, walletSubject)
       const credentialResponse = await this.requestCredential(tokenData.access_token, proofJWT)
 
@@ -283,11 +286,12 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return tokenData
   }
 
-  private async createProof(cNonce: string, walletSubject?: string): Promise<string> {
+  private async createProof(cNonce: string, walletSubject: string): Promise<string> {
     this.updateState({ currentStep: 'Creating nonce-bound proof JWT' })
-    const normalizedSubject = walletSubject && walletSubject.trim().length > 0
-      ? walletSubject.trim()
-      : 'did:example:wallet:holder'
+    const normalizedSubject = walletSubject.trim()
+    if (!normalizedSubject) {
+      throw new Error('Wallet subject is required for proof creation but was empty')
+    }
     const audience = `${window.location.origin}${this.config.baseUrl}`
     const now = Math.floor(Date.now() / 1000)
     const expiration = now + 180

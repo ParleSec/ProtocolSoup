@@ -102,7 +102,7 @@ func NewPlugin() *Plugin {
 		BasePlugin: plugin.NewBasePlugin(plugin.PluginInfo{
 			ID:          "oid4vci",
 			Name:        "OpenID4VCI",
-			Version:     "0.1.0",
+			Version:     "1.0.0",
 			Description: "OpenID for Verifiable Credential Issuance with multi-format VC support",
 			Tags:        []string{"vc", "oid4vci", "credential-issuance", "sd-jwt", "jwt-vc", "ldp-vc"},
 			RFCs:        []string{"OpenID4VCI 1.0", "OAuth 2.0", "SD-JWT VC", "VC Data Model 2.0"},
@@ -228,7 +228,7 @@ func (p *Plugin) GetInspectors() []plugin.Inspector {
 		{
 			ID:          "oid4vci-credential-inspector",
 			Name:        "VC Issuance Inspector",
-			Description: "Inspect credential offers, c_nonce challenges, and issued SD-JWT VC artifacts",
+			Description: "Inspect credential offers, c_nonce challenges, and issued VC artifacts across all supported formats",
 			Type:        "token",
 		},
 	}
@@ -240,7 +240,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "oid4vci-pre-authorized",
 			Name:        "OID4VCI Pre-Authorized Code",
-			Description: "Wallet resolves a credential offer URI, discovers issuer metadata, exchanges a pre-authorized code for an access token with c_nonce, and requests an SD-JWT VC bound to a proof JWT.",
+			Description: "Wallet resolves a credential offer URI, discovers issuer metadata, exchanges a pre-authorized code for an access token with c_nonce, and requests a Verifiable Credential bound to a proof JWT.",
 			Executable:  true,
 			Category:    "issuance",
 			Steps: []plugin.FlowStep{
@@ -332,19 +332,19 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       6,
 					Name:        "Credential Response",
-					Description: "Credential Issuer validates proof key binding, nonce freshness, and audience, then returns the issued SD-JWT VC with a fresh c_nonce for subsequent requests (OID4VCI §7.3).",
+					Description: "Credential Issuer validates proof key binding, nonce freshness, and audience, then returns the issued Verifiable Credential in the requested format with a fresh c_nonce for subsequent requests (OID4VCI §7.3).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"format":             "dc+sd-jwt (SD-JWT VC serialization)",
-						"credential":         "Issuer-signed JWT with selective disclosure segments",
+						"format":             "Per credential_configuration_id (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, or ldp_vc)",
+						"credential":         "Issuer-signed credential in the negotiated format",
 						"c_nonce":            "Next challenge nonce for any follow-up credential requests",
 						"c_nonce_expires_in": "Next nonce lifetime in seconds",
 					},
 					Security: []string{
 						"Credential must be signed by the issuer using advertised key material and algorithm",
-						"SD-JWT includes _sd digests for selectively disclosable claims",
+						"Format-specific integrity applies (SD-JWT disclosures, JSON-LD proofs, etc.)",
 						"Wallet stores issued credential material securely for later presentation",
 					},
 				},
@@ -441,17 +441,17 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       6,
 					Name:        "Credential Response",
-					Description: "Credential Issuer validates proof and returns the issued SD-JWT VC with a fresh c_nonce (OID4VCI §7.3).",
+					Description: "Credential Issuer validates proof and returns the issued Verifiable Credential with a fresh c_nonce (OID4VCI §7.3).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"format":     "dc+sd-jwt (SD-JWT VC serialization)",
-						"credential": "Issuer-signed JWT with selective disclosure segments",
+						"format":     "Per credential_configuration_id (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, or ldp_vc)",
+						"credential": "Issuer-signed credential in the negotiated format",
 						"c_nonce":    "Next challenge nonce",
 					},
 					Security: []string{
-						"Credential is signed by the issuer and returned as SD-JWT VC serialization",
+						"Credential is signed by the issuer and returned in the negotiated format",
 					},
 				},
 			},
@@ -574,13 +574,13 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       8,
 					Name:        "Credential Ready",
-					Description: "Credential Issuer returns the final SD-JWT VC once the issuance backend marks the transaction as ready (OID4VCI §9.1).",
+					Description: "Credential Issuer returns the final Verifiable Credential once the issuance backend marks the transaction as ready (OID4VCI §9.1).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"format":     "dc+sd-jwt (SD-JWT VC serialization)",
-						"credential": "Issuer-signed JWT with selective disclosure segments",
+						"format":     "Per credential_configuration_id (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, or ldp_vc)",
+						"credential": "Issuer-signed credential in the negotiated format",
 					},
 					Security: []string{
 						"Credential is identical to what would have been returned in an immediate response",
@@ -603,7 +603,7 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 				{Order: 1, Name: "Create Offer", Description: "Generate credential_offer_uri", Auto: true},
 				{Order: 2, Name: "Exchange Token", Description: "Use pre-authorized code for access token", Auto: true},
 				{Order: 3, Name: "Submit Proof", Description: "Create nonce-bound proof JWT", Auto: true},
-				{Order: 4, Name: "Receive Credential", Description: "Fetch issued SD-JWT VC", Auto: true},
+				{Order: 4, Name: "Receive Credential", Description: "Fetch issued Verifiable Credential", Auto: true},
 			},
 		},
 		{

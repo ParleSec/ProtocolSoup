@@ -247,9 +247,6 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
 	preAuthorizedCode := strings.TrimSpace(r.FormValue("pre-authorized_code"))
-	if preAuthorizedCode == "" {
-		preAuthorizedCode = strings.TrimSpace(r.FormValue("pre_authorized_code"))
-	}
 	txCode := strings.TrimSpace(r.FormValue("tx_code"))
 	if preAuthorizedCode == "" {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", "pre-authorized_code is required")

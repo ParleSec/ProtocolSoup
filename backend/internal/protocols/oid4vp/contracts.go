@@ -44,8 +44,8 @@ func ParseClientIDSchemeName(raw string) (ClientIDScheme, error) {
 	return scheme, nil
 }
 
-// DefaultMVPClientIDSchemeSet returns the initial OID4VP client_id scheme allowlist.
-func DefaultMVPClientIDSchemeSet() map[ClientIDScheme]struct{} {
+// DefaultClientIDSchemeSet returns the supported OID4VP client_id scheme allowlist.
+func DefaultClientIDSchemeSet() map[ClientIDScheme]struct{} {
 	return map[ClientIDScheme]struct{}{
 		ClientIDSchemeRedirectURI:             {},
 		ClientIDSchemeDecentralizedIdentifier: {},

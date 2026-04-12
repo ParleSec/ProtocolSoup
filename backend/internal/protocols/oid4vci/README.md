@@ -112,7 +112,7 @@ When `SHOWCASE_DATA_DIR` is configured, credentials are persisted under:
 
 - The plugin is designed to interoperate directly with the OID4VP plugin through shared wallet credential state
 - Looking Glass events for offer creation, token exchange, proof checks, and issuance are emitted from real handler execution
-- `tx_code` demonstration value is intentionally deterministic (`123456`) to keep user interaction reproducible in guided flows
+- `tx_code` values are cryptographically random 6-digit numeric codes generated per offer, delivered out-of-band through the offer response
 
 ## Specifications
 

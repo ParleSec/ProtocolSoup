@@ -88,12 +88,12 @@ func NewPlugin() *Plugin {
 		BasePlugin: plugin.NewBasePlugin(plugin.PluginInfo{
 			ID:          "oid4vp",
 			Name:        "OpenID4VP",
-			Version:     "0.1.0",
+			Version:     "1.0.0",
 			Description: "OpenID for Verifiable Presentations with DCQL-first request contracts",
 			Tags:        []string{"vc", "oid4vp", "presentation", "dcql"},
 			RFCs:        []string{"OpenID4VP 1.0", "OAuth 2.0", "JOSE"},
 		}),
-		supportedClientIDSchemes: DefaultMVPClientIDSchemeSet(),
+		supportedClientIDSchemes: DefaultClientIDSchemeSet(),
 		requests:                 make(map[string]*requestSession),
 		requestsByState:          make(map[string]string),
 	}

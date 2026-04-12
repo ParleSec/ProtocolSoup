@@ -112,7 +112,7 @@ export const protocolMeta: Record<string, {
       'Credential Endpoint',
       'c_nonce Freshness',
       'Deferred Issuance',
-      'SD-JWT VC Output',
+      'Multi-Format VC Output',
       'Real HTTP + Signatures',
     ],
   },

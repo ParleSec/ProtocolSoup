@@ -48,7 +48,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
   {
     id: 'oid4vci',
     name: 'OID4VCI',
-    description: 'OpenID for Verifiable Credential Issuance. Demonstrates credential offers, pre-authorized code token exchange, nonce-bound proof validation, and SD-JWT VC issuance.',
+    description: 'OpenID for Verifiable Credential Issuance. Demonstrates credential offers, pre-authorized code token exchange, nonce-bound proof validation, and multi-format VC issuance (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, ldp_vc).',
     spec: 'OpenID4VCI 1.0',
     specUrl: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html',
     flows: [
