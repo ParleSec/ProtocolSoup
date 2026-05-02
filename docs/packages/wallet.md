@@ -82,6 +82,7 @@ services:
 - **`session isolation key is required`:** supply `looking_glass_session_id` or `request_id` in `/submit`.
 - **`response_uri ... does not match trusted verifier callback`:** request object callback does not match `WALLET_TARGET_BASE_URL`.
 - **`credential_jwt sub does not match wallet_subject`:** provided credential is bound to a different holder.
+- **`wallet does not have a credential that satisfies the presentation request`:** ensure the selected OID4VCI credential profile issues a format requested by the OID4VP DCQL preset, or provide a matching `credential_jwt`.
 - **Upstream timeout/failure:** check `WALLET_HTTP_TIMEOUT` and VC target health.
 
 ## Versioning And Tags

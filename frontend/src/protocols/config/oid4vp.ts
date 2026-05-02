@@ -7,6 +7,11 @@ export interface OID4VPDCQLPreset {
   query: string
 }
 
+export interface OID4VPDCQLCredentialRequirement {
+  id: string
+  format: string
+}
+
 export const OID4VP_DEFAULT_DISCLOSURE_HINTS = [
   'degree',
   'graduation_year',
@@ -132,6 +137,46 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
 ]
 
 export const DEFAULT_OID4VP_DCQL_PRESET_ID = OID4VP_DCQL_PRESETS[0]?.id || 'degree-core'
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  return value as Record<string, unknown>
+}
+
+export function parseOID4VPDCQLCredentialRequirements(rawQuery: string): OID4VPDCQLCredentialRequirement[] {
+  const normalized = rawQuery.trim()
+  if (!normalized) {
+    return []
+  }
+
+  const payload = asRecord(JSON.parse(normalized))
+  if (!payload || !Array.isArray(payload.credentials)) {
+    return []
+  }
+
+  return payload.credentials
+    .map((rawCredential) => {
+      const credential = asRecord(rawCredential)
+      if (!credential) {
+        return null
+      }
+      return {
+        id: typeof credential.id === 'string' ? credential.id.trim() : '',
+        format: typeof credential.format === 'string' ? credential.format.trim() : '',
+      }
+    })
+    .filter((requirement): requirement is OID4VPDCQLCredentialRequirement => Boolean(requirement))
+}
+
+export function getOID4VPDCQLCredentialFormats(rawQuery: string): string[] {
+  const formats = parseOID4VPDCQLCredentialRequirements(rawQuery)
+    .map((requirement) => requirement.format)
+    .filter(Boolean)
+
+  return Array.from(new Set(formats)).sort()
+}
 
 export function parseSDJWTDisclosureClaimNames(rawCredential: string): string[] {
   const normalized = rawCredential.trim()

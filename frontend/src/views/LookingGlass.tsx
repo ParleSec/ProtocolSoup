@@ -31,6 +31,7 @@ import {
   DEFAULT_OID4VP_DCQL_PRESET_ID,
   OID4VP_DCQL_PRESETS,
   OID4VP_DEFAULT_DISCLOSURE_HINTS,
+  getOID4VPDCQLCredentialFormats,
   parseSDJWTDisclosureClaimNames,
   humanizeOID4VPTrustMode,
 } from '../protocols/config/oid4vp'
@@ -51,6 +52,13 @@ const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'Error', shortLabel: 'Error' },
 }
 
+function formatOID4VPList(values: string[]): string {
+  if (values.length === 0) {
+    return ''
+  }
+  return values.map((value) => `"${value}"`).join(', ')
+}
+
 function sanitizeQRCodeDataURL(raw: string): string {
   const value = raw.trim()
   if (!value.startsWith(SAFE_QR_DATA_URL_PREFIX)) {
@@ -61,6 +69,33 @@ function sanitizeQRCodeDataURL(raw: string): string {
     return ''
   }
   return value
+}
+
+function describeWalletSubmitError(responsePayload: Record<string, unknown> | null, fallback: string): string {
+  const baseMessage = String(
+    responsePayload?.error_description
+      || responsePayload?.error
+      || fallback,
+  ).trim()
+  const credentialMatches = responsePayload?.credential_matches
+  if (!credentialMatches || typeof credentialMatches !== 'object' || Array.isArray(credentialMatches)) {
+    return baseMessage
+  }
+
+  const reasons = (credentialMatches as Record<string, unknown>).reasons
+  if (!Array.isArray(reasons) || reasons.length === 0) {
+    return baseMessage
+  }
+
+  const details = reasons
+    .map((reason) => String(reason).trim())
+    .filter(Boolean)
+    .slice(0, 3)
+
+  if (details.length === 0) {
+    return baseMessage
+  }
+  return `${baseMessage}. Match details: ${details.join('; ')}.`
 }
 
 export function LookingGlass() {
@@ -352,6 +387,51 @@ export function LookingGlass() {
     () => oid4vpCredentialJWTInput.trim(),
     [oid4vpCredentialJWTInput],
   )
+  const selectedOID4VPCredentialProfileLabel = `${selectedOID4VCICredentialProfile.label} (${selectedOID4VCICredentialProfile.id})`
+  const oid4vpWalletCredentialCompatibility = useMemo(() => {
+    if (!isOID4VPFlow || oid4vpQueryMode !== 'dcql' || oid4vpDCQLValidationError) {
+      return { requestedFormats: [] as string[], error: null as string | null, warning: null as string | null }
+    }
+
+    const requestedFormats = getOID4VPDCQLCredentialFormats(oid4vpDCQLInput)
+    if (requestedFormats.length === 0) {
+      return { requestedFormats, error: null as string | null, warning: null as string | null }
+    }
+
+    const selectedFormat = selectedOID4VCICredentialProfile.format
+    if (requestedFormats.includes(selectedFormat)) {
+      return { requestedFormats, error: null as string | null, warning: null as string | null }
+    }
+
+    const presetLabel = selectedOID4VPPreset?.label || 'custom DCQL'
+    const mismatchMessage = [
+      `The selected VC credential profile ${selectedOID4VPCredentialProfileLabel} issues "${selectedFormat}",`,
+      `but the OID4VP preset "${presetLabel}" requests credential format ${formatOID4VPList(requestedFormats)}.`,
+    ].join(' ')
+
+    if (normalizedOID4VPCredentialJWTInput) {
+      return {
+        requestedFormats,
+        error: null as string | null,
+        warning: `${mismatchMessage} The pasted credential_jwt will be tried instead; if it is not one of those formats, the wallet will reject the presentation.`,
+      }
+    }
+
+    return {
+      requestedFormats,
+      error: `${mismatchMessage} Select a matching VC credential profile or paste a matching credential_jwt before submitting the wallet response.`,
+      warning: null as string | null,
+    }
+  }, [
+    isOID4VPFlow,
+    oid4vpQueryMode,
+    oid4vpDCQLValidationError,
+    oid4vpDCQLInput,
+    selectedOID4VCICredentialProfile.format,
+    selectedOID4VPCredentialProfileLabel,
+    selectedOID4VPPreset?.label,
+    normalizedOID4VPCredentialJWTInput,
+  ])
   const oid4vpTrustMode = useMemo(() => {
     const metadata = (oid4vpRequestObjectArtifact?.metadata || walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
     return String(metadata.trustMode || '').trim()
@@ -372,7 +452,8 @@ export function LookingGlass() {
 
   const canSubmitOID4VPWalletInteraction =
     !!oid4vpRequestID &&
-    !!oid4vpRequestJWT
+    !!oid4vpRequestJWT &&
+    !oid4vpWalletCredentialCompatibility.error
 
   const oid4vpWalletHandoffPayload = useMemo(
     () => String(walletHandoffArtifact?.metadata?.qrPayload || walletHandoffArtifact?.metadata?.deepLink || walletHandoffArtifact?.raw || '').trim(),
@@ -546,6 +627,10 @@ export function LookingGlass() {
       setOID4VPWalletSubmitError('Missing request context. Re-run OID4VP request creation.')
       return
     }
+    if (oid4vpWalletCredentialCompatibility.error) {
+      setOID4VPWalletSubmitError(oid4vpWalletCredentialCompatibility.error)
+      return
+    }
 
     setOID4VPWalletSubmitPending(true)
     setOID4VPWalletSubmitError(null)
@@ -576,13 +661,7 @@ export function LookingGlass() {
       })
       const responsePayload = await response.json().catch(() => null) as Record<string, unknown> | null
       if (!response.ok) {
-        throw new Error(
-          String(
-            responsePayload?.error_description
-              || responsePayload?.error
-              || `Wallet submission failed (${response.status})`,
-          ),
-        )
+        throw new Error(describeWalletSubmitError(responsePayload, `Wallet submission failed (${response.status})`))
       }
       injectWalletLifecycleEvents(responsePayload)
       const upstreamStatus = Number(responsePayload?.upstream_status || 0)
@@ -632,6 +711,7 @@ export function LookingGlass() {
     oid4vpDisclosureClaims,
     selectedOID4VCICredentialProfile.format,
     selectedOID4VCICredentialProfile.id,
+    oid4vpWalletCredentialCompatibility.error,
     wireSessionId,
     executeFlow,
     injectWalletLifecycleEvents,
@@ -645,6 +725,10 @@ export function LookingGlass() {
 
     if ((step === 'build_presentation' || step === 'submit_response') && (!oid4vpRequestID || !oid4vpRequestJWT)) {
       setOID4VPWalletSubmitError('Missing request context. Re-run OID4VP request creation.')
+      return
+    }
+    if (step !== 'bootstrap' && oid4vpWalletCredentialCompatibility.error) {
+      setOID4VPWalletSubmitError(oid4vpWalletCredentialCompatibility.error)
       return
     }
 
@@ -688,17 +772,14 @@ export function LookingGlass() {
       })
       const responsePayload = await response.json().catch(() => null) as Record<string, unknown> | null
       if (!response.ok) {
-        throw new Error(
-          String(
-            responsePayload?.error_description
-              || responsePayload?.error
-              || `Wallet step "${step}" failed (${response.status})`,
-          ),
-        )
+        throw new Error(describeWalletSubmitError(responsePayload, `Wallet step "${step}" failed (${response.status})`))
       }
 
       injectWalletLifecycleEvents(responsePayload)
       const nextVPToken = String(responsePayload?.vp_token || '').trim()
+      if (step === 'build_presentation' && !nextVPToken) {
+        throw new Error('Wallet build_presentation completed without returning a vp_token. Check the credential format/profile selected for this request.')
+      }
       if (step === 'build_presentation' && nextVPToken) {
         setOID4VPStepwiseVPToken(nextVPToken)
       }
@@ -738,6 +819,7 @@ export function LookingGlass() {
     oid4vpDisclosureClaims,
     selectedOID4VCICredentialProfile.format,
     selectedOID4VCICredentialProfile.id,
+    oid4vpWalletCredentialCompatibility.error,
     wireSessionId,
     oid4vpRequestID,
     oid4vpRequestJWT,
@@ -1254,6 +1336,18 @@ export function LookingGlass() {
                 </option>
               ))}
             </select>
+            {isOID4VPFlow && (oid4vpWalletCredentialCompatibility.error || oid4vpWalletCredentialCompatibility.warning) && (
+              <div className={`mt-2 rounded-lg border p-2.5 text-[11px] sm:text-xs leading-relaxed ${
+                oid4vpWalletCredentialCompatibility.error
+                  ? 'border-red-500/30 bg-red-500/5 text-red-300'
+                  : 'border-amber-500/30 bg-amber-500/5 text-amber-300'
+              }`}>
+                <span className="font-medium">
+                  {oid4vpWalletCredentialCompatibility.error ? 'Credential profile mismatch: ' : 'Credential profile warning: '}
+                </span>
+                {oid4vpWalletCredentialCompatibility.error || oid4vpWalletCredentialCompatibility.warning}
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -1603,6 +1697,9 @@ export function LookingGlass() {
             walletHandoffQRCodeError={oid4vpWalletHandoffQRCodeError}
             walletSubjectInput={oid4vpWalletSubjectInput}
             onWalletSubjectInputChange={setOID4VPWalletSubjectInput}
+            credentialProfileLabel={selectedOID4VPCredentialProfileLabel}
+            walletCompatibilityError={oid4vpWalletCredentialCompatibility.error}
+            walletCompatibilityWarning={oid4vpWalletCredentialCompatibility.warning}
             credentialJWTInput={oid4vpCredentialJWTInput}
             onCredentialJWTInputChange={setOID4VPCredentialJWTInput}
             disclosureOptions={oid4vpCredentialDisclosureOptions}

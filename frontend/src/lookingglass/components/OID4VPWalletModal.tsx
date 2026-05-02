@@ -18,6 +18,9 @@ interface OID4VPWalletModalProps {
   walletHandoffQRCodeError: string | null
   walletSubjectInput: string
   onWalletSubjectInputChange: (value: string) => void
+  credentialProfileLabel: string
+  walletCompatibilityError: string | null
+  walletCompatibilityWarning: string | null
   credentialJWTInput: string
   onCredentialJWTInputChange: (value: string) => void
   disclosureOptions: string[]
@@ -47,6 +50,9 @@ export function OID4VPWalletModal({
   walletHandoffQRCodeError,
   walletSubjectInput,
   onWalletSubjectInputChange,
+  credentialProfileLabel,
+  walletCompatibilityError,
+  walletCompatibilityWarning,
   credentialJWTInput,
   onCredentialJWTInputChange,
   disclosureOptions,
@@ -62,6 +68,8 @@ export function OID4VPWalletModal({
   submitMessage,
   onSubmitWalletResponse,
 }: OID4VPWalletModalProps) {
+  const hasWalletGateError = Boolean(walletCompatibilityError)
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -116,6 +124,11 @@ export function OID4VPWalletModal({
                   <span className="text-surface-400">did:web allowlist:</span> <code>{didWebAllowedHosts.join(', ')}</code>
                 </div>
               )}
+              {credentialProfileLabel && (
+                <div>
+                  <span className="text-surface-400">auto-issue profile:</span> <code>{credentialProfileLabel}</code>
+                </div>
+              )}
             </div>
           </div>
 
@@ -166,6 +179,19 @@ export function OID4VPWalletModal({
               className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
             />
           </div>
+
+          {(walletCompatibilityError || walletCompatibilityWarning) && (
+            <div className={`rounded-lg border p-3 text-[11px] sm:text-xs leading-relaxed ${
+              walletCompatibilityError
+                ? 'border-red-500/30 bg-red-500/5 text-red-300'
+                : 'border-amber-500/30 bg-amber-500/5 text-amber-300'
+            }`}>
+              <div className="font-medium mb-1">
+                {walletCompatibilityError ? 'Wallet credential gate failed' : 'Wallet credential gate warning'}
+              </div>
+              <div>{walletCompatibilityError || walletCompatibilityWarning}</div>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <div className="text-xs sm:text-sm font-medium text-surface-300">Selective disclosure claims</div>
@@ -226,9 +252,9 @@ export function OID4VPWalletModal({
               <div className="text-[11px] sm:text-xs text-violet-200 font-medium">Expert stepwise ceremony</div>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" onClick={() => onExecuteWalletStep('bootstrap')} disabled={submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">1) Bootstrap wallet</button>
-                <button type="button" onClick={() => onExecuteWalletStep('issue_credential')} disabled={submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">2) Issue credential</button>
-                <button type="button" onClick={() => onExecuteWalletStep('build_presentation')} disabled={!canSubmitWalletInteraction || submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">3) Build vp_token</button>
-                <button type="button" onClick={() => onExecuteWalletStep('submit_response')} disabled={!canSubmitWalletInteraction || submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">4) Submit response</button>
+                <button type="button" onClick={() => onExecuteWalletStep('issue_credential')} disabled={hasWalletGateError || submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">2) Issue credential</button>
+                <button type="button" onClick={() => onExecuteWalletStep('build_presentation')} disabled={!canSubmitWalletInteraction || hasWalletGateError || submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">3) Build vp_token</button>
+                <button type="button" onClick={() => onExecuteWalletStep('submit_response')} disabled={!canSubmitWalletInteraction || hasWalletGateError || submitPending} className="px-2 py-1.5 rounded border border-white/10 bg-surface-900 text-[11px] sm:text-xs text-surface-200 hover:text-white disabled:opacity-50">4) Submit response</button>
               </div>
               <div className="text-[11px] sm:text-xs text-surface-300">
                 Last step: <code>{stepwiseLastStep || 'none'}</code>
@@ -237,7 +263,7 @@ export function OID4VPWalletModal({
             </div>
           )}
 
-          {walletMode === 'one_click' && !canSubmitWalletInteraction && (
+          {walletMode === 'one_click' && !canSubmitWalletInteraction && !walletCompatibilityError && (
             <p className="text-[11px] sm:text-xs text-amber-400">
               Missing request context. Re-run OID4VP request creation.
             </p>
@@ -271,7 +297,7 @@ export function OID4VPWalletModal({
           {walletMode === 'one_click' && (
             <button
               onClick={onSubmitWalletResponse}
-              disabled={!canSubmitWalletInteraction || submitPending}
+              disabled={!canSubmitWalletInteraction || hasWalletGateError || submitPending}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/20 border border-violet-500/30 text-violet-200 text-xs sm:text-sm font-medium hover:bg-violet-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {submitPending && <Loader2 className="w-4 h-4 animate-spin" />}

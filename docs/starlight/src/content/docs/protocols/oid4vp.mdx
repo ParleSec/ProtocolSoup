@@ -25,6 +25,12 @@ description: "OpenID4VP verifier flows with DCQL request contracts, direct_post 
 - **DCQL direct_post** -- Create request object, hand off to wallet, evaluate verifier policy
 - **DCQL direct_post.jwt** -- Same flow with encrypted response transport and inner JWT validation
 
+## Wallet Credential Profile Matching
+
+The Looking Glass OID4VP controls preflight the selected VC credential profile against the DCQL preset before wallet submission. If the preset requests `dc+sd-jwt`, `jwt_vc_json`, `jwt_vc_json-ld`, or `ldp_vc`, the wallet auto-issue profile must issue one of those formats. Otherwise the wallet action is blocked with an explanation, because the wallet cannot build a matching `vp_token` from the selected profile.
+
+When a `credential_jwt` is pasted manually, the UI allows submission but warns when the selected auto-issue profile does not match the DCQL format. The wallet and verifier still validate the actual credential and will reject the presentation if the credential evidence does not satisfy the request.
+
 ## Example DCQL Query
 
 Example DCQL query requesting a `university_degree` credential with `degree` and `graduation_year` claims:
