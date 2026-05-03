@@ -1,8 +1,8 @@
 # SPIRE Agent Dockerfile with Shell Support
 # Uses Alpine base with SPIRE binaries for bootstrap capability
 
-FROM ghcr.io/spiffe/spire-agent:1.14.0 AS spire-agent
-FROM ghcr.io/spiffe/spire-server:1.14.0 AS spire-server
+FROM ghcr.io/spiffe/spire-agent:1.14.6 AS spire-agent
+FROM ghcr.io/spiffe/spire-server:1.14.6 AS spire-server
 
 FROM alpine:3.21
 

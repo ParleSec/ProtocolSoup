@@ -4,7 +4,7 @@
 # - Validates incoming JWT-SVIDs
 # - Shows certificate rotation in action
 
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25.9-alpine AS builder
 
 WORKDIR /app
 
@@ -233,7 +233,7 @@ EOF
 
 # Initialize module and get dependencies
 RUN go mod init demo-service && \
-    go get github.com/spiffe/go-spiffe/v2@v2.2.0 && \
+    go get github.com/spiffe/go-spiffe/v2@v2.6.0 && \
     go mod tidy
 
 # Build

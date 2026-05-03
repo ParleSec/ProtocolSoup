@@ -227,7 +227,7 @@ type credentialSummary struct {
 	Claims           map[string]interface{} `json:"claims,omitempty"`
 }
 
-//go:embed static/*
+//go:embed all:static
 var walletStaticFS embed.FS
 
 func main() {

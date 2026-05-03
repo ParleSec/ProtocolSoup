@@ -1,7 +1,7 @@
 # SPIRE Registration Dockerfile
 # Registers workload entries with SPIRE Server
 
-FROM ghcr.io/spiffe/spire-server:1.14.0 AS spire
+FROM ghcr.io/spiffe/spire-server:1.14.6 AS spire
 
 FROM alpine:3.21
 

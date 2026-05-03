@@ -31,7 +31,7 @@ RUN npm run build
 # ============================================
 # Stage 2: Build Backend
 # ============================================
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.25.9-alpine AS backend-builder
 
 WORKDIR /app
 
@@ -39,20 +39,19 @@ WORKDIR /app
 RUN apk add --no-cache gcc musl-dev
 
 # Copy go mod files
-COPY backend/go.mod ./
+COPY backend/go.mod backend/go.sum ./
 
 # Copy source code
 COPY backend/ .
 
 # Download dependencies and build
-RUN go mod tidy && go mod download
+RUN go mod download
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ./cmd/server
 
 # ============================================
 # Stage 3: Get SPIRE binaries
 # ============================================
-FROM ghcr.io/spiffe/spire-agent:1.14.0 AS spire-agent
-FROM ghcr.io/spiffe/spire-server:1.14.0 AS spire-server
+FROM ghcr.io/spiffe/spire-agent:1.14.6 AS spire-agent
 
 # ============================================
 # Stage 4: Production Image with SPIRE Agent
@@ -72,9 +71,8 @@ COPY --from=frontend-builder /frontend/.next/standalone ./frontend
 COPY --from=frontend-builder /frontend/.next/static ./frontend/.next/static
 COPY --from=frontend-builder /frontend/public ./frontend/public
 
-# Copy SPIRE Agent binary (and server binary for token generation if needed)
+# Copy SPIRE Agent binary
 COPY --from=spire-agent /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
-COPY --from=spire-server /opt/spire/bin/spire-server /opt/spire/bin/spire-server
 
 # Create directories for SPIRE and SCIM
 # Note: /data is the mount point for persistent volume on Fly.io

@@ -32,7 +32,7 @@ Comment on the issue to let maintainers know you're working on it. If you don't 
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.22+ | Backend development |
+| Go | 1.25+ | Backend development |
 | Node.js | 20+ | Frontend development |
 | Docker | Latest | Container orchestration |
 | Git | Latest | Version control |

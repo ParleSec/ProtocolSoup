@@ -26,6 +26,18 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 
+RUN rm -rf \
+  /opt/yarn-* \
+  /usr/local/bin/corepack \
+  /usr/local/bin/npm \
+  /usr/local/bin/npx \
+  /usr/local/bin/pnpm \
+  /usr/local/bin/pnpx \
+  /usr/local/bin/yarn \
+  /usr/local/bin/yarnpkg \
+  /usr/local/lib/node_modules/corepack \
+  /usr/local/lib/node_modules/npm
+
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static

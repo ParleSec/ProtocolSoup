@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25.9-alpine AS builder
 
 ARG SERVICE_CMD=./cmd/server
 
@@ -9,13 +9,13 @@ WORKDIR /app
 RUN apk add --no-cache gcc musl-dev
 
 # Copy go mod files
-COPY backend/go.mod ./
+COPY backend/go.mod backend/go.sum ./
 
-# Copy source code first (needed for go mod tidy)
+# Copy source code
 COPY backend/ .
 
-# Download dependencies and generate go.sum
-RUN go mod tidy && go mod download
+# Download dependencies
+RUN go mod download
 
 # Build the application
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}

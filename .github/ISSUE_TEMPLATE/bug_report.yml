@@ -87,7 +87,7 @@ body:
       placeholder: |
         - OS: macOS 14.2 / Ubuntu 22.04 / Windows 11
         - Browser: Chrome 120
-        - Go: 1.22
+        - Go: 1.25.9
         - Node: 20.x
 
   - type: textarea
