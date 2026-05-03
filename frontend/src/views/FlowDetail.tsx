@@ -13,6 +13,7 @@ import { TokenInspector } from '../lookingglass/components/inspectors/TokenInspe
 import { FlowDiagram } from '../lookingglass/components/FlowDiagram'
 import { FlowDefinition, FlowStep } from '../protocols/registry'
 import { CODE_EXAMPLES } from '../protocols/examples'
+import { ParameterExplainer } from '../components/ParameterExplainer'
 
 interface FlowDetailProps {
   protocolId: string
@@ -330,6 +331,7 @@ export function FlowDetail({
                 key={step.order}
                 step={step}
                 index={index}
+                protocolId={protocolId}
                 isActive={activeStep === step.order}
                 isLast={index === flow.steps.length - 1}
                 onClick={() => setActiveStep(activeStep === step.order ? -1 : step.order)}
@@ -385,12 +387,13 @@ export function FlowDetail({
 export default FlowDetail
 
 // Step Row Component
-function StepRow({ step, index, isActive, isLast, onClick }: { 
+function StepRow({ step, index, protocolId, isActive, isLast, onClick }: {
   step: FlowStep & { security?: string[] }
   index: number
+  protocolId: string
   isActive: boolean
   isLast: boolean
-  onClick: () => void 
+  onClick: () => void
 }) {
   const typeConfig: Record<string, { color: string; icon: React.ElementType }> = {
     request: { color: 'text-blue-400 bg-blue-500/10 border-blue-500/20', icon: ArrowRight },
@@ -456,10 +459,12 @@ function StepRow({ step, index, isActive, isLast, onClick }: {
                 {step.parameters && Object.keys(step.parameters).length > 0 && (
                   <div className="grid gap-1 sm:gap-1.5">
                     {Object.entries(step.parameters).map(([key, value]) => (
-                      <div key={key} className="flex flex-col sm:flex-row sm:gap-3 text-xs sm:text-sm">
-                        <code className="text-cyan-400 font-mono break-all">{key}</code>
-                        <span className="text-surface-400 break-words">{value}</span>
-                      </div>
+                      <ParameterExplainer
+                        key={key}
+                        protocolId={protocolId}
+                        name={key}
+                        value={value}
+                      />
                     ))}
                   </div>
                 )}
