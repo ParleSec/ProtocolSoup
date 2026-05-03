@@ -659,8 +659,9 @@ func verifyDataIntegritySignature(suite ldpProofSuite, hashData []byte, proofByt
 			return fmt.Errorf("proof verification key has type %T, expected *ecdsa.PublicKey", publicKey)
 		}
 		componentSize := 32
-		if ecKey.Curve != nil && ecKey.Curve.Params() != nil {
-			componentSize = (ecKey.Curve.Params().BitSize + 7) / 8
+		curve := ecKey.Curve
+		if curve != nil && curve.Params() != nil {
+			componentSize = (curve.Params().BitSize + 7) / 8
 		}
 		if len(proofBytes) != componentSize*2 {
 			return fmt.Errorf("ecdsa proofValue length %d does not match curve size %d", len(proofBytes), componentSize*2)
@@ -1092,8 +1093,9 @@ func curveFromPublicKey(publicKey interface{}, fallbackKTY string) string {
 	case ed25519.PublicKey:
 		return "Ed25519"
 	case *ecdsa.PublicKey:
-		if typed.Curve != nil && typed.Curve.Params() != nil {
-			switch typed.Curve.Params().BitSize {
+		curve := typed.Curve
+		if curve != nil && curve.Params() != nil {
+			switch curve.Params().BitSize {
 			case 256:
 				return "P-256"
 			case 384:

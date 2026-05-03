@@ -88,7 +88,7 @@ body:
         - OS: macOS 14.2 / Ubuntu 22.04 / Windows 11
         - Browser: Chrome 120
         - Go: 1.25.9
-        - Node: 20.x
+        - Node: 22.12.x
 
   - type: textarea
     id: logs

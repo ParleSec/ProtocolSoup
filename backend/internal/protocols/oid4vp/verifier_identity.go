@@ -517,7 +517,7 @@ func verifyPrivateKeyMatchesCertificate(certificate *x509.Certificate, privateKe
 		if !ok {
 			return fmt.Errorf("certificate public key is not RSA")
 		}
-		if publicKey.E != typed.PublicKey.E || publicKey.N.Cmp(typed.PublicKey.N) != 0 {
+		if publicKey.E != typed.E || publicKey.N.Cmp(typed.N) != 0 {
 			return fmt.Errorf("rsa public key mismatch")
 		}
 	case *ecdsa.PrivateKey:
@@ -525,7 +525,7 @@ func verifyPrivateKeyMatchesCertificate(certificate *x509.Certificate, privateKe
 		if !ok {
 			return fmt.Errorf("certificate public key is not EC")
 		}
-		if publicKey.X.Cmp(typed.PublicKey.X) != 0 || publicKey.Y.Cmp(typed.PublicKey.Y) != 0 || publicKey.Curve != typed.PublicKey.Curve {
+		if publicKey.X.Cmp(typed.X) != 0 || publicKey.Y.Cmp(typed.Y) != 0 || publicKey.Curve != typed.Curve {
 			return fmt.Errorf("ecdsa public key mismatch")
 		}
 	case ed25519.PrivateKey:
@@ -609,15 +609,15 @@ func (p *Plugin) describeX509Chain() map[string]interface{} {
 	}
 
 	chain := map[string]interface{}{
-		"chain_depth":     len(certs),
+		"chain_depth":       len(certs),
 		"signing_algorithm": sigAlg,
 		"leaf": map[string]interface{}{
-			"subject":        leaf.Subject.CommonName,
-			"issuer":         leaf.Issuer.CommonName,
-			"dns_names":      leaf.DNSNames,
-			"serial":         leaf.SerialNumber.String(),
-			"not_before":     leaf.NotBefore.Format(time.RFC3339),
-			"not_after":      leaf.NotAfter.Format(time.RFC3339),
+			"subject":              leaf.Subject.CommonName,
+			"issuer":               leaf.Issuer.CommonName,
+			"dns_names":            leaf.DNSNames,
+			"serial":               leaf.SerialNumber.String(),
+			"not_before":           leaf.NotBefore.Format(time.RFC3339),
+			"not_after":            leaf.NotAfter.Format(time.RFC3339),
 			"public_key_algorithm": leaf.PublicKeyAlgorithm.String(),
 		},
 	}

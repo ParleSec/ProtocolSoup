@@ -12,7 +12,7 @@ permissions:
 
 env:
   GO_VERSION: '1.25.9'
-  NODE_VERSION: '20'
+  NODE_VERSION: '22.12.0'
 
 jobs:
   # Job 1: Frontend Security Scanning
@@ -277,9 +277,9 @@ jobs:
         run: go vet ./...
       
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          version: v2.4.0
           working-directory: backend
 
   # Job 6: Backend Tests

@@ -33,7 +33,7 @@ Comment on the issue to let maintainers know you're working on it. If you don't 
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Go | 1.25+ | Backend development |
-| Node.js | 20+ | Frontend development |
+| Node.js | 22.12+ | Frontend and docs development |
 | Docker | Latest | Container orchestration |
 | Git | Latest | Version control |
 
@@ -186,7 +186,7 @@ Before submitting, verify:
 
 ```bash
 # Install linter
-go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0
 
 # Run linter
 golangci-lint run ./...

@@ -174,7 +174,7 @@ func hasNonEmptyVerificationValue(raw interface{}) bool {
 // DIDWebDocumentURL converts a did:web identifier to its DID Document URL.
 func DIDWebDocumentURL(did string) (string, string, error) {
 	if !strings.HasPrefix(did, "did:web:") {
-		return "", "", fmt.Errorf("did must start with did:web:")
+		return "", "", fmt.Errorf("did must start with did:web")
 	}
 
 	identifier := strings.TrimPrefix(did, "did:web:")

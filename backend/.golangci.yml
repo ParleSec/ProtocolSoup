@@ -1,47 +1,45 @@
-# golangci-lint configuration
-# https://golangci-lint.run/usage/configuration/
-
+version: "2"
 run:
-  timeout: 5m
   modules-download-mode: readonly
-
 output:
   formats:
-    - format: colored-line-number
-
+    text:
+      path: stdout
 linters:
-  enable:
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-    - unused
-
-linters-settings:
-  errcheck:
-    # Don't check errors for these functions (common in HTTP handlers)
-    exclude-functions:
-      - (net/http.ResponseWriter).Write
-      - (*encoding/json.Encoder).Encode
-      - (io.Writer).Write
-      - (*html/template.Template).Execute
-      - (*text/template.Template).Execute
-
+  settings:
+    errcheck:
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+        - (io.Writer).Write
+        - (*html/template.Template).Execute
+        - (*text/template.Template).Execute
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: internal/lookingglass/
+        text: SetReadDeadline|SetWriteDeadline|WriteMessage
+      - linters:
+          - errcheck
+        text: rand.Read
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  # Don't limit the number of issues per linter
   max-issues-per-linter: 0
   max-same-issues: 0
-  
-  exclude-rules:
-    # Ignore errcheck for SetReadDeadline/SetWriteDeadline in websocket code
-    - path: internal/lookingglass/
-      linters:
-        - errcheck
-      text: "SetReadDeadline|SetWriteDeadline|WriteMessage"
-    
-    # Ignore errcheck for rand.Read (crypto/rand never returns error on supported platforms)
-    - linters:
-        - errcheck
-      text: "rand.Read"
-
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -306,7 +306,7 @@ ProtocolSoup/
 ### Prerequisites
 
 - Go 1.25+
-- Node.js 18+
+- Node.js 22.12+
 - Docker & Docker Compose
 
 ### Running Locally (without Docker)

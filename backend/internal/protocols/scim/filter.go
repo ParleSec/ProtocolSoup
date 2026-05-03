@@ -371,7 +371,8 @@ func (p *Parser) parseExpression(precedence int) (FilterNode, error) {
 	var err error
 
 	// Handle NOT prefix
-	if p.current.Type == TokenNot {
+	switch p.current.Type {
+	case TokenNot:
 		p.nextToken()
 		if p.current.Type != TokenLParen {
 			return nil, fmt.Errorf("expected '(' after 'not', got %s", p.current)
@@ -386,7 +387,7 @@ func (p *Parser) parseExpression(precedence int) (FilterNode, error) {
 		}
 		p.nextToken()
 		left = &NotExpr{Expr: inner}
-	} else if p.current.Type == TokenLParen {
+	case TokenLParen:
 		// Grouped expression
 		p.nextToken()
 		left, err = p.parseExpression(precLowest)
@@ -397,7 +398,7 @@ func (p *Parser) parseExpression(precedence int) (FilterNode, error) {
 			return nil, fmt.Errorf("expected ')', got %s", p.current)
 		}
 		p.nextToken()
-	} else {
+	default:
 		// Attribute expression
 		left, err = p.parseAttrExpr()
 		if err != nil {
