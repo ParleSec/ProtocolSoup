@@ -14,6 +14,8 @@ import { FlowDiagram } from '../lookingglass/components/FlowDiagram'
 import { FlowDefinition, FlowStep } from '../protocols/registry'
 import { CODE_EXAMPLES } from '../protocols/examples'
 import { ParameterExplainer } from '../components/ParameterExplainer'
+import { ProtocolReferences } from '../components/ProtocolReferences'
+import { getCatalogFlow, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
 
 interface FlowDetailProps {
   protocolId: string
@@ -42,6 +44,10 @@ export function FlowDetail({
 
   const codeExample = CODE_EXAMPLES[currentFlowId] || CODE_EXAMPLES['_default']
   const getCodeExample = () => codeExample?.code || ''
+
+  const flowRouteId = getFlowRouteId(protocolId, currentFlowId)
+  const catalogFlow = getCatalogFlow(protocolId, flowRouteId)
+  const flowReferences = catalogFlow?.references ?? []
 
   // Get flow badges — keyed by actual backend flow IDs
   const getBadges = () => {
@@ -270,7 +276,7 @@ export function FlowDetail({
           <p className="text-xs sm:text-sm text-surface-400 mt-0.5 sm:mt-1">Click any step for details</p>
         </div>
         <div className="p-3 sm:p-5">
-          <FlowDiagram 
+          <FlowDiagram
             steps={flow.steps}
             activeStep={activeStep}
             onStepClick={setActiveStep}
@@ -361,6 +367,15 @@ export function FlowDetail({
           {token && <TokenInspector token={token} />}
         </div>
       </section>
+
+      {/* Specs that define this flow */}
+      {flowReferences.length > 0 && (
+        <ProtocolReferences
+          title="Specs for this flow"
+          description="Sections of the protocol that normatively define this flow, plus the security considerations that apply to it."
+          references={flowReferences}
+        />
+      )}
 
       {/* Navigation */}
       <div className="flex items-center justify-between pt-2 pb-4 sm:pb-0">

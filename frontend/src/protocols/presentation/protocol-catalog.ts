@@ -1,6 +1,6 @@
 import type { ElementType } from 'react'
 import { Eye, Fingerprint, FileKey, Key, KeyRound, Radio, Shield, Users } from 'lucide-react'
-import { PROTOCOL_CATALOG_DATA } from './protocol-catalog-data'
+import { PROTOCOL_CATALOG_DATA, type ProtocolReference } from './protocol-catalog-data'
 
 export interface ProtocolFlowSummary {
   id: string
@@ -17,6 +17,7 @@ export interface ProtocolCatalogItem {
   spec: string
   specUrl: string
   flows: ProtocolFlowSummary[]
+  references: ProtocolReference[]
 }
 
 export interface ComingSoonProtocol {
@@ -55,6 +56,7 @@ export const PROTOCOL_CATALOG: ProtocolCatalogItem[] = PROTOCOL_CATALOG_DATA.map
   spec: item.spec,
   specUrl: item.specUrl,
   flows: item.flows,
+  references: item.references,
 }))
 
 export const COMING_SOON_PROTOCOLS: ComingSoonProtocol[] = [

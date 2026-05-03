@@ -10,7 +10,8 @@ import {
 import type { FlowDefinition, Protocol } from '../protocols/registry'
 import { protocolMeta } from '../protocols/registry'
 import { FLOW_PRESENTATION_META, getFeatureDescription } from '../protocols/presentation/flow-meta'
-import { getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
+import { getCatalogProtocol, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
+import { ProtocolReferences } from '../components/ProtocolReferences'
 
 interface ProtocolDemoProps {
   protocolId: string
@@ -41,6 +42,8 @@ export function ProtocolDemo({
 
   // Get first recommended flow for quick action
   const recommendedFlow = flows.find(f => FLOW_PRESENTATION_META[f.id]?.recommended) || flows[0]
+
+  const catalogEntry = getCatalogProtocol(protocolId)
 
   return (
     <div className="space-y-6 sm:space-y-8 px-1 sm:px-0">
@@ -150,6 +153,15 @@ export function ProtocolDemo({
           })}
         </div>
       </div>
+
+      {/* Specs & References */}
+      {catalogEntry && (
+        <ProtocolReferences
+          title="Specs & references"
+          description={`Authoritative reading list for ${protocol.name} — core specs, security considerations, and companion standards.`}
+          references={catalogEntry.references}
+        />
+      )}
 
       {/* Protocol Features - from modular meta */}
       <div className="glass rounded-xl p-4 sm:p-6">
