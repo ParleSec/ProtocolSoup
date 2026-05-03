@@ -235,23 +235,23 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     references: [
       {
         label: 'OpenID CAEP Spec',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
         label: 'OpenID RISC Event Types',
-        href: 'https://openid.net/specs/openid-risc-profile-1_0-ID1.html',
+        href: 'https://openid.net/specs/openid-risc-1_0.html',
       },
       {
         label: 'RFC 8417 §5 (Security Considerations)',
         href: 'https://datatracker.ietf.org/doc/html/rfc8417#section-5',
       },
       {
-        label: 'OpenID CAEP §6 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §4 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
-        label: 'OpenID RISC §6 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-risc-profile-1_0-ID1.html',
+        label: 'OpenID RISC §4 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-risc-1_0.html',
       },
     ],
   },
@@ -593,11 +593,11 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     references: [
       {
         label: 'OpenID CAEP §2 (Common Event Properties)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
-        label: 'OpenID CAEP §6 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §4 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
     ],
   },
@@ -651,12 +651,12 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OpenID RISC Profile §2.2 (account-disabled)',
-        href: 'https://openid.net/specs/openid-risc-profile-1_0-ID1.html',
+        label: 'OpenID RISC Profile §2.3 (account-disabled)',
+        href: 'https://openid.net/specs/openid-risc-1_0.html',
       },
       {
-        label: 'OpenID RISC §6 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-risc-profile-1_0-ID1.html',
+        label: 'OpenID RISC §4 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-risc-1_0.html',
       },
     ],
   },
@@ -680,7 +680,7 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
           'method, the suspected attacker\'s IP, and internal ticket ID. ' +
           'All of that lands in the SaaS\'s logs, accessible to the SaaS\'s ' +
           'support staff and any subprocessor of the SaaS\'s logging ' +
-          'pipeline. RISC §2.1 explicitly warns: "Do NOT include actual ' +
+          'pipeline. RISC §2.7 explicitly warns: "Do NOT include actual ' +
           'compromised credential values in the SET" — but the broader ' +
           'principle (don\'t leak detection details) is often missed.',
         impact:
@@ -713,11 +713,11 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     references: [
       {
         label: 'OpenID CAEP §2 (reason_admin / reason_user)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
-        label: 'OpenID CAEP §6 (Security Considerations) / RISC §2.1 Privacy Warning',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §4 (Security Considerations) / RISC §2.7 Privacy Warning',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
     ],
   },
@@ -768,12 +768,12 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OpenID CAEP §3.2 (credential-change)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §3.3 (credential-change)',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
-        label: 'OpenID CAEP §6 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §4 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
     ],
   },
@@ -839,12 +839,12 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OpenID CAEP §3.2 (credential-change change_type)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §3.3 (credential-change change_type)',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
-        label: 'OpenID CAEP §6 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-caep-1_0-ID2.html',
+        label: 'OpenID CAEP §4 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
     ],
   },
