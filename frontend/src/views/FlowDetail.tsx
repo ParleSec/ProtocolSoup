@@ -332,6 +332,7 @@ export function FlowDetail({
                 step={step}
                 index={index}
                 protocolId={protocolId}
+                flowId={flow.id}
                 isActive={activeStep === step.order}
                 isLast={index === flow.steps.length - 1}
                 onClick={() => setActiveStep(activeStep === step.order ? -1 : step.order)}
@@ -387,10 +388,11 @@ export function FlowDetail({
 export default FlowDetail
 
 // Step Row Component
-function StepRow({ step, index, protocolId, isActive, isLast, onClick }: {
+function StepRow({ step, index, protocolId, flowId, isActive, isLast, onClick }: {
   step: FlowStep & { security?: string[] }
   index: number
   protocolId: string
+  flowId: string
   isActive: boolean
   isLast: boolean
   onClick: () => void
@@ -462,6 +464,9 @@ function StepRow({ step, index, protocolId, isActive, isLast, onClick }: {
                       <ParameterExplainer
                         key={key}
                         protocolId={protocolId}
+                        flowId={flowId}
+                        stepOrder={step.order}
+                        direction={step.type as 'request' | 'response' | 'redirect' | 'internal'}
                         name={key}
                         value={value}
                       />
