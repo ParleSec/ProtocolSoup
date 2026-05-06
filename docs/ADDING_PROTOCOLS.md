@@ -224,7 +224,106 @@ async rewrites() {
 },
 ```
 
-## 7. Optional: Looking Glass executor (for real execution)
+## 7. Parameter explainers and references
+
+Two UI surfaces give learners security context for the new protocol: per-parameter explainer panels (clickable `(?)` icons beside flow parameters) and the "Specs & references" panels on the protocol overview and flow detail pages. Both are populated from data files; adding a new protocol means adding entries on both surfaces.
+
+### 7.1 Per-parameter explainers
+
+Create `frontend/src/protocols/explainers/<protocol>.ts` exporting a map keyed by parameter name:
+
+```ts
+import type { ParameterExplainer } from './index'
+
+export const NEWPROTOCOL_EXPLAINERS: Record<string, ParameterExplainer> = {
+  param_name: {
+    purpose: 'What this parameter does and why it exists.',
+    attacks: [
+      {
+        id: 'named-attack',
+        name: 'Named attack pattern (CVE or research label)',
+        scenario: 'How an attacker exploits the parameter when it is absent or mishandled.',
+        impact: 'What the attacker achieves.',
+      },
+    ],
+    mitigations: [
+      {
+        action: 'Concrete mitigation step.',
+        rationale: 'Optional one-line reason this works.',
+        mitigates: ['named-attack'],
+      },
+    ],
+    references: [
+      { label: 'RFC/spec section', href: 'https://...' },
+    ],
+  },
+}
+```
+
+Then register the map in `frontend/src/protocols/explainers/index.ts` by adding an import and spreading it into the `EXPLAINERS` record:
+
+```ts
+import { NEWPROTOCOL_EXPLAINERS } from './newprotocol'
+
+const EXPLAINERS: Record<string, ParameterExplainer> = {
+  ...OAUTH2_EXPLAINERS,
+  // ...
+  ...NEWPROTOCOL_EXPLAINERS,
+}
+```
+
+Notes:
+
+- Mitigations link back to attacks via `mitigates: string[]` of attack IDs. A single mitigation may cover several attacks.
+- For parameters whose semantics differ across protocols (for example, `nonce` in OIDC versus OID4VP), use the override key form `${protocolId}:${name}` instead of the bare name.
+- Source content from canonical specs and named real-world incidents (CVE numbers, research disclosures). Avoid universal-baseline mitigations such as "use HTTPS"; reviewers can be assumed to know those.
+- See any existing protocol's explainer file (for example `oauth2.ts`) for a worked reference of tone, length, and structure.
+- The map keys must match the parameter names emitted by the backend's `FlowStep.Parameters` map (see section 3). Mismatched names will silently fail to render an explainer.
+
+### 7.2 Per-protocol references panel
+
+Update `frontend/src/protocols/presentation/protocol-catalog-data.ts` to add a `references` array on the protocol's catalog entry:
+
+```ts
+{
+  id: 'newprotocol',
+  name: 'New Protocol',
+  // ...existing fields
+  references: [
+    { category: 'core',      label: 'Core spec name',                    href: 'https://...' },
+    { category: 'security',  label: 'Security & privacy considerations', href: 'https://...' },
+    { category: 'companion', label: 'Companion RFC',                     href: 'https://...' },
+    { category: 'profile',   label: 'Deployment profile',                href: 'https://...' },
+  ],
+}
+```
+
+The categories render as separate sections in the UI:
+
+- `core`: specs that normatively define the protocol.
+- `security`: dedicated security and privacy considerations documents (or deep-anchored security sections of core specs).
+- `companion`: extension RFCs and related standards the protocol composes with.
+- `profile`: deployment profiles that constrain the protocol for specific assurance regimes (FAPI, HAIP, eIDAS, and so on).
+
+### 7.3 Per-flow references panel
+
+In the same file, add a `references` array to each flow definition. Prefer deep-anchored URLs to specific sections rather than spec landing pages:
+
+```ts
+{
+  id: 'flow-id',
+  name: 'Flow Name',
+  rfc: '§X.Y',
+  references: [
+    { category: 'core',     label: 'Spec §X.Y - Section title',         href: 'https://...#anchor' },
+    { category: 'security', label: 'Security considerations §Z',         href: 'https://...#anchor' },
+  ],
+}
+```
+
+The same `ProtocolReferences` component renders both surfaces, so flow references should be focused (typically two to four per flow) and non-overlapping with the protocol-level reading list.
+
+## 8. Optional: Looking Glass executor (for real execution)
 
 If your flow is executable, implement a flow executor.
 
