@@ -1,9 +1,15 @@
 #!/usr/bin/env node
-// Verifies the {label, href} reference pairs we ship in protocol-catalog-data.ts
-// and src/protocols/explainers/*.ts against the live spec documents. For each
-// href: confirms the URL returns 200, then (when an anchor is present) fetches
-// the page, locates the anchor, and fuzzy-matches the section number and title
-// from our label against the heading text we find next to the anchor.
+// Verifies every {label, href} reference shipped in protocol-catalog-data.ts
+// and src/protocols/explainers/*.ts against the live spec document.
+//
+// Three classes of bug this catches that tsc/eslint can't:
+//   1. Dead URLs (HTTP != 200).
+//   2. Broken anchors — href has a #fragment that no longer exists on the page,
+//      e.g. after a spec rev renamed the section.
+//   3. Drift between the label and where the anchor actually lands — e.g.
+//      label says "§11" but the anchor sits in §13, or label says "Refresh
+//      Token Protection" but the heading reads "TLS Terminating Reverse
+//      Proxies". This is the failure mode that tripped this codebase up most.
 //
 // Usage: npm run verify-refs
 //        npm run verify-refs -- --only=oid4vp     filter by file basename
@@ -24,6 +30,12 @@ const onlyArg = args.find((a) => a.startsWith('--only='))
 const onlyFilter = onlyArg ? onlyArg.split('=')[1] : null
 const strict = args.includes('--strict')
 
+// Two ref shapes exist in the codebase:
+//   - protocol-catalog-data.ts: { category, label, href, note? } objects
+//   - explainer files:          { label, href } pairs nested inside Reference[]
+// REFERENCE_REGEX matches the catalog form and is tried first; SIMPLE_REF_REGEX
+// is the fallback for explainer refs. We track match offsets so the second pass
+// doesn't double-count refs already captured by the first.
 const REFERENCE_REGEX =
   /\{\s*category:\s*'(?<category>[^']+)'\s*,\s*label:\s*'(?<label>(?:[^'\\]|\\.)*)'\s*,\s*href:\s*'(?<href>[^']+)'(?:\s*,\s*note:\s*'(?:[^'\\]|\\.)*')?\s*,?\s*\}/g
 
@@ -62,6 +74,10 @@ async function main() {
   const cache = new Map()
   const issues = []
 
+  // Bounded-concurrency pump: keep MAX_PARALLEL fetches in flight at once.
+  // Higher concurrency would help against many distinct hosts but most refs
+  // hit datatracker.ietf.org / openid.net — being polite keeps us off rate
+  // limiters and avoids skewing results with transient timeouts.
   let inFlight = 0
   let nextIndex = 0
   await new Promise((resolve) => {
@@ -129,6 +145,9 @@ function lineOf(src, index) {
 async function verifyRef(ref, cache) {
   const problems = []
   const url = new URL(ref.href)
+  // Cache key strips the #fragment so the same spec page is only fetched once
+  // even when many refs target different anchors on it (e.g. ~30 refs all
+  // point at rfc9700 with different #section-X.Y).
   const baseUrl = `${url.origin}${url.pathname}${url.search}`
   const anchor = url.hash ? url.hash.slice(1) : null
 
@@ -232,9 +251,14 @@ async function fetchOnce(url) {
 
 function locateAnchor(html, anchor) {
   const escAnchor = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // Match either `id="..."` (modern RFCs, openid.net specs) or `name="..."`
+  // (OIDC core uses the legacy <a name="..."> anchor style).
   const idMatch = new RegExp(`(?:id|name)\\s*=\\s*"${escAnchor}"`, 'i').exec(html)
   if (!idMatch) return null
 
+  // Window sized empirically: headings usually sit within a few hundred chars
+  // of the anchor element. 200 before + 1500 after captures the heading and
+  // the next subsection number (used for parent/child §-tolerance below).
   const start = Math.max(0, idMatch.index - 200)
   const end = Math.min(html.length, idMatch.index + 1500)
   const window = html.slice(start, end)
@@ -265,6 +289,13 @@ function extractHeadingText(window, anchorOffset) {
 }
 
 function collectSectionNumbers(window, plainText) {
+  // Two complementary signals:
+  //   1. Datatracker pages embed the section number in the anchor itself
+  //      (id/name/href="section-X.Y"). Cheap and unambiguous when present.
+  //   2. openid.net specs and spiffe.io pages don't — they print the number
+  //      as part of the heading text ("3.5. Pre-Authorized Code Flow"). The
+  //      plain-text regex picks those up. The `[A-Z]` lookahead avoids
+  //      matching numeric prose like "RFC 8417 defines..." or version "1.0".
   const out = new Set()
   const anchorMatches = window.matchAll(/(?:id|name|href)\s*=\s*"#?section-([\d.]+)"/gi)
   for (const m of anchorMatches) out.add(m[1])
@@ -310,7 +341,11 @@ function sectionMatches(labelSection, foundSection) {
 }
 
 function extractTitle(label) {
-  // Prefer trailing parenthesised content: handles "RFC 8417 §2.2 (events claim — token-type discriminator)".
+  // The codebase uses two label conventions:
+  //   - explainer files:  "RFC 8417 §2.2 (events claim — token-type ...)"  -> parens
+  //   - catalog data:     "RFC 9700 §2.5 — Client Authentication"          -> em-dash
+  // Try the trailing-parens form first because em-dash split would otherwise
+  // misfire on parens that contain their own em-dash.
   const trailingParen = /\(([^()]+)\)\s*$/.exec(label)
   if (trailingParen) return trailingParen[1].trim()
   const dash = label.split(/—|–|--/)
@@ -324,6 +359,10 @@ function extractTitle(label) {
   return null
 }
 
+// Hosts whose pages we know how to introspect (predictable section/heading
+// markup). For anything else — blog posts, advisory sites, vendor writeups —
+// we only confirm liveness. Several of those (Medium, NVD) also bot-block,
+// which would generate false-positive errors if we tried strict checks.
 const SPEC_HOSTS = new Set([
   'datatracker.ietf.org',
   'openid.net',
@@ -337,6 +376,10 @@ function isSpecUrl(url) {
 }
 
 function scoreTitleMatch(title, haystack) {
+  // Loose substring match. We intentionally skip short tokens (<3 chars) and
+  // common English stop words because they'd match almost any heading and
+  // suppress real signal. The threshold is tuned against the actual labels
+  // in this repo — see callers in verifyRef for the warn conditions.
   const keywords = title
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
