@@ -431,8 +431,8 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.1.2',
       },
       {
-        label: 'OAuth 2.1 §2.1.2 (Removed Grant Types)',
-        href: 'https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1#section-2.1.2',
+        label: 'OAuth 2.1 §10.1 (Removal of the Implicit Grant)',
+        href: 'https://datatracker.ietf.org/doc/html/draft-ietf-oauth-v2-1#name-removal-of-the-oauth-20-imp',
       },
     ],
   },
@@ -546,8 +546,8 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-10.4',
       },
       {
-        label: 'RFC 9700 §4.13 (Refresh Token Protection)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.13',
+        label: 'RFC 9700 §4.14 (Refresh Token Protection)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.14',
       },
     ],
   },
