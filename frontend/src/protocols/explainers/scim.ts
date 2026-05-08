@@ -133,7 +133,7 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://socprime.com/blog/cve-2025-41115-vulnerability/',
       },
       {
-        label: 'RFC 7643 §3.1 (externalId)',
+        label: 'RFC 7643 §3.1 (Common Attributes — externalId)',
         href: 'https://datatracker.ietf.org/doc/html/rfc7643#section-3.1',
       },
       {
@@ -193,7 +193,7 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://github.com/keycloak/keycloak/issues/46658',
       },
       {
-        label: 'RFC 7643 §3.1 (id is server-assigned and immutable)',
+        label: 'RFC 7643 §3.1 (Common Attributes — id immutable)',
         href: 'https://datatracker.ietf.org/doc/html/rfc7643#section-3.1',
       },
       {

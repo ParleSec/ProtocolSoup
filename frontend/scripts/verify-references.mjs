@@ -48,17 +48,13 @@ async function main() {
     }
   }
 
+  // Do NOT dedupe identical {label, href} refs that appear on multiple lines:
+  // when a ref is wrong, every occurrence needs a fix, so each line should surface.
   const refs = []
-  const seenPairs = new Set()
   for (const file of FILES_TO_SCAN) {
     const basename = path.basename(file, '.ts')
     if (onlyFilter && !basename.includes(onlyFilter)) continue
-    for (const ref of await extractRefs(file)) {
-      const key = `${ref.file}${ref.label}${ref.href}`
-      if (seenPairs.has(key)) continue
-      seenPairs.add(key)
-      refs.push(ref)
-    }
+    refs.push(...(await extractRefs(file)))
   }
 
   console.log(`Scanning ${refs.length} reference entries from ${FILES_TO_SCAN.length} files\n`)
