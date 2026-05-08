@@ -62,7 +62,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: '§4.4',
         references: [
           { category: 'core', label: 'RFC 6749 §4.4 — Client Credentials Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.4' },
-          { category: 'security', label: 'RFC 9700 §4.5 — Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.5' },
+          { category: 'security', label: 'RFC 9700 §2.5 — Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.5' },
         ],
       },
       {
@@ -72,7 +72,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: '§6',
         references: [
           { category: 'core', label: 'RFC 6749 §6 — Refreshing an Access Token', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-6' },
-          { category: 'security', label: 'RFC 9700 §2.2.2 — Refresh Token Protection', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.2.2' },
+          { category: 'security', label: 'RFC 9700 §4.14 — Refresh Token Protection', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.14' },
         ],
       },
       {
@@ -148,7 +148,8 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: '§3.3',
         references: [
           { category: 'core', label: 'OIDC Core §3.3 — Authentication using the Hybrid Flow', href: 'https://openid.net/specs/openid-connect-core-1_0.html#HybridFlowAuth' },
-          { category: 'security', label: 'OIDC Core §3.3.5 — Hybrid Flow Security', href: 'https://openid.net/specs/openid-connect-core-1_0.html#HybridIDToken' },
+          { category: 'security', label: 'OIDC Core §3.3.2 — Hybrid Flow Authorization Endpoint', href: 'https://openid.net/specs/openid-connect-core-1_0.html#HybridAuthorizationEndpoint' },
+          { category: 'security', label: 'OIDC Core §3.3.3 — Hybrid Flow Token Endpoint', href: 'https://openid.net/specs/openid-connect-core-1_0.html#HybridTokenEndpoint' },
         ],
       },
       {
@@ -186,8 +187,8 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
       { category: 'companion', label: 'RFC 7517 — JSON Web Key (JWK)', href: 'https://datatracker.ietf.org/doc/html/rfc7517' },
       { category: 'companion', label: 'RFC 7518 — JSON Web Algorithms (JWA)', href: 'https://datatracker.ietf.org/doc/html/rfc7518' },
       { category: 'companion', label: 'RFC 9493 — Subject Identifiers for SETs', href: 'https://datatracker.ietf.org/doc/html/rfc9493' },
-      { category: 'profile', label: 'FAPI 2.0 Security Profile', href: 'https://openid.net/specs/fapi-2_0-security-profile.html', note: 'High-assurance profile for financial-grade APIs.' },
-      { category: 'profile', label: 'FAPI 2.0 Message Signing', href: 'https://openid.net/specs/fapi-2_0-message-signing.html' },
+      { category: 'profile', label: 'FAPI 2.0 Security Profile', href: 'https://openid.net/specs/fapi-security-profile-2_0.html', note: 'High-assurance profile for financial-grade APIs.' },
+      { category: 'profile', label: 'FAPI 2.0 Message Signing', href: 'https://openid.net/specs/fapi-message-signing-2_0.html' },
     ],
   },
   {
@@ -203,9 +204,9 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: 'OID4VCI §4, §6.1, §8',
         references: [
           { category: 'core', label: 'OID4VCI 1.0 §4 — Credential Offer', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-credential-offer' },
-          { category: 'core', label: 'OID4VCI 1.0 §6.1 — Pre-Authorized Code Flow', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-pre-authorized-code-flow' },
+          { category: 'core', label: 'OID4VCI 1.0 §3.5 — Pre-Authorized Code Flow', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-pre-authorized-code-flow' },
           { category: 'core', label: 'OID4VCI 1.0 §8 — Credential Endpoint', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-credential-endpoint' },
-          { category: 'security', label: 'OID4VCI 1.0 §11.2 — Pre-Authorized Code Flow Security', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-security-considerations' },
+          { category: 'security', label: 'OID4VCI 1.0 §13.6 — Pre-Authorized Code Flow Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-pre-authorized-code-flow-2' },
         ],
       },
       {
@@ -213,8 +214,8 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         name: 'Pre-Authorized + tx_code',
         rfc: 'OID4VCI §6.1',
         references: [
-          { category: 'core', label: 'OID4VCI 1.0 §6.1 — Pre-Authorized Code Flow', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-pre-authorized-code-flow' },
-          { category: 'security', label: 'OID4VCI 1.0 §11.3 — PIN / tx_code Phishing', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-security-considerations' },
+          { category: 'core', label: 'OID4VCI 1.0 §6.1 — Token Request', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-token-request' },
+          { category: 'security', label: 'OID4VCI 1.0 §13.6.2 — Transaction Code Phishing', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-transaction-code-phishing' },
         ],
       },
       {
@@ -223,13 +224,13 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: 'OID4VCI Deferred Endpoint',
         references: [
           { category: 'core', label: 'OID4VCI 1.0 §9 — Deferred Credential Endpoint', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-deferred-credential-endpoin' },
-          { category: 'security', label: 'OID4VCI 1.0 §11 — Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-security-considerations' },
+          { category: 'security', label: 'OID4VCI 1.0 §13 — Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-security-considerations' },
         ],
       },
     ],
     references: [
       { category: 'core', label: 'OpenID for Verifiable Credential Issuance 1.0', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html' },
-      { category: 'security', label: 'OID4VCI 1.0 §11 — Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-security-considerations' },
+      { category: 'security', label: 'OID4VCI 1.0 §13 — Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#name-security-considerations' },
       { category: 'security', label: 'OpenID Foundation — Formal Security Analysis of OpenID for VCs', href: 'https://openid.net/formal-security-analysis-openid-verifiable-credentials/', note: 'Independent formal analysis covering OID4VCI and OID4VP.' },
       { category: 'companion', label: 'IETF SD-JWT (Selective Disclosure for JWTs)', href: 'https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/' },
       { category: 'companion', label: 'IETF SD-JWT VC (SD-JWT-based Verifiable Credentials)', href: 'https://datatracker.ietf.org/doc/draft-ietf-oauth-sd-jwt-vc/' },
@@ -254,8 +255,8 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         references: [
           { category: 'core', label: 'OID4VP 1.0 §5 — Authorization Request', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-authorization-request' },
           { category: 'core', label: 'OID4VP 1.0 §6.1 — DCQL (Digital Credentials Query Language)', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-digital-credentials-query-l' },
-          { category: 'core', label: 'OID4VP 1.0 §8.2 — direct_post Response Mode', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-response-modes' },
-          { category: 'security', label: 'OID4VP 1.0 §11.1 — Verifier Impersonation', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-security-considerations' },
+          { category: 'core', label: 'OID4VP 1.0 §8.2 — direct_post Response Mode', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-response-mode-direct_post' },
+          { category: 'security', label: 'OID4VP 1.0 §14.1 — Verifier Impersonation (Preventing Replay of Verifiable Presentations)', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-preventing-replay-of-verifi' },
         ],
       },
       {
@@ -263,19 +264,20 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         name: 'DCQL + direct_post.jwt',
         rfc: 'OID4VP §8.3.1',
         references: [
-          { category: 'core', label: 'OID4VP 1.0 §8.3 — direct_post.jwt Response Mode', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-response-modes' },
+          { category: 'core', label: 'OID4VP 1.0 §8.3.1 — direct_post.jwt Response Mode', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-response-mode-direct_postjw' },
           { category: 'core', label: 'RFC 7516 — JSON Web Encryption (JWE)', href: 'https://datatracker.ietf.org/doc/html/rfc7516' },
-          { category: 'security', label: 'OID4VP 1.0 §11.2 — Nonce Binding', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-security-considerations' },
+          { category: 'security', label: 'OID4VP 1.0 §14.1.2 — Verifiable Presentations (Nonce Binding)', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-verifiable-presentations' },
         ],
       },
     ],
     references: [
       { category: 'core', label: 'OpenID for Verifiable Presentations 1.0', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html' },
-      { category: 'security', label: 'OID4VP 1.0 §11 — Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-security-considerations' },
+      { category: 'security', label: 'OID4VP 1.0 §14 — Security Considerations', href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html#name-security-considerations' },
       { category: 'security', label: 'OpenID Foundation — Formal Security Analysis of OpenID for VCs', href: 'https://openid.net/formal-security-analysis-openid-verifiable-credentials/' },
       { category: 'companion', label: 'RFC 9101 — JWT-Secured Authorization Request (JAR)', href: 'https://datatracker.ietf.org/doc/html/rfc9101' },
       { category: 'companion', label: 'RFC 7516 — JSON Web Encryption (JWE)', href: 'https://datatracker.ietf.org/doc/html/rfc7516', note: 'Underlies direct_post.jwt response encryption.' },
       { category: 'companion', label: 'W3C Digital Credentials API', href: 'https://w3c-fedid.github.io/digital-credentials/', note: 'Browser API for presenting VCs to verifiers.' },
+      { category: 'companion', label: 'digitalcredentials.dev', href: 'https://digitalcredentials.dev/', note: 'Experimental verifier and wallet playground for OID4VP and W3C credentials.' },
       { category: 'profile', label: 'OpenID4VC High Assurance Interoperability Profile (HAIP)', href: 'https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html' },
     ],
   },
@@ -314,7 +316,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: 'Profiles §4.4',
         references: [
           { category: 'core', label: 'SAML 2.0 Profiles §4.4 — Single Logout Profile', href: 'https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf' },
-          { category: 'security', label: 'SAML Security and Privacy Considerations §6.4.7 — Session-related issues', href: 'https://docs.oasis-open.org/security/saml/v2.0/saml-sec-consider-2.0-os.pdf' },
+          { category: 'security', label: 'SAML Security and Privacy Considerations §7.1.4 — Single Logout Profile', href: 'https://docs.oasis-open.org/security/saml/v2.0/saml-sec-consider-2.0-os.pdf' },
         ],
       },
       {
@@ -352,9 +354,9 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         name: 'X.509-SVID Acquisition',
         rfc: 'X.509-SVID',
         references: [
-          { category: 'core', label: 'SPIFFE X.509-SVID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md' },
-          { category: 'core', label: 'SPIFFE Workload API §5.2 — FetchX509SVID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md' },
-          { category: 'security', label: 'X.509-SVID §4 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#4-security-considerations' },
+          { category: 'core', label: 'SPIFFE X.509-SVID', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/' },
+          { category: 'core', label: 'SPIFFE Workload API §5.2.1 — FetchX509SVID', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_workload_api/#521-fetchx509svid' },
+          { category: 'security', label: 'X.509-SVID §4 — Constraints and Usage', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/#4-constraints-and-usage' },
         ],
       },
       {
@@ -362,9 +364,9 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         name: 'JWT-SVID Acquisition',
         rfc: 'JWT-SVID',
         references: [
-          { category: 'core', label: 'SPIFFE JWT-SVID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md' },
-          { category: 'core', label: 'SPIFFE Workload API §5.4 — FetchJWTSVID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md' },
-          { category: 'security', label: 'JWT-SVID §6 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#6-security-considerations' },
+          { category: 'core', label: 'SPIFFE JWT-SVID', href: 'https://spiffe.io/docs/latest/spiffe-specs/jwt-svid/' },
+          { category: 'core', label: 'SPIFFE Workload API §6.2.1 — FetchJWTSVID', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_workload_api/#621-fetchjwtsvid' },
+          { category: 'security', label: 'JWT-SVID §7 — Security Considerations', href: 'https://spiffe.io/docs/latest/spiffe-specs/jwt-svid/#7-security-considerations' },
         ],
       },
       {
@@ -372,9 +374,9 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         name: 'mTLS with X.509-SVIDs',
         rfc: 'RFC 8446',
         references: [
-          { category: 'core', label: 'SPIFFE X.509-SVID §3 — Validation', href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#3-validation' },
+          { category: 'core', label: 'SPIFFE X.509-SVID §5 — Validation', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/#5-validation' },
           { category: 'core', label: 'RFC 8446 — TLS 1.3', href: 'https://datatracker.ietf.org/doc/html/rfc8446' },
-          { category: 'security', label: 'X.509-SVID §4 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#4-security-considerations' },
+          { category: 'security', label: 'X.509-SVID §4 — Constraints and Usage', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/#4-constraints-and-usage' },
         ],
       },
       {
@@ -382,23 +384,22 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         name: 'Certificate Rotation',
         rfc: 'Workload API',
         references: [
-          { category: 'core', label: 'SPIFFE Workload API — streaming SVID updates', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md' },
-          { category: 'security', label: 'Workload API §6 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations' },
+          { category: 'core', label: 'SPIFFE Workload API §4.2 — Connection Lifetime', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_workload_api/#42-connection-lifetime' },
+          { category: 'security', label: 'X.509-SVID §4 — Constraints and Usage', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/#4-constraints-and-usage' },
         ],
       },
     ],
     references: [
-      { category: 'core', label: 'SPIFFE-ID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md' },
-      { category: 'core', label: 'SPIFFE X.509-SVID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md' },
-      { category: 'core', label: 'SPIFFE JWT-SVID', href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md' },
-      { category: 'core', label: 'SPIFFE Workload API', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md' },
-      { category: 'core', label: 'SPIFFE Trust Domain and Bundle', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md' },
-      { category: 'core', label: 'SPIFFE Federation', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md' },
-      { category: 'security', label: 'X.509-SVID §4 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#4-security-considerations' },
-      { category: 'security', label: 'JWT-SVID §6 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#6-security-considerations' },
-      { category: 'security', label: 'Workload API §6 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations' },
-      { category: 'security', label: 'Federation §6 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#6-security-considerations' },
-      { category: 'security', label: 'Trust Domain and Bundle §5 — Security Considerations', href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#5-security-considerations' },
+      { category: 'core', label: 'SPIFFE-ID', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe-id/' },
+      { category: 'core', label: 'SPIFFE X.509-SVID', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/' },
+      { category: 'core', label: 'SPIFFE JWT-SVID', href: 'https://spiffe.io/docs/latest/spiffe-specs/jwt-svid/' },
+      { category: 'core', label: 'SPIFFE Workload API', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_workload_api/' },
+      { category: 'core', label: 'SPIFFE Trust Domain and Bundle', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_trust_domain_and_bundle/' },
+      { category: 'core', label: 'SPIFFE Federation', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_federation/' },
+      { category: 'security', label: 'X.509-SVID §4 — Constraints and Usage', href: 'https://spiffe.io/docs/latest/spiffe-specs/x509-svid/#4-constraints-and-usage' },
+      { category: 'security', label: 'JWT-SVID §7 — Security Considerations', href: 'https://spiffe.io/docs/latest/spiffe-specs/jwt-svid/#7-security-considerations' },
+      { category: 'security', label: 'Federation §7 — Security Considerations', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_federation/#7-security-considerations' },
+      { category: 'security', label: 'Trust Domain and Bundle §6 — Security Considerations', href: 'https://spiffe.io/docs/latest/spiffe-specs/spiffe_trust_domain_and_bundle/#6-security-considerations' },
       { category: 'companion', label: 'RFC 8446 — TLS 1.3', href: 'https://datatracker.ietf.org/doc/html/rfc8446', note: 'Underlying transport for X.509-SVID mTLS.' },
       { category: 'companion', label: 'SPIRE Documentation', href: 'https://spiffe.io/docs/latest/spire-about/spire-concepts/', note: 'Reference implementation of SPIFFE.' },
     ],
@@ -406,8 +407,8 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
   {
     id: 'scim',
     name: 'SCIM 2.0',
-    description: 'System for Cross-domain Identity Management. Standards-based protocol for automating user provisioning and lifecycle management between identity providers and service providers.',
-    spec: 'RFC 7642, 7643, 7644',
+    description: 'System for Cross-domain Identity Management (SCIM). Standards-based protocol for automating user provisioning and lifecycle management between identity providers and service providers.',
+    spec: 'System for Cross-domain Identity Management (RFC 7642, 7643, 7644)',
     specUrl: 'https://datatracker.ietf.org/doc/html/rfc7644',
     flows: [
       {
@@ -474,14 +475,14 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
     name: 'Shared Signals (SSF)',
     description: 'OpenID Shared Signals Framework for real-time security event sharing. Enables continuous access evaluation (CAEP) and risk incident coordination (RISC) between identity providers and relying parties.',
     spec: 'SSF 1.0, CAEP 1.0, RISC 1.0, RFC 8417',
-    specUrl: 'https://openid.net/specs/openid-sse-framework-1_0.html',
+    specUrl: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html',
     flows: [
       {
         id: 'ssf-stream-configuration',
         name: 'Stream Configuration',
         rfc: 'SSF §4',
         references: [
-          { category: 'core', label: 'OpenID SSF §8 — Management API for SET Event Streams', href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html' },
+          { category: 'core', label: 'OpenID SSF §8 — Management API for SET Event Streams', href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html' },
         ],
       },
       {
@@ -499,7 +500,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: 'SSF §5.2.2',
         references: [
           { category: 'core', label: 'RFC 8936 — SET Delivery via HTTP Polling', href: 'https://datatracker.ietf.org/doc/html/rfc8936' },
-          { category: 'security', label: 'RFC 8936 §5 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8936#section-5' },
+          { category: 'security', label: 'RFC 8936 §4 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8936#section-4' },
         ],
       },
       {
@@ -538,13 +539,13 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
       },
     ],
     references: [
-      { category: 'core', label: 'OpenID Shared Signals Framework 1.0', href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html' },
+      { category: 'core', label: 'OpenID Shared Signals Framework 1.0', href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html' },
       { category: 'core', label: 'OpenID CAEP — Continuous Access Evaluation Profile', href: 'https://openid.net/specs/openid-caep-1_0-final.html' },
       { category: 'core', label: 'OpenID RISC Profile 1.0', href: 'https://openid.net/specs/openid-risc-1_0.html' },
       { category: 'core', label: 'RFC 8417 — Security Event Token (SET)', href: 'https://datatracker.ietf.org/doc/html/rfc8417' },
       { category: 'security', label: 'RFC 8417 §5 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8417#section-5' },
       { category: 'security', label: 'RFC 8935 §5 — SET Push Delivery Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8935#section-5' },
-      { category: 'security', label: 'RFC 8936 §5 — SET Poll Delivery Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8936#section-5' },
+      { category: 'security', label: 'RFC 8936 §4 — SET Poll Delivery Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8936#section-4' },
       { category: 'companion', label: 'RFC 8935 — SET Delivery Using HTTP Push (POST)', href: 'https://datatracker.ietf.org/doc/html/rfc8935' },
       { category: 'companion', label: 'RFC 8936 — SET Delivery Using HTTP Polling', href: 'https://datatracker.ietf.org/doc/html/rfc8936' },
       { category: 'companion', label: 'RFC 9493 — Subject Identifiers for SETs', href: 'https://datatracker.ietf.org/doc/html/rfc9493' },
