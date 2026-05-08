@@ -88,7 +88,7 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc8417',
       },
       {
-        label: 'RFC 8417 §2.2 (events claim — token-type discriminator)',
+        label: 'RFC 8417 §2.2 (Core SET Claims — events token-type)',
         href: 'https://datatracker.ietf.org/doc/html/rfc8417#section-2.2',
       },
       {

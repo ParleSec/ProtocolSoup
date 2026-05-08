@@ -256,7 +256,7 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.5',
       },
       {
-        label: 'OAuth 2.0 for Native Apps §8.1 (BCP 212)',
+        label: 'OAuth 2.0 for Native Apps §8.1 (Protecting the Authorization Code)',
         href: 'https://datatracker.ietf.org/doc/html/rfc8252#section-8.1',
       },
     ],
@@ -334,7 +334,7 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'RFC 7636 §4.2 (Method Selection)',
+        label: 'RFC 7636 §4.2 (Client Creates the Code Challenge)',
         href: 'https://datatracker.ietf.org/doc/html/rfc7636#section-4.2',
       },
     ],

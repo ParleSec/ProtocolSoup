@@ -181,8 +181,8 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://www.armosec.io/blog/authlib-cve-2026-28802-jwt-signature-verification-bypass/',
       },
       {
-        label: 'JWT alg confusion (RS256 → HS256)',
-        href: 'https://medium.com/@instatunnel/jwt-algorithm-confusion-turning-rs256-tokens-into-hs256-disasters-db1923774873',
+        label: 'JWT alg confusion (RS256 to HS256)',
+        href: 'https://portswigger.net/web-security/jwt/algorithm-confusion',
       },
       {
         label: 'OpenID Connect Core §16.3 (Token Manufacture / Modification)',
@@ -804,7 +804,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc7517',
       },
       {
-        label: 'OpenID Connect Discovery 1.0 §3 (jwks_uri)',
+        label: 'OpenID Connect Discovery 1.0 §3 (Provider Metadata — jwks_uri)',
         href: 'https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata',
       },
       {
