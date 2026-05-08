@@ -71,7 +71,7 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://ethz.ch/content/dam/ethz/special-interest/infk/inst-infsec/information-security-group-dam/research/software/zischg-oid4vci.pdf',
       },
       {
-        label: 'OID4VCI 1.0 §11 (Security Considerations)',
+        label: 'OID4VCI 1.0 §13 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-security-considerations',
       },
     ],
@@ -125,7 +125,7 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-pre-authorized-code-flow',
       },
       {
-        label: 'OID4VCI 1.0 §11.2 (Pre-Authorized Code Flow — Security Considerations)',
+        label: 'OID4VCI 1.0 §13.6 (Pre-Authorized Code Flow Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-pre-authorized-code-flow-2',
       },
     ],
@@ -181,12 +181,12 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VCI 1.0 §3.5.1 (tx_code)',
+        label: 'OID4VCI 1.0 §6.1 (Token Request — tx_code)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-token-request',
       },
       {
-        label: 'OID4VCI 1.0 §11.3 (PIN Phishing)',
-        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-trust-between-wallet-and-is',
+        label: 'OID4VCI 1.0 §13.6.2 (Transaction Code Phishing)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-transaction-code-phishing',
       },
     ],
   },
@@ -235,12 +235,12 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VCI 1.0 §7.2.1 (c_nonce)',
-        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-request',
+        label: 'OID4VCI 1.0 §7.2 (Nonce Response — c_nonce)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-response',
       },
       {
-        label: 'OID4VCI 1.0 §11.6 (Replay Prevention)',
-        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-security-considerations',
+        label: 'OID4VCI 1.0 §13.6.1 (Replay Prevention)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-replay-prevention',
       },
     ],
   },
@@ -297,16 +297,16 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VCI 1.0 §7.2.1.1 (Proof JWT)',
-        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-proof-types',
+        label: 'OID4VCI 1.0 Appendix F.1 (jwt Proof Type)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-jwt-proof-type',
       },
       {
         label: 'RFC 7800 (Proof-of-Possession Key Semantics — cnf claim)',
         href: 'https://datatracker.ietf.org/doc/html/rfc7800',
       },
       {
-        label: 'OID4VCI 1.0 §11.5 (Key Proof Replay)',
-        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-security-considerations',
+        label: 'OID4VCI 1.0 §13.8 (Proof Replay)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-proof-replay',
       },
     ],
   },
@@ -407,7 +407,7 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VCI 1.0 §7.3 (Credential Response)',
+        label: 'OID4VCI 1.0 §8.3 (Credential Response)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-response',
       },
       {
@@ -419,7 +419,7 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://www.w3.org/TR/vc-data-model-2.0/',
       },
       {
-        label: 'OID4VCI 1.0 §11.4 (Credential Format Profile Considerations)',
+        label: 'OID4VCI 1.0 §13 (Security Considerations — credential format profiles)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-security-considerations',
       },
     ],
@@ -495,7 +495,7 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-deferred-credential-endpoin',
       },
       {
-        label: 'OID4VCI 1.0 §11 (Security Considerations)',
+        label: 'OID4VCI 1.0 §13 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-security-considerations',
       },
     ],

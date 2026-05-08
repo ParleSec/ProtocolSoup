@@ -84,16 +84,16 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §6 (Authorization Response)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-authorization-response',
+        label: 'OID4VP 1.0 §8 (Response)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response',
       },
       {
         label: 'SD-JWT §5.4 (Key Binding JWT validation)',
         href: 'https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/',
       },
       {
-        label: 'OID4VP 1.0 §11.1 (Verifier Impersonation Threat)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-verifier-impersonation',
+        label: 'OID4VP 1.0 §14.1 (Preventing Replay of Verifiable Presentations)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-preventing-replay-of-verifi',
       },
     ],
   },
@@ -154,7 +154,7 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-digital-credentials-query-l',
       },
       {
-        label: 'OID4VP 1.0 §11 (Security Considerations)',
+        label: 'OID4VP 1.0 §14 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-security-considerations',
       },
     ],
@@ -215,12 +215,12 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §5 (Client Identifier Scheme)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-client-identifier-scheme',
+        label: 'OID4VP 1.0 §5.9 (Client Identifier Prefix)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-client-identifier-prefix-an',
       },
       {
-        label: 'OID4VP 1.0 §11.1 (Verifier Impersonation)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-verifier-impersonation',
+        label: 'OID4VP 1.0 §14.1 (Verifier Impersonation — Preventing Replay)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-preventing-replay-of-verifi',
       },
       {
         label: 'OpenID4VC HAIP 1.0',
@@ -297,11 +297,11 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §7 (Response Mode)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response-modes',
+        label: 'OID4VP 1.0 §8.2 (Response Mode "direct_post")',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response-mode-direct_post',
       },
       {
-        label: 'OID4VP 1.0 §11 (Security Considerations)',
+        label: 'OID4VP 1.0 §14 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-security-considerations',
       },
     ],
@@ -344,11 +344,11 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §7.1 (response_uri)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response-modes',
+        label: 'OID4VP 1.0 §8.2 (response_uri / direct_post)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response-mode-direct_post',
       },
       {
-        label: 'OID4VP 1.0 §11 (Security Considerations)',
+        label: 'OID4VP 1.0 §14 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-security-considerations',
       },
     ],
@@ -405,7 +405,7 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc9101',
       },
       {
-        label: 'OID4VP 1.0 §11 (Security Considerations)',
+        label: 'OID4VP 1.0 §14 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-security-considerations',
       },
     ],
@@ -451,15 +451,15 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §7.2 (direct_post.jwt)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response-modes',
+        label: 'OID4VP 1.0 §8.3.1 (direct_post.jwt)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-response-mode-direct_postjw',
       },
       {
         label: 'RFC 7516 (JWE)',
         href: 'https://datatracker.ietf.org/doc/html/rfc7516',
       },
       {
-        label: 'OID4VP 1.0 §11 (Security Considerations)',
+        label: 'OID4VP 1.0 §14 (Security Considerations)',
         href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-security-considerations',
       },
     ],
@@ -517,8 +517,8 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §11.2 (Nonce Binding)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-replay-of-vp-tokens',
+        label: 'OID4VP 1.0 §14.1.2 (Verifiable Presentations — nonce binding)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-verifiable-presentations',
       },
       {
         label: 'SD-JWT §4.3 (Key Binding JWT)',
@@ -574,12 +574,12 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VP 1.0 §5 (client_id and client_id_scheme)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-client-identifier-scheme',
+        label: 'OID4VP 1.0 §5.9 (client_id and Client Identifier Prefix)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-client-identifier-prefix-an',
       },
       {
-        label: 'OID4VP 1.0 §11.1 (Verifier Impersonation)',
-        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-security-considerations',
+        label: 'OID4VP 1.0 §14.1 (Verifier Impersonation — Preventing Replay)',
+        href: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html#name-preventing-replay-of-verifi',
       },
     ],
   },

@@ -190,7 +190,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         label: 'OpenID Connect Core §16.13 (Other Crypto-Related Attacks)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#CryptoRelated',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#OtherCryptoAttacks',
       },
     ],
   },
@@ -310,7 +310,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
     references: [
       {
         label: 'OpenID Connect Core 1.0 §3.3.2.11 (c_hash)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#CodeIDToken',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#HybridIDToken',
       },
       {
         label: 'CVE-2026-28498 (Authlib at_hash/c_hash fail-open)',
@@ -318,7 +318,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         label: 'OpenID Connect Core §16.10 (Eavesdropping or Leaking Authorization Codes)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#CodeReuse',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#AuthCodeCapture',
       },
     ],
   },
@@ -565,11 +565,11 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         label: 'OpenID Connect Core §16.13 (Other Crypto-Related Attacks)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#CryptoRelated',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#OtherCryptoAttacks',
       },
       {
         label: 'OpenID Connect Core §16.19 (Symmetric Key Entropy)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#SymKeyEntropy',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#SymmetricKeyEntropy',
       },
     ],
   },
@@ -809,7 +809,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         label: 'OpenID Connect Core §16.13 (Crypto-Related Attacks)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#CryptoRelated',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#OtherCryptoAttacks',
       },
     ],
   },
@@ -880,7 +880,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         label: 'OpenID Connect Core §16.13 (Crypto-Related Attacks)',
-        href: 'https://openid.net/specs/openid-connect-core-1_0.html#CryptoRelated',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#OtherCryptoAttacks',
       },
     ],
   },

@@ -392,8 +392,8 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc8935#section-5',
       },
       {
-        label: 'RFC 8936 §5 (Poll — Security Considerations)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc8936#section-5',
+        label: 'RFC 8936 §4 (Poll — Security Considerations)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc8936#section-4',
       },
     ],
   },
