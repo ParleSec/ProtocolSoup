@@ -239,7 +239,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OpenID Connect Core 1.0 §3.2.2.10 (at_hash)',
+        label: 'OpenID Connect Core 1.0 §3.2.2.9 (Implicit Flow — Access Token Validation, at_hash check)',
         href: 'https://openid.net/specs/openid-connect-core-1_0.html#ImplicitTokenValidation',
       },
       {
@@ -286,9 +286,11 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Compute SHA-256(code), take the left-half, base64url-encode, ' +
-          'and compare to the `c_hash` claim. Reject mismatches before ' +
-          'exchanging the code at /token.',
+          'Compute hash(code) using the hash function tied to the ID ' +
+          'Token\'s `alg` (RS256/ES256/HS256 → SHA-256, RS384/ES384 → ' +
+          'SHA-384, RS512/ES512 → SHA-512), take the left-half, base64url-' +
+          'encode, and compare to the `c_hash` claim. Reject mismatches ' +
+          'before exchanging the code at /token.',
         mitigates: ['code-substitution-hybrid'],
       },
       {
@@ -325,11 +327,14 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
 
   azp: {
     purpose:
-      'Authorized Party claim in the ID Token. When the token\'s `aud` ' +
-      'contains multiple audiences (or one audience that is not the ' +
-      'requesting client), `azp` MUST equal the client_id of the party the ' +
-      'token was actually issued to. Lets a recipient distinguish "I am the ' +
-      'audience" from "I am the audience the token was minted for".',
+      'Authorized Party claim in the ID Token. OIDC Core §2 defines `azp` ' +
+      'as OPTIONAL — it appears in practice only when extensions beyond ' +
+      'base OIDC are in use, and the spec advises implementations not ' +
+      'using such extensions to "not use azp and to ignore it when it does ' +
+      'occur". §3.1.3.7 step 4 says that if `azp` is present, the client ' +
+      'SHOULD verify it equals the receiver\'s client_id. Lets a recipient ' +
+      'distinguish "I am in the audience" from "I am the audience the ' +
+      'token was minted for" — but only when the deployment populates it.',
     attacks: [
       {
         id: 'cross-client-id-token-reuse',
@@ -340,9 +345,10 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
           'backend microservices). Mallory operates Service A and persuades ' +
           'Alice to sign in. Mallory takes the resulting ID Token and ' +
           'replays it to Service B, which sees `aud` containing its own ' +
-          'client_id and accepts the login. Without `azp` validation, ' +
-          'Service B has no way to know the token was originally minted ' +
-          'for Service A.',
+          'client_id and accepts the login. The base OIDC defence here is ' +
+          'the §3.1.3.7 step 3 check (`client_id ∈ aud`) — but that check ' +
+          'still passes for Service B. `azp`, when populated, lets Service ' +
+          'B distinguish "originally minted for Service A".',
         impact:
           'Cross-service identity bleed in shared-audience configurations.',
       },
@@ -350,22 +356,29 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Recipients in multi-audience tokens MUST validate `azp == this ' +
-          'client_id` in addition to `client_id ∈ aud`.',
+          'When `azp` is present, validate `azp == this client_id` per ' +
+          'OIDC Core §3.1.3.7 step 4 (SHOULD). Operationally, deployments ' +
+          'that issue multi-audience ID Tokens often elevate this from ' +
+          'SHOULD to MUST as part of their security profile (e.g. several ' +
+          'IdPs unconditionally emit `azp`).',
         mitigates: ['cross-client-id-token-reuse'],
       },
       {
         action:
           'Prefer single-audience tokens — issue a separate ID Token per ' +
           'recipient instead of "saving tokens" by reusing one across ' +
-          'services.',
+          'services. Removes the need to rely on `azp` at all.',
         mitigates: ['cross-client-id-token-reuse'],
       },
     ],
     references: [
       {
-        label: 'OpenID Connect Core 1.0 §2 (azp claim)',
+        label: 'OpenID Connect Core 1.0 §2 (ID Token — azp claim)',
         href: 'https://openid.net/specs/openid-connect-core-1_0.html#IDToken',
+      },
+      {
+        label: 'OpenID Connect Core §3.1.3.7 (ID Token Validation, steps 4–5 — azp validation)',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation',
       },
       {
         label: 'OpenID Connect Core §16.11 (Token Substitution)',
@@ -462,9 +475,9 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
           'SaaS apps still vulnerable per a 2025 study. The OPs vary ' +
           'wildly in how they set this claim: some always set true; some ' +
           'never set the field; some let users in their tenant set ' +
-          'arbitrary unverified email values. The OIDC spec itself says: ' +
-          '"ultimately it is unsafe to rely on the Issuer to verify the ' +
-          'email of a user."',
+          'arbitrary unverified email values. OIDC Core §5.7 explicitly ' +
+          'warns that `email` is not stable or unique and that RPs should ' +
+          'not key user accounts on it.',
         impact:
           'Full account takeover. MFA does not help, EDR does not help, ' +
           'the attack uses the federation exactly as designed.',
@@ -503,7 +516,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://www.semperis.com/blog/noauth-abuse-alert-full-account-takeover/',
       },
       {
-        label: 'OpenID Connect Core 1.0 §5.7 (Claim Stability)',
+        label: 'OpenID Connect Core 1.0 §5.7 (Claim Stability and Uniqueness)',
         href: 'https://openid.net/specs/openid-connect-core-1_0.html#ClaimStability',
       },
     ],
@@ -659,7 +672,7 @@ export const OIDC_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OpenID Connect Core 1.0 §5.7 (Claim Stability)',
+        label: 'OpenID Connect Core 1.0 §5.7 (Claim Stability and Uniqueness)',
         href: 'https://openid.net/specs/openid-connect-core-1_0.html#ClaimStability',
       },
       {

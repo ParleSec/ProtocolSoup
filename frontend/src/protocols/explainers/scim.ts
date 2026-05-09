@@ -208,7 +208,9 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
       'PATCH operation type: `add` (insert/append), `replace` (overwrite), ' +
       '`remove` (delete). One of three operations applied at a JSON ' +
       'Pointer `path` on a target resource. SCIM PATCH wraps these in a ' +
-      'PatchOp document with multiple operations applied transactionally.',
+      'PatchOp document with multiple operations applied in sequence per ' +
+      'RFC 7644 §3.5.2 (servers stop on the first error; whether prior ' +
+      'successful operations roll back is implementation-defined).',
     attacks: [
       {
         id: 'op-attribute-escalation',
@@ -501,7 +503,7 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
   },
 
-  active: {
+  'scim:active': {
     purpose:
       'Boolean attribute on a User resource indicating whether the account ' +
       'is enabled. The IdP\'s SCIM client typically toggles `active=false` ' +
@@ -537,9 +539,13 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'SCIM `active=false` MUST trigger session/token revocation — ' +
-          'not just a database flag flip. Refresh tokens, API keys, ' +
-          'downstream service sessions all need invalidation.',
+          'Treat SCIM `active=false` as a trigger for full session/token ' +
+          'revocation across every credential surface — not just a ' +
+          'database flag flip. Refresh tokens, API keys, downstream ' +
+          'service sessions all need invalidation. SCIM is a provisioning ' +
+          'protocol; session revocation is the SP\'s responsibility outside ' +
+          'the SCIM RFCs, so this is operational hardening rather than a ' +
+          'spec-normative MUST.',
         mitigates: ['deactivation-session-lag'],
       },
       {
@@ -638,8 +644,8 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'RFC 7644 §3.7 (Bulk Operations)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-3.7',
+        label: 'RFC 7644 §3.7.2 (Bulk Operation Request and Response Structure)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-3.7.2',
       },
       {
         label: 'SCIM-SDK BulkId Reference Resolving (cycle detection)',
@@ -705,8 +711,8 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc7643#section-4.2',
       },
       {
-        label: 'SOC Prime — SCIM PATCH escalation (related class)',
-        href: 'https://socprime.com/blog/cve-2025-41115-vulnerability/',
+        label: 'RFC 7644 §3.5.2 (Modifying with PATCH)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-3.5.2',
       },
       {
         label: 'RFC 7644 §7 (Security Considerations)',
@@ -775,8 +781,8 @@ export const SCIM_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'RFC 7644 §3.9 (attributes / excludedAttributes)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-3.9',
+        label: 'RFC 7644 §3.4.2.5 (attributes and excludedAttributes)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-3.4.2.5',
       },
       {
         label: 'RFC 7644 §7 (Security Considerations)',

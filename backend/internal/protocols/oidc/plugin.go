@@ -547,7 +547,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					Parameters: map[string]string{
 						"validate": "Token signature and expiration",
 						"scope":    "Verify 'openid' scope is present",
-						"subject":  "Look up user by 'sub' claim in token",
+						"sub":      "Look up user by 'sub' claim in token",
 					},
 				},
 				{
