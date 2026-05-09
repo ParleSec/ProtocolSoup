@@ -133,13 +133,16 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
 
   tx_code: {
     purpose:
-      'A short user-entered code (typically 4-8 digits) the issuer delivers ' +
-      'to the user out-of-band via a separate channel from the credential ' +
-      'offer (SMS to a known phone, email to a known address, displayed on ' +
-      'a kiosk screen). The wallet prompts the user to type it and forwards ' +
-      'it to /token alongside the pre-authorized code. Adds a second factor ' +
-      '(something the user knows / received separately) that an interceptor ' +
-      'of the offer alone cannot supply.',
+      'A short user-entered code the issuer delivers to the user. ' +
+      'OID4VCI 1.0 §4.1.1 lets the issuer declare `input_mode` ' +
+      '(`numeric` or `text`) and `length`; deployments commonly pick 4–8 ' +
+      'digits but neither bound is in the spec. §13.6.2 RECOMMENDS ' +
+      'delivering it via a separate channel from the credential offer ' +
+      '(SMS to a known phone, email to a known address, kiosk display) ' +
+      '— it is RECOMMENDED, not REQUIRED. The wallet prompts the user ' +
+      'to type it and forwards it to /token alongside the pre-authorized ' +
+      'code. Adds a second factor (something the user knows / received ' +
+      'separately) that an interceptor of the offer alone cannot supply.',
     attacks: [
       {
         id: 'pin-channel-cross-protocol-phishing',
@@ -193,12 +196,14 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
 
   c_nonce: {
     purpose:
-      'Challenge nonce the Credential Issuer returns from /token (and ' +
-      'subsequently from /credential). The wallet MUST include this exact ' +
+      'Challenge nonce the Credential Issuer returns from a dedicated ' +
+      'Nonce Endpoint (OID4VCI 1.0 §7). The wallet MUST include this exact ' +
       'value in the `nonce` claim of the proof JWT it sends with its ' +
-      'credential request. Single-use; consumed on each call. ' +
-      'OIDC `nonce` binds an ID Token to an authentication session; ' +
-      '`c_nonce` binds a proof JWT to a specific issuance request.',
+      'credential request. The issuer decides when to issue a fresh ' +
+      'c_nonce versus reusing one across requests; consumers should treat ' +
+      'each as freshness-bounded. OIDC `nonce` binds an ID Token to an ' +
+      'authentication session; `c_nonce` binds a proof JWT to a specific ' +
+      'issuance request.',
     attacks: [
       {
         id: 'proof-jwt-replay',
@@ -222,24 +227,32 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Issuer MUST consume `c_nonce` on use and reject replays. ' +
-          'Track consumed nonces for the validity window.',
+          'Issuer SHOULD treat `c_nonce` values as freshness-bounded and ' +
+          'reject replays past their validity window. The spec leaves ' +
+          'reuse-vs-rotation to issuer discretion (§7), but tracking ' +
+          'consumed nonces inside the validity window is the cleanest ' +
+          'replay defence.',
         mitigates: ['proof-jwt-replay'],
       },
       {
         action:
-          'Wallet MUST treat each c_nonce as single-use and refresh it ' +
-          'from the next response before issuing a new proof.',
+          'Wallet treats each c_nonce as freshness-bounded and refreshes ' +
+          'it from the next Nonce Endpoint response before issuing a new ' +
+          'proof if the issuer has invalidated the prior one.',
         mitigates: ['proof-jwt-replay'],
       },
     ],
     references: [
       {
-        label: 'OID4VCI 1.0 §7.2 (Nonce Response — c_nonce)',
+        label: 'OID4VCI 1.0 §7 (Nonce Endpoint)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-endpoint',
+      },
+      {
+        label: 'OID4VCI 1.0 §7.2 (Nonce Response)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-nonce-response',
       },
       {
-        label: 'OID4VCI 1.0 §13.6.1 (Replay Prevention)',
+        label: 'OID4VCI 1.0 §13.6 (Replay Prevention)',
         href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-replay-prevention',
       },
     ],
@@ -247,13 +260,15 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
 
   proof: {
     purpose:
-      'A wallet-signed JWT (or similar) that proves the wallet controls the ' +
-      'private key the issued credential will be bound to. Sent on the ' +
-      'credential request. JWT MUST contain header `typ=' +
-      'openid4vci-proof+jwt`, payload claims `iss` (wallet/client ID), ' +
-      '`aud` (credential issuer identifier), `iat`, `exp`, `nonce` (equal ' +
-      'to current `c_nonce`), and `cnf.jwk` (the wallet\'s public key the ' +
-      'credential will be bound to).',
+      'A wallet-signed JWT (or similar) that proves the wallet controls ' +
+      'the private key the issued credential will be bound to. Sent on ' +
+      'the credential request. Per OID4VCI 1.0 Appendix F.1 (jwt proof ' +
+      'type): JWT MUST contain header `typ=openid4vci-proof+jwt` and the ' +
+      'wallet\'s public key in the JWS header as `jwk`, `kid`, or `x5c`. ' +
+      'Payload MUST contain `aud` (credential issuer identifier), `iat`, ' +
+      'and `nonce` (equal to current `c_nonce`); `iss` is REQUIRED only ' +
+      'when the wallet is a registered OAuth client. The issuer copies ' +
+      'the proof key into the issued credential as `cnf` (RFC 7800).',
     attacks: [
       {
         id: 'credential-lift-and-replay',
@@ -284,8 +299,10 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         action:
-          'Issuer MUST verify the proof JWT signature against the embedded ' +
-          '`cnf.jwk` and bind that key into the issued credential.',
+          'Issuer MUST verify the proof JWT signature against the key in ' +
+          'the JWS header (`jwk` / `kid` / `x5c`), then copy that key into ' +
+          'the issued credential as the `cnf` claim (RFC 7800) so ' +
+          'verifiers can later check holder binding.',
         mitigates: ['credential-lift-and-replay'],
       },
       {
@@ -503,11 +520,15 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
 
   format: {
     purpose:
-      'Identifies the credential format being issued or presented. Common ' +
-      'values: `dc+sd-jwt` (SD-JWT-VC, selective disclosure JWT), ' +
-      '`jwt_vc_json` (JWT-encoded W3C VC), `jwt_vc_json-ld` (JWT-encoded ' +
-      'JSON-LD VC), `ldp_vc` (Linked Data Proofs VC), `mso_mdoc` ' +
-      '(ISO 18013-5 mobile drivers license).',
+      'Identifies a credential format. In OID4VCI 1.0 it appears inside ' +
+      'each Credential Configuration in the issuer\'s metadata (Appendix ' +
+      'A) — wallets reference a configuration via ' +
+      '`credential_configuration_id` rather than passing `format` ' +
+      'directly on the credential request. Common values: `dc+sd-jwt` ' +
+      '(SD-JWT-VC, selective disclosure JWT), `jwt_vc_json` (JWT-encoded ' +
+      'W3C VC), `jwt_vc_json-ld` (JWT-encoded JSON-LD VC), `ldp_vc` ' +
+      '(Linked Data Proofs VC), `mso_mdoc` (ISO 18013-5 mobile drivers ' +
+      'license).',
     attacks: [
       {
         id: 'format-confusion-bypass',
@@ -544,8 +565,12 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OID4VCI 1.0 §11.4 (Credential Format Considerations)',
-        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html',
+        label: 'OID4VCI 1.0 Appendix A (Credential Format Profiles)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-credential-format-profiles',
+      },
+      {
+        label: 'OID4VCI 1.0 §13 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html#name-security-considerations',
       },
     ],
   },

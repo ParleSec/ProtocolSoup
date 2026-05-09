@@ -23,15 +23,14 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         id: 'multi-uri-san-smuggling',
         name: 'Multi-URI-SAN smuggling',
         scenario:
-          'A certificate may technically have multiple URI SANs; SPIFFE ' +
-          'spec says exactly one MUST be a SPIFFE ID, but lax parsers ' +
-          'accept the first match anywhere. Mallory obtains a legitimate ' +
-          'certificate for some innocuous workload, but at issuance she ' +
-          'gets the CA to include both her real SPIFFE ID and a higher-' +
-          'privilege one she wants to impersonate (CA hardening prevents ' +
-          'this in SPIRE itself, but bridge implementations and home-grown ' +
-          'CAs are looser). The verifier reads "the first URI SAN" and ' +
-          'gets her chosen target.',
+          'X.509-SVID §2 says an SVID MUST contain exactly one URI SAN, ' +
+          'and §5.2 mandates verifiers reject any cert with more than one. ' +
+          'Lax verifiers — typically bridge implementations or home-grown ' +
+          'CAs that treat URI SAN as just another SAN — read the first ' +
+          'URI SAN they find. Mallory persuades such a CA to issue a cert ' +
+          'with both her own SPIFFE ID and a higher-privilege impersonation ' +
+          'target. A verifier that reads "the first URI SAN" picks ' +
+          'whichever the CA emitted first.',
         impact:
           'Identity confusion → unauthorized service-to-service access.',
       },
@@ -49,8 +48,10 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Reject certificates with more than one SPIFFE-shaped URI SAN. ' +
-          'SPIFFE spec MANDATES exactly one URI SAN must be a SPIFFE ID.',
+          'Reject any certificate with more than one URI SAN, period. ' +
+          'X.509-SVID §5.2 (Leaf Validation) is explicit: an SVID MUST ' +
+          'contain exactly one URI SAN; verifiers MUST reject if more ' +
+          'than one is present.',
         mitigates: ['multi-uri-san-smuggling'],
       },
       {
@@ -72,12 +73,12 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md',
       },
       {
-        label: 'SPIFFE X.509-SVID §2 (URI SAN)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md',
+        label: 'SPIFFE X.509-SVID §2 (SPIFFE ID)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#2-spiffe-id',
       },
       {
-        label: 'SPIFFE X.509-SVID §4 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#4-security-considerations',
+        label: 'SPIFFE X.509-SVID §5.2 (Leaf Validation)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#52-leaf-validation',
       },
     ],
   },
@@ -131,8 +132,8 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md',
       },
       {
-        label: 'SPIFFE Trust Domain and Bundle §5 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#5-security-considerations',
+        label: 'SPIFFE Trust Domain and Bundle §6 (Security Considerations)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#6-security-considerations',
       },
     ],
   },
@@ -228,8 +229,8 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://github.com/spiffe/spire/tree/main/pkg/agent/plugin/workloadattestor',
       },
       {
-        label: 'SPIFFE Workload API §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations',
+        label: 'SPIFFE Workload API §4.1 (Identifying the Caller)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#41-identifying-the-caller',
       },
     ],
   },
@@ -278,10 +279,6 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         label: 'SPIRE Registering Workloads — parent_id',
         href: 'https://spiffe.io/docs/latest/deploying/registering/',
       },
-      {
-        label: 'SPIFFE Workload API §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations',
-      },
     ],
   },
 
@@ -328,12 +325,12 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SPIFFE X.509-SVID §3 (Issuance)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md',
+        label: 'SPIFFE X.509-SVID §3 (Hierarchy)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#3-hierarchy',
       },
       {
-        label: 'SPIFFE X.509-SVID §4 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#4-security-considerations',
+        label: 'SPIFFE X.509-SVID §5 (Validation)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#5-validation',
       },
     ],
   },
@@ -341,22 +338,23 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
   uri_san: {
     purpose:
       'The URI Subject Alternative Name in an X.509-SVID where the SPIFFE ' +
-      'ID is encoded. SPIFFE spec: exactly ONE URI SAN MUST be a valid ' +
-      'SPIFFE ID; certs MAY have other (non-SPIFFE) URI SANs but the ' +
-      'verifier MUST identify the SPIFFE one as the authoritative identity.',
+      'ID is encoded. X.509-SVID §2 mandates that an SVID MUST contain ' +
+      'exactly one URI SAN, and that URI SAN MUST be the SPIFFE ID. ' +
+      '§5.2 (Leaf Validation) requires verifiers to reject any cert with ' +
+      'more than one URI SAN.',
     attacks: [
       {
         id: 'multi-uri-san-attack',
         name: 'Multi-URI-SAN attack',
         scenario:
           'A misbehaving CA (or a SPIRE clone bridging to legacy PKI) ' +
-          'issues a cert with two URI SANs: ' +
+          'issues a cert with two URI SANs in violation of X.509-SVID §2: ' +
           '`spiffe://domain/innocent-service` (the legitimate one Mallory ' +
           'is registered for) and `spiffe://domain/admin-service` (her ' +
-          'target). A naive verifier that iterates URI SANs and stops at ' +
-          'the first SPIFFE-shaped match returns whichever comes first — ' +
-          'and Mallory crafts the cert order to put the privileged ID ' +
-          'first.',
+          'target). A non-conforming verifier that iterates URI SANs and ' +
+          'returns the first one — instead of rejecting the cert outright ' +
+          'as §5.2 requires — picks whichever the CA emitted first, and ' +
+          'Mallory crafts the cert order to put the privileged ID first.',
         impact:
           'Identity confusion in the verifier.',
       },
@@ -364,25 +362,27 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Count SPIFFE-shaped URI SANs; reject certs with more than one.',
+          'Reject any cert with more than one URI SAN, per X.509-SVID §5.2 ' +
+          'Leaf Validation. Do not "pick the first SPIFFE-shaped one" — ' +
+          'the spec forbids that path entirely.',
         mitigates: ['multi-uri-san-attack'],
       },
       {
         action:
           'Use SPIFFE\'s reference parsing libraries (go-spiffe, ' +
-          'spiffe-rs) which enforce the single-SPIFFE-SAN rule. Do NOT ' +
-          'hand-roll certificate-to-SPIFFE-ID parsing.',
+          'spiffe-rs) which enforce the §5.2 rule. Do NOT hand-roll ' +
+          'certificate-to-SPIFFE-ID parsing.',
         mitigates: ['multi-uri-san-attack'],
       },
     ],
     references: [
       {
-        label: 'SPIFFE X.509-SVID §2 (URI SAN constraints)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md',
+        label: 'SPIFFE X.509-SVID §2 (SPIFFE ID)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#2-spiffe-id',
       },
       {
-        label: 'SPIFFE X.509-SVID §4 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#4-security-considerations',
+        label: 'SPIFFE X.509-SVID §5.2 (Leaf Validation)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#52-leaf-validation',
       },
     ],
   },
@@ -446,12 +446,12 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SPIFFE Trust Domain and Bundle §4',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md',
+        label: 'SPIFFE Trust Domain and Bundle §4 (Bundle Format)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#4-spiffe-bundle-format',
       },
       {
-        label: 'SPIFFE Trust Domain and Bundle §5 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#5-security-considerations',
+        label: 'SPIFFE Trust Domain and Bundle §6 (Security Considerations)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#6-security-considerations',
       },
     ],
   },
@@ -517,8 +517,8 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md',
       },
       {
-        label: 'SPIFFE Federation §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#6-security-considerations',
+        label: 'SPIFFE Federation §7 (Security Considerations)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#7-security-considerations',
       },
     ],
   },
@@ -576,12 +576,12 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SPIFFE Federation §5 (Bundle Endpoint Distribution)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md',
+        label: 'SPIFFE Federation §5 (Serving and Consuming a SPIFFE Bundle Endpoint)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#5-serving-and-consuming-a-spiffe-bundle-endpoint',
       },
       {
-        label: 'SPIFFE Federation §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#6-security-considerations',
+        label: 'SPIFFE Federation §7 (Security Considerations)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#7-security-considerations',
       },
     ],
   },
@@ -636,11 +636,11 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     references: [
       {
         label: 'SPIFFE Federation §5.2 (Endpoint Profiles)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#52-endpoint-profiles',
       },
       {
-        label: 'SPIFFE Federation §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#6-security-considerations',
+        label: 'SPIFFE Federation §7 (Security Considerations)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#7-security-considerations',
       },
     ],
   },
@@ -723,10 +723,6 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         label: 'SPIRE Node Attestation',
         href: 'https://spiffe.io/docs/latest/deploying/configuring/',
       },
-      {
-        label: 'SPIFFE Workload API §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations',
-      },
     ],
   },
 
@@ -779,10 +775,6 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         label: 'SPIRE Server — Join Token attestor',
         href: 'https://github.com/spiffe/spire/blob/main/doc/plugin_server_nodeattestor_jointoken.md',
-      },
-      {
-        label: 'SPIFFE Workload API §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations',
       },
     ],
   },
@@ -846,12 +838,12 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SPIFFE JWT-SVID §3 (audience claim)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md',
+        label: 'SPIFFE JWT-SVID §3.2 (Audience)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#32-audience',
       },
       {
-        label: 'SPIFFE JWT-SVID §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#6-security-considerations',
+        label: 'SPIFFE JWT-SVID §7.2 (Audience — replay protection)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/JWT-SVID.md#72-audience',
       },
     ],
   },
@@ -910,10 +902,6 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
         label: 'SPIRE Concepts — Agent SVID lifecycle',
         href: 'https://spiffe.io/docs/latest/spire-about/spire-concepts/',
       },
-      {
-        label: 'SPIFFE Workload API §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations',
-      },
     ],
   },
 
@@ -946,8 +934,10 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Agent MUST re-attest on every Workload API call — do not cache ' +
-          'the attestation across calls.',
+          'Re-attest on every Workload API call — do not cache attestation ' +
+          'across calls. SPIRE Agent does this by default; the spec ' +
+          'delegates attestation specifics to implementations, so this is ' +
+          'an implementation requirement rather than a spec MUST.',
         mitigates: ['pid-reuse-race'],
       },
       {
@@ -965,12 +955,199 @@ export const SPIFFE_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SPIFFE Workload API §3 (Process Identity Verification)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md',
+        label: 'SPIFFE Workload API §3 (Service Definition)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#3-service-definition',
       },
       {
-        label: 'SPIFFE Workload API §6 (Security Considerations)',
-        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#6-security-considerations',
+        label: 'SPIFFE Workload API §4.1 (Identifying the Caller)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Workload_API.md#41-identifying-the-caller',
+      },
+    ],
+  },
+
+  'spiffe:format': {
+    purpose:
+      'Wire format of a federated trust-bundle endpoint response — a JWKS ' +
+      '(RFC 7517) document where each entry with `use=x509-svid` carries ' +
+      'an `x5c` parameter holding exactly one base64-DER CA certificate ' +
+      '(SHOULD be self-signed, per X.509-SVID §6.1). The local SPIRE ' +
+      'Server unions these certificates to form the foreign trust ' +
+      'domain\'s X.509 CA bundle.',
+    attacks: [
+      {
+        id: 'rogue-x5c-injection',
+        name: 'Rogue CA injection via attacker-controlled `x5c`',
+        scenario:
+          'The bundle endpoint is reached without proper TLS validation ' +
+          '(missing `endpoint_spiffe_id` check on `https_spiffe`, or wrong ' +
+          'CA pinning on `https_web`). Mallory MITMs the response and ' +
+          'replaces the `x5c` chain with her own CA. The local SPIRE Server ' +
+          'imports the rogue CA into the federated bundle, after which any ' +
+          'workload presenting an SVID signed by Mallory\'s CA is treated ' +
+          'as a legitimate member of the foreign trust domain.',
+        impact:
+          'Attacker mints arbitrary identities in any federated trust ' +
+          'domain — full cross-domain workload impersonation.',
+      },
+      {
+        id: 'jwks-format-drift',
+        name: 'Format-drift attacks (non-conformant JWKS body)',
+        scenario:
+          'X.509-SVID §6.2 requires consumers to ignore any `use=x509-svid` ' +
+          'JWK entry whose `x5c` is missing or empty, and to take only the ' +
+          'first value when multiple are present. A misconfigured (or ' +
+          'compromised) endpoint can serve `use=x509-svid` entries with no ' +
+          '`x5c`, or PEM, or an empty `keys: []`. A consumer that skips ' +
+          'this filtering and just takes whatever it parsed either fails ' +
+          'open (clears the X509-SVID trust bundle, then accepts ' +
+          'anything) or silently retains the previous bundle indefinitely ' +
+          'past `spiffe_refresh_hint`.',
+        impact:
+          'Either no trust enforcement (fail-open) or stale trust ' +
+          'anchors that survive intentional revocation.',
+      },
+    ],
+    mitigations: [
+      {
+        action:
+          'Validate the bundle endpoint TLS chain *before* parsing the ' +
+          'body. For `https_spiffe`, require the endpoint\'s SPIFFE ID to ' +
+          'match the configured `endpoint_spiffe_id`. For `https_web`, pin ' +
+          'the Web-PKI CA used to authenticate the bundle URL.',
+        mitigates: ['rogue-x5c-injection'],
+      },
+      {
+        action:
+          'Strictly parse JWKS: require `Content-Type: application/json`, ' +
+          'reject responses without a non-empty `keys[]` containing ' +
+          '`x5c` chains, and validate each chain up to a known root before ' +
+          'trusting it.',
+        mitigates: ['rogue-x5c-injection', 'jwks-format-drift'],
+      },
+      {
+        action:
+          'On bundle-fetch failure or schema mismatch, retain the last-' +
+          'known-good bundle and alert — do not clear trust anchors. The ' +
+          'spec recommends caching and retrying at the next interval. ' +
+          'Honour `spiffe_refresh_hint` (Trust Domain §4.1.2) for cache ' +
+          'lifetime, and cap maximum age locally so stale bundles cannot ' +
+          'persist forever — the cap is operational hardening, not a ' +
+          'spec requirement.',
+        mitigates: ['jwks-format-drift'],
+      },
+    ],
+    references: [
+      {
+        label: 'SPIFFE Trust Domain and Bundle §4 (Bundle Format)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Trust_Domain_and_Bundle.md#4-spiffe-bundle-format',
+      },
+      {
+        label: 'SPIFFE Federation §5.2 (Endpoint Profiles)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE_Federation.md#52-endpoint-profiles',
+      },
+      {
+        label: 'SPIFFE X.509-SVID §6.1 (Publishing SPIFFE Bundle Elements)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#61-publishing-spiffe-bundle-elements',
+      },
+      {
+        label: 'SPIFFE X.509-SVID §6.2 (Consuming a SPIFFE Bundle)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#62-consuming-a-spiffe-bundle',
+      },
+      {
+        label: 'RFC 7517 (JSON Web Key)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7517',
+      },
+    ],
+  },
+
+  'spiffe:issuer': {
+    purpose:
+      'The signing CA that issued an X.509-SVID — typically SPIRE\'s ' +
+      'intermediate CA chained under the trust-domain root. The verifier ' +
+      'uses this together with the trust bundle to decide whether the ' +
+      'presented SVID is a legitimate member of the trust domain.',
+    attacks: [
+      {
+        id: 'intermediate-ca-compromise',
+        name: 'Signing-CA compromise mints arbitrary SVIDs',
+        scenario:
+          'SPIRE Server is configured with the `disk` KeyManager (one of ' +
+          'the default options) so the intermediate CA\'s private key sits ' +
+          'in a file on the host, and the operator has overridden the ' +
+          'default 24h CA TTL to a longer period for "stability." A host ' +
+          'compromise (admin credential leak, container escape, backup ' +
+          'exfiltration) hands Mallory the signing key. She mints SVIDs ' +
+          'for `spiffe://trust-domain/admin/anything` offline, and any ' +
+          'verifier validating chain-to-trust-bundle accepts them as ' +
+          'legitimate.',
+        impact:
+          'Trust-domain-wide impersonation. Until the intermediate is ' +
+          'rotated and the old key removed from the trust bundle, every ' +
+          'workload in the domain is impersonable.',
+      },
+      {
+        id: 'chain-validation-skipped',
+        name: 'Verifier accepts SVID without validating issuer chain',
+        scenario:
+          'Verifier code extracts the SPIFFE ID from the SVID\'s URI SAN ' +
+          'and authorises on that, but does not validate the X.509 chain ' +
+          'up to a CA in the trust bundle. Attacker presents a self-signed ' +
+          'cert, or a cert signed by an unrelated CA, with a URI SAN of ' +
+          'the target SPIFFE ID. Verifier honours the identity.',
+        impact:
+          'No cryptographic binding between identity claim and trust ' +
+          'domain — anyone can claim any SPIFFE ID.',
+      },
+    ],
+    mitigations: [
+      {
+        action:
+          'Hold the signing key in a managed key store via SPIRE\'s ' +
+          'KeyManager plugin: `aws_kms`, `gcp_kms`, or `azure_key_vault` ' +
+          '(rather than the `disk` or `memory` defaults). Separately, ' +
+          'consider chaining SPIRE\'s CA under an external root via the ' +
+          'UpstreamAuthority plugin (`vault`, `awspca`, `cert-manager`). ' +
+          'Keep CA TTL at or below SPIRE\'s 24h default and monitor for ' +
+          'SVID-issuance anomalies (unexpected SPIFFE IDs, off-hours ' +
+          'minting).',
+        rationale:
+          'KeyManager controls *where the private key lives*; ' +
+          'UpstreamAuthority controls *what root signs SPIRE\'s ' +
+          'intermediate*. Conflating them is a common configuration error.',
+        mitigates: ['intermediate-ca-compromise'],
+      },
+      {
+        action:
+          'Verifiers MUST validate the full X.509 chain from the SVID up ' +
+          'to a CA present in the local or federated trust bundle BEFORE ' +
+          'authorising on the URI SAN. Reject any SVID whose chain does ' +
+          'not terminate at a trusted root.',
+        mitigates: ['chain-validation-skipped', 'intermediate-ca-compromise'],
+      },
+      {
+        action:
+          'Keep SVID lifetimes short (default `default_x509_svid_ttl=1h` ' +
+          'in SPIRE) so a compromised intermediate has a bounded blast ' +
+          'radius after rotation — old SVIDs naturally expire.',
+        mitigates: ['intermediate-ca-compromise'],
+      },
+    ],
+    references: [
+      {
+        label: 'SPIFFE X.509-SVID §5 (Validation)',
+        href: 'https://github.com/spiffe/spiffe/blob/main/standards/X509-SVID.md#5-validation',
+      },
+      {
+        label: 'SPIRE KeyManager — AWS KMS plugin',
+        href: 'https://github.com/spiffe/spire/blob/main/doc/plugin_server_keymanager_aws_kms.md',
+      },
+      {
+        label: 'SPIRE UpstreamAuthority configuration',
+        href: 'https://spiffe.io/docs/latest/deploying/configuring/#configuring-which-trust-root--upstream-authority-your-application-will-use',
+      },
+      {
+        label: 'RFC 5280 §6 (Certification Path Validation)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc5280#section-6',
       },
     ],
   },

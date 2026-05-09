@@ -234,8 +234,10 @@ export const OID4VP_EXPLAINERS: Record<string, ParameterExplainer> = {
       'Tells the wallet how to deliver the authorization response. ' +
       '`direct_post` POSTs `vp_token` + `state` as form parameters to ' +
       '`response_uri`. `direct_post.jwt` POSTs an encrypted JWE wrapping a ' +
-      'signed inner JWT. Legacy `query` and `fragment` modes return the ' +
-      'response in the redirect URL.',
+      'signed inner JWT. `dc_api` / `dc_api.jwt` (added in OID4VP 1.0 ' +
+      'final) deliver the response via the W3C Digital Credentials browser ' +
+      'API instead of an HTTP POST. Legacy `query` and `fragment` modes ' +
+      'return the response in the redirect URL.',
     attacks: [
       {
         id: 'fragment-leak-response-mode',

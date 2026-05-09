@@ -74,8 +74,11 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         action:
           'Apply standard JWT validation: pin allowed `alg` from ' +
-          'Transmitter metadata; verify signature; validate `iss`, `aud`, ' +
-          'and `iat`/exp.',
+          'Transmitter metadata; verify signature; validate `iss` (REQUIRED ' +
+          'per RFC 8417 §2.2), `aud` (RECOMMENDED), and apply a freshness ' +
+          'window on `iat`. Note: SETs do not carry an `exp` claim per ' +
+          '§2.2 — they are point-in-time event reports, not bearer ' +
+          'credentials with a validity window.',
         mitigates: [
           'set-jwt-validation-pitfalls',
           'set-token-type-confusion',
@@ -248,10 +251,6 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         label: 'OpenID CAEP §4 (Security Considerations)',
         href: 'https://openid.net/specs/openid-caep-1_0-final.html',
-      },
-      {
-        label: 'OpenID RISC §4 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-risc-1_0.html',
       },
     ],
   },
@@ -455,12 +454,12 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'OpenID SSF §7 (Stream Management)',
-        href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html',
+        label: 'OpenID SSF §8 (Event Stream Management)',
+        href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html',
       },
       {
-        label: 'OpenID SSF §11 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html',
+        label: 'OpenID SSF §9 (Security Considerations)',
+        href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html',
       },
     ],
   },
@@ -539,8 +538,8 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc9493',
       },
       {
-        label: 'RFC 9493 §6 (Security Considerations)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc9493#section-6',
+        label: 'RFC 9493 §7 (Security Considerations)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc9493#section-7',
       },
     ],
   },
@@ -571,8 +570,9 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     mitigations: [
       {
         action:
-          'Transmitter MUST include `initiating_entity` on every CAEP ' +
-          'event.',
+          'Transmitter SHOULD include `initiating_entity` on every CAEP ' +
+          'event. CAEP §2 lists it as an OPTIONAL claim, so this is ' +
+          'deployment policy rather than a spec MUST.',
         mitigates: ['initiating-entity-audit-trail-confusion'],
       },
       {
@@ -652,11 +652,7 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
     references: [
       {
         label: 'OpenID RISC Profile §2.3 (account-disabled)',
-        href: 'https://openid.net/specs/openid-risc-1_0.html',
-      },
-      {
-        label: 'OpenID RISC §4 (Security Considerations)',
-        href: 'https://openid.net/specs/openid-risc-1_0.html',
+        href: 'https://openid.net/specs/openid-risc-1_0.html#section-2.3',
       },
     ],
   },
@@ -680,9 +676,9 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
           'method, the suspected attacker\'s IP, and internal ticket ID. ' +
           'All of that lands in the SaaS\'s logs, accessible to the SaaS\'s ' +
           'support staff and any subprocessor of the SaaS\'s logging ' +
-          'pipeline. RISC §2.7 explicitly warns: "Do NOT include actual ' +
-          'compromised credential values in the SET" — but the broader ' +
-          'principle (don\'t leak detection details) is often missed.',
+          'pipeline. The OpenID specs do not give explicit text on what ' +
+          'belongs in `reason_admin`; treating it as cross-organisation ' +
+          'data sharing is operational hygiene, not a spec mandate.',
         impact:
           'Privacy and operational-information leakage outside the ' +
           'organisation.',
@@ -716,7 +712,7 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
       {
-        label: 'OpenID CAEP §4 (Security Considerations) / RISC §2.7 Privacy Warning',
+        label: 'OpenID CAEP §4 (Security Considerations)',
         href: 'https://openid.net/specs/openid-caep-1_0-final.html',
       },
     ],
@@ -781,10 +777,11 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
   change_type: {
     purpose:
       'CAEP `credential-change` event property: `create` (new credential ' +
-      'added), `revoke` (credential removed), or `update` (credential ' +
-      'modified, e.g. password reset). Drives the Receiver\'s response — ' +
-      '`revoke` triggers token invalidation; `create` may be ' +
-      'informational; `update` requires nuanced response.',
+      'added), `revoke` (credential removed), `update` (credential ' +
+      'modified, e.g. password reset), or `delete` (credential record ' +
+      'removed). Drives the Receiver\'s response — `revoke`/`delete` ' +
+      'trigger token invalidation; `create` may be informational; ' +
+      '`update` requires nuanced response.',
     attacks: [
       {
         id: 'change-type-revoke-as-create',
@@ -845,6 +842,105 @@ export const SSF_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         label: 'OpenID CAEP §4 (Security Considerations)',
         href: 'https://openid.net/specs/openid-caep-1_0-final.html',
+      },
+    ],
+  },
+
+  'ssf:scope': {
+    purpose:
+      'Breadth of session/token termination a Receiver applies in response ' +
+      'to a SET. The OpenID RISC profile defines the events but leaves ' +
+      'Receiver response behaviour to the deployment — it does not ' +
+      'mandate "all sessions, all devices, all tokens." Defence-in-depth ' +
+      'practice for high-severity events (credential-compromise, account-' +
+      'disabled) is to revoke comprehensively; anything narrower lets the ' +
+      'attacker survive the event through a path the Receiver forgot to cut.',
+    attacks: [
+      {
+        id: 'partial-revocation-residual-access',
+        name: 'Residual access through forgotten revocation paths',
+        scenario:
+          'IdP fires credential-compromise for Alice. Receiver terminates ' +
+          'browser sessions and access tokens but does NOT revoke: refresh ' +
+          'tokens (Mallory mints fresh access tokens for hours), API keys ' +
+          '(Mallory keeps using them), downstream service sessions ' +
+          '(Mallory remains signed-in to federated SPs), mobile-app long-' +
+          'lived tokens, or cached introspection results (RS still trusts ' +
+          'the old token until cache expires). Same class as the ' +
+          'SCIM `active=false` session-lag attack but triggered out-of-band ' +
+          'via SET delivery.',
+        impact:
+          'Compromise event is fired, audit logs show "handled", but the ' +
+          'attacker retains usable credentials through every revocation ' +
+          'path the Receiver did not enumerate.',
+      },
+      {
+        id: 'forged-set-mass-disruption',
+        name: 'Forged SET triggers mass session termination (DoS)',
+        scenario:
+          'Receiver accepts SETs without strict signature validation ' +
+          'against the Transmitter\'s pinned JWKS, or trusts SETs from any ' +
+          'issuer in its config. An attacker who can submit a SET (compromised ' +
+          'intermediate, lax `aud`/`iss` checks, replayed `jti`) fires ' +
+          'credential-compromise events for arbitrary subjects. The ' +
+          'Receiver dutifully terminates every session for those users.',
+        impact:
+          'Targeted denial-of-service: legitimate users repeatedly logged ' +
+          'out, sessions killed mid-transaction, user trust in the platform ' +
+          'eroded. At scale: a tool for mass logout of an organisation.',
+      },
+    ],
+    mitigations: [
+      {
+        action:
+          'Enumerate every credential surface the Receiver controls and ' +
+          'cut all of them on credential-compromise: browser sessions, ' +
+          'refresh tokens, API keys, mobile/long-lived tokens, downstream ' +
+          'federated sessions, cached introspection results, in-flight ' +
+          'API requests bearing the affected token. Document the list and ' +
+          'review it whenever a new credential surface is added.',
+        rationale:
+          'The "forgotten path" is always added later by some other team. ' +
+          'A documented, auditable list is the only defence against drift.',
+        mitigates: ['partial-revocation-residual-access'],
+      },
+      {
+        action:
+          'For high-impact RISC events (credential-compromise, account-' +
+          'disabled), require strict SET validation. Spec-mandated by ' +
+          'RFC 8417 §2.2: signature on the JWS by a trusted issuer, `iss` ' +
+          'present and recognised. Receiver hardening beyond spec: exact ' +
+          '`aud` match (RECOMMENDED in §2.2, not REQUIRED), `jti` replay-' +
+          'tracking (§2.2 says "MAY"), freshness window on `iat` (not in ' +
+          'the spec). Reject on any failure; do not fail open.',
+        mitigates: ['forged-set-mass-disruption'],
+      },
+      {
+        action:
+          'Rate-limit and monitor mass-termination events. A spike in ' +
+          'credential-compromise SETs from one Transmitter, especially ' +
+          'across many users in a short window, is a forged-SET DoS ' +
+          'pattern even if individual signatures validate. Operational ' +
+          'guidance, not a spec requirement.',
+        mitigates: ['forged-set-mass-disruption'],
+      },
+    ],
+    references: [
+      {
+        label: 'OpenID RISC Profile §2.7 (Credential Compromise)',
+        href: 'https://openid.net/specs/openid-risc-1_0.html#section-2.7',
+      },
+      {
+        label: 'RFC 8417 §2.2 (SET Claims)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc8417#section-2.2',
+      },
+      {
+        label: 'RFC 8417 §5 (Security Considerations)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc8417#section-5',
+      },
+      {
+        label: 'RFC 8935 §3 (Authentication and Authorization)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc8935#section-3',
       },
     ],
   },

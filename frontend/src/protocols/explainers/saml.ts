@@ -196,11 +196,13 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
 
   RelayState: {
     purpose:
-      'Opaque value (max 80 bytes) carried alongside SAMLRequest / ' +
-      'SAMLResponse to preserve SP application state across the SSO round ' +
-      'trip. Common uses: original target URL the user wanted before being ' +
-      'redirected to login, session correlation tokens, simple deep-link ' +
-      'parameters.',
+      'Opaque value carried alongside SAMLRequest / SAMLResponse to ' +
+      'preserve SP application state across the SSO round trip. The 80-' +
+      'byte cap applies only when carried over the HTTP-Redirect (Bindings ' +
+      '§3.4.3) or HTTP-POST (§3.5.3) bindings; other transport bindings do ' +
+      'not impose the same limit. Common uses: the original target URL the ' +
+      'user wanted before being redirected to login, session correlation ' +
+      'tokens, simple deep-link parameters.',
     attacks: [
       {
         id: 'relaystate-open-redirect',
@@ -248,6 +250,10 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         label: 'Snyk — Common SAML vulnerabilities',
         href: 'https://snyk.io/blog/common-saml-vulnerabilities-remediate/',
+      },
+      {
+        label: 'SAML 2.0 Bindings §3.4.3 / §3.5.3 (RelayState in Redirect / POST)',
+        href: 'https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf',
       },
       {
         label: 'SAML 2.0 Security and Privacy Considerations §7 (Profile-Specific Threats / Bindings)',
@@ -515,7 +521,7 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations',
       },
       {
-        label: 'SAML 2.0 Core §2.2 (NameIDType)',
+        label: 'SAML 2.0 Core §2.2.3 (NameIDType)',
         href: 'http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf',
       },
       {
@@ -579,7 +585,7 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SAML 2.0 Core §2.5 (Conditions)',
+        label: 'SAML 2.0 Core §2.5.1 (Conditions)',
         href: 'http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf',
       },
       {
@@ -692,7 +698,7 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'http://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf',
       },
       {
-        label: 'SAML 2.0 Profiles §4.1.4.5 (POST Binding Validation)',
+        label: 'SAML 2.0 Profiles §4.1.4.3 (POST-Specific Processing Rules)',
         href: 'http://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf',
       },
       {
@@ -706,10 +712,13 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
     purpose:
       'The URL at which the SP receives SAML Responses. Sent on the ' +
       'AuthnRequest by the SP and pre-registered in the SP\'s metadata. ' +
-      'The IdP MUST validate it matches a registered ACS URL before ' +
-      'sending the Response. SAML\'s analogue of OAuth\'s `redirect_uri` ' +
-      '— the same exact-match story, same attack class when matching is ' +
-      'loose.',
+      'Per Core §3.4.1, the SP can identify its ACS by either the URL ' +
+      'value (`AssertionConsumerServiceURL`) or by index ' +
+      '(`AssertionConsumerServiceIndex`) into the registered ACS list. ' +
+      'The IdP MUST validate the value/index resolves to a registered ACS ' +
+      'before sending the Response. SAML\'s analogue of OAuth\'s ' +
+      '`redirect_uri` — the same exact-match story, same attack class when ' +
+      'matching is loose.',
     attacks: [
       {
         id: 'response-redirection-via-acs',
@@ -821,7 +830,7 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SAML 2.0 Metadata §2.3 (entityID)',
+        label: 'SAML 2.0 Metadata §2.3.2.1 (EntityDescriptor — entityID, max 1024 chars)',
         href: 'http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf',
       },
       {
@@ -885,7 +894,7 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
     references: [
       {
-        label: 'SAML 2.0 Metadata §2.4.2 (WantAssertionsSigned)',
+        label: 'SAML 2.0 Metadata §2.4.4 (SPSSODescriptor — WantAssertionsSigned)',
         href: 'http://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf',
       },
       {
@@ -905,7 +914,10 @@ export const SAML_EXPLAINERS: Record<string, ParameterExplainer> = {
       'the IdP should use in the resulting Assertion. Common values: ' +
       '`urn:oasis:names:tc:SAML:2.0:nameid-format:persistent` (stable ' +
       'pseudonym per SP), `transient` (single-session pseudonym), ' +
-      '`emailAddress`, `unspecified`.',
+      '`emailAddress`, `unspecified`. The `AllowCreate` attribute (Core ' +
+      '§3.4.1.1, default `false`) governs whether the IdP may create a new ' +
+      'identifier for this user/format pair if one does not already exist; ' +
+      'SPs that need just-in-time provisioning must set it to `true`.',
     attacks: [
       {
         id: 'nameidpolicy-cross-tenant-confusion',

@@ -122,8 +122,8 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-3.1.2',
       },
       {
-        label: 'RFC 9700 §4.1 (Insufficient redirect_uri Validation)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.1',
+        label: 'RFC 9700 §4.1.3 (Countermeasures — redirect URI exact-match)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.1.3',
       },
     ],
   },
@@ -420,8 +420,9 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         action:
-          'OAuth 2.1 removes the implicit grant entirely; RFC 9700 §2.1.2 ' +
-          'says implicit MUST NOT be used.',
+          'OAuth 2.1 removes the implicit grant entirely. RFC 9700 §2.1.2 ' +
+          'says implicit SHOULD NOT be used (carve-out only when access-' +
+          'token injection cannot otherwise be prevented).',
         mitigates: ['implicit-fragment-leak'],
       },
     ],
@@ -663,7 +664,11 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc6750#section-5',
       },
       {
-        label: 'RFC 9700 §4.3 (Token Leakage)',
+        label: 'RFC 9700 §4.2 (Credential Leakage via Referer Headers)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.2',
+      },
+      {
+        label: 'RFC 9700 §4.3 (Credential Leakage via Browser History)',
         href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.3',
       },
       {
@@ -696,7 +701,7 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         id: 'audience-injection',
-        name: 'Audience injection (RFC 9700 §4.10)',
+        name: 'Audience injection',
         scenario:
           'In a deployment with multiple ASes, a malicious AS coerces ' +
           'clients into sending tokens with attacker-chosen audience ' +
@@ -732,7 +737,7 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc8707',
       },
       {
-        label: 'RFC 9700 §4.10 (Audience Injection)',
+        label: 'RFC 9700 §4.10 (Misuse of Stolen Access Tokens — sender-constraining and audience-restricting)',
         href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.10',
       },
     ],
@@ -796,6 +801,132 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
     ],
   },
 
+  active: {
+    purpose:
+      'Boolean field in a Token Introspection response (RFC 7662 §2.2). ' +
+      '`true` means the token is currently valid at the AS — not expired, ' +
+      'not revoked, and within any other AS-imposed constraints. Any other ' +
+      'value (including a missing `active`) MUST be treated as inactive. ' +
+      'It is the only REQUIRED member of the introspection response and is ' +
+      'the field a Resource Server keys its accept/reject decision on.',
+    attacks: [
+      {
+        id: 'introspection-result-caching',
+        name: 'Stale `active=true` after revocation',
+        scenario:
+          'The RS introspects Alice\'s token at 10:00, gets `active=true`, ' +
+          'and caches the result for 10 minutes to keep latency down. At ' +
+          '10:02 Alice\'s token is revoked at the AS (logout, password ' +
+          'reset, incident response). Mallory, who captured the token ' +
+          'earlier, keeps using it against the RS until 10:10 because the ' +
+          'cached introspection result still says active.',
+        impact:
+          'Revocation has no effect for the duration of the cache window — ' +
+          'logout and incident-response controls become advisory.',
+      },
+      {
+        id: 'missing-active-check',
+        name: 'RS treats HTTP 200 as token-valid',
+        scenario:
+          'The RS code reads the introspection response body but only ' +
+          'checks `response.ok` / HTTP 200. The AS correctly returns ' +
+          '`{"active": false}` with status 200 for an expired or revoked ' +
+          'token (RFC 7662 §2.2 — `active=false` is not an error). The RS ' +
+          'proceeds as if the token were valid.',
+        impact:
+          'Expired and revoked tokens are honoured indefinitely; ' +
+          'introspection silently fails open.',
+      },
+      {
+        id: 'introspection-response-spoofing',
+        name: 'Forged introspection response',
+        scenario:
+          'The RS reaches the introspection endpoint over plaintext HTTP, ' +
+          'or trusts a response without validating the AS\'s TLS ' +
+          'certificate. A network attacker rewrites the body to ' +
+          '`{"active": true, "scope": "admin", "sub": "alice"}` for any ' +
+          'token the RS asks about.',
+        impact:
+          'Attacker mints arbitrary identities at the RS by intercepting ' +
+          'the introspection channel.',
+      },
+      {
+        id: 'token-scanning',
+        name: 'Token validity scanning via unauthenticated introspection',
+        scenario:
+          'The introspection endpoint accepts queries from any caller. ' +
+          'Mallory feeds it bulk token guesses (leaked logs, captured ' +
+          'snippets, token-format brute-force) and reads the `active` ' +
+          'field to learn which tokens are currently valid — without ' +
+          'needing to use them at any RS, which would generate audit ' +
+          'trails. This is the attack RFC 7662 §2.1 motivates protecting ' +
+          'the endpoint against.',
+        impact:
+          'Attacker enumerates live tokens and target identities silently, ' +
+          'with no per-RS access logs to reveal the probing.',
+      },
+    ],
+    mitigations: [
+      {
+        action:
+          'Treat `active` strictly: accept the token only when `active === ' +
+          'true`. Any other value, missing field, or non-200 response means ' +
+          'reject.',
+        mitigates: ['missing-active-check'],
+      },
+      {
+        action:
+          'Bound introspection caching to short, security-aware windows ' +
+          '(seconds, not minutes), and key the cache on the token value so ' +
+          'a revocation propagates to all RSes via a fresh introspect on ' +
+          'the next request after expiry.',
+        rationale:
+          'RFC 7662 §4 explicitly warns that caching introspection ' +
+          'responses weakens revocation. For high-value APIs, prefer ' +
+          'short-lived self-contained tokens (JWT with small `exp`) plus ' +
+          'introspection only when freshness matters, or push-based ' +
+          'revocation (token blocklist propagated to RSes).',
+        mitigates: ['introspection-result-caching'],
+      },
+      {
+        action:
+          'Always call the introspection endpoint over TLS and validate ' +
+          'the AS certificate against a pinned trust anchor or the ' +
+          'discovery-document issuer.',
+        mitigates: ['introspection-response-spoofing'],
+      },
+      {
+        action:
+          'Protect the introspection endpoint with authorization per RFC ' +
+          '7662 §2.1 — either client authentication (HTTP Basic, mTLS, ' +
+          'JWT-bearer assertion) OR a separate OAuth 2.0 access token ' +
+          'specifically scoped to introspect. The spec leaves the choice ' +
+          'open; the goal is preventing unauthenticated callers from ' +
+          'querying token validity.',
+        rationale:
+          'RFC 7662 §2.1 motivates this requirement specifically against ' +
+          'token-scanning. Per-RS authentication also gives the AS hooks ' +
+          'for rate-limiting and audit, but those are side benefits, not ' +
+          'the spec\'s stated reason.',
+        mitigates: ['token-scanning'],
+      },
+    ],
+    references: [
+      {
+        label: 'RFC 7662 §2.1 (Introspection Request)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7662#section-2.1',
+      },
+      {
+        label: 'RFC 7662 §2.2 (Introspection Response)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7662#section-2.2',
+      },
+      {
+        label: 'RFC 7662 §4 (Security Considerations)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7662#section-4',
+      },
+    ],
+  },
+
   expires_in: {
     purpose:
       'Token lifetime in seconds, returned alongside the access token. Sets ' +
@@ -822,7 +953,18 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         action:
           'Set short access-token lifetimes (minutes, not hours); rely on ' +
-          'refresh tokens for renewal. RFC 9700 §2.2.1.',
+          'refresh tokens for renewal. RFC 9700 §4.14 explicitly motivates ' +
+          'this: refresh tokens "allow the authorization server to issue ' +
+          'access tokens with a short lifetime and reduced scope, thus ' +
+          'reducing the potential impact of access token leakage."',
+        mitigates: ['persistent-xss-theft'],
+      },
+      {
+        action:
+          'Pair short lifetime with privilege restriction (RFC 9700 §2.3): ' +
+          'audience-restrict and scope-restrict every access token so a ' +
+          'leak only buys access to one resource\'s narrow API surface, ' +
+          'not the user\'s full token-bearer capability.',
         mitigates: ['persistent-xss-theft'],
       },
       {
@@ -838,8 +980,12 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-5.1',
       },
       {
-        label: 'RFC 9700 §2.2.1 (Access Token Privilege Restriction)',
-        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.2.1',
+        label: 'RFC 9700 §2.3 (Access Token Privilege Restriction)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.3',
+      },
+      {
+        label: 'RFC 9700 §4.14 (Refresh Token Protection — short access-token lifetimes)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-4.14',
       },
     ],
   },
