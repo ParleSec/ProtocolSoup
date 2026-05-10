@@ -147,7 +147,7 @@ jobs:
             org.opencontainers.image.title=protocolsoup-${{ matrix.name }}
             org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.vendor=ParleSec
-            org.opencontainers.image.documentation=https://github.com/ParleSec/ProtocolLens/blob/master/docs/packages/${{ matrix.name }}.md
+            org.opencontainers.image.documentation=https://github.com/ParleSec/ProtocolSoup/blob/master/docs/packages/${{ matrix.name }}.md
 
       - name: Build and push Docker image
         id: build

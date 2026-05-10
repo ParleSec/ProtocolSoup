@@ -1,0 +1,39 @@
+name: First-time Contributor Guidance
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  welcome:
+    name: Share Contributor Links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post first interaction guidance
+        uses: actions/first-interaction@v1
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
+          issue-message: |
+            Thanks for opening your first ProtocolSoup issue.
+
+            For bugs, please include enough detail to reproduce the affected protocol flow. For larger ideas or new protocol proposals, linking the relevant RFC or specification helps maintainers triage quickly.
+
+            Helpful links:
+            - Contributing guide: https://github.com/ParleSec/ProtocolSoup/blob/master/CONTRIBUTING.md
+            - Developer docs: https://docs.protocolsoup.com/developers/overview/
+            - Security reports: https://github.com/ParleSec/ProtocolSoup/blob/master/SECURITY.md
+          pr-message: |
+            Thanks for opening your first ProtocolSoup pull request.
+
+            Pick the validation checks from the PR template that match your change. Use `git commit -s` for DCO sign-off when you can—if you forgot, comment and maintainers will help before merge (there is no bot that blocks the PR for this alone).
+
+            Helpful links:
+            - PR workflow: https://docs.protocolsoup.com/developers/pull-request-workflow/
+            - Development setup: https://docs.protocolsoup.com/developers/development-setup/
+            - Add a protocol: https://docs.protocolsoup.com/developers/extending/add-a-protocol/
