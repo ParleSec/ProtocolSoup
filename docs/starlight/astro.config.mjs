@@ -21,7 +21,7 @@ export default defineConfig({
         { tag: 'meta', attrs: { name: 'theme-color', content: '#a855f7' } },
       ],
       editLink: {
-        baseUrl: 'https://github.com/ParleSec/ProtocolSoup/edit/main/docs/starlight/',
+        baseUrl: 'https://github.com/ParleSec/ProtocolSoup/edit/master/docs/starlight/',
       },
       sidebar: [
         {
@@ -114,6 +114,21 @@ export default defineConfig({
             { label: 'Explore All Endpoints', link: '/api/reference/', attrs: { target: '_self' } },
             { slug: 'api/overview' },
             { slug: 'api/integration-patterns' },
+          ],
+        },
+        {
+          label: 'Developers',
+          collapsed: true,
+          items: [
+            { slug: 'developers/overview' },
+            { slug: 'developers/development-setup' },
+            { slug: 'developers/pull-request-workflow' },
+            {
+              label: 'Extending ProtocolSoup',
+              items: [
+                { slug: 'developers/extending/add-a-protocol' },
+              ],
+            },
           ],
         },
       ],

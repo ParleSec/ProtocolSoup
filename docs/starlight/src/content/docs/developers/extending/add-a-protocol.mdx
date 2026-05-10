@@ -1,10 +1,13 @@
-# Adding Protocols (Contributor Guide)
+---
+title: Add A Protocol
+description: End-to-end checklist for adding a new protocol plugin—same content as the in-repo contributor guide.
+---
 
-> Canonical docs site route: `https://docs.protocolsoup.com/developers/extending/add-a-protocol/`
->
-> Starlight source for that page: `docs/starlight/src/content/docs/developers/extending/add-a-protocol.mdx`
->
-> Keep this file and the MDX page in sync when steps or paths change. This legacy Markdown copy remains for in-repo search and deep links.
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside type="note">
+This page mirrors [`docs/ADDING_PROTOCOLS.md`](https://github.com/ParleSec/ProtocolSoup/blob/master/docs/ADDING_PROTOCOLS.md). Update both when steps, paths, or requirements change.
+</Aside>
 
 This is a concrete, end-to-end checklist for adding a new protocol plugin. It includes exact files to touch and a worked example.
 
@@ -14,7 +17,7 @@ This is a concrete, end-to-end checklist for adding a new protocol plugin. It in
 - Package dir: `backend/internal/protocols/<id>`
 - Flow IDs: lowercase, snake_case or kebab-case. The UI normalizes underscores to hyphens.
 - Demo scenario IDs: use the same ID as the flow you want to execute.
- - Use the exact backend flow ID in `flowMeta`. The Looking Glass executor uses the hyphen-normalized flow ID.
+- Use the exact backend flow ID in `flowMeta`. The Looking Glass executor uses the hyphen-normalized flow ID.
 
 ## 1. Backend package
 
@@ -172,7 +175,7 @@ If you create a new service, update docker compose and gateway routing as needed
 
 Add the new protocol metadata (inside the object literal):
 
-1) `frontend/src/protocols/registry.ts`:
+**1)** `frontend/src/protocols/registry.ts`:
 
 ```ts
 export const protocolMeta = {
@@ -186,7 +189,7 @@ export const protocolMeta = {
 }
 ```
 
-2) `frontend/src/lookingglass/registry.ts`:
+**2)** `frontend/src/lookingglass/registry.ts`:
 
 ```ts
 const PROTOCOL_COLORS = {
@@ -200,7 +203,7 @@ const PROTOCOL_ICONS = {
 }
 ```
 
-3) `frontend/src/views/ProtocolDemo.tsx`:
+**3)** `frontend/src/views/ProtocolDemo.tsx`:
 
 ```ts
 const flowMeta = {
@@ -213,9 +216,10 @@ const flowMeta = {
   },
 }
 ```
+
 Use the exact `flow.id` string from the backend, not the URL slug.
 
-4) `frontend/next.config.ts`: add a rewrite entry for the protocol base path so executors can call `/${protocolId}` in local/dev and production runtimes.
+**4)** `frontend/next.config.ts`: add a rewrite entry for the protocol base path so executors can call `/${protocolId}` in local/dev and production runtimes.
 
 ```ts
 async rewrites() {
@@ -277,7 +281,7 @@ const EXPLAINERS: Record<string, ParameterExplainer> = {
 Notes:
 
 - Mitigations link back to attacks via `mitigates: string[]` of attack IDs. A single mitigation may cover several attacks.
-- For parameters whose semantics differ across protocols (for example, `nonce` in OIDC versus OID4VP), use the override key form `${protocolId}:${name}` instead of the bare name.
+- For parameters whose semantics differ across protocols (for example, `nonce` in OIDC versus OID4VP), use the override key form `` `${protocolId}:${name}` `` instead of the bare name.
 - Source content from canonical specs and named real-world incidents (CVE numbers, research disclosures). Avoid universal-baseline mitigations such as "use HTTPS"; reviewers can be assumed to know those.
 - See any existing protocol's explainer file (for example `oauth2.ts`) for a worked reference of tone, length, and structure.
 - The map keys must match the parameter names emitted by the backend's `FlowStep.Parameters` map (see section 3). Mismatched names will silently fail to render an explainer.
@@ -354,7 +358,6 @@ export class NewProtocolExecutor extends FlowExecutorBase {
 }
 ```
 
-
 ## Documentation
 
 Add `backend/internal/protocols/<id>/README.md`:
@@ -363,11 +366,13 @@ Add `backend/internal/protocols/<id>/README.md`:
 - RFC/spec references
 - Any config knobs or special behavior
 
+When user-facing or deployment behavior changes, also update public docs under `docs/starlight/src/content/docs/`, OpenAPI under `openapi/v1/` (and keep `docs/starlight/public/openapi/` in sync), and package docs under `docs/packages/` as described in [Development setup](/developers/development-setup/).
+
 ## Compliance manifest mapping (required)
 
 Protocol implementations must map normative requirements to code, tests, and Looking Glass annotations.
 
-1) Add or update the protocol manifest in `docs/compliance/` (JSON):
+**1)** Add or update the protocol manifest in `docs/compliance/` (JSON):
 
 - `protocol`: protocol id
 - `spec_version`: pinned spec version
@@ -381,12 +386,12 @@ Protocol implementations must map normative requirements to code, tests, and Loo
   - `annotations` (annotation keys used in Looking Glass)
   - `status` (`planned`, `implemented`, `verified`)
 
-2) Keep manifest mappings synchronized with file moves and refactors:
+**2)** Keep manifest mappings synchronized with file moves and refactors:
 
 - Update `implementation` and `tests` paths whenever protocol files are relocated.
 - Keep `MUST`/`SHALL` entries tied to concrete tests and annotations.
 
-3) Run runtime conformance checks from `backend/`:
+**3)** Run runtime conformance checks from `backend/`:
 
 ```bash
 go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
@@ -394,12 +399,15 @@ go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
 
 This command executes real end-to-end OID4VCI and OID4VP HTTP flows, including issuance-to-presentation lineage checks.
 
-4) External interoperability checks:
+**4)** External interoperability checks:
 
 - Configure `CONFORMANCE_BASE_URL` and `CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL` GitHub secrets.
 - The `Protocol Conformance` workflow runs nightly/manual external interop checks via `TestExternalInteropConformance`.
 - For local/manual external checks, run:
-  `RUN_EXTERNAL_INTEROP_CONFORMANCE=1 CONFORMANCE_BASE_URL=https://<verifier-base> CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL=https://<wallet-harness>/submit go test ./internal/protocols/oid4vp -run TestExternalInteropConformance -count=1 -v`
+
+```bash
+RUN_EXTERNAL_INTEROP_CONFORMANCE=1 CONFORMANCE_BASE_URL=https://<verifier-base> CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL=https://<wallet-harness>/submit go test ./internal/protocols/oid4vp -run TestExternalInteropConformance -count=1 -v
+```
 
 ## VC plugin patterns (OID4VCI/OID4VP)
 
@@ -422,3 +430,7 @@ When adding Verifiable Credential flows, follow these additional constraints:
 - Flow definitions match the spec and contain RFC references
 - UI metadata added so the protocol and flows are discoverable
 
+## Related
+
+- [Development setup](/developers/development-setup/) — local validation commands
+- [Pull request workflow](/developers/pull-request-workflow/) — review expectations and DCO
