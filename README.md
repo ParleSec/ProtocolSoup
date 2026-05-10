@@ -14,7 +14,21 @@ An interactive sandbox for exploring authentication and identity protocols. Exec
 
 ## Quick Start
 
+Run the full stack locally with Docker:
 
+```bash
+git clone https://github.com/ParleSec/ProtocolSoup.git
+cd ProtocolSoup/docker
+docker compose up -d
+```
+
+Then open:
+
+- UI: `http://localhost:3000`
+- Gateway/API: `http://localhost:8080`
+- Health check: `http://localhost:8080/health`
+
+For source development, see [CONTRIBUTING.md](CONTRIBUTING.md). For the full public setup guide, see [docs.protocolsoup.com/start-here/quickstart](https://docs.protocolsoup.com/start-here/quickstart/).
 
 ## Features
 
@@ -261,11 +275,11 @@ ProtocolSoup/
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| Go | 1.24 | Core language |
-| chi | 5.1 | HTTP router |
-| golang-jwt | 5.2 | JWT creation/validation |
+| Go | 1.25 | Core language |
+| chi | 5.2 | HTTP router |
+| golang-jwt | 5.3 | JWT creation/validation |
 | gorilla/websocket | 1.5 | Real-time communication |
-| go-spiffe | 2.2 | SPIFFE Workload API client |
+| go-spiffe | 2.6 | SPIFFE Workload API client |
 | modernc/sqlite | 1.29 | Embedded database for SCIM/SSF |
 
 ### Frontend
@@ -277,7 +291,6 @@ ProtocolSoup/
 | Next.js | 16.x | SSR/SSG app framework (App Router) |
 | Tailwind CSS | 3.4 | Styling |
 | Framer Motion | 11.5 | Animations |
-| Zustand | 4.5 | State management |
 
 ### Infrastructure
 
@@ -294,10 +307,12 @@ ProtocolSoup/
 
 - [Docs Home](https://docs.protocolsoup.com/) - Public docs portal
 - [Start Here](https://docs.protocolsoup.com/start-here/overview) - First-run orientation and setup
-- [Use ProtocolSoup](https://docs.protocolsoup.com/use-protocolsoup/what-you-can-do) - User flows and walkthroughs
-- [Container Images](https://docs.protocolsoup.com/ghcr/overview) - GHCR deployment guidance
-- [API Reference](https://docs.protocolsoup.com/api-reference/overview) - OpenAPI-backed integration docs
+- [Use ProtocolSoup](https://docs.protocolsoup.com/using/what-you-can-do/) - User flows and walkthroughs
+- [Container Images](https://docs.protocolsoup.com/deploy/overview/) - GHCR deployment guidance
+- [API Reference](https://docs.protocolsoup.com/api/overview/) - OpenAPI-backed integration docs
+- [Contribute](https://docs.protocolsoup.com/developers/overview/) - Development setup and contribution workflow
 - [Protocols](https://docs.protocolsoup.com/protocols/oauth2) - Standards-aligned protocol pages
+- [Support](SUPPORT.md) - Where to ask questions, report bugs, and get contributor help
 
 ---
 
@@ -317,14 +332,10 @@ cd backend
 go run ./cmd/server
 ```
 
-**Backend (split services):**
+**Backend services via Compose (same topology as Quick Start, includes frontend):**
 ```bash
-cd backend
-go run ./cmd/gateway
-go run ./cmd/server-federation
-go run ./cmd/server-scim
-go run ./cmd/server-ssf
-go run ./cmd/server-spiffe
+cd docker
+docker compose up -d
 ```
 
 **Frontend:**

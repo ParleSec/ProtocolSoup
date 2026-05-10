@@ -1,0 +1,82 @@
+---
+title: Development Setup
+description: Prepare a local ProtocolSoup checkout and run the validation commands expected for contributor PRs.
+---
+
+## Prerequisites
+
+- Go 1.25 or newer
+- Node.js 22.12 or newer
+- Docker with Compose
+- Git
+
+## Clone The Repository
+
+```bash
+git clone https://github.com/ParleSec/ProtocolSoup.git
+cd ProtocolSoup
+```
+
+## Install Dependencies
+
+```bash
+cd backend
+go mod download
+
+cd ../frontend
+npm ci
+
+cd ../wallet-ui
+npm ci
+
+cd ../docs/starlight
+npm ci
+```
+
+## Run Locally
+
+For most UI and protocol work, run the backend monolith and frontend dev server in separate terminals.
+
+```bash
+cd backend
+go run ./cmd/server
+```
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:3000`. The frontend proxies protocol requests to the backend at `http://localhost:8080`.
+
+For the split-service topology, use Docker Compose:
+
+```bash
+cd docker
+docker compose up -d
+```
+
+Add SPIFFE/SPIRE when you are working on workload identity flows:
+
+```bash
+cd docker
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
+```
+
+## Validation Matrix
+
+Run the smallest set that covers your change before requesting review.
+
+| Change area | Command |
+|-------------|---------|
+| Backend Go code | `cd backend && go build ./... && go test ./...` |
+| Backend lint-sensitive changes | `cd backend && golangci-lint run ./...` |
+| Frontend UI or Looking Glass | `cd frontend && npm run lint && npx tsc --noEmit && npm run build` |
+| Frontend protocol references | `cd frontend && npm run verify-refs` |
+| Wallet UI | `cd wallet-ui && npx tsc --noEmit && npm run build` |
+| Docs site | `cd docs/starlight && npm run build` |
+| OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |
+| Docker or service topology | `cd docker && docker compose config` |
+| OID4VCI/OID4VP conformance | `cd backend && go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1` |
+
+Security scans may be limited on forked pull requests because repository secrets are not available to untrusted code. Maintainers can rerun or review those checks after triage.

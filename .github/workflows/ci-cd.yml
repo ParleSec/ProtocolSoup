@@ -251,6 +251,10 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Verify frontend protocol references
+        working-directory: frontend
+        run: npm run verify-refs
+
   # Job 5: Backend Linting and Vet
   backend-lint:
     name: Backend Lint & Vet
@@ -303,24 +307,11 @@ jobs:
         working-directory: backend
         run: go mod download
       
-      - name: Check for test files
-        id: check_tests
-        working-directory: backend
-        run: |
-          if find . -name "*_test.go" -type f | grep -q .; then
-            echo "tests_exist=true" >> $GITHUB_OUTPUT
-          else
-            echo "tests_exist=false" >> $GITHUB_OUTPUT
-            echo "⚠️ No test files found. Consider adding tests to improve code quality."
-          fi
-      
       - name: Run Go tests
-        if: steps.check_tests.outputs.tests_exist == 'true'
         working-directory: backend
         run: go test -v -race -coverprofile=coverage.out ./...
       
       - name: Upload coverage report
-        if: steps.check_tests.outputs.tests_exist == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: backend-coverage
@@ -360,6 +351,7 @@ jobs:
         working-directory: wallet-ui
         run: |
           npm ci
+          npx tsc --noEmit
           npm run build
         env:
           CI: true

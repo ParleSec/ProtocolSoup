@@ -1,0 +1,53 @@
+---
+title: Pull Request Workflow
+description: Prepare ProtocolSoup changes for review, CI, and merge.
+---
+
+## Before You Start
+
+Open or join an issue before beginning significant work. This helps avoid duplicate effort and gives maintainers a chance to confirm scope, protocol references, and expected validation.
+
+Small documentation fixes, typo fixes, and tightly scoped bug fixes can usually go straight to a pull request.
+
+## Branch And Commit
+
+Branch from `master`:
+
+```bash
+git checkout master
+git pull
+git checkout -b feature/short-description
+```
+
+Use `git commit -s` so each commit includes a Developer Certificate of Origin sign-off where practical:
+
+```bash
+git commit -s -m "Describe the change"
+```
+
+The sign-off adds a `Signed-off-by: Name <email>` line to the commit message. This is separate from cryptographic commit signing. The project does not run a bot that fails the PR for a missing sign-off; maintainers check before merge and can help you amend or squash with sign-off if needed.
+
+## Pull Request Checklist
+
+- Link the related issue or explain why the change is standalone.
+- Select the relevant validation commands in the pull request template.
+- Include screenshots for UI changes.
+- Include Looking Glass output or flow notes for protocol behavior changes.
+- Update docs when setup, configuration, APIs, protocol behavior, deployment, or contributor workflow changes.
+- Do not include secrets, generated credentials, `.env` files, or local data stores.
+
+## Review Expectations
+
+Maintainers optimize for correctness and long-term maintainability. Reviews may ask for:
+
+- Clearer spec references for protocol behavior.
+- More complete Looking Glass events.
+- Tests for backend logic, protocol error paths, or security-sensitive behavior.
+- Smaller PR scope when unrelated changes are bundled together.
+- Documentation updates for user-facing or contributor-facing changes.
+
+CI must pass and at least one maintainer approval is required before merge. Most contributions are squash-merged.
+
+## Forked PR Security Scans
+
+Some security checks depend on repository secrets. Those secrets are not exposed to untrusted forked pull requests, so a forked PR can pass normal build and lint checks while Snyk or upload-only security reporting is skipped. Maintainers may rerun those checks from a trusted branch before merge.

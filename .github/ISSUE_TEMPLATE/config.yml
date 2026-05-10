@@ -6,3 +6,6 @@ contact_links:
   - name: Questions and discussion
     url: https://github.com/ParleSec/ProtocolSoup/discussions
     about: Ask questions, share ideas, or discuss ProtocolSoup with the community.
+  - name: Support and contributor help
+    url: https://github.com/ParleSec/ProtocolSoup/blob/master/SUPPORT.md
+    about: Choose the right channel for bugs, questions, contributor help, and security reports.

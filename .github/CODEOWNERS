@@ -1,12 +1,38 @@
-# Default owner for everything in the repo
+# Default owner for everything in the repo. Add additional maintainers or
+# trusted protocol reviewers beside @ParleSec as ownership grows.
 * @ParleSec
 
-# Backend protocol implementations
-/backend/internal/protocols/ @ParleSec
+# Backend core and service entrypoints
+/backend/cmd/ @ParleSec
+/backend/internal/core/ @ParleSec
+/backend/internal/gateway/ @ParleSec
+/backend/internal/plugin/ @ParleSec
+/backend/internal/lookingglass/ @ParleSec
+/backend/internal/crypto/ @ParleSec
+/backend/internal/mockidp/ @ParleSec
 
-# Frontend
+# Protocol implementations
+/backend/internal/protocols/oauth2/ @ParleSec
+/backend/internal/protocols/oidc/ @ParleSec
+/backend/internal/protocols/saml/ @ParleSec
+/backend/internal/protocols/scim/ @ParleSec
+/backend/internal/protocols/spiffe/ @ParleSec
+/backend/internal/protocols/ssf/ @ParleSec
+/backend/internal/protocols/oid4vci/ @ParleSec
+/backend/internal/protocols/oid4vp/ @ParleSec
+
+# Frontend and wallet surfaces
 /frontend/ @ParleSec
+/wallet-ui/ @ParleSec
 
-# Infrastructure and deployment
+# Public docs and API contracts
+/docs/ @ParleSec
+/openapi/ @ParleSec
+/README.md @ParleSec
+/CONTRIBUTING.md @ParleSec
+/SUPPORT.md @ParleSec
+
+# Infrastructure, deployment, and repository automation
 /docker/ @ParleSec
+/.github/workflows/ @ParleSec
 /.github/ @ParleSec

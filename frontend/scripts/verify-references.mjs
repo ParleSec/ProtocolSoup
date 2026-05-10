@@ -44,6 +44,7 @@ const SIMPLE_REF_REGEX =
 
 const MAX_PARALLEL = 6
 const FETCH_TIMEOUT_MS = 15_000
+const FETCH_MAX_ATTEMPTS = 3
 const USER_AGENT =
   'ProtocolSoup-ref-verifier/1.0 (+https://github.com/ParleSec/ProtocolSoup)'
 
@@ -226,7 +227,26 @@ async function verifyRef(ref, cache) {
   return problems
 }
 
-async function fetchOnce(url) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// True when a failed fetch might succeed on retry (CI DNS/TLS/transient upstream)
+function isRetryableFetchFailure(err) {
+  if (!err || err.name === 'AbortError') return false
+  const code = typeof err.cause?.code === 'string' ? err.cause.code : ''
+  if (
+    ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(
+      code,
+    )
+  ) {
+    return true
+  }
+  const msg = `${err.message || ''}`.toLowerCase()
+  return msg.includes('fetch failed') || msg.includes('network')
+}
+
+async function fetchOnce(url, attemptIndex = 0) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
@@ -244,6 +264,12 @@ async function fetchOnce(url) {
     }
     const body = await res.text()
     return { ok: true, status: res.status, contentType, body }
+  } catch (err) {
+    if (attemptIndex + 1 < FETCH_MAX_ATTEMPTS && isRetryableFetchFailure(err)) {
+      await sleep(500 * (attemptIndex + 1))
+      return fetchOnce(url, attemptIndex + 1)
+    }
+    throw err
   } finally {
     clearTimeout(timer)
   }
