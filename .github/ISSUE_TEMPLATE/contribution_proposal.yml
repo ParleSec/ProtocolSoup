@@ -1,0 +1,61 @@
+name: Contribution Proposal
+description: Propose a focused implementation before opening a larger pull request
+title: "[Proposal]: "
+labels: ["proposal", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for scoped implementation ideas that are larger than a typo fix but smaller than a full new protocol proposal.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome do you want this contribution to achieve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope
+      description: List the files, services, protocol flows, or docs areas you expect to touch.
+      placeholder: |
+        - backend/internal/...
+        - frontend/src/...
+        - docs/starlight/...
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Which local checks, flows, screenshots, or Looking Glass output will demonstrate the change?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - Backend API
+        - Frontend UI
+        - Looking Glass
+        - Protocol behavior
+        - Documentation
+        - Docker/Deployment
+        - GitHub automation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues and discussions for related work
+          required: true
+        - label: I am willing to open a pull request if maintainers agree with this direction
+          required: false

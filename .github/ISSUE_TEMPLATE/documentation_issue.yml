@@ -1,0 +1,56 @@
+name: Documentation Issue
+description: Report missing, stale, confusing, or incorrect ProtocolSoup documentation
+title: "[Docs]: "
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve ProtocolSoup docs. Please include the page or file and what made the current guidance hard to use.
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation location
+      description: Link to the docs page or repository file.
+      placeholder: "https://docs.protocolsoup.com/start-here/quickstart/ or docs/starlight/src/content/docs/..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong or missing?
+      description: Describe the stale, confusing, missing, or incorrect guidance.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Suggested correction
+      description: If you know the current behavior or better wording, share it here.
+
+  - type: dropdown
+    id: docs-area
+    attributes:
+      label: Documentation area
+      options:
+        - Start Here / Quickstart
+        - Using ProtocolSoup
+        - Protocol Guides
+        - API Reference
+        - Deploy with GHCR
+        - Developer / Contributor docs
+        - Repository README or markdown
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have checked the current docs site and repository docs for related guidance
+          required: true

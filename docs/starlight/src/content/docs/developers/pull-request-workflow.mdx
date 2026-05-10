@@ -19,13 +19,13 @@ git pull
 git checkout -b feature/short-description
 ```
 
-Every commit must include a Developer Certificate of Origin sign-off:
+Use `git commit -s` so each commit includes a Developer Certificate of Origin sign-off where practical:
 
 ```bash
 git commit -s -m "Describe the change"
 ```
 
-The sign-off adds a `Signed-off-by: Name <email>` line to the commit message. This is separate from cryptographic commit signing.
+The sign-off adds a `Signed-off-by: Name <email>` line to the commit message. This is separate from cryptographic commit signing. The project does not run a bot that fails the PR for a missing sign-off; maintainers check before merge and can help you amend or squash with sign-off if needed.
 
 ## Pull Request Checklist
 

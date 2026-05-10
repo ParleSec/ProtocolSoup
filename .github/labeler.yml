@@ -1,0 +1,91 @@
+"area: backend":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/**"
+
+"area: frontend":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "frontend/**"
+
+"area: wallet":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "wallet-ui/**"
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "SUPPORT.md"
+          - "GOVERNANCE.md"
+
+"area: openapi":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "openapi/**"
+
+"area: docker":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docker/**"
+          - "fly*.toml"
+
+"area: github-actions":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+
+"protocol: oauth2-oidc":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/internal/protocols/oauth2/**"
+          - "backend/internal/protocols/oidc/**"
+          - "frontend/src/lookingglass/flows/authorization-code.ts"
+          - "frontend/src/lookingglass/flows/client-credentials.ts"
+          - "frontend/src/lookingglass/flows/device-code.ts"
+          - "frontend/src/lookingglass/flows/implicit.ts"
+          - "frontend/src/lookingglass/flows/interactive-code.ts"
+          - "frontend/src/lookingglass/flows/refresh-token.ts"
+          - "frontend/src/lookingglass/flows/resource-owner.ts"
+          - "frontend/src/lookingglass/flows/token-introspection.ts"
+          - "frontend/src/lookingglass/flows/token-revocation.ts"
+          - "frontend/src/lookingglass/flows/oidc-*.ts"
+
+"protocol: saml":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/internal/protocols/saml/**"
+          - "frontend/src/lookingglass/flows/saml-*.ts"
+
+"protocol: scim":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/internal/protocols/scim/**"
+          - "frontend/src/lookingglass/flows/scim-provisioning.ts"
+          - "openapi/v1/scim.yaml"
+
+"protocol: spiffe":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/internal/protocols/spiffe/**"
+          - "backend/internal/spiffe/**"
+          - "docker/spire/**"
+          - "frontend/src/lookingglass/flows/spiffe-svid.ts"
+
+"protocol: ssf":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/internal/protocols/ssf/**"
+          - "frontend/src/lookingglass/flows/ssf-sandbox.ts"
+
+"protocol: verifiable-credentials":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "backend/internal/protocols/oid4vci/**"
+          - "backend/internal/protocols/oid4vp/**"
+          - "frontend/src/lookingglass/flows/oid4vci*"
+          - "frontend/src/lookingglass/flows/oid4vp*"
+          - "wallet-ui/**"
