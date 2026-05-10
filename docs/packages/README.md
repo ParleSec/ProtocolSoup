@@ -1,6 +1,6 @@
 # ProtocolSoup Container Images
 
-> Canonical docs site route: `https://docs.protocolsoup.com/ghcr/overview/`
+> Canonical docs site route: `https://docs.protocolsoup.com/deploy/overview/`
 >
 > This file remains the in-repo runtime contract source; public navigation should use the docs site route wrappers.
 
@@ -64,8 +64,8 @@ docker run -p 8080:8080 -p 8081:8081 ghcr.io/parlesec/protocolsoup-ssf
 ### Full Stack
 
 ```bash
-git clone https://github.com/ParleSec/ProtocolLens
-cd ProtocolLens/docker
+git clone https://github.com/ParleSec/ProtocolSoup
+cd ProtocolSoup/docker
 docker compose up -d
 ```
 

@@ -1,6 +1,6 @@
 # Architecture Documentation
 
-> Canonical docs site route: `https://docs.protocolsoup.com/developers/architecture/system-architecture/`
+> Canonical docs site route: `https://docs.protocolsoup.com/start-here/platform-at-a-glance/`
 >
 > This legacy file remains for in-repo context; public navigation should use the docs site route.
 

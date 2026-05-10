@@ -8,6 +8,7 @@ Thank you for your interest in contributing to ProtocolSoup! This project aims t
 - [Development Setup](#development-setup)
 - [Making Contributions](#making-contributions)
 - [Pull Request Process](#pull-request-process)
+- [Local Validation Matrix](#local-validation-matrix)
 - [Coding Standards](#coding-standards)
 - [Adding New Protocols](#adding-new-protocols)
 - [Getting Help](#getting-help)
@@ -16,7 +17,7 @@ Thank you for your interest in contributing to ProtocolSoup! This project aims t
 
 ### Finding Something to Work On
 
-- **Good First Issues**: Look for issues labeled [`good first issue`](https://github.com/ParleSec/ProtocolSoup/labels/good%20first%20issue)-these are scoped for newcomers
+- **Good First Issues**: Look for issues labeled [`good first issue`](https://github.com/ParleSec/ProtocolSoup/labels/good%20first%20issue) - these are scoped for newcomers
 - **Help Wanted**: Issues labeled [`help wanted`](https://github.com/ParleSec/ProtocolSoup/labels/help%20wanted) are ready for contribution
 - **Protocol Requests**: Check for new protocol proposals if you have domain expertise
 
@@ -46,12 +47,12 @@ cd ProtocolSoup
 
 # Backend setup
 cd backend
-go mod tidy
-go build ./cmd/server
+go mod download
+go build ./...
 
 # Frontend setup
 cd ../frontend
-npm install
+npm ci
 ```
 
 ### Running Locally
@@ -59,12 +60,12 @@ npm install
 **Option 1: Split development (recommended for frontend work)**
 
 ```bash
-# Terminal 1: Start backend
-cd backend
+# Terminal 1: Start backend monolith
+cd ProtocolSoup/backend
 go run ./cmd/server
 
 # Terminal 2: Start frontend dev server
-cd frontend
+cd ProtocolSoup/frontend
 npm run dev
 ```
 
@@ -74,19 +75,19 @@ The frontend runs at `http://localhost:3000` and proxies API requests to the bac
 
 ```bash
 cd docker
-docker-compose -f docker-compose.dev.yml up
+docker compose up -d
 ```
 
 **Option 3: With SPIFFE/SPIRE**
 
 ```bash
 cd docker
-docker-compose -f docker-compose.yml -f docker-compose.spiffe.yml up
+docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
 ```
 
 ### Verifying Your Setup
 
-1. Open `http://localhost:3000` (or `http://localhost:8080` for Docker)
+1. Open `http://localhost:3000` (with Docker Compose this includes the frontend; API-only checks can use `http://localhost:8080`)
 2. Navigate to Looking Glass
 3. Run an OAuth 2.0 Authorization Code flow
 4. Verify you see real-time events in the timeline
@@ -124,6 +125,14 @@ For multiple commits:
 git rebase HEAD~N --signoff  # where N is the number of commits
 ```
 
+Check that every commit includes a DCO sign-off before opening a PR:
+
+```bash
+git log --format='%h %s%n%b' origin/master..HEAD
+```
+
+Each commit message should contain a `Signed-off-by: Name <email>` line. Cryptographic commit signatures are separate from DCO sign-off and are not required.
+
 ### Branch Naming
 
 Use descriptive branch names:
@@ -148,20 +157,19 @@ Signed-off-by: Your Name <your.email@example.com>
 
 ## Pull Request Process
 
-1. **Fork and branch**: Create a feature branch from `main`
+1. **Fork and branch**: Create a feature branch from `master`
 2. **Make changes**: Implement your feature or fix
 3. **Test locally**: Ensure all tests pass
 4. **Sign commits**: All commits must include DCO sign-off
-5. **Open PR**: Submit against `main` with a clear description
+5. **Open PR**: Submit against `master` with a clear description
 6. **Respond to feedback**: Address review comments promptly
 
 ### PR Checklist
 
 Before submitting, verify:
 
-- [ ] All commits are signed off (`git log --show-signature`)
-- [ ] Backend tests pass (`go test ./...`)
-- [ ] Frontend lints pass (`npm run lint`)
+- [ ] All commits include `Signed-off-by: Name <email>`
+- [ ] Relevant commands from the [local validation matrix](#local-validation-matrix) pass
 - [ ] Code follows project style guidelines
 - [ ] Documentation is updated if needed
 - [ ] No secrets or credentials are committed
@@ -173,6 +181,24 @@ Before submitting, verify:
 - CI checks must pass before merge
 - At least one maintainer approval is required
 - Squash-merge is used for most contributions
+
+## Local Validation Matrix
+
+Run the smallest set that covers your change. CI may run additional checks, but this matrix gives maintainers a reliable starting point for review.
+
+| Change area | Local commands |
+|-------------|----------------|
+| Backend Go code | `cd backend && go build ./... && go test ./...` |
+| Backend lint-sensitive changes | `cd backend && golangci-lint run ./...` |
+| Frontend UI or Looking Glass | `cd frontend && npm ci && npm run lint && npx tsc --noEmit && npm run build` |
+| Frontend protocol references | `cd frontend && npm run verify-refs` |
+| Wallet UI | `cd wallet-ui && npm ci && npx tsc --noEmit && npm run build` |
+| Docs site | `cd docs/starlight && npm ci && npm run build` |
+| OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |
+| Docker or service topology | `cd docker && docker compose config` and, when practical, `docker compose up -d` |
+| OID4VCI/OID4VP protocol behavior | `cd backend && go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1` |
+
+When Snyk or other security scans are skipped for forked PRs because repository secrets are unavailable, maintainers may rerun or review those checks after initial triage.
 
 ## Coding Standards
 
@@ -268,7 +294,8 @@ See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design documenta
 
 ## Getting Help
 
-- **Bugs/Questions**: File a [GitHub Issue](https://github.com/ParleSec/ProtocolSoup/issues) or reach out to me anywhere you can find me :)
+- **Bugs/Questions**: Use [GitHub Issues](https://github.com/ParleSec/ProtocolSoup/issues), [GitHub Discussions](https://github.com/ParleSec/ProtocolSoup/discussions), or [SUPPORT.md](SUPPORT.md)
+- **Contributor docs**: See [docs.protocolsoup.com/developers/overview](https://docs.protocolsoup.com/developers/overview/)
 - **Security issues**: See [SECURITY.md](SECURITY.md) for responsible disclosure
 
 ---
