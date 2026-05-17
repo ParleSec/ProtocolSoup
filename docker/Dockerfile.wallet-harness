@@ -22,7 +22,7 @@ COPY backend/ ./
 COPY --from=wallet-ui-builder /repo/backend/cmd/walletharness/static ./cmd/walletharness/static
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o wallet-harness ./cmd/walletharness
 
-FROM alpine:3.21
+FROM alpine:3.23
 
 WORKDIR /app
 RUN apk --no-cache add ca-certificates
