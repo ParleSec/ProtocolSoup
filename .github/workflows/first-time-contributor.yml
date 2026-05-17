@@ -18,8 +18,8 @@ jobs:
       - name: Post first interaction guidance
         uses: actions/first-interaction@v3
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          issue-message: |
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          issue_message: |
             Thanks for opening your first ProtocolSoup issue.
 
             For bugs, please include enough detail to reproduce the affected protocol flow. For larger ideas or new protocol proposals, linking the relevant RFC or specification helps maintainers triage quickly.
@@ -28,7 +28,7 @@ jobs:
             - Contributing guide: https://github.com/ParleSec/ProtocolSoup/blob/master/CONTRIBUTING.md
             - Developer docs: https://docs.protocolsoup.com/developers/overview/
             - Security reports: https://github.com/ParleSec/ProtocolSoup/blob/master/SECURITY.md
-          pr-message: |
+          pr_message: |
             Thanks for opening your first ProtocolSoup pull request.
 
             Pick the validation checks from the PR template that match your change. Use `git commit -s` for DCO sign-off when you can—if you forgot, comment and maintainers will help before merge (there is no bot that blocks the PR for this alone).

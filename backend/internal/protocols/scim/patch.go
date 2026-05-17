@@ -559,7 +559,7 @@ func (pe *PatchExecutor) mapToResource(m map[string]interface{}) error {
 
 	// Get the underlying value
 	val := reflect.ValueOf(pe.resource)
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
 	}
 

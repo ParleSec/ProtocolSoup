@@ -17,7 +17,7 @@ Thank you for your interest in contributing to ProtocolSoup! This project aims t
 
 ### Finding Something to Work On
 
-- **Good First Issues**: Look for issues labeled [`good first issue`](https://github.com/ParleSec/ProtocolSoup/labels/good%20first%20issue)-these are scoped for newcomers
+- **Good First Issues**: Look for issues labeled [`good first issue`](https://github.com/ParleSec/ProtocolSoup/labels/good%20first%20issue) - these are scoped for newcomers
 - **Help Wanted**: Issues labeled [`help wanted`](https://github.com/ParleSec/ProtocolSoup/labels/help%20wanted) are ready for contribution
 - **Protocol Requests**: Check for new protocol proposals if you have domain expertise
 
@@ -98,7 +98,7 @@ docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
 
 This project uses the [Developer Certificate of Origin](https://developercertificate.org/) to ensure contributions can be legally distributed under our Apache 2.0 license.
 
-**Sign off on your commits** (or on the single squashed commit at merge). This certifies that you wrote the code or have the right to submit it:
+**You must sign off on every commit.** This certifies that you wrote the code or have the right to submit it:
 
 ```bash
 git commit -s -m "Add feature X"
@@ -133,8 +133,6 @@ git log --format='%h %s%n%b' origin/master..HEAD
 
 Each commit message should contain a `Signed-off-by: Name <email>` line. Cryptographic commit signatures are separate from DCO sign-off and are not required.
 
-There is **no automated DCO check** on pull requests: CI does not fail solely for a missing sign-off. Maintainers verify DCO before merge and can walk you through `amend` / `rebase --signoff` if you forgot. Squash-merge often produces a single signed-off commit.
-
 ### Branch Naming
 
 Use descriptive branch names:
@@ -162,7 +160,7 @@ Signed-off-by: Your Name <your.email@example.com>
 1. **Fork and branch**: Create a feature branch from `master`
 2. **Make changes**: Implement your feature or fix
 3. **Test locally**: Ensure all tests pass
-4. **Sign commits (DCO)**: Use `git commit -s` so messages include `Signed-off-by`; ask in the PR if you need help fixing sign-off
+4. **Sign commits (DCO)**: Use `git commit -s` so messages include `Signed-off-by`
 5. **Open PR**: Submit against `master` with a clear description
 6. **Respond to feedback**: Address review comments promptly
 
@@ -170,7 +168,7 @@ Signed-off-by: Your Name <your.email@example.com>
 
 Before submitting, verify:
 
-- [ ] DCO: commits include `Signed-off-by` before merge, or you've noted that you need maintainer help to fix sign-off
+- [ ] All commits include `Signed-off-by: Name <email>`
 - [ ] Relevant commands from the [local validation matrix](#local-validation-matrix) pass
 - [ ] Code follows project style guidelines
 - [ ] Documentation is updated if needed
