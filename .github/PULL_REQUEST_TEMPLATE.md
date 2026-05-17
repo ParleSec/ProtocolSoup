@@ -41,7 +41,7 @@ Fixes #
 
 <!-- Complete all items before requesting review. -->
 
-- [ ] My commits include DCO sign-off (`git commit -s`) per the [DCO](https://developercertificate.org/), or I've asked for maintainer help to add it before merge
+- [ ] My commits are signed off (`git commit -s`) per the [DCO](https://developercertificate.org/)
 - [ ] I have read the [CONTRIBUTING](https://github.com/ParleSec/ProtocolSoup/blob/master/CONTRIBUTING.md) guide
 - [ ] I selected the relevant validation checks above
 - [ ] I have updated documentation if needed

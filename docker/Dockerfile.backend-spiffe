@@ -20,7 +20,7 @@ RUN go mod download
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}
 
 # Final image with agent + backend
-FROM alpine:3.21
+FROM alpine:3.23
 
 # Install required packages
 RUN apk add --no-cache ca-certificates supervisor

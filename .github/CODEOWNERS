@@ -1,5 +1,4 @@
-# Default owner for everything in the repo. Add additional maintainers or
-# trusted protocol reviewers beside @ParleSec as ownership grows.
+# Default owner for everything in the repo
 * @ParleSec
 
 # Backend core and service entrypoints

@@ -5,7 +5,7 @@
 # ============================================
 # Stage 1: Build Frontend
 # ============================================
-FROM node:20-alpine AS frontend-builder
+FROM node:26-alpine AS frontend-builder
 
 WORKDIR /frontend
 
@@ -56,7 +56,7 @@ FROM ghcr.io/spiffe/spire-agent:1.14.6 AS spire-agent
 # ============================================
 # Stage 4: Production Image with SPIRE Agent
 # ============================================
-FROM alpine:3.21
+FROM alpine:3.23
 
 WORKDIR /app
 
