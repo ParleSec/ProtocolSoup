@@ -11,7 +11,7 @@ COPY wallet-ui/ ./wallet-ui/
 RUN mkdir -p /repo/backend/cmd/walletharness/static
 RUN cd wallet-ui && npm run build
 
-FROM golang:1.25.9-alpine AS builder
+FROM golang:1.26.3-alpine AS builder
 
 WORKDIR /app
 
