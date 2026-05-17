@@ -177,7 +177,7 @@ RUN go mod init demo-client && \
 RUN CGO_ENABLED=0 go build -o demo-client .
 
 # Runtime
-FROM alpine:3.21
+FROM alpine:3.23
 
 WORKDIR /app
 
