@@ -91,8 +91,15 @@ async function main() {
             for (const p of problems) issues.push(p)
           })
           .catch((err) => {
+            // Transient network/timeout failures against third-party spec hosts downgraded to warn so a flaky upstream can't fail CI on its own. 
+            // Real ref bugs (404, missing anchor, wrong §) still surface as errors via verifyRef's normal return path.
+            // Use --strict to promote warnings back to failures.
+            const transient =
+              err?.name === 'AbortError' ||
+              err?.code === 'ETIMEDOUT' ||
+              isRetryableFetchFailure(err)
             issues.push({
-              level: 'error',
+              level: transient ? 'warn' : 'error',
               ref,
               message: `unhandled error: ${err.message}`,
             })
