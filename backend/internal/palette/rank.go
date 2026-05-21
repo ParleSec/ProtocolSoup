@@ -49,7 +49,7 @@ func rankCandidates(cands map[string]*candidate, parsed ParsedQuery, cat catalog
 
 	results := make([]Result, 0, len(scoredAll))
 	for _, s := range scoredAll {
-		results = append(results, toResult(s, cat, parsed))
+		results = append(results, toResult(s, parsed))
 	}
 
 	chips := detectRefinementChips(scoredAll, parsed)
@@ -240,7 +240,7 @@ func weightForAxis(w Weights, axis string) float64 {
 // toResult turns a scored candidate into the externally-visible Result row.
 // AxisChips prioritises matched axis values (so they appear first) and then
 // fills with the artefact's remaining axis values.
-func toResult(s scored, cat catalog, parsed ParsedQuery) Result {
+func toResult(s scored, parsed ParsedQuery) Result {
 	matched := make(map[string]struct{})
 	for _, r := range s.reasons {
 		if r.Axis == "" || r.Value == "" {
