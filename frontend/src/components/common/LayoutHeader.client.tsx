@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Eye, Home, ExternalLink, BookOpen, Menu, X, Radio, FileText } from 'lucide-react'
+import { Eye, Home, ExternalLink, BookOpen, Menu, X, Radio, FileText, Search } from 'lucide-react'
+
+import { usePlatformShortcutLabel } from '@/components/palette/usePaletteQuery'
 
 function Github({ className }: { className?: string }) {
   return (
@@ -20,14 +22,24 @@ const navItems = [
   { path: '/protocols', icon: BookOpen, label: 'Protocols' },
 ]
 
+function openPalette() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('palette:open'))
+}
+
 export function LayoutHeader() {
   const pathname = usePathname()
   const currentPath = pathname || '/'
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const shortcutLabel = usePlatformShortcutLabel()
 
   useEffect(() => {
     setIsMobileMenuOpen(false)
   }, [currentPath])
+
+  // The homepage carries its own prominent search input; suppressing the
+  // header chip there avoids two competing call-to-action surfaces.
+  const showSearchChip = currentPath !== '/'
 
   useEffect(() => {
     if (isMobileMenuOpen) {
@@ -51,6 +63,23 @@ export function LayoutHeader() {
             </Link>
 
             <nav className="hidden lg:flex items-center gap-1">
+              {showSearchChip && (
+                <button
+                  type="button"
+                  onClick={openPalette}
+                  aria-haspopup="dialog"
+                  aria-label="Open search palette"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-sm text-surface-400 hover:text-white hover:bg-white/5 mr-1"
+                >
+                  <Search className="w-4 h-4" />
+                  <span>Search</span>
+                  {shortcutLabel && (
+                    <kbd className="ml-1 hidden xl:inline-flex items-center rounded border border-white/10 bg-surface-800/60 px-1.5 py-0.5 text-[10px] font-mono text-surface-300">
+                      {shortcutLabel}
+                    </kbd>
+                  )}
+                </button>
+              )}
               {navItems.map((item) => {
                 const isActive = currentPath === item.path ||
                   (item.path !== '/' && currentPath.startsWith(item.path))
@@ -137,6 +166,19 @@ export function LayoutHeader() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-1">
+                {showSearchChip && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false)
+                      openPalette()
+                    }}
+                    className="flex w-full items-center gap-3 px-4 py-3 rounded-xl text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
+                  >
+                    <Search className="w-5 h-5" />
+                    <span className="font-medium">Search</span>
+                  </button>
+                )}
                 {navItems.map((item) => {
                   const isActive = currentPath === item.path ||
                     (item.path !== '/' && currentPath.startsWith(item.path))

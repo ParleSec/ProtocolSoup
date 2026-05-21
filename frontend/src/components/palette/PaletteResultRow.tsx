@@ -44,6 +44,8 @@ const NORMATIVE_LEVEL_STYLE: Record<string, string> = {
 interface PaletteResultRowProps {
   result: PaletteResult
   selected: boolean
+  id: string
+  dataIndex: number
   onSelect: () => void
   onActivate: () => void
   /**
@@ -63,7 +65,7 @@ interface PaletteResultRowProps {
  */
 export const PaletteResultRow = forwardRef<HTMLLIElement, PaletteResultRowProps>(
   function PaletteResultRow(
-    { result, selected, onSelect, onActivate, onRelatedConceptClick },
+    { result, selected, id, dataIndex, onSelect, onActivate, onRelatedConceptClick },
     ref,
   ) {
     const Icon = TYPE_ICON[result.type] ?? Beaker
@@ -85,14 +87,20 @@ export const PaletteResultRow = forwardRef<HTMLLIElement, PaletteResultRowProps>
     ].join(' ')
 
     return (
-      <li ref={ref} className={`list-none ${outerClasses}`}>
+      <li
+        ref={ref}
+        id={id}
+        data-index={dataIndex}
+        role="option"
+        aria-selected={selected}
+        className={`list-none ${outerClasses}`}
+      >
         <button
           type="button"
           onClick={handleClick}
           onMouseEnter={onSelect}
           onFocus={onSelect}
           className="flex w-full items-stretch gap-3 rounded-lg px-3 py-2.5 sm:px-3.5 sm:py-3 text-left"
-          aria-current={selected}
           data-result-id={result.id}
         >
           <span className="flex-shrink-0 mt-0.5">
@@ -119,7 +127,7 @@ export const PaletteResultRow = forwardRef<HTMLLIElement, PaletteResultRowProps>
               )}
             </span>
             <div className="mt-0.5 flex items-baseline gap-2">
-              <span className="text-sm sm:text-base font-medium text-white truncate">
+              <span className="text-sm sm:text-base font-medium text-white line-clamp-2 sm:truncate">
                 {result.name}
               </span>
             </div>
@@ -154,16 +162,21 @@ export const PaletteResultRow = forwardRef<HTMLLIElement, PaletteResultRowProps>
               </div>
             )}
 
-            <div className="mt-2 flex flex-wrap items-center gap-1">
-              {result.axis_chips.slice(0, 4).map((chip) => (
+            <div className={`mt-2 flex flex-wrap items-center gap-1 ${selected ? '' : 'hidden sm:flex'}`}>
+              {result.axis_chips.slice(0, selected ? 4 : 2).map((chip) => (
                 <AxisChipTag key={`${chip.axis}-${chip.value}`} chip={chip} />
               ))}
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-1">
-              {result.match_reasons.map((reason, idx) => (
+              {(selected ? result.match_reasons : result.match_reasons.slice(0, 2)).map((reason, idx) => (
                 <MatchReasonChip key={`${reason.kind}-${idx}`} reason={reason} />
               ))}
+              {!selected && result.match_reasons.length > 2 && (
+                <span className="text-[10px] text-surface-500 sm:hidden">
+                  +{result.match_reasons.length - 2} more
+                </span>
+              )}
             </div>
           </span>
 
@@ -238,7 +251,7 @@ function ExpandedBody({
   onRelatedConceptClick?: (conceptId: string) => void
 }) {
   return (
-    <div className="mt-3 rounded-md border border-white/5 bg-surface-950/40 p-3">
+    <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-white/5 bg-surface-950/40 p-3 sm:max-h-72">
       <MarkdownLite source={result.body ?? ''} />
 
       {result.normative_anchors && result.normative_anchors.length > 0 && (
