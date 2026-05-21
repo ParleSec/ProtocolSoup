@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { Layout } from '@/components/common/Layout'
+import { CmdKPalette } from '@/components/palette/CmdKPalette'
 import { SITE_CONFIG } from '@/config/seo'
 import { SITE_ORIGIN, absoluteUrl } from '@/lib/seo'
 import { generateOrganizationSchema, generateWebsiteSchema } from '@/utils/schema'
@@ -85,6 +86,7 @@ export default function RootLayout({
           />
         ))}
         <Layout>{children}</Layout>
+        <CmdKPalette />
       </body>
     </html>
   )

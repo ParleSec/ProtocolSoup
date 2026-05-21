@@ -5,6 +5,8 @@ import {
   Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
 
+import { HomepagePalette } from '@/components/palette/HomepagePalette'
+
 interface SpecLinkItem {
   label: string
   url: string
@@ -85,6 +87,11 @@ export function Dashboard() {
           infrastructure and see exactly what happens at each step.
         </p>
       </header>
+
+      {/* Palette: prominent multi-axis content retrieval surface */}
+      <section aria-label="Search protocols, flows, and concepts">
+        <HomepagePalette />
+      </section>
 
       {/* Value Props */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
