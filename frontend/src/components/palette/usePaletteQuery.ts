@@ -100,3 +100,85 @@ export function usePaletteQuery({
 
   return { data, loading, error, refresh: issueQuery }
 }
+
+
+// usePlatformShortcutLabel
+export function usePlatformShortcutLabel(): string | null {
+  const [label, setLabel] = useState<string | null>(null)
+
+  useEffect(() => {
+    const ua = navigator.userAgent || ''
+    const isMac = /Mac OS X|Macintosh|iPhone|iPad|iPod/.test(ua)
+    setLabel(isMac ? '\u2318 K' : 'Ctrl K')
+  }, [])
+
+  return label
+}
+
+// useRecentSearches
+const RECENT_STORAGE_KEY = 'protocolsoup.palette.recent.v1'
+const MAX_RECENT = 5
+
+function readRecentFromStorage(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((v): v is string => typeof v === 'string').slice(0, MAX_RECENT)
+  } catch {
+    return []
+  }
+}
+
+function writeRecentToStorage(next: string[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(next))
+  } catch {
+    // Quota exceeded, private mode, or storage disabled — drop the write.
+  }
+}
+
+export interface UseRecentSearchesResult {
+  recent: string[]
+  push: (query: string) => void
+  clear: () => void
+}
+
+/**
+ * localStorage-backed recent palette queries for the empty state.
+ */
+export function useRecentSearches(): UseRecentSearchesResult {
+  const [recent, setRecent] = useState<string[]>([])
+
+  useEffect(() => {
+    setRecent(readRecentFromStorage())
+
+    function onStorage(event: StorageEvent) {
+      if (event.key !== RECENT_STORAGE_KEY) return
+      setRecent(readRecentFromStorage())
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  const push = useCallback((query: string) => {
+    const normalized = query.trim()
+    if (normalized.length === 0) return
+    setRecent((prev) => {
+      const without = prev.filter((entry) => entry !== normalized)
+      const next = [normalized, ...without].slice(0, MAX_RECENT)
+      writeRecentToStorage(next)
+      return next
+    })
+  }, [])
+
+  const clear = useCallback(() => {
+    writeRecentToStorage([])
+    setRecent([])
+  }, [])
+
+  return { recent, push, clear }
+}
