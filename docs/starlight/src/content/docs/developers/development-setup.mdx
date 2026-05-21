@@ -78,5 +78,9 @@ Run the smallest set that covers your change before requesting review.
 | OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |
 | Docker or service topology | `cd docker && docker compose config` |
 | OID4VCI/OID4VP conformance | `cd backend && go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1` |
+| Palette content (`content/**`) | `cd backend && go run ./cmd/content-validate -content ../content && go test ./internal/palette/...` |
+| Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ../frontend/public/palette.db` |
+
+The canonical contract for palette artefacts lives in [`content/SCHEMA.md`](https://github.com/ParleSec/ProtocolSoup/blob/master/content/SCHEMA.md). New axis values must be added to `content/taxonomy.yaml`, and synonyms to `content/aliases.yaml`. Both files are validated in CI by `cmd/content-validate`.
 
 Security scans may be limited on forked pull requests because repository secrets are not available to untrusted code. Maintainers can rerun or review those checks after triage.
