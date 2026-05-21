@@ -307,6 +307,31 @@ The build is idempotent — same input produces byte-identical output. Backed by
 
 Mounted at `POST /api/palette/query`. Implementation lives in `backend/internal/palette/`. The pipeline is parse → candidates → rank → match-reason emission → refinement chips. P99 latency budget is 20ms in-process. Tunable weights live in `rank.go`.
 
+### Frontend surfaces
+
+Two mount points share one component (`frontend/src/components/palette/Palette.tsx`):
+
+| Surface | Where | Notes |
+|---------|-------|-------|
+| Homepage input | `/` hero | URL persistence via `?q=&scope=&filter=`; shareable searches |
+| cmd+K modal | all other routes | `Cmd/Ctrl+K` or `/`; header **Search** chip on non-home pages |
+
+Keyboard (both surfaces unless noted):
+
+- `↑` / `↓` — navigate results
+- `Enter` — open result or dispatch runnable flow to Looking Glass
+- `Tab` — apply first refinement chip
+- `Esc` — close modal (cmd+K) or reset search (homepage)
+- `Cmd/Ctrl+K` — focus homepage input on `/`; toggle modal elsewhere
+
+Homepage URL shape (invalid values are ignored):
+
+```
+/?q=pkce&scope=concept&filter=use_cases:mobile_app
+```
+
+Recent searches (last 5) persist in `localStorage` under `protocolsoup.palette.recent.v1` and appear in the empty state.
+
 ## Project Architecture
 
 Understanding the codebase helps you contribute effectively:
