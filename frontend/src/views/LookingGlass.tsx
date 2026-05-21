@@ -4,8 +4,10 @@
 
 'use client'
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+
+import { parseFlowDeepLink } from '@/components/palette/runDispatch'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Square,
@@ -100,6 +102,7 @@ function describeWalletSubmitError(responsePayload: Record<string, unknown> | nu
 
 export function LookingGlass() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const [selectedProtocol, setSelectedProtocol] = useState<LookingGlassProtocol | null>(null)
   const [selectedFlow, setSelectedFlow] = useState<LookingGlassFlow | null>(null)
@@ -1005,6 +1008,30 @@ export function LookingGlass() {
       }
     }
   }, [protocols, resetFlow, clearWireEvents, router])
+
+  // Honour ?protocol=X&flow=Y from deep-links (palette run dispatch, shared
+  // URLs, browser bookmarks). The effect must work for three cases:
+  //
+  //   1. Direct visit / refresh / shared URL — the param-loaded path.
+  //   2. Palette dispatch from another page — router.push() changes the
+  //      route and the URL.
+  //   3. Palette re-dispatch while already on /looking-glass — only the
+  //      search params change.
+  //
+  // Using `useSearchParams()` makes the effect reactive to URL changes
+  // (case 3), and tracking the last handled (protocol, flow) pair in a
+  // ref prevents a redundant re-dispatch when the `protocols` array
+  // reference changes (e.g. refetch) but the deep-link target has not.
+  const lastHandledPairRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (protocolsLoading || protocols.length === 0) return
+    const pair = parseFlowDeepLink(searchParams)
+    if (!pair) return
+    const key = `${pair.protocolId}\u0000${pair.flowId}`
+    if (lastHandledPairRef.current === key) return
+    lastHandledPairRef.current = key
+    handleQuickSelect(pair.protocolId, pair.flowId)
+  }, [searchParams, protocols, protocolsLoading, handleQuickSelect])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
   const quickStartFlows = [
