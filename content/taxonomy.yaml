@@ -1,0 +1,153 @@
+# ProtocolSoup palette taxonomy
+#
+# Controlled vocabulary for every retrieval axis. Validator fails on any
+# artefact frontmatter that uses a value not present here.
+#
+# Each value carries a one-line semantic note explaining what it covers.
+# Notes are declarative; do not turn them into marketing copy.
+#
+# Axes:
+#   use_cases       — intent-level outcomes the user is trying to achieve
+#   actors          — protocol participants involved in the artefact
+#   patterns        — how the protocol mechanically operates
+#   problem_domains — high-level problem space the artefact addresses
+
+use_cases:
+  user-login-via-own-idp:
+    note: User signs into a relying party using credentials held by their own identity provider.
+  user-login-via-social:
+    note: User signs into a relying party via a third-party social identity provider.
+  service-to-service-auth:
+    note: One backend service authenticates as itself to another backend service.
+  step-up-authentication:
+    note: Demanding stronger or fresher authentication mid-session.
+  credential-issuance:
+    note: Issuer mints a verifiable credential to a holder wallet.
+  credential-presentation:
+    note: Holder wallet presents a verifiable credential to a verifier.
+  continuous-evaluation:
+    note: Producing or consuming security events that change live session state.
+  workload-attestation:
+    note: Workload obtains a cryptographic identity that proves what it is.
+  user-provisioning:
+    note: Synchronising user accounts and groups across identity systems.
+  single-sign-on:
+    note: One authentication grants access to multiple federated applications.
+  single-logout:
+    note: One logout terminates sessions across multiple federated applications.
+  token-introspection:
+    note: Resource server validates an opaque token at the authoritative issuer.
+  token-revocation:
+    note: Invalidating a previously issued token at the issuer.
+  delegated-api-access:
+    note: Application calls an API on behalf of a user with scoped permissions.
+  mobile-app-login:
+    note: User signs into a native mobile application.
+  single-page-app-login:
+    note: User signs into a browser SPA without a backend client secret.
+  federation-trust-establishment:
+    note: Two identity systems publish metadata and establish bilateral trust.
+  discovery:
+    note: Locating endpoints, keys, and capabilities of a protocol participant.
+  token-refresh:
+    note: Exchanging a refresh token for a new access token without user interaction.
+  pkce-protection:
+    note: Binding an authorization request to a code_verifier to prevent code interception.
+
+actors:
+  public-client:
+    note: OAuth client that cannot keep secrets confidential (SPA, mobile, native).
+  confidential-client:
+    note: OAuth client that can keep secrets confidential (backend service).
+  client:
+    note: OAuth client application requesting tokens, public or confidential.
+  authorization-server:
+    note: OAuth 2.0 entity that issues access and refresh tokens.
+  resource-server:
+    note: OAuth 2.0 entity that hosts protected resources and accepts access tokens.
+  identity-provider:
+    note: SAML or OIDC IdP responsible for authenticating users.
+  service-provider:
+    note: SAML SP relying on assertions issued by an IdP.
+  relying-party:
+    note: OIDC RP relying on identity claims issued by an OP.
+  wallet:
+    note: VC holder application that stores and presents credentials.
+  verifier:
+    note: VC verifier requesting presentations from a wallet.
+  issuer:
+    note: VC issuer issuing credentials to a wallet.
+  holder:
+    note: Subject controlling a wallet that holds credentials.
+  workload:
+    note: Service identity attested by SPIFFE infrastructure.
+  user-agent:
+    note: Browser or mobile OS mediating between user and protocol participants.
+  transmitter:
+    note: SSF transmitter publishing security event tokens.
+  receiver:
+    note: SSF receiver consuming security event tokens.
+  scim-client:
+    note: SCIM client (typically an IdP) issuing provisioning requests.
+  scim-service-provider:
+    note: SCIM-protected resource accepting provisioning requests.
+
+patterns:
+  front-channel-redirect:
+    note: Protocol message delivered through the user agent via HTTP redirects.
+  back-channel:
+    note: Protocol message delivered server-to-server without user-agent involvement.
+  out-of-band:
+    note: Protocol step delivered outside the primary HTTP exchange.
+  certificate-bound:
+    note: Token or session bound to a TLS client certificate.
+  key-bound:
+    note: Token bound to a cryptographic proof-of-possession key.
+  push-based:
+    note: Sender initiates delivery as events occur.
+  polling:
+    note: Receiver asks for new data on a schedule or trigger.
+  signed-assertion:
+    note: Identity statement carried in a cryptographically signed envelope.
+  pre-authorized:
+    note: Authorization granted before the protocol exchange begins.
+  pkce-bound:
+    note: Authorization request bound to a PKCE code_verifier and code_challenge.
+  nonce-bound:
+    note: Response bound to a request-provided nonce to prevent replay.
+  xml-signed:
+    note: Assertion signed using XMLDsig.
+  qr-code-handoff:
+    note: Handoff between two devices via QR code.
+  metadata-discovery:
+    note: Endpoints and keys located via a published metadata document.
+  audience-restricted:
+    note: Token or assertion scoped to a specific recipient via audience claim.
+  attestation-bound:
+    note: Identity bound to platform or workload attestation.
+  mutual-tls:
+    note: Both parties present X.509 certificates during TLS handshake.
+  bearer:
+    note: Token presented as proof of authorization, valid for whoever holds it.
+
+problem_domains:
+  authentication:
+    note: Verifying who someone is.
+  authorization:
+    note: Deciding what an authenticated party may do.
+  federation:
+    note: Trust relationships and identity flow between organisations.
+  provisioning:
+    note: Creating, updating, and deactivating user accounts across systems.
+  verifiable-credentials:
+    note: Issuance, holding, and presentation of cryptographically verifiable claims.
+  security-events:
+    note: Sharing real-time signals about identities, sessions, and credentials.
+  workload-identity:
+    note: Cryptographic identity for non-human services.
+  session-management:
+    note: Establishing, refreshing, and terminating user sessions.
+  key-management:
+    note: Distribution, rotation, and trust of cryptographic keys.
+  discovery:
+    note: Locating endpoints, keys, and supported features.
