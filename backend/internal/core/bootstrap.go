@@ -7,6 +7,7 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
+	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 )
 
@@ -15,6 +16,7 @@ type BootstrapOptions struct {
 	EnableKeySet       bool
 	EnableMockIdP      bool
 	EnableLookingGlass bool
+	EnablePalette      bool
 }
 
 // BootstrapResult holds initialized dependencies and plugin config.
@@ -23,6 +25,7 @@ type BootstrapResult struct {
 	KeySet       *crypto.KeySet
 	MockIdP      *mockidp.MockIdP
 	LookingGlass *lookingglass.Engine
+	Palette      *palette.Service
 	PluginConfig plugin.PluginConfig
 }
 
@@ -56,6 +59,17 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		log.Println("Looking Glass engine initialized")
 	}
 
+	var paletteSvc *palette.Service
+	if opts.EnablePalette && cfg.PaletteDBPath != "" {
+		svc, err := palette.NewService(cfg.PaletteDBPath)
+		if err != nil {
+			log.Printf("Palette service disabled: %v", err)
+		} else {
+			paletteSvc = svc
+			log.Printf("Palette service initialized from %s", cfg.PaletteDBPath)
+		}
+	}
+
 	pluginConfig := plugin.PluginConfig{
 		BaseURL:      cfg.BaseURL,
 		DataDir:      cfg.DataDir,
@@ -69,6 +83,7 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		KeySet:       keySet,
 		MockIdP:      idp,
 		LookingGlass: lg,
+		Palette:      paletteSvc,
 		PluginConfig: pluginConfig,
 	}, nil
 }

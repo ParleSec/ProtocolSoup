@@ -30,6 +30,10 @@ type Config struct {
 
 	// Data directory for durable protocol state (wallet lineage, verifier sessions)
 	DataDir string
+
+	// PaletteDBPath points at the prebuilt palette SQLite index. Empty
+	// disables the palette query service (and the /api/palette/query route).
+	PaletteDBPath string
 }
 
 // LoadConfig loads configuration from environment variables with sensible defaults
@@ -43,6 +47,7 @@ func LoadConfig() *Config {
 		Debug:          getEnvBool("SHOWCASE_DEBUG", false),
 		FrontendOrigin: getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
 		DataDir:        getEnv("SHOWCASE_DATA_DIR", ""),
+		PaletteDBPath: getEnv("SHOWCASE_PALETTE_DB", ""),
 	}
 
 	return cfg

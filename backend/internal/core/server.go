@@ -11,6 +11,7 @@ import (
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -23,10 +24,12 @@ type Server struct {
 	registry     *plugin.Registry
 	lookingGlass *lookingglass.Engine
 	keySet       *crypto.KeySet
+	palette      *palette.Service
 	router       chi.Router
 }
 
-// NewServer creates a new server instance
+// NewServer creates a new server instance. Pass nil for paletteSvc when the
+// palette index is not loaded — the route is then omitted entirely.
 func NewServer(cfg *Config, registry *plugin.Registry, lg *lookingglass.Engine, ks *crypto.KeySet) *Server {
 	s := &Server{
 		config:       cfg,
@@ -34,6 +37,17 @@ func NewServer(cfg *Config, registry *plugin.Registry, lg *lookingglass.Engine, 
 		lookingGlass: lg,
 		keySet:       ks,
 	}
+	s.setupRouter()
+	return s
+}
+
+// WithPalette mounts the palette query handler. Returns the server for
+// fluent use during bootstrap. A nil service is a no-op.
+func (s *Server) WithPalette(paletteSvc *palette.Service) *Server {
+	if paletteSvc == nil {
+		return s
+	}
+	s.palette = paletteSvc
 	s.setupRouter()
 	return s
 }
@@ -94,6 +108,13 @@ func (s *Server) setupRouter() {
 		// JWKS endpoint (optional)
 		if s.keySet != nil {
 			r.Get("/.well-known/jwks.json", s.handleJWKS)
+		}
+
+		// Palette query (optional). The handler is mounted only when an
+		// index is loaded; otherwise the route is absent so clients can
+		// detect availability via /api.
+		if s.palette != nil {
+			r.Post("/palette/query", s.palette.Handler())
 		}
 	})
 
@@ -222,6 +243,9 @@ func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.keySet != nil {
 		endpoints["jwks"] = "/api/.well-known/jwks.json"
+	}
+	if s.palette != nil {
+		endpoints["palette"] = "/api/palette/query"
 	}
 
 	writeJSON(w, http.StatusOK, APIIndexResponse{

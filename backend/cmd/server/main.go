@@ -26,6 +26,7 @@ func main() {
 		EnableKeySet:       true,
 		EnableMockIdP:      true,
 		EnableLookingGlass: true,
+		EnablePalette:      true,
 	})
 	if err != nil {
 		log.Fatalf("Failed to bootstrap server: %v", err)
@@ -93,7 +94,8 @@ func main() {
 	log.Printf("Initialized %d protocol plugins", len(registry.List()))
 
 	// Create and configure server
-	server := core.NewServer(bootstrap.Config, registry, bootstrap.LookingGlass, bootstrap.KeySet)
+	server := core.NewServer(bootstrap.Config, registry, bootstrap.LookingGlass, bootstrap.KeySet).
+		WithPalette(bootstrap.Palette)
 	httpServer := &http.Server{
 		Addr:         bootstrap.Config.ListenAddr,
 		Handler:      server.Router(),
