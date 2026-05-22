@@ -186,7 +186,7 @@ func (s *Service) Stats() Stats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return Stats{
-		Loaded:        s != nil && !s.closed,
+		Loaded:        !s.closed,
 		ArtefactCount: len(s.catalog.artefacts),
 		IndexVersion:  IndexVersion,
 	}
