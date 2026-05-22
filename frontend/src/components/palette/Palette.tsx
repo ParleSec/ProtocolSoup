@@ -81,20 +81,19 @@ export function Palette({ variant, onClose, autoFocus }: PaletteProps) {
   // URL persistence is enabled for the homepage variant only.
   const urlPersist = variant === 'homepage'
 
-  // Hydrate initial state from URL once on mount.
-  const initial = useMemo(() => {
-    if (!urlPersist || !searchParams) return null
-    return parsePaletteUrlState(searchParams)
-    // We intentionally only compute this once on mount; subsequent URL updates are driven by state changes
-  }, [])
-
-  const [q, setQ] = useState(() => initial?.q ?? '')
-  const [scope, setScope] = useState<PaletteScope | undefined>(
-    () => initial?.scope,
-  )
-  const [filters, setFilters] = useState<PaletteFilter[]>(
-    () => initial?.filters ?? [],
-  )
+  // Hydrate initial state from URL once on mount (lazy useState initializers).
+  const [q, setQ] = useState(() => {
+    if (!urlPersist || !searchParams) return ''
+    return parsePaletteUrlState(searchParams).q
+  })
+  const [scope, setScope] = useState<PaletteScope | undefined>(() => {
+    if (!urlPersist || !searchParams) return undefined
+    return parsePaletteUrlState(searchParams).scope
+  })
+  const [filters, setFilters] = useState<PaletteFilter[]>(() => {
+    if (!urlPersist || !searchParams) return []
+    return parsePaletteUrlState(searchParams).filters
+  })
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [placeholderIndex, setPlaceholderIndex] = useState(0)
   const [statusMessage, setStatusMessage] = useState('')
