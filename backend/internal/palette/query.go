@@ -174,6 +174,24 @@ func DefaultWeights() Weights {
 	}
 }
 
+// Stats reports whether the palette index is loaded and how large it is.
+type Stats struct {
+	Loaded        bool   `json:"loaded"`
+	ArtefactCount int    `json:"artefact_count"`
+	IndexVersion  string `json:"index_version"`
+}
+
+// Stats returns a snapshot of palette service state for health checks.
+func (s *Service) Stats() Stats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return Stats{
+		Loaded:        s != nil && !s.closed,
+		ArtefactCount: len(s.catalog.artefacts),
+		IndexVersion:  IndexVersion,
+	}
+}
+
 // Service is the in-memory query service. It opens the SQLite palette file
 // once at construction time and serves concurrent queries from prepared
 // statements. The DB is held in process memory after first access via

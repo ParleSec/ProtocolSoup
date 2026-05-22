@@ -63,6 +63,11 @@ func (c *Config) IsDemo() bool {
 	return c.Environment == "demo"
 }
 
+// IsProduction returns true when SHOWCASE_ENV is production.
+func (c *Config) IsProduction() bool {
+	return c.Environment == "production"
+}
+
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value

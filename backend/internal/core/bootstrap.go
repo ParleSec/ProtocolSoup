@@ -60,13 +60,25 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 	}
 
 	var paletteSvc *palette.Service
-	if opts.EnablePalette && cfg.PaletteDBPath != "" {
-		svc, err := palette.NewService(cfg.PaletteDBPath)
-		if err != nil {
-			log.Printf("Palette service disabled: %v", err)
+	if opts.EnablePalette {
+		if cfg.PaletteDBPath == "" {
+			if cfg.IsProduction() {
+				return nil, fmt.Errorf("SHOWCASE_PALETTE_DB is required in production")
+			}
+			log.Println("Palette service disabled: SHOWCASE_PALETTE_DB is empty")
 		} else {
-			paletteSvc = svc
-			log.Printf("Palette service initialized from %s", cfg.PaletteDBPath)
+			svc, err := palette.NewService(cfg.PaletteDBPath)
+			if err != nil {
+				if cfg.IsProduction() {
+					return nil, fmt.Errorf("load palette index at %s: %w", cfg.PaletteDBPath, err)
+				}
+				log.Printf("Palette service disabled: %v", err)
+			} else {
+				paletteSvc = svc
+				stats := svc.Stats()
+				log.Printf("Palette service initialized from %s (%d artefacts, index v%s)",
+					cfg.PaletteDBPath, stats.ArtefactCount, stats.IndexVersion)
+			}
 		}
 	}
 
