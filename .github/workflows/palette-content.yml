@@ -10,6 +10,8 @@ on:
       - 'backend/internal/palette/**'
       - 'backend/go.mod'
       - 'backend/go.sum'
+      - 'docker/Dockerfile.backend'
+      - 'docker/Dockerfile.fly'
       - '.github/workflows/palette-content.yml'
   pull_request:
     branches: [ master, develop ]
@@ -20,6 +22,8 @@ on:
       - 'backend/internal/palette/**'
       - 'backend/go.mod'
       - 'backend/go.sum'
+      - 'docker/Dockerfile.backend'
+      - 'docker/Dockerfile.fly'
       - '.github/workflows/palette-content.yml'
 
 permissions:
@@ -49,3 +53,66 @@ jobs:
       - name: Run palette unit tests
         working-directory: backend
         run: go test ./internal/palette/...
+
+  build-index:
+    name: Build palette index
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Build palette.db
+        working-directory: backend
+        run: |
+          go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db
+          test -s ./dist/palette.db
+          file ./dist/palette.db | grep -q SQLite
+
+      - name: Upload palette.db artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: palette-db
+          path: backend/dist/palette.db
+          retention-days: 7
+
+  smoke:
+    name: Palette smoke test
+    needs: build-index
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Build backend image
+        run: docker build -f docker/Dockerfile.backend -t ps-backend:smoke .
+
+      - name: Run palette API smoke checks
+        run: |
+          docker run -d --name ps \
+            -e SHOWCASE_ENV=production \
+            -e SHOWCASE_BASE_URL=http://localhost:8080 \
+            -e SHOWCASE_PALETTE_DB=/app/palette.db \
+            -p 8080:8080 ps-backend:smoke
+          for i in 1 2 3 4 5; do
+            curl -sf http://localhost:8080/health && break || sleep 2
+          done
+          curl -sf http://localhost:8080/health | jq -e '.palette.loaded == true'
+          curl -sf http://localhost:8080/api | jq -e '.endpoints.palette == "/api/palette/query"'
+          curl -sf -X POST http://localhost:8080/api/palette/query \
+            -H 'content-type: application/json' \
+            -d '{"q":"pkce"}' | jq -e '.results | length > 0'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs ps || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f ps || true
