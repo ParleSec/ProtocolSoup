@@ -9,16 +9,12 @@ FROM node:26-alpine AS frontend-builder
 
 WORKDIR /frontend
 
-# Copy package files
 COPY frontend/package.json frontend/package-lock.json* ./
 
-# Install dependencies
 RUN npm install --legacy-peer-deps
 
-# Copy frontend source
 COPY frontend/ .
 
-# Build the frontend
 ARG BACKEND_ORIGIN=http://127.0.0.1:8080
 ENV BACKEND_ORIGIN=$BACKEND_ORIGIN
 ARG NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
@@ -29,24 +25,25 @@ ENV NODE_ENV=production
 RUN npm run build
 
 # ============================================
-# Stage 2: Build Backend
+# Stage 2: Build Backend + palette index
 # ============================================
 FROM golang:1.26.3-alpine AS backend-builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
+RUN apk add --no-cache gcc musl-dev file
 
-# Copy go mod files
 COPY backend/go.mod backend/go.sum ./
-
-# Copy source code
-COPY backend/ .
-
-# Download dependencies and build
 RUN go mod download
+
+COPY backend/ .
+COPY content/ /content/
+
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o palette-indexer ./cmd/palette-indexer
+RUN ./palette-indexer -content /content -out /app/palette.db && \
+    test -s /app/palette.db && \
+    file /app/palette.db | grep -q SQLite
 
 # ============================================
 # Stage 3: Get SPIRE binaries
@@ -60,50 +57,38 @@ FROM alpine:3.23
 
 WORKDIR /app
 
-# Install runtime dependencies
 RUN apk --no-cache add ca-certificates nodejs supervisor
 
-# Copy the backend binary
-COPY --from=backend-builder /app/server .
+COPY --from=backend-builder /app/server ./server
+COPY --from=backend-builder /app/palette.db ./palette.db
 
-# Copy Next.js standalone runtime and assets
 COPY --from=frontend-builder /frontend/.next/standalone ./frontend
 COPY --from=frontend-builder /frontend/.next/static ./frontend/.next/static
 COPY --from=frontend-builder /frontend/public ./frontend/public
 
-# Copy SPIRE Agent binary
 COPY --from=spire-agent /opt/spire/bin/spire-agent /opt/spire/bin/spire-agent
 
-# Create directories for SPIRE and SCIM
-# Note: /data is the mount point for persistent volume on Fly.io
-# Subdirectories are created at runtime by start-agent.sh
 RUN mkdir -p /opt/spire/conf/agent /run/spire/sockets /var/log/supervisor /data/spire /data/scim
 
-# Copy configuration files
 COPY docker/fly/agent.conf /opt/spire/conf/agent/agent.conf
 COPY docker/fly/start-agent.sh /opt/spire/bin/start-agent.sh
 COPY docker/fly/supervisord.conf /etc/supervisord.conf
 
-# Copy bootstrap agent certificate for x509pop attestation (key comes from Fly secrets)
 COPY docker/spire/server-fly/bootstrap-agent.crt /opt/spire/conf/agent/bootstrap-agent.crt
 
-# Fix line endings and permissions
 RUN chmod +x /opt/spire/bin/start-agent.sh && \
     sed -i 's/\r$//' /opt/spire/bin/start-agent.sh
 
-# Set environment variables
 ENV SHOWCASE_ENV=production
 ENV SHOWCASE_LISTEN_ADDR=:8080
 ENV SHOWCASE_FRONTEND_ORIGIN=http://127.0.0.1:3000
 ENV BACKEND_ORIGIN=http://127.0.0.1:8080
 ENV NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
+ENV SHOWCASE_PALETTE_DB=/app/palette.db
 
-# Expose port
 EXPOSE 8080
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Run with supervisor
 ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

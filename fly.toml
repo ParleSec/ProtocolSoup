@@ -22,6 +22,7 @@ primary_region = 'syd'
   BACKEND_ORIGIN = 'http://127.0.0.1:8080'
   NEXT_PUBLIC_SITE_URL = 'https://protocolsoup.com'
   SHOWCASE_MOCK_IDP = 'true'
+  SHOWCASE_PALETTE_DB = '/app/palette.db'
   
   # SPIFFE/SPIRE Configuration
   # The agent will connect to SPIRE Server via Fly private network
