@@ -88,6 +88,7 @@ export default defineConfig({
             { slug: 'deploy/deployment-models' },
             { slug: 'deploy/release-and-tag-policy' },
             { slug: 'deploy/environment-variables' },
+            { slug: 'deploy/palette-index' },
             {
               label: 'Services',
               items: [

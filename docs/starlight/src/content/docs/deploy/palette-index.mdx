@@ -1,0 +1,64 @@
+---
+title: "Palette content index"
+description: "How monolith deployments ship and mount the palette SQLite index for homepage search and cmd+K."
+---
+
+# Palette content index
+
+The homepage search bar and global **cmd+K** palette query a prebuilt SQLite index (`palette.db`) produced from the repository `content/` tree. The index is a **backend artefact**: Go serves `POST /api/palette/query`; it is not bundled as a Next.js static file.
+
+## Canonical paths
+
+| Context | Path |
+|---------|------|
+| Local / CI build output | `backend/dist/palette.db` |
+| Baked into Docker images | `/app/palette.db` |
+| Runtime configuration | `SHOWCASE_PALETTE_DB=/app/palette.db` |
+
+Build the index locally:
+
+```bash
+cd backend
+go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db
+```
+
+## Baked into the image (recommended)
+
+`docker/Dockerfile.backend` and `docker/Dockerfile.fly` compile `palette-indexer`, run it against `/content` at **image build time**, copy `/app/palette.db` into the runtime layer, and set `SHOWCASE_PALETTE_DB=/app/palette.db`.
+
+**Implication:** changing `content/` requires rebuilding the backend (or monolith) image even when no Go source changed.
+
+Verify after deploy:
+
+```bash
+curl -s https://your-host/health | jq '.palette'
+curl -s https://your-host/api | jq '.endpoints.palette'
+curl -sf -X POST https://your-host/api/palette/query \
+  -H 'content-type: application/json' \
+  -d '{"q":"pkce"}' | jq '.results | length'
+```
+
+In `SHOWCASE_ENV=production`, the server **refuses to start** if `SHOWCASE_PALETTE_DB` is unset or the file cannot be opened.
+
+## Mounted as a volume (self-hosted)
+
+For custom monolith deployments, build the index on a host or in CI and mount it at the canonical path:
+
+```yaml
+services:
+  backend:
+    image: ghcr.io/parlesec/protocolsoup-federation:latest
+    environment:
+      SHOWCASE_ENV: production
+      SHOWCASE_PALETTE_DB: /app/palette.db
+    volumes:
+      - ./backend/dist/palette.db:/app/palette.db:ro
+```
+
+Rebuild the index whenever `content/` changes, then restart the backend.
+
+## Related
+
+- [Deployment models](/deploy/deployment-models/) — Model 3 (simple monolith) includes the baked index via `Dockerfile.backend`
+- [Environment variables](/deploy/environment-variables/) — `SHOWCASE_PALETTE_DB`
+- Contributor guide: palette section in the repository `CONTRIBUTING.md`

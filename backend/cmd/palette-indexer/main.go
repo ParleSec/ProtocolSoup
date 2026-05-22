@@ -2,6 +2,14 @@
 // content tree. The output file is deterministic for fixed input: running the
 // indexer twice on the same tree produces a byte-identical database, which is
 // what lets CI compare deploy artefacts.
+//
+// Canonical paths:
+//   - Build-time output (local/CI): backend/dist/palette.db  (-out ./dist/palette.db from backend/)
+//   - Container build output:       /app/palette.db           (Dockerfile.backend / Dockerfile.fly)
+//   - Runtime (containers):         /app/palette.db           (SHOWCASE_PALETTE_DB)
+//
+// The index is a backend artefact served by Go at POST /api/palette/query, not
+// a frontend static file.
 package main
 
 import (

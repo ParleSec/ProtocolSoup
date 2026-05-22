@@ -65,6 +65,8 @@ docker compose -f docker-compose.simple.yml up -d
 
 **Best for:** Quick evaluation of core federation protocols without multi-service overhead.
 
+The simple monolith image builds the [palette content index](/deploy/palette-index/) at image build time (`/app/palette.db`). Homepage search and cmd+K require that file and `SHOWCASE_PALETTE_DB`.
+
 ## Model 4: Custom Topology
 
 Combine selected GHCR images with your own infrastructure.

@@ -198,7 +198,7 @@ Run the smallest set that covers your change. CI may run additional checks, but 
 | Docker or service topology | `cd docker && docker compose config` and, when practical, `docker compose up -d` |
 | OID4VCI/OID4VP protocol behavior | `cd backend && go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1` |
 | Palette content (`content/**`) | `cd backend && go run ./cmd/content-validate -content ../content && go test ./internal/palette/...` |
-| Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ../frontend/public/palette.db` |
+| Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db` |
 
 When Snyk or other security scans are skipped for forked PRs because repository secrets are unavailable, maintainers may rerun or review those checks after initial triage.
 
@@ -298,14 +298,18 @@ A deploy-time Go binary builds the runtime SQLite file:
 
 ```bash
 cd backend
-go run ./cmd/palette-indexer -content ../content -out ../frontend/public/palette.db
+go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db
 ```
 
 The build is idempotent — same input produces byte-identical output. Backed by SQLite FTS5 plus structured tables (`artefacts`, `axis_values`, `edges`, `aliases`).
 
+**Canonical paths:** local and CI builds write `backend/dist/palette.db`. Production Docker images (`docker/Dockerfile.backend`, `docker/Dockerfile.fly`) run the indexer at image build time and copy the file to `/app/palette.db`, exposed via `SHOWCASE_PALETTE_DB=/app/palette.db`. Content changes require a backend image rebuild (or a mounted volume at that path for self-hosted monoliths).
+
 ### Query service
 
 Mounted at `POST /api/palette/query`. Implementation lives in `backend/internal/palette/`. The pipeline is parse → candidates → rank → match-reason emission → refinement chips. P99 latency budget is 20ms in-process. Tunable weights live in `rank.go`.
+
+Production requires `SHOWCASE_PALETTE_DB` pointing at a readable index file; the server refuses to start in `SHOWCASE_ENV=production` if the path is missing or unreadable. Docker images built from `docker/Dockerfile.backend` and `docker/Dockerfile.fly` bake `/app/palette.db` and set the variable automatically. Verify with `GET /health` (`palette.loaded`) or `GET /api` (`endpoints.palette`).
 
 ### Frontend surfaces
 
