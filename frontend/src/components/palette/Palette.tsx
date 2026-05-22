@@ -19,6 +19,7 @@ import {
 } from '@/components/palette/paletteUrlState'
 import { resolveFlowHandoff } from '@/components/palette/runDispatch'
 import {
+  usePaletteEndpointAvailable,
   usePaletteQuery,
   usePlatformShortcutLabel,
   useRecentSearches,
@@ -143,11 +144,14 @@ export function Palette({ variant, onClose, autoFocus }: PaletteProps) {
     return () => window.clearInterval(handle)
   }, [q.length, placeholderPool.length])
 
+  const paletteAvailable = usePaletteEndpointAvailable()
+
   const { data, loading, error } = usePaletteQuery({
     q,
     scope,
     filters,
-    enabled: q.trim().length > 0 || filters.length > 0,
+    enabled:
+      paletteAvailable && (q.trim().length > 0 || filters.length > 0),
   })
 
   const results = useMemo(() => data?.results ?? [], [data])
@@ -536,6 +540,31 @@ export function Palette({ variant, onClose, autoFocus }: PaletteProps) {
     variant === 'homepage'
       ? 'w-full'
       : 'flex min-h-0 w-full max-w-2xl flex-1 flex-col'
+
+  if (variant === 'homepage' && !paletteAvailable) {
+    return (
+      <div className="w-full" role="search" aria-labelledby={headingId}>
+        <h2 id={headingId} className="sr-only">
+          Explore protocols
+        </h2>
+        <p className="mb-2 text-xs text-surface-500">
+          Content search requires a palette index on the backend (
+          <code className="text-surface-400">SHOWCASE_PALETTE_DB</code>
+          ). See the{' '}
+          <a href="https://docs.protocolsoup.com/deploy/palette-index/" className="text-amber-300/90 hover:underline">
+            palette index
+          </a>{' '}
+          deployment guide.
+        </p>
+        <EmptyState
+          variant="homepage"
+          onPick={setEntryChip}
+          recent={recentSearches}
+          onClearRecent={clearRecent}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className={shellClass} role="search" aria-labelledby={headingId}>

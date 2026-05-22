@@ -64,6 +64,20 @@ export function usePaletteQuery({
         body: JSON.stringify(body),
       })
       if (!response.ok) {
+        if (response.status === 404 || response.status === 405) {
+          // Route not mounted — degrade silently; production always exposes this route.
+          if (seq === requestSeq.current) {
+            setData({
+              query: q,
+              results: [],
+              refinement_chips: [],
+              resolved_aliases: [],
+              total_candidates: 0,
+              elapsed_micros: 0,
+            })
+          }
+          return
+        }
         throw new Error(`palette query failed (${response.status})`)
       }
       const payload = (await response.json()) as PaletteResponse
@@ -101,6 +115,44 @@ export function usePaletteQuery({
   return { data, loading, error, refresh: issueQuery }
 }
 
+let paletteEndpointCache: boolean | null = null
+
+/**
+ * Probes GET /api once to see whether endpoints.palette is advertised.
+ * Used to hide live search on self-hosted deployments without an index.
+ */
+export function usePaletteEndpointAvailable(): boolean {
+  const [available, setAvailable] = useState(paletteEndpointCache ?? true)
+
+  useEffect(() => {
+    if (paletteEndpointCache !== null) {
+      setAvailable(paletteEndpointCache)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const response = await fetch('/api')
+        if (!response.ok) {
+          paletteEndpointCache = false
+        } else {
+          const payload = (await response.json()) as { endpoints?: { palette?: string } }
+          paletteEndpointCache = Boolean(payload.endpoints?.palette)
+        }
+      } catch {
+        paletteEndpointCache = false
+      }
+      if (!cancelled) {
+        setAvailable(paletteEndpointCache ?? false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  return available
+}
 
 // usePlatformShortcutLabel
 export function usePlatformShortcutLabel(): string | null {
