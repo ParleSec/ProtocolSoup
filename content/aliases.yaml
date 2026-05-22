@@ -1,0 +1,459 @@
+# ProtocolSoup palette aliases
+#
+# Synonym map. Each alias resolves to one or more canonical targets. An alias
+# may produce multiple canonical mappings (e.g. "auth" resolves to both
+# authentication and authorization); the indexer keeps all rows.
+#
+# Canonical entry shape:
+#   axis:  one of use_cases | actors | patterns | problem_domains  (optional)
+#   value: a value defined in taxonomy.yaml under that axis         (when axis is set)
+#   artefact: an artefact id (concept, protocol, flow, etc.)        (when axis is unset)
+#
+# Aliases are matched case-insensitively. Duplicate alias keys cause a
+# validator failure even when the canonical targets differ — collapse them
+# into one entry with multiple canonical targets.
+
+aliases:
+  # Protocol shortnames
+  - alias: oauth
+    canonical:
+      - artefact: oauth2
+  - alias: oauth2
+    canonical:
+      - artefact: oauth2
+  - alias: oauth 2.0
+    canonical:
+      - artefact: oauth2
+  - alias: oidc
+    canonical:
+      - artefact: oidc
+  - alias: openid connect
+    canonical:
+      - artefact: oidc
+  - alias: openid
+    canonical:
+      - artefact: oidc
+  - alias: saml
+    canonical:
+      - artefact: saml
+  - alias: scim
+    canonical:
+      - artefact: scim
+  - alias: ssf
+    canonical:
+      - artefact: ssf
+  - alias: spiffe
+    canonical:
+      - artefact: spiffe
+  - alias: spire
+    canonical:
+      - artefact: spiffe
+  - alias: oid4vci
+    canonical:
+      - artefact: oid4vci
+  - alias: oid4vp
+    canonical:
+      - artefact: oid4vp
+  - alias: openid4vci
+    canonical:
+      - artefact: oid4vci
+  - alias: openid4vp
+    canonical:
+      - artefact: oid4vp
+
+  # Concept aliases
+  - alias: pkce
+    canonical:
+      - artefact: pkce
+      - axis: patterns
+        value: pkce-bound
+  - alias: code verifier
+    canonical:
+      - artefact: pkce
+  - alias: code challenge
+    canonical:
+      - artefact: pkce
+  - alias: jwt
+    canonical:
+      - artefact: jwt
+  - alias: json web token
+    canonical:
+      - artefact: jwt
+  - alias: jwks
+    canonical:
+      - artefact: jwks
+  - alias: id token
+    canonical:
+      - artefact: id-token
+  - alias: id_token
+    canonical:
+      - artefact: id-token
+  - alias: access token
+    canonical:
+      - artefact: access-token
+  - alias: refresh token
+    canonical:
+      - axis: use_cases
+        value: token-refresh
+  - alias: bearer
+    canonical:
+      - axis: patterns
+        value: bearer
+  - alias: bearer token
+    canonical:
+      - axis: patterns
+        value: bearer
+  - alias: mtls
+    canonical:
+      - axis: patterns
+        value: mutual-tls
+  - alias: mutual tls
+    canonical:
+      - axis: patterns
+        value: mutual-tls
+  - alias: dpop
+    canonical:
+      - axis: patterns
+        value: key-bound
+  - alias: dcql
+    canonical:
+      - artefact: dcql
+  - alias: did:web
+    canonical:
+      - artefact: did-web
+  - alias: nonce
+    canonical:
+      - axis: patterns
+        value: nonce-bound
+
+  # Use-case aliases — sign in / login phrasings
+  - alias: sign in
+    canonical:
+      - axis: use_cases
+        value: user-login-via-own-idp
+      - axis: use_cases
+        value: single-page-app-login
+      - axis: use_cases
+        value: mobile-app-login
+  - alias: sign-in
+    canonical:
+      - axis: use_cases
+        value: user-login-via-own-idp
+      - axis: use_cases
+        value: single-page-app-login
+      - axis: use_cases
+        value: mobile-app-login
+  - alias: login
+    canonical:
+      - axis: use_cases
+        value: user-login-via-own-idp
+      - axis: use_cases
+        value: single-page-app-login
+      - axis: use_cases
+        value: mobile-app-login
+  - alias: log in
+    canonical:
+      - axis: use_cases
+        value: user-login-via-own-idp
+  - alias: signin
+    canonical:
+      - axis: use_cases
+        value: user-login-via-own-idp
+  - alias: sso
+    canonical:
+      - axis: use_cases
+        value: single-sign-on
+  - alias: single sign on
+    canonical:
+      - axis: use_cases
+        value: single-sign-on
+  - alias: single sign-on
+    canonical:
+      - axis: use_cases
+        value: single-sign-on
+  - alias: slo
+    canonical:
+      - axis: use_cases
+        value: single-logout
+  - alias: logout
+    canonical:
+      - axis: use_cases
+        value: single-logout
+  - alias: step up
+    canonical:
+      - axis: use_cases
+        value: step-up-authentication
+  - alias: step-up
+    canonical:
+      - axis: use_cases
+        value: step-up-authentication
+
+  # Service-to-service phrasings
+  - alias: machine to machine
+    canonical:
+      - axis: use_cases
+        value: service-to-service-auth
+  - alias: m2m
+    canonical:
+      - axis: use_cases
+        value: service-to-service-auth
+  - alias: service to service
+    canonical:
+      - axis: use_cases
+        value: service-to-service-auth
+  - alias: backend to backend
+    canonical:
+      - axis: use_cases
+        value: service-to-service-auth
+  - alias: api to api
+    canonical:
+      - axis: use_cases
+        value: service-to-service-auth
+
+  # Client form-factor phrasings
+  - alias: spa
+    canonical:
+      - axis: actors
+        value: public-client
+      - axis: use_cases
+        value: single-page-app-login
+  - alias: single page app
+    canonical:
+      - axis: use_cases
+        value: single-page-app-login
+  - alias: mobile app
+    canonical:
+      - axis: use_cases
+        value: mobile-app-login
+      - axis: actors
+        value: public-client
+  - alias: native app
+    canonical:
+      - axis: actors
+        value: public-client
+  - alias: mobile
+    canonical:
+      - axis: use_cases
+        value: mobile-app-login
+
+  # Actor phrasings
+  - alias: idp
+    canonical:
+      - axis: actors
+        value: identity-provider
+  - alias: identity provider
+    canonical:
+      - axis: actors
+        value: identity-provider
+  - alias: sp
+    canonical:
+      - axis: actors
+        value: service-provider
+  - alias: service provider
+    canonical:
+      - axis: actors
+        value: service-provider
+  - alias: rp
+    canonical:
+      - axis: actors
+        value: relying-party
+  - alias: relying party
+    canonical:
+      - axis: actors
+        value: relying-party
+  - alias: as
+    canonical:
+      - axis: actors
+        value: authorization-server
+  - alias: authorization server
+    canonical:
+      - axis: actors
+        value: authorization-server
+  - alias: resource server
+    canonical:
+      - axis: actors
+        value: resource-server
+  - alias: rs
+    canonical:
+      - axis: actors
+        value: resource-server
+  - alias: workload
+    canonical:
+      - axis: actors
+        value: workload
+      - axis: problem_domains
+        value: workload-identity
+
+  # Verifiable credentials phrasings
+  - alias: vc
+    canonical:
+      - axis: problem_domains
+        value: verifiable-credentials
+  - alias: vcs
+    canonical:
+      - axis: problem_domains
+        value: verifiable-credentials
+  - alias: verifiable credential
+    canonical:
+      - axis: problem_domains
+        value: verifiable-credentials
+  - alias: credential issuance
+    canonical:
+      - axis: use_cases
+        value: credential-issuance
+  - alias: credential presentation
+    canonical:
+      - axis: use_cases
+        value: credential-presentation
+  - alias: presentation
+    canonical:
+      - axis: use_cases
+        value: credential-presentation
+  - alias: issuance
+    canonical:
+      - axis: use_cases
+        value: credential-issuance
+  - alias: wallet
+    canonical:
+      - axis: actors
+        value: wallet
+  - alias: holder
+    canonical:
+      - axis: actors
+        value: holder
+  - alias: verifier
+    canonical:
+      - axis: actors
+        value: verifier
+  - alias: issuer
+    canonical:
+      - axis: actors
+        value: issuer
+
+  # Provisioning phrasings
+  - alias: user provisioning
+    canonical:
+      - axis: use_cases
+        value: user-provisioning
+  - alias: provisioning
+    canonical:
+      - axis: use_cases
+        value: user-provisioning
+      - axis: problem_domains
+        value: provisioning
+
+  # Federation phrasings
+  - alias: federate
+    canonical:
+      - axis: use_cases
+        value: federation-trust-establishment
+      - axis: problem_domains
+        value: federation
+  - alias: federation
+    canonical:
+      - axis: problem_domains
+        value: federation
+  - alias: federating
+    canonical:
+      - axis: use_cases
+        value: federation-trust-establishment
+
+  # Security events phrasings
+  - alias: caep
+    canonical:
+      - artefact: caep
+  - alias: risc
+    canonical:
+      - artefact: risc
+  - alias: security event
+    canonical:
+      - axis: problem_domains
+        value: security-events
+  - alias: continuous evaluation
+    canonical:
+      - axis: use_cases
+        value: continuous-evaluation
+  - alias: continuous access evaluation
+    canonical:
+      - axis: use_cases
+        value: continuous-evaluation
+
+  # Discovery phrasings
+  - alias: well known
+    canonical:
+      - axis: use_cases
+        value: discovery
+      - axis: patterns
+        value: metadata-discovery
+  - alias: ".well-known"
+    canonical:
+      - axis: use_cases
+        value: discovery
+      - axis: patterns
+        value: metadata-discovery
+  - alias: metadata
+    canonical:
+      - axis: patterns
+        value: metadata-discovery
+  - alias: discovery
+    canonical:
+      - axis: use_cases
+        value: discovery
+      - axis: problem_domains
+        value: discovery
+
+  # Ambiguous on purpose — both directions kept
+  - alias: auth
+    canonical:
+      - axis: problem_domains
+        value: authentication
+      - axis: problem_domains
+        value: authorization
+  - alias: authn
+    canonical:
+      - axis: problem_domains
+        value: authentication
+  - alias: authz
+    canonical:
+      - axis: problem_domains
+        value: authorization
+
+  # Token operations
+  - alias: introspection
+    canonical:
+      - axis: use_cases
+        value: token-introspection
+  - alias: introspect
+    canonical:
+      - axis: use_cases
+        value: token-introspection
+  - alias: revoke
+    canonical:
+      - axis: use_cases
+        value: token-revocation
+  - alias: revocation
+    canonical:
+      - axis: use_cases
+        value: token-revocation
+
+  # API access phrasings
+  - alias: call our api
+    canonical:
+      - axis: use_cases
+        value: delegated-api-access
+      - axis: use_cases
+        value: service-to-service-auth
+  - alias: call my api
+    canonical:
+      - axis: use_cases
+        value: delegated-api-access
+      - axis: use_cases
+        value: service-to-service-auth
+  - alias: api access
+    canonical:
+      - axis: use_cases
+        value: delegated-api-access
+  - alias: delegated access
+    canonical:
+      - axis: use_cases
+        value: delegated-api-access

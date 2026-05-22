@@ -197,6 +197,8 @@ Run the smallest set that covers your change. CI may run additional checks, but 
 | OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |
 | Docker or service topology | `cd docker && docker compose config` and, when practical, `docker compose up -d` |
 | OID4VCI/OID4VP protocol behavior | `cd backend && go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1` |
+| Palette content (`content/**`) | `cd backend && go run ./cmd/content-validate -content ../content && go test ./internal/palette/...` |
+| Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ../frontend/public/palette.db` |
 
 When Snyk or other security scans are skipped for forked PRs because repository secrets are unavailable, maintainers may rerun or review those checks after initial triage.
 
@@ -266,6 +268,70 @@ When proposing a new protocol:
 3. **Start with core flows** before edge cases
 4. **Emit Looking Glass events** for all significant operations-visibility is our differentiator
 
+## Palette Content (`content/`)
+
+The homepage search input and global cmd+K palette retrieve from a deterministic in-process index built from the `content/` tree at the repo root. There is no external search service, no embeddings, and no probabilistic ranking. Every result row must carry visible match-reason metadata that points at the structured field that caused it to surface.
+
+### Authoring rules
+
+- **Source of truth is frontmatter** in markdown files under `content/protocols/`, `content/flows/<protocol>/`, `content/concepts/`, and (when produced) `content/spec-assertions/<protocol>/`.
+- **Schema**: see [`content/SCHEMA.md`](content/SCHEMA.md) for the full frontmatter contract (required, recommended, and optional fields). That document is canonical; do not duplicate the rules elsewhere.
+- **Controlled vocabulary**: only values declared in [`content/taxonomy.yaml`](content/taxonomy.yaml) are valid for the `use_cases`, `actors`, `patterns`, and `problem_domains` axes. New values require a taxonomy PR with a one-line semantic note.
+- **Synonyms**: add user-language synonyms to [`content/aliases.yaml`](content/aliases.yaml). Ambiguous aliases keep all mappings; the palette surfaces refinement chips when intent is genuinely ambiguous.
+- **Edges**: list `related_concepts` (and, where appropriate, `prerequisite_of` / `governs`) to enable one-hop traversals during retrieval.
+
+### Validator
+
+Every PR that touches `content/` or `backend/internal/palette/` must pass:
+
+```bash
+cd backend
+go run ./cmd/content-validate -content ../content
+go test ./internal/palette/...
+```
+
+The validator fails on unknown axis values, missing required fields, duplicate alias keys, dangling edge references, filename/id mismatches, and unknown top-level fields. CI enforces the same set; see `.github/workflows/palette-content.yml`.
+
+### Indexer
+
+A deploy-time Go binary builds the runtime SQLite file:
+
+```bash
+cd backend
+go run ./cmd/palette-indexer -content ../content -out ../frontend/public/palette.db
+```
+
+The build is idempotent — same input produces byte-identical output. Backed by SQLite FTS5 plus structured tables (`artefacts`, `axis_values`, `edges`, `aliases`).
+
+### Query service
+
+Mounted at `POST /api/palette/query`. Implementation lives in `backend/internal/palette/`. The pipeline is parse → candidates → rank → match-reason emission → refinement chips. P99 latency budget is 20ms in-process. Tunable weights live in `rank.go`.
+
+### Frontend surfaces
+
+Two mount points share one component (`frontend/src/components/palette/Palette.tsx`):
+
+| Surface | Where | Notes |
+|---------|-------|-------|
+| Homepage input | `/` hero | URL persistence via `?q=&scope=&filter=`; shareable searches |
+| cmd+K modal | all other routes | `Cmd/Ctrl+K` or `/`; header **Search** chip on non-home pages |
+
+Keyboard (both surfaces unless noted):
+
+- `↑` / `↓` — navigate results
+- `Enter` — open result or dispatch runnable flow to Looking Glass
+- `Tab` — apply first refinement chip
+- `Esc` — close modal (cmd+K) or reset search (homepage)
+- `Cmd/Ctrl+K` — focus homepage input on `/`; toggle modal elsewhere
+
+Homepage URL shape (invalid values are ignored):
+
+```
+/?q=pkce&scope=concept&filter=use_cases:mobile_app
+```
+
+Recent searches (last 5) persist in `localStorage` under `protocolsoup.palette.recent.v1` and appear in the empty state.
+
 ## Project Architecture
 
 Understanding the codebase helps you contribute effectively:
@@ -273,21 +339,33 @@ Understanding the codebase helps you contribute effectively:
 ```
 ProtocolSoup/
 ├── backend/
-│   ├── cmd/server/          # Application entry point
+│   ├── cmd/
+│   │   ├── server/              # Application entry point
+│   │   ├── content-validate/    # Palette content frontmatter validator
+│   │   └── palette-indexer/     # Builds the SQLite palette index
 │   └── internal/
-│       ├── core/            # HTTP server, config, middleware
-│       ├── crypto/          # JWT/JWK key management
-│       ├── lookingglass/    # Real-time protocol inspection
-│       ├── mockidp/         # Mock identity provider
-│       ├── plugin/          # Plugin system interfaces
-│       └── protocols/       # Protocol implementations
+│       ├── core/                # HTTP server, config, middleware
+│       ├── crypto/              # JWT/JWK key management
+│       ├── lookingglass/        # Real-time protocol inspection
+│       ├── mockidp/             # Mock identity provider
+│       ├── palette/             # Indexer + query service for the search palette
+│       ├── plugin/              # Plugin system interfaces
+│       └── protocols/           # Protocol implementations
+├── content/                     # Source of truth for palette artefacts
+│   ├── taxonomy.yaml            # Controlled axis vocabulary
+│   ├── aliases.yaml             # Synonym map
+│   ├── SCHEMA.md                # Frontmatter contract (canonical)
+│   ├── protocols/               # Protocol artefacts
+│   ├── flows/<protocol>/        # Flow artefacts
+│   └── concepts/                # Concept artefacts
 ├── frontend/
 │   └── src/
-│       ├── components/      # Shared UI components
-│       ├── lookingglass/    # Flow executors & visualization
-│       ├── pages/           # Route pages
-│       └── protocols/       # Protocol registry
-└── docker/                  # Container configurations
+│       ├── components/
+│       │   └── palette/         # Shared retrieval surface (homepage + cmd+K)
+│       ├── lookingglass/        # Flow executors & visualization
+│       ├── pages/               # Route pages
+│       └── protocols/           # Protocol registry
+└── docker/                      # Container configurations
 ```
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design documentation.

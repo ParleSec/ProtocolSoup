@@ -1,0 +1,51 @@
+name: Palette content
+
+on:
+  push:
+    branches: [ '**' ]
+    paths:
+      - 'content/**'
+      - 'backend/cmd/content-validate/**'
+      - 'backend/cmd/palette-indexer/**'
+      - 'backend/internal/palette/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/palette-content.yml'
+  pull_request:
+    branches: [ master, develop ]
+    paths:
+      - 'content/**'
+      - 'backend/cmd/content-validate/**'
+      - 'backend/cmd/palette-indexer/**'
+      - 'backend/internal/palette/**'
+      - 'backend/go.mod'
+      - 'backend/go.sum'
+      - '.github/workflows/palette-content.yml'
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.25.9'
+
+jobs:
+  validate:
+    name: Validate content frontmatter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Run content validator
+        working-directory: backend
+        run: go run ./cmd/content-validate -content ../content
+
+      - name: Run palette unit tests
+        working-directory: backend
+        run: go test ./internal/palette/...
