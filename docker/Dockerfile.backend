@@ -1,49 +1,43 @@
-# Build stage
+# Build stage: server binary + palette-indexer + deterministic palette.db
 FROM golang:1.26.3-alpine AS builder
 
 ARG SERVICE_CMD=./cmd/server
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
+RUN apk add --no-cache gcc musl-dev file
 
-# Copy go mod files
 COPY backend/go.mod backend/go.sum ./
-
-# Copy source code
-COPY backend/ .
-
-# Download dependencies
 RUN go mod download
 
-# Build the application
+COPY backend/ .
+COPY content/ /content/
+
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}
+RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o palette-indexer ./cmd/palette-indexer
+RUN ./palette-indexer -content /content -out /app/palette.db && \
+    test -s /app/palette.db && \
+    file /app/palette.db | grep -q SQLite
 
 # Runtime stage
 FROM alpine:3.23
 
 WORKDIR /app
 
-# Install ca-certificates for HTTPS requests
 RUN apk --no-cache add ca-certificates
 
-# Copy the binary from builder
 COPY --from=builder /app/server .
+COPY --from=builder /app/palette.db ./palette.db
 
-# Expose port
 EXPOSE 8080
 
-# Set environment variables
 ENV SHOWCASE_ENV=demo
 ENV SHOWCASE_LISTEN_ADDR=:8080
 ENV SHOWCASE_BASE_URL=http://localhost:8080
 ENV SHOWCASE_MOCK_IDP=true
+ENV SHOWCASE_PALETTE_DB=/app/palette.db
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Run the server
 CMD ["./server"]
-
