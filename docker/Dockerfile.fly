@@ -48,7 +48,7 @@ RUN ./palette-indexer -content /content -out /app/palette.db && \
 # ============================================
 # Stage 3: Get SPIRE binaries
 # ============================================
-FROM ghcr.io/spiffe/spire-agent:1.14.6 AS spire-agent
+FROM ghcr.io/spiffe/spire-agent:1.15.0 AS spire-agent
 
 # ============================================
 # Stage 4: Production Image with SPIRE Agent

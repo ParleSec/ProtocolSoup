@@ -1,7 +1,7 @@
 # Backend with SPIFFE Agent Sidecar
 # Runs the backend inside the agent container for proper workload attestation
 
-FROM ghcr.io/spiffe/spire-agent:1.14.6 AS spire-agent
+FROM ghcr.io/spiffe/spire-agent:1.15.0 AS spire-agent
 FROM ghcr.io/spiffe/spire-server:1.14.6 AS spire-server
 
 # Build backend
