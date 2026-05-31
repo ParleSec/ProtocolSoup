@@ -4,11 +4,19 @@ An interactive sandbox for exploring authentication and identity protocols. Exec
 
 > Real flows against real infrastructure
 
-**Protocols:** OAuth 2.0 • OpenID Connect • SAML 2.0 • SPIFFE/SPIRE • SCIM 2.0 • Shared Signals (SSF)
+**Protocols:** OAuth 2.0 • OpenID Connect • SAML 2.0 • SPIFFE/SPIRE • SCIM 2.0 • Shared Signals (SSF) • OID4VP • OID4VCI
 
 ## Live Website
-
+### Main
 **[protocolsoup.com](https://protocolsoup.com)**
+
+### Documenation
+
+**[docs.protocolsoup.com](https://docs.protocolsoup.com)**
+
+### VC Wallet 
+
+**[wallet.protocolsoup.com](https://wallet.protocolsoup.com)**
 
 ---
 
