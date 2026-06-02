@@ -56,30 +56,15 @@ export function LayoutHeader() {
     <>
       <header className="fixed top-0 left-0 right-0 z-50 bg-surface-950/80 backdrop-blur-sm border-b border-white/5">
         <div className="max-w-5xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3">
-          <div className="flex items-center justify-between gap-2">
-            <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group min-w-0">
-              <span className="text-lg sm:text-xl flex-shrink-0">🍜</span>
-              <span className="font-semibold text-white group-hover:text-amber-100 transition-colors text-sm sm:text-base truncate">Protocol Soup</span>
-            </Link>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center">
+              <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group flex-shrink-0">
+                <span className="text-lg sm:text-xl flex-shrink-0">🍜</span>
+                <span className="font-semibold text-white group-hover:text-amber-100 transition-colors text-sm sm:text-base whitespace-nowrap">Protocol Soup</span>
+              </Link>
+            </div>
 
-            <nav className="hidden lg:flex items-center gap-1">
-              {showSearchChip && (
-                <button
-                  type="button"
-                  onClick={openPalette}
-                  aria-haspopup="dialog"
-                  aria-label="Open search palette"
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-sm text-surface-400 hover:text-white hover:bg-white/5 mr-1"
-                >
-                  <Search className="w-4 h-4" />
-                  <span>Search</span>
-                  {shortcutLabel && (
-                    <kbd className="ml-1 hidden xl:inline-flex items-center rounded border border-white/10 bg-surface-800/60 px-1.5 py-0.5 text-[10px] font-mono text-surface-300">
-                      {shortcutLabel}
-                    </kbd>
-                  )}
-                </button>
-              )}
+            <nav className="hidden lg:flex items-center gap-0.5 flex-shrink-0">
               {navItems.map((item) => {
                 const isActive = currentPath === item.path ||
                   (item.path !== '/' && currentPath.startsWith(item.path))
@@ -87,54 +72,92 @@ export function LayoutHeader() {
                   <Link
                     key={item.path}
                     href={item.path}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors text-sm ${
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors text-sm whitespace-nowrap flex-shrink-0 ${
                       isActive
                         ? 'bg-white/10 text-white'
                         : 'text-surface-400 hover:text-white hover:bg-white/5'
                     }`}
                   >
-                    <item.icon className="w-4 h-4" />
+                    <item.icon className="w-4 h-4 flex-shrink-0" />
                     <span>{item.label}</span>
                   </Link>
                 )
               })}
-              <div className="w-px h-4 bg-white/10 mx-2" />
-              <a
-                href="https://docs.protocolsoup.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-surface-400 hover:text-white hover:bg-white/5 transition-colors text-sm"
-              >
-                <FileText className="w-4 h-4" />
-                <span>Docs</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-              <a
-                href="https://github.com/ParleSec/ProtocolSoup"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-surface-400 hover:text-white hover:bg-white/5 transition-colors text-sm"
-              >
-                <Github className="w-4 h-4" />
-                <span>Source</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
             </nav>
 
-            <button
-              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="lg:hidden p-2 -mr-2 rounded-lg text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
-              aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
-              aria-haspopup="dialog"
-              aria-expanded={isMobileMenuOpen}
-              aria-controls="mobile-nav-drawer"
-            >
-              {isMobileMenuOpen ? (
-                <X className="w-6 h-6" />
-              ) : (
-                <Menu className="w-6 h-6" />
+            <div className="flex-1 min-w-0 flex items-center justify-end gap-1">
+              <div className="hidden lg:flex items-center gap-1 min-w-0">
+                {showSearchChip && (
+                  <button
+                    type="button"
+                    onClick={openPalette}
+                    aria-haspopup="dialog"
+                    aria-label="Search protocols and docs"
+                    title="Search (press the shortcut to open)"
+                    className="flex items-center justify-center h-9 w-9 rounded-md text-surface-400 hover:text-white hover:bg-white/5 transition-colors flex-shrink-0 xl:w-auto xl:justify-start xl:gap-2 xl:px-3 xl:border xl:border-white/10 xl:bg-surface-900/40 xl:hover:bg-surface-900/70"
+                  >
+                    <Search className="w-4 h-4 flex-shrink-0" />
+                    <span className="hidden xl:inline text-sm">Search</span>
+                    {shortcutLabel && (
+                      <kbd className="hidden 2xl:inline-flex items-center rounded border border-white/10 bg-surface-800/60 px-1.5 py-0.5 text-[10px] font-mono text-surface-300">
+                        {shortcutLabel}
+                      </kbd>
+                    )}
+                  </button>
+                )}
+                <div className="w-px h-5 bg-white/10 mx-1 flex-shrink-0" />
+                <a
+                  href="https://docs.protocolsoup.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Documentation (opens in a new tab)"
+                  title="Documentation"
+                  className="flex items-center justify-center h-9 w-9 rounded-md text-surface-400 hover:text-white hover:bg-white/5 transition-colors flex-shrink-0 xl:w-auto xl:justify-start xl:gap-1.5 xl:px-2.5"
+                >
+                  <FileText className="w-4 h-4 flex-shrink-0" />
+                  <span className="hidden xl:inline text-sm">Docs</span>
+                </a>
+                <a
+                  href="https://github.com/ParleSec/ProtocolSoup"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Source code on GitHub (opens in a new tab)"
+                  title="Source on GitHub"
+                  className="flex items-center justify-center h-9 w-9 rounded-md text-surface-400 hover:text-white hover:bg-white/5 transition-colors flex-shrink-0 xl:w-auto xl:justify-start xl:gap-1.5 xl:px-2.5"
+                >
+                  <Github className="w-4 h-4 flex-shrink-0" />
+                  <span className="hidden xl:inline text-sm">Source</span>
+                </a>
+              </div>
+
+              {/* Mobile controls */}
+              {showSearchChip && (
+                <button
+                  type="button"
+                  onClick={openPalette}
+                  className="lg:hidden p-2 rounded-lg text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
+                  aria-haspopup="dialog"
+                  aria-label="Search protocols and docs"
+                >
+                  <Search className="w-6 h-6" />
+                </button>
               )}
-            </button>
+              <button
+                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                className="lg:hidden p-2 -mr-2 rounded-lg text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
+                aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
+                aria-haspopup="dialog"
+                aria-expanded={isMobileMenuOpen}
+                aria-controls="mobile-nav-drawer"
+              >
+                {isMobileMenuOpen ? (
+                  <X className="w-6 h-6" />
+                ) : (
+                  <Menu className="w-6 h-6" />
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -166,19 +189,6 @@ export function LayoutHeader() {
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-1">
-                {showSearchChip && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMobileMenuOpen(false)
-                      openPalette()
-                    }}
-                    className="flex w-full items-center gap-3 px-4 py-3 rounded-xl text-surface-400 hover:text-white hover:bg-white/5 transition-colors"
-                  >
-                    <Search className="w-5 h-5" />
-                    <span className="font-medium">Search</span>
-                  </button>
-                )}
                 {navItems.map((item) => {
                   const isActive = currentPath === item.path ||
                     (item.path !== '/' && currentPath.startsWith(item.path))
