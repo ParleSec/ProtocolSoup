@@ -1,5 +1,7 @@
 # Protocol Soup - Split Backend Services (Base)
-# Run with: docker compose up -d
+# Run with: docker compose up -d --build
+# After pulling new code, always pass --build so frontend and gateway images
+# are rebuilt from source (palette UI and /api/palette/query are baked in).
 #
 # This starts:
 # - Gateway (API aggregation + protocol routing)
@@ -45,6 +47,7 @@ services:
       - SHOWCASE_LISTEN_ADDR=:8080
       - SHOWCASE_BASE_URL=http://localhost:8080
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
+      - SHOWCASE_PALETTE_DB=/app/palette.db
       - FEDERATION_SERVICE_URL=http://federation-service:8080
       - SCIM_SERVICE_URL=http://scim-service:8080
       - SSF_SERVICE_URL=http://ssf-service:8080
@@ -177,6 +180,7 @@ services:
         NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8080
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-frontend:latest
+    image: protocol-lens-frontend:latest
     container_name: protocol-showcase-frontend
     ports:
       - "3000:3000"
