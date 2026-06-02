@@ -27,7 +27,7 @@ Run the full stack locally with Docker:
 ```bash
 git clone https://github.com/ParleSec/ProtocolSoup.git
 cd ProtocolSoup/docker
-docker compose up -d
+docker compose up -d --build
 ```
 
 Then open:
