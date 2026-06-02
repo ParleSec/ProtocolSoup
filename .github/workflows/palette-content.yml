@@ -76,7 +76,7 @@ jobs:
           file ./dist/palette.db | grep -q SQLite
 
       - name: Upload palette.db artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: palette-db
           path: backend/dist/palette.db
