@@ -12,10 +12,27 @@ import (
 
 	"github.com/ParleSec/ProtocolSoup/internal/core"
 	"github.com/ParleSec/ProtocolSoup/internal/gateway"
+	"github.com/ParleSec/ProtocolSoup/internal/palette"
 )
 
 func main() {
 	cfg := core.LoadConfig()
+
+	var paletteSvc *palette.Service
+	if cfg.PaletteDBPath != "" {
+		svc, err := palette.NewService(cfg.PaletteDBPath)
+		if err != nil {
+			if cfg.IsProduction() {
+				log.Fatalf("Failed to load palette index at %s: %v", cfg.PaletteDBPath, err)
+			}
+			log.Printf("Palette service disabled: %v", err)
+		} else {
+			paletteSvc = svc
+			stats := svc.Stats()
+			log.Printf("Palette service initialized from %s (%d artefacts, index v%s)",
+				cfg.PaletteDBPath, stats.ArtefactCount, stats.IndexVersion)
+		}
+	}
 
 	upstreams := []gateway.UpstreamConfig{
 		{Name: "federation", BaseURL: strings.TrimSpace(os.Getenv("FEDERATION_SERVICE_URL"))},
@@ -33,6 +50,7 @@ func main() {
 		StartupRetryInitial: envDuration("GATEWAY_STARTUP_RETRY_INITIAL", 2*time.Second),
 		StartupRetryMax:     envDuration("GATEWAY_STARTUP_RETRY_MAX", 30*time.Second),
 		RequestTimeout:      envDuration("GATEWAY_REQUEST_TIMEOUT", 5*time.Second),
+		Palette:             paletteSvc,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize gateway: %v", err)

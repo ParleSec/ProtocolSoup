@@ -60,6 +60,9 @@ func (g *Gateway) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 		"lookingglass":     "/api/lookingglass",
 		"lookingglass_ws":  "/ws/lookingglass/{session}",
 	}
+	if g.palette != nil {
+		endpoints["palette"] = "/api/palette/query"
+	}
 
 	g.writeJSON(w, http.StatusOK, apiIndexResponse{
 		Service:   "protocol-lens-gateway",

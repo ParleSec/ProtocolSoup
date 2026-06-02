@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 )
@@ -29,6 +30,9 @@ type Config struct {
 	StartupRetryInitial time.Duration
 	StartupRetryMax     time.Duration
 	RequestTimeout      time.Duration
+	// Palette serves POST /api/palette/query from a local SQLite index. Nil
+	// omits the route (split deployments without a baked index).
+	Palette *palette.Service
 }
 
 // UpstreamConfig represents an upstream service.
@@ -65,6 +69,8 @@ type Upstream struct {
 // Gateway routes API and protocol traffic to upstream services.
 type Gateway struct {
 	cfg Config
+
+	palette *palette.Service
 
 	client    *http.Client
 	upstreams map[string]*Upstream
@@ -119,7 +125,8 @@ func NewGateway(cfg Config) (*Gateway, error) {
 	}
 
 	return &Gateway{
-		cfg: cfg,
+		cfg:     cfg,
+		palette: cfg.Palette,
 		client: &http.Client{
 			Timeout: cfg.RequestTimeout,
 		},
@@ -161,6 +168,10 @@ func (g *Gateway) Router() http.Handler {
 		r.Post("/lookingglass/decode", g.handleDecodeToken)
 		r.Get("/lookingglass/sessions", g.handleListSessions)
 		r.Get("/lookingglass/sessions/{id}", g.handleGetSession)
+
+		if g.palette != nil {
+			r.Post("/palette/query", g.palette.Handler())
+		}
 	})
 
 	r.Get("/ws/lookingglass/{session}", g.handleLookingGlassWS)

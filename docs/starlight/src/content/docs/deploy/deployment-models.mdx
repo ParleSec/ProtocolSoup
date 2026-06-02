@@ -11,10 +11,12 @@ Run the complete ProtocolSoup experience with all services.
 
 ```bash
 cd docker
-docker compose up -d
+docker compose up -d --build
 ```
 
 **Services started:** frontend, gateway, federation-service, scim-service, ssf-service
+
+The gateway image ships the [palette content index](/deploy/palette-index/) at `/app/palette.db` and serves `POST /api/palette/query` for homepage search and **cmd+K**. Rebuild images after pulling new code (`--build`); `docker compose up -d` alone reuses cached layers and can leave you on an older UI.
 
 **Add SPIFFE:**
 
