@@ -6,7 +6,7 @@
 # - Extended CA TTL (90 days) for demo stability
 # - x509pop attestation support for agent resilience
 
-FROM ghcr.io/spiffe/spire-server:1.15.0 AS spire-base
+FROM ghcr.io/spiffe/spire-server:1.15.1 AS spire-base
 
 # Build health check server
 FROM golang:1.26.3-alpine AS health-builder
