@@ -7,13 +7,13 @@
 
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Play, Square, RotateCcw, CheckCircle, XCircle, Clock,
+  Play, RotateCcw, CheckCircle, XCircle, Clock,
   Send, ArrowDownLeft, Key, Shield, AlertTriangle,
   Lock, Eye, EyeOff, Copy, Check, ChevronDown,
   ChevronRight, Fingerprint, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useEffect, useState, useRef, useCallback, type ElementType } from 'react'
+import { useEffect, useState, type ElementType } from 'react'
 import type { 
   FlowExecutorState, 
   CapturedExchange,
@@ -30,10 +30,6 @@ import { StepCards } from './StepCards'
 
 interface RealFlowPanelProps {
   state: FlowExecutorState | null
-  onExecute: () => void
-  onAbort: () => void
-  onReset: () => void
-  isExecuting: boolean
   flowInfo: {
     supported: boolean
     description: string
@@ -55,10 +51,6 @@ interface RealFlowPanelProps {
 
 export function RealFlowPanel({
   state,
-  onExecute,
-  onAbort,
-  onReset,
-  isExecuting,
   flowInfo,
   requirements,
   error,
@@ -69,21 +61,6 @@ export function RealFlowPanel({
   showVCTab = false,
 }: RealFlowPanelProps) {
   const [activeTab, setActiveTab] = useState<'flow' | 'http' | 'wire' | 'tokens' | 'vc'>('flow')
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const isNearBottomRef = useRef(true)
-  const eventCount = (state?.events.length || 0) + (wireExchanges.length)
-
-  const handleScrollContainer = useCallback(() => {
-    if (!scrollContainerRef.current) return
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current
-    isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 80
-  }, [])
-
-  useEffect(() => {
-    if (isNearBottomRef.current && scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight
-    }
-  }, [eventCount])
 
   const latestVerificationArtifact = state?.vcArtifacts
     ? [...state.vcArtifacts].reverse().find((artifact) => artifact.type === 'verification_result')
@@ -126,10 +103,6 @@ export function RealFlowPanel({
   const currentStatus = state ? statusConfig[state.status] : statusConfig.idle
   const StatusIcon = currentStatus.icon
 
-  // For now, allow all flows to be executed
-  // Specific flows that need extra config (client_secret, refresh_token, username/password) 
-  // will show an error when executed if the config is missing
-  const hasUnmetRequirements = false
   const tabs = [
     { id: 'flow', label: 'Flow', count: state?.events.length || 0, icon: Zap },
     { id: 'wire', label: 'Wire', count: wireExchanges.length, icon: Server },
@@ -175,47 +148,16 @@ export function RealFlowPanel({
     <div className="space-y-3 sm:space-y-4">
       {/* Flow Info Header */}
       <div className="p-3 sm:p-4 rounded-xl bg-surface-900/50 border border-white/5">
-        {/* Top row: Status + Controls */}
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <div className={`p-1.5 sm:p-2 rounded-lg flex-shrink-0 ${currentStatus.bg}`}>
-              <StatusIcon className={`w-4 h-4 ${currentStatus.color}`} />
-            </div>
-            <div className="min-w-0">
-              <p className={`text-xs sm:text-sm font-medium ${currentStatus.color}`}>{currentStatus.label}</p>
-              {state?.currentStep && (
-                <p className="text-[11px] text-surface-400 mt-0.5">{state.currentStep}</p>
-              )}
-            </div>
+        {/* Status row */}
+        <div className="flex items-center gap-2 sm:gap-3 mb-3">
+          <div className={`p-1.5 sm:p-2 rounded-lg flex-shrink-0 ${currentStatus.bg}`}>
+            <StatusIcon className={`w-4 h-4 ${currentStatus.color}`} />
           </div>
-          
-          {/* Controls */}
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            {isExecuting ? (
-              <button
-                onClick={onAbort}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 active:bg-red-500/30 transition-colors text-xs sm:text-sm"
-              >
-                <Square className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span>Abort</span>
-              </button>
-            ) : (
-              <button
-                onClick={onExecute}
-                disabled={hasUnmetRequirements || state?.status === 'completed'}
-                className="flex items-center gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-green-500 to-emerald-500 text-white font-medium hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed text-xs sm:text-sm"
-              >
-                <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                <span>Execute</span>
-              </button>
+          <div className="min-w-0">
+            <p className={`text-xs sm:text-sm font-medium ${currentStatus.color}`}>{currentStatus.label}</p>
+            {state?.currentStep && (
+              <p className="text-[11px] text-surface-400 mt-0.5">{state.currentStep}</p>
             )}
-            <button
-              onClick={onReset}
-              className="p-1.5 sm:p-2 rounded-lg bg-surface-800 border border-white/10 text-surface-400 hover:text-white active:bg-surface-700 transition-colors"
-              title="Reset"
-            >
-              <RotateCcw className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
           </div>
         </div>
         
@@ -337,9 +279,7 @@ export function RealFlowPanel({
 
       {/* Tab Content */}
       <div
-        ref={scrollContainerRef}
-        onScroll={handleScrollContainer}
-        className="min-h-[300px] sm:min-h-[400px] max-h-[450px] sm:max-h-[600px] overflow-y-auto scroll-smooth"
+        className="min-h-[300px] sm:min-h-[400px]"
       >
         <AnimatePresence mode="wait">
           {activeTab === 'flow' && (

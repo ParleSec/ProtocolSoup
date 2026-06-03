@@ -5,14 +5,15 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
-import { parseFlowDeepLink } from '@/components/palette/runDispatch'
+import { parseFlowDeepLink, buildLookingGlassPath } from '@/components/palette/runDispatch'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Eye, Play, RotateCcw, Key, Square,
   Fingerprint, Shield, Lock, Sparkles,
-  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink
+  RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink,
+  Share2, XCircle
 } from 'lucide-react'
 
 import {
@@ -102,7 +103,10 @@ function describeWalletSubmitError(responsePayload: Record<string, unknown> | nu
 
 export function LookingGlass() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
+  const [shareCopied, setShareCopied] = useState(false)
+  const lastHandledPairRef = useRef<string | null>(null)
 
   const [selectedProtocol, setSelectedProtocol] = useState<LookingGlassProtocol | null>(null)
   const [selectedFlow, setSelectedFlow] = useState<LookingGlassFlow | null>(null)
@@ -833,6 +837,57 @@ export function LookingGlass() {
     injectWalletLifecycleEvents,
   ])
 
+  const syncUrlToSelection = useCallback(
+    (protocolId: string | null, flowId: string | null) => {
+      if (protocolId && flowId) {
+        const deepLink = buildLookingGlassPath({ protocolId, flowId })
+        router.replace(deepLink, { scroll: false })
+      } else {
+        router.replace(pathname || '/looking-glass', { scroll: false })
+      }
+    },
+    [router, pathname],
+  )
+
+  const clearUrlState = useCallback(() => {
+    router.replace(pathname || '/looking-glass', { scroll: false })
+  }, [router, pathname])
+
+  const handleClearAll = useCallback(() => {
+    setSelectedProtocol(null)
+    setSelectedFlow(null)
+    resetFlow()
+    setWireSessionId(null)
+    clearWireEvents()
+    setWireSessionError(null)
+    setPendingExecute(false)
+    setInspectedToken('')
+    setStoredRefreshToken(null)
+    setStoredAccessToken(null)
+    setRefreshTokenInput('')
+    setTokenInput('')
+    setScimBearerToken('')
+    setOID4VPWalletModalOpen(false)
+    setOID4VPLastPromptedRequestID('')
+    setOID4VPWalletSubmitPending(false)
+    setOID4VPWalletSubmitError(null)
+    setOID4VPWalletSubmitMessage(null)
+    setOID4VPWalletMode('one_click')
+    setOID4VPStepwiseVPToken('')
+    setOID4VPStepwiseLastStep('')
+    setOID4VPDisclosureClaims([])
+    setOID4VPQueryMode('dcql')
+    setOID4VPDCQLPresetID(DEFAULT_OID4VP_DCQL_PRESET_ID)
+    setOID4VPDCQLInput(
+      OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
+    )
+    setOID4VPScopeAliasInput('')
+    setOID4VPClientIDInput('')
+    setOID4VPClientIDScheme('redirect_uri')
+    lastHandledPairRef.current = null
+    clearUrlState()
+  }, [resetFlow, clearWireEvents, clearUrlState])
+
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
     // SSF has its own dedicated sandbox - redirect there
     if (protocol.id === 'ssf') {
@@ -862,7 +917,8 @@ export function LookingGlass() {
       OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
     )
     setOID4VPScopeAliasInput('')
-  }, [resetFlow, clearWireEvents, router])
+    syncUrlToSelection(protocol.id, null)
+  }, [resetFlow, clearWireEvents, router, syncUrlToSelection])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
     // SSF flows should redirect to the SSF Sandbox
@@ -886,7 +942,8 @@ export function LookingGlass() {
     setOID4VPStepwiseVPToken('')
     setOID4VPStepwiseLastStep('')
     setOID4VPDisclosureClaims([])
-  }, [resetFlow, clearWireEvents, selectedProtocol, router])
+    syncUrlToSelection(selectedProtocol?.id || null, flow.id)
+  }, [resetFlow, clearWireEvents, selectedProtocol, router, syncUrlToSelection])
 
   const handleReset = useCallback(() => {
     resetFlow()
@@ -904,7 +961,8 @@ export function LookingGlass() {
     setOID4VPStepwiseVPToken('')
     setOID4VPStepwiseLastStep('')
     setOID4VPDisclosureClaims([])
-  }, [resetFlow, clearWireEvents])
+    clearUrlState()
+  }, [resetFlow, clearWireEvents, clearUrlState])
 
   const copyWalletHandoff = useCallback(async () => {
     if (!walletHandoffArtifact) return
@@ -1010,19 +1068,9 @@ export function LookingGlass() {
   }, [protocols, resetFlow, clearWireEvents, router])
 
   // Honour ?protocol=X&flow=Y from deep-links (palette run dispatch, shared
-  // URLs, browser bookmarks). The effect must work for three cases:
-  //
-  //   1. Direct visit / refresh / shared URL — the param-loaded path.
-  //   2. Palette dispatch from another page — router.push() changes the
-  //      route and the URL.
-  //   3. Palette re-dispatch while already on /looking-glass — only the
-  //      search params change.
-  //
-  // Using `useSearchParams()` makes the effect reactive to URL changes
-  // (case 3), and tracking the last handled (protocol, flow) pair in a
-  // ref prevents a redundant re-dispatch when the `protocols` array
-  // reference changes (e.g. refetch) but the deep-link target has not.
-  const lastHandledPairRef = useRef<string | null>(null)
+  // URLs, browser bookmarks). After consuming the deep-link, replace the
+  // URL with a clean pathname so the query params don't persist across
+  // navigation, protocol changes, or tab-session lifetime.
   useEffect(() => {
     if (protocolsLoading || protocols.length === 0) return
     const pair = parseFlowDeepLink(searchParams)
@@ -1031,7 +1079,24 @@ export function LookingGlass() {
     if (lastHandledPairRef.current === key) return
     lastHandledPairRef.current = key
     handleQuickSelect(pair.protocolId, pair.flowId)
-  }, [searchParams, protocols, protocolsLoading, handleQuickSelect])
+
+    // Consume-and-clear: strip the deep-link params so they don't
+    // re-trigger on remount after navigating away and back.
+    router.replace(pathname || '/looking-glass', { scroll: false })
+  }, [searchParams, protocols, protocolsLoading, handleQuickSelect, router, pathname])
+
+  const copyShareableLink = useCallback(() => {
+    if (!selectedProtocol || !selectedFlow) return
+    const deepLink = buildLookingGlassPath({
+      protocolId: selectedProtocol.id,
+      flowId: selectedFlow.id,
+    })
+    const url = `${window.location.origin}${deepLink}`
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 1500)
+    })
+  }, [selectedProtocol, selectedFlow])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
   const quickStartFlows = [
@@ -1132,7 +1197,10 @@ export function LookingGlass() {
                 sublabel={flow.sublabel}
                 color={flow.color}
                 compact
-                onClick={() => handleQuickSelect(flow.protocolId, flow.flowId)}
+                onClick={() => {
+                  handleQuickSelect(flow.protocolId, flow.flowId)
+                  syncUrlToSelection(flow.protocolId, flow.flowId)
+                }}
               />
             ))}
           </div>
@@ -1144,7 +1212,10 @@ export function LookingGlass() {
                 label={flow.label}
                 sublabel={flow.sublabel}
                 color={flow.color}
-                onClick={() => handleQuickSelect(flow.protocolId, flow.flowId)}
+                onClick={() => {
+                  handleQuickSelect(flow.protocolId, flow.flowId)
+                  syncUrlToSelection(flow.protocolId, flow.flowId)
+                }}
               />
             ))}
           </div>
@@ -1162,14 +1233,44 @@ export function LookingGlass() {
           loading={protocolsLoading}
         />
         {selectedFlow && (
-          <button
-            onClick={handleReset}
-            aria-label="Reset selected flow"
-            className="flex items-center gap-1.5 px-2 py-1.5 rounded border border-white/10 text-xs sm:text-sm text-surface-400 hover:text-white hover:border-white/20 transition-colors"
-          >
-            <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            <span className="hidden sm:inline">Reset</span>
-          </button>
+          <div className="flex items-center rounded bg-surface-900 border border-white/10 overflow-hidden">
+            <button
+              onClick={copyShareableLink}
+              aria-label="Copy shareable link for this flow"
+              title="Copy shareable deep-link"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 text-xs font-mono text-surface-300 hover:text-accent-cyan hover:bg-white/5 transition-colors border-r border-white/10"
+            >
+              {shareCopied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-green-400" />
+                  <span className="hidden sm:inline text-green-400">copied</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">share</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleReset}
+              aria-label="Reset selected flow"
+              title="Reset flow execution"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 text-xs font-mono text-surface-300 hover:text-white hover:bg-white/5 transition-colors border-r border-white/10"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">reset</span>
+            </button>
+            <button
+              onClick={handleClearAll}
+              aria-label="Clear selection and URL"
+              title="Clear all"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 sm:py-1.5 text-xs font-mono text-surface-300 hover:text-red-400 hover:bg-white/5 transition-colors"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">clear</span>
+            </button>
+          </div>
         )}
       </section>
 
@@ -1522,7 +1623,7 @@ export function LookingGlass() {
         >
           {/* Flow Header */}
           <div className="px-3 sm:px-5 py-3 sm:py-4 border-b border-white/10">
-            <div className="flex items-start justify-between gap-2 mb-2 sm:mb-0">
+            <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                 <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center flex-shrink-0">
                   <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
@@ -1538,7 +1639,6 @@ export function LookingGlass() {
                   </div>
                 </div>
               </div>
-              
               <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
                 {status === 'idle' && (
                   <button
@@ -1692,10 +1792,6 @@ export function LookingGlass() {
             )}
             <RealFlowPanel
               state={realExecutor.state}
-              onExecute={handleExecute}
-              onAbort={realExecutor.abort}
-              onReset={handleReset}
-              isExecuting={realExecutor.isExecuting}
               flowInfo={realExecutor.flowInfo}
               requirements={realExecutor.requirements}
               error={realExecutor.error}
