@@ -30,7 +30,6 @@ import { StepCards } from './StepCards'
 
 interface RealFlowPanelProps {
   state: FlowExecutorState | null
-  isExecuting: boolean
   flowInfo: {
     supported: boolean
     description: string
@@ -52,7 +51,6 @@ interface RealFlowPanelProps {
 
 export function RealFlowPanel({
   state,
-  isExecuting,
   flowInfo,
   requirements,
   error,

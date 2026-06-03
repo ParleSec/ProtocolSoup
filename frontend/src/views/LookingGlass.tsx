@@ -1792,7 +1792,6 @@ export function LookingGlass() {
             )}
             <RealFlowPanel
               state={realExecutor.state}
-              isExecuting={realExecutor.isExecuting}
               flowInfo={realExecutor.flowInfo}
               requirements={realExecutor.requirements}
               error={realExecutor.error}
