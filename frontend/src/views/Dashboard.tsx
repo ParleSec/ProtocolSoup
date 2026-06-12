@@ -64,7 +64,7 @@ const SPEC_GROUPS: SpecGroupItem[] = [
       { label: 'RFC 8417', url: 'https://datatracker.ietf.org/doc/html/rfc8417', tone: 'rfc' },
       { label: 'CAEP 1.0', url: 'https://openid.net/specs/openid-caep-1_0.html', tone: 'spec' },
       { label: 'RISC 1.0', url: 'https://openid.net/specs/openid-risc-profile-1_0.html', tone: 'spec' },
-      { label: 'SSF 1.0', url: 'https://openid.net/specs/openid-sse-framework-1_0.html', tone: 'spec' },
+      { label: 'SSF 1.0', url: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html', tone: 'spec' },
     ],
   },
 ]
