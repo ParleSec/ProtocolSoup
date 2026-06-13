@@ -15,6 +15,7 @@ import { FlowDefinition, FlowStep } from '../protocols/registry'
 import { CODE_EXAMPLES } from '../protocols/examples'
 import { ParameterExplainer } from '../components/ParameterExplainer'
 import { ProtocolReferences } from '../components/ProtocolReferences'
+import { buildFlowExecutionPath } from '@/components/palette/runDispatch'
 import { getCatalogFlow, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
 
 interface FlowDetailProps {
@@ -181,6 +182,10 @@ export function FlowDetail({
   }
 
   const badges = getBadges()
+  const flowExecutionPath = buildFlowExecutionPath({
+    protocolId,
+    flowId: currentFlowId,
+  })
 
   return (
     <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6 px-1 sm:px-0">
@@ -214,7 +219,7 @@ export function FlowDetail({
           </div>
           
           <Link
-            href={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
+            href={flowExecutionPath}
             className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r ${
               protocolId === 'ssf' 
                 ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
@@ -234,7 +239,7 @@ export function FlowDetail({
           </div>
           
           <Link
-            href={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
+            href={flowExecutionPath}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r ${
               protocolId === 'ssf' 
                 ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
@@ -388,7 +393,7 @@ export function FlowDetail({
           <span className="sm:hidden">Back</span>
         </Link>
         <Link
-          href={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
+          href={flowExecutionPath}
           className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
         >
           <span className="hidden sm:inline">{protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}</span>

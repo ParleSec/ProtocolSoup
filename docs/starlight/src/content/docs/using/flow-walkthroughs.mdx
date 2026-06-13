@@ -9,7 +9,7 @@ Use this method to evaluate any flow with consistent evidence.
 
 1. **Choose a flow** from the [Protocol Catalog](/using/protocol-catalog/) and define the expected outcome.
 2. **Check prerequisites** -- some flows need an existing token (refresh, introspection), a prior credential (OID4VP), or SPIFFE mode enabled.
-3. **Execute** the flow in Looking Glass.
+3. **Execute** the flow in [Looking Glass](https://protocolsoup.com/looking-glass)
 4. **Inspect** the event timeline -- click each step to see full payloads.
 5. **Interpret** validation outcomes and security annotations.
 6. **Rerun** with one changed variable to confirm control behavior.
@@ -18,14 +18,14 @@ Use this method to evaluate any flow with consistent evidence.
 
 | Protocol | Flow | Why Start Here |
 |----------|------|---------------|
-| OAuth 2.0 | Authorization Code + PKCE | Core delegated authorization with modern security |
-| OIDC | Authorization Code + UserInfo | Identity layer on OAuth, ID token claims |
-| SAML 2.0 | SP-Initiated SSO | Enterprise SSO entry pattern, assertion inspection |
-| SCIM 2.0 | User Lifecycle | Full CRUD cycle with PATCH semantics |
-| SPIFFE | X.509-SVID Issuance | Workload identity fundamentals |
-| SSF | CAEP Session Revoked | Real-time security event stream with receiver response |
-| OID4VCI | Pre-Authorized Code | Credential issuance (SD-JWT VC, JWT VC, LDP VC) |
-| OID4VP | DCQL + direct_post | Verifier request and wallet submission |
+| OAuth 2.0 | [Authorization Code + PKCE](https://protocolsoup.com/looking-glass?protocol=oauth2&flow=authorization_code_pkce) | Core delegated authorization with modern security |
+| OIDC | [Authorization Code + UserInfo](https://protocolsoup.com/looking-glass?protocol=oidc&flow=oidc_authorization_code) | Identity layer on OAuth, ID token claims |
+| SAML 2.0 | [SP-Initiated SSO](https://protocolsoup.com/looking-glass?protocol=saml&flow=sp_initiated_sso) | Enterprise SSO entry pattern, assertion inspection |
+| SCIM 2.0 | [User Lifecycle](https://protocolsoup.com/looking-glass?protocol=scim&flow=user-lifecycle) | Full CRUD cycle with PATCH semantics |
+| SPIFFE | [X.509-SVID Issuance](https://protocolsoup.com/looking-glass?protocol=spiffe&flow=x509-svid-issuance) | Workload identity fundamentals |
+| SSF | [CAEP Session Revoked](https://protocolsoup.com/ssf-sandbox) | Real-time security event stream with receiver response |
+| OID4VCI | [Pre-Authorized Code](https://protocolsoup.com/looking-glass?protocol=oid4vci&flow=oid4vci-pre-authorized) | Credential issuance (SD-JWT VC, JWT VC, LDP VC) |
+| OID4VP | [DCQL + direct_post](https://protocolsoup.com/looking-glass?protocol=oid4vp&flow=oid4vp-direct-post) | Verifier request and wallet submission |
 
 ## Interpreting Outcomes
 
