@@ -1,6 +1,6 @@
 # Shared Signals Framework (SSF) Implementation
 
-A standards-based implementation of the [OpenID Shared Signals Framework](https://openid.net/specs/openid-sse-framework-1_0.html) for real-time security event sharing between identity providers and relying parties.
+A standards-based implementation of the [OpenID Shared Signals Framework](https://openid.net/specs/openid-sharedsignals-framework-1_0.html) for real-time security event sharing between identity providers and relying parties.
 
 ## Overview
 
@@ -342,7 +342,7 @@ curl -H "X-SSF-Session: $SESSION_ID" \
 ## Specifications
 
 - [RFC 8417 - Security Event Token (SET)](https://datatracker.ietf.org/doc/html/rfc8417)
-- [OpenID Shared Signals Framework 1.0](https://openid.net/specs/openid-sse-framework-1_0.html)
+- [OpenID Shared Signals Framework 1.0](https://openid.net/specs/openid-sharedsignals-framework-1_0.html)
 - [CAEP - Continuous Access Evaluation Profile](https://openid.net/specs/openid-caep-1_0.html)
 - [RISC - Risk Incident Sharing and Coordination](https://openid.net/specs/openid-risc-1_0.html)
 

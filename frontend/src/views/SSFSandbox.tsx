@@ -488,7 +488,7 @@ export function SSFSandbox() {
             <span className="text-surface-600">SET</span>
           </a>
           <a
-            href="https://openid.net/specs/openid-sse-framework-1_0.html"
+            href="https://openid.net/specs/openid-sharedsignals-framework-1_0.html"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-surface-400 hover:text-amber-400 transition-colors group"
