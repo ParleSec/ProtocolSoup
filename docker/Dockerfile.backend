@@ -20,7 +20,7 @@ RUN ./palette-indexer -content /content -out /app/palette.db && \
     file /app/palette.db | grep -q SQLite
 
 # Runtime stage
-FROM alpine:3.23
+FROM alpine:3.24
 
 WORKDIR /app
 
