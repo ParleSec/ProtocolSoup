@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import type { FlowDefinition, Protocol } from '../protocols/registry'
 import { protocolMeta } from '../protocols/registry'
+import { buildFlowExecutionPath } from '@/components/palette/runDispatch'
 import { FLOW_PRESENTATION_META, getFeatureDescription } from '../protocols/presentation/flow-meta'
 import { getCatalogProtocol, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
 import { ProtocolReferences } from '../components/ProtocolReferences'
@@ -44,6 +45,11 @@ export function ProtocolDemo({
   const recommendedFlow = flows.find(f => FLOW_PRESENTATION_META[f.id]?.recommended) || flows[0]
 
   const catalogEntry = getCatalogProtocol(protocolId)
+  const executionPath = recommendedFlow
+    ? buildFlowExecutionPath({ protocolId, flowId: recommendedFlow.id })
+    : protocolId === 'ssf'
+      ? '/ssf-sandbox'
+      : '/looking-glass'
 
   return (
     <div className="space-y-6 sm:space-y-8 px-1 sm:px-0">
@@ -77,7 +83,7 @@ export function ProtocolDemo({
           </Link>
         )}
         <Link
-          href={protocolId === 'ssf' ? '/ssf-sandbox' : '/looking-glass'}
+          href={executionPath}
           className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm sm:text-base font-medium hover:bg-white/10 transition-colors"
         >
           {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

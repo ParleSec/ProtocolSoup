@@ -1,8 +1,10 @@
 # Backend with SPIFFE Agent Sidecar
 # Runs the backend inside the agent container for proper workload attestation
 
-FROM ghcr.io/spiffe/spire-agent:1.15.0 AS spire-agent
+
 FROM ghcr.io/spiffe/spire-server:1.15.1 AS spire-server
+FROM ghcr.io/spiffe/spire-agent:1.15.1 AS spire-agent
+
 
 # Build backend
 FROM golang:1.26.3-alpine AS backend-builder

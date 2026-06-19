@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CheckCircle, XCircle, Loader2, ArrowLeft, AlertTriangle } from 'lucide-react'
+import { buildLookingGlassPath } from '@/components/palette/runDispatch'
 
 type CallbackType = 'authorization_code' | 'implicit' | 'hybrid' | 'error' | 'unknown'
 
@@ -68,6 +69,10 @@ export function Callback() {
     }
   }, [])
 
+  const lookingGlassReturnPath = callbackData
+    ? lookingGlassPathForCallback(callbackData)
+    : buildLookingGlassPath({ protocolId: 'oauth2', flowId: 'authorization_code_pkce' })
+
   return (
     <div className="min-h-[80vh] flex items-center justify-center">
         <div className="glass rounded-xl p-8 max-w-lg w-full">
@@ -96,7 +101,7 @@ export function Callback() {
 
               {!window.opener && (
                 <Link
-                  href="/looking-glass"
+                  href={lookingGlassReturnPath}
                   className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 text-accent-cyan hover:bg-accent-cyan/20 transition-colors"
                 >
                   <ArrowLeft className="w-4 h-4" />
@@ -134,7 +139,7 @@ export function Callback() {
               )}
 
               <Link
-                href="/looking-glass"
+                href={lookingGlassReturnPath}
                 className="inline-flex items-center gap-2 mt-6 px-4 py-2 rounded-lg bg-surface-800 border border-white/10 text-surface-300 hover:text-white hover:bg-surface-700 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -237,6 +242,19 @@ function extractCallbackData(
   }
 
   return { type: 'unknown' }
+}
+
+function lookingGlassPathForCallback(data: CallbackData): string {
+  switch (data.type) {
+    case 'implicit':
+      return buildLookingGlassPath({ protocolId: 'oidc', flowId: 'oidc_implicit' })
+    case 'hybrid':
+      return buildLookingGlassPath({ protocolId: 'oidc', flowId: 'oidc_hybrid' })
+    case 'authorization_code':
+      return buildLookingGlassPath({ protocolId: 'oauth2', flowId: 'authorization_code_pkce' })
+    default:
+      return buildLookingGlassPath({ protocolId: 'oauth2', flowId: 'authorization_code_pkce' })
+  }
 }
 
 /**

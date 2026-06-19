@@ -83,3 +83,15 @@ export function resolveFlowHandoff(result: PaletteResult): FlowRunHandoff | null
 export function buildLookingGlassPath({ protocolId, flowId }: FlowDeepLink): string {
   return `/looking-glass?protocol=${encodeURIComponent(protocolId)}&flow=${encodeURIComponent(flowId)}`
 }
+
+/**
+ * buildFlowExecutionPath returns the URL that opens a runnable flow in the
+ * correct execution surface. SSF flows use the dedicated sandbox; all other
+ * protocols deep-link into Looking Glass with the flow pre-selected.
+ */
+export function buildFlowExecutionPath({ protocolId, flowId }: FlowDeepLink): string {
+  if (protocolId === 'ssf') {
+    return '/ssf-sandbox'
+  }
+  return buildLookingGlassPath({ protocolId, flowId })
+}
