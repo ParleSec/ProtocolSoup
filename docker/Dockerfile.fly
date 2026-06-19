@@ -53,7 +53,7 @@ FROM ghcr.io/spiffe/spire-agent:1.15.1 AS spire-agent
 # ============================================
 # Stage 4: Production Image with SPIRE Agent
 # ============================================
-FROM alpine:3.23
+FROM alpine:3.24
 
 WORKDIR /app
 
