@@ -19,12 +19,29 @@ type MockIdP struct {
 	authCodes     map[string]*models.AuthorizationCode
 	sessions      map[string]*models.Session
 	refreshTokens map[string]*models.RefreshToken
-	revokedTokens map[string]time.Time // RFC 7009: Track revoked access tokens by JTI
+	revokedTokens map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
+	usedCodes     map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
 	keySet        *crypto.KeySet
 	jwtService    *crypto.JWTService
 	issuer        string
 	mu            sync.RWMutex
 }
+
+// usedAuthorizationCode records an authorization code that has already been
+// redeemed, together with the tokens minted from it. RFC 6749 Section 4.1.2
+// requires the OP to deny a replayed code (MUST) and to revoke the tokens
+// previously issued from that code (SHOULD); retaining this record lets the OP
+// do both when the same code is presented a second time.
+type usedAuthorizationCode struct {
+	accessTokenJTIs []string
+	refreshTokens   []string
+	usedAt          time.Time
+}
+
+// usedCodeRetention bounds how long a redeemed authorization code is remembered
+// for replay detection. It matches the access-token lifetime: once the tokens a
+// code minted have expired on their own, there is nothing left to revoke.
+const usedCodeRetention = time.Hour
 
 // NewMockIdP creates a new mock identity provider
 func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
@@ -34,7 +51,8 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		authCodes:     make(map[string]*models.AuthorizationCode),
 		sessions:      make(map[string]*models.Session),
 		refreshTokens: make(map[string]*models.RefreshToken),
-		revokedTokens: make(map[string]time.Time), // RFC 7009: Revoked token tracking
+		revokedTokens: make(map[string]time.Time),                // RFC 7009: Revoked token tracking
+		usedCodes:     make(map[string]*usedAuthorizationCode),   // RFC 6749 Section 4.1.2: replayed-code detection
 		keySet:        keySet,
 		issuer:        "http://localhost:8080",
 	}
@@ -72,9 +90,30 @@ func (idp *MockIdP) initDemoData() {
 
 	// Demo users
 	idp.users["alice"] = &models.User{
-		ID:       "alice",
-		Email:    "alice@example.com",
-		Name:     "Alice Johnson",
+		ID:         "alice",
+		Email:      "alice@example.com",
+		Name:       "Alice Johnson",
+		GivenName:  "Alice",
+		FamilyName: "Johnson",
+		MiddleName: "Marie",
+		Nickname:   "Ali",
+		Profile:    "https://www.protocolsoup.com/u/alice",
+		Picture:    "https://www.protocolsoup.com/u/alice/avatar.png",
+		Website:    "https://alice.example.com",
+		Gender:     "female",
+		Birthdate:  "1990-03-12",
+		Zoneinfo:   "Australia/Sydney",
+		Locale:     "en-AU",
+		PhoneNumber:         "+61 2 5550 1234",
+		PhoneNumberVerified: true,
+		Address: &models.Address{
+			Formatted:     "12 Wattle Street\nSydney NSW 2000\nAustralia",
+			StreetAddress: "12 Wattle Street",
+			Locality:      "Sydney",
+			Region:        "NSW",
+			PostalCode:    "2000",
+			Country:       "Australia",
+		},
 		Password: alicePassword, // In a real system, this would be hashed
 		Roles:    []string{"user"},
 		Claims: map[string]string{
@@ -84,9 +123,30 @@ func (idp *MockIdP) initDemoData() {
 	}
 
 	idp.users["bob"] = &models.User{
-		ID:       "bob",
-		Email:    "bob@example.com",
-		Name:     "Bob Smith",
+		ID:         "bob",
+		Email:      "bob@example.com",
+		Name:       "Bob Smith",
+		GivenName:  "Bob",
+		FamilyName: "Smith",
+		MiddleName: "Daniel",
+		Nickname:   "Bobby",
+		Profile:    "https://www.protocolsoup.com/u/bob",
+		Picture:    "https://www.protocolsoup.com/u/bob/avatar.png",
+		Website:    "https://bob.example.com",
+		Gender:     "male",
+		Birthdate:  "1985-07-23",
+		Zoneinfo:   "Australia/Melbourne",
+		Locale:     "en-AU",
+		PhoneNumber:         "+61 3 5550 5678",
+		PhoneNumberVerified: true,
+		Address: &models.Address{
+			Formatted:     "48 Collins Street\nMelbourne VIC 3000\nAustralia",
+			StreetAddress: "48 Collins Street",
+			Locality:      "Melbourne",
+			Region:        "VIC",
+			PostalCode:    "3000",
+			Country:       "Australia",
+		},
 		Password: bobPassword,
 		Roles:    []string{"user"},
 		Claims: map[string]string{
@@ -96,9 +156,30 @@ func (idp *MockIdP) initDemoData() {
 	}
 
 	idp.users["admin"] = &models.User{
-		ID:       "admin",
-		Email:    "admin@example.com",
-		Name:     "Admin User",
+		ID:         "admin",
+		Email:      "admin@example.com",
+		Name:       "Admin User",
+		GivenName:  "Admin",
+		FamilyName: "User",
+		MiddleName: "System",
+		Nickname:   "Admin",
+		Profile:    "https://www.protocolsoup.com/u/admin",
+		Picture:    "https://www.protocolsoup.com/u/admin/avatar.png",
+		Website:    "https://www.protocolsoup.com",
+		Gender:     "other",
+		Birthdate:  "1980-11-05",
+		Zoneinfo:   "Australia/Brisbane",
+		Locale:     "en-AU",
+		PhoneNumber:         "+61 7 5550 9012",
+		PhoneNumberVerified: true,
+		Address: &models.Address{
+			Formatted:     "300 Queen Street\nBrisbane QLD 4000\nAustralia",
+			StreetAddress: "300 Queen Street",
+			Locality:      "Brisbane",
+			Region:        "QLD",
+			PostalCode:    "4000",
+			Country:       "Australia",
+		},
 		Password: adminPassword,
 		Roles:    []string{"user", "admin"},
 		Claims: map[string]string{
@@ -201,6 +282,22 @@ func (idp *MockIdP) GetClient(id string) (*models.Client, bool) {
 	return client, exists
 }
 
+// RegisterClient adds or replaces a client registration. It is used to
+// provision conformance clients at startup; it does not relax any validation,
+// the registered redirect URIs are still matched exactly at the authorization
+// endpoint.
+func (idp *MockIdP) RegisterClient(client *models.Client) {
+	if client == nil || client.ID == "" {
+		return
+	}
+	if client.CreatedAt.IsZero() {
+		client.CreatedAt = time.Now()
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	idp.clients[client.ID] = client
+}
+
 // ValidateClient validates client credentials
 func (idp *MockIdP) ValidateClient(clientID, clientSecret string) (*models.Client, error) {
 	client, exists := idp.GetClient(clientID)
@@ -243,9 +340,16 @@ func (idp *MockIdP) NormalizeRedirectURI(clientID, redirectURI string) (string, 
 
 // CreateAuthorizationCode creates and stores an authorization code
 // Validates PKCE code_challenge per RFC 7636 Section 4.2 if provided
+// authTime records when the End-User authenticated; it is propagated into the
+// ID Token auth_time claim (OpenID Connect Core 1.0 Section 2). Callers that do
+// not track a distinct authentication time pass the current time.
+// claims is the raw OIDC claims request parameter (OpenID Connect Core 1.0
+// Section 5.5), stored so individually requested claims can be honoured when the
+// code is exchanged for tokens. Callers not using it pass an empty string.
 func (idp *MockIdP) CreateAuthorizationCode(
 	clientID, userID, redirectURI, scope, state, nonce string,
-	codeChallenge, codeChallengeMethod string,
+	codeChallenge, codeChallengeMethod, claims string,
+	authTime time.Time,
 ) (*models.AuthorizationCode, error) {
 	// Validate PKCE code_challenge if provided (RFC 7636 Section 4.2)
 	if codeChallenge != "" {
@@ -255,6 +359,10 @@ func (idp *MockIdP) CreateAuthorizationCode(
 	}
 
 	code := generateRandomString(32)
+
+	if authTime.IsZero() {
+		authTime = time.Now()
+	}
 
 	authCode := &models.AuthorizationCode{
 		Code:                code,
@@ -266,6 +374,8 @@ func (idp *MockIdP) CreateAuthorizationCode(
 		Nonce:               nonce,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		Claims:              claims,
+		AuthTime:            authTime,
 		ExpiresAt:           time.Now().Add(10 * time.Minute),
 		CreatedAt:           time.Now(),
 	}
@@ -282,8 +392,24 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 
+	idp.pruneUsedCodesLocked()
+
 	authCode, exists := idp.authCodes[code]
 	if !exists {
+		// RFC 6749 Section 4.1.2: an authorization code presented more than once
+		// MUST be denied, and the OP SHOULD revoke the tokens it previously issued
+		// from that code. A code that is gone from authCodes but recorded in
+		// usedCodes is exactly such a replay, so the access tokens it minted are
+		// revoked (by JTI) and any refresh token dropped before the denial.
+		if used, replayed := idp.usedCodes[code]; replayed {
+			for _, jti := range used.accessTokenJTIs {
+				idp.revokedTokens[jti] = time.Now()
+			}
+			for _, rt := range used.refreshTokens {
+				delete(idp.refreshTokens, rt)
+			}
+			return nil, errors.New("authorization code already used")
+		}
 		return nil, errors.New("invalid authorization code")
 	}
 
@@ -310,7 +436,63 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 		}
 	}
 
+	// Remember the redeemed code so a later replay is detected and the tokens it
+	// produces can be revoked (RFC 6749 Section 4.1.2). RecordIssuedTokens fills
+	// in the token identifiers once issuance succeeds; recording the code here
+	// (rather than at issuance) closes the window between consumption and
+	// issuance during which a concurrent replay could otherwise slip through.
+	idp.usedCodes[code] = &usedAuthorizationCode{usedAt: time.Now()}
+
 	return authCode, nil
+}
+
+// RecordIssuedTokens binds the tokens minted from an authorization code to that
+// code's replay-detection record. If the code is later replayed,
+// ValidateAuthorizationCode revokes exactly these tokens (RFC 6749 Section
+// 4.1.2). Calling it with an empty code is a no-op, so test fixtures that build
+// an AuthorizationCode without a Code value are unaffected.
+func (idp *MockIdP) RecordIssuedTokens(code, accessToken, refreshToken string) {
+	if code == "" {
+		return
+	}
+
+	// Resolve the access token's JTI so the exact token can be revoked later;
+	// revocation is tracked by JTI to match RevokeAccessToken/IsTokenRevoked.
+	// ValidateToken does not touch idp state, so it is safe before the lock.
+	jti := accessToken
+	if claims, err := idp.jwtService.ValidateToken(accessToken); err == nil {
+		if v, ok := claims["jti"].(string); ok && v != "" {
+			jti = v
+		}
+	}
+
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	used, ok := idp.usedCodes[code]
+	if !ok {
+		// The record was pruned (or never created); recreate it so a replay can
+		// still revoke this token.
+		used = &usedAuthorizationCode{usedAt: time.Now()}
+		idp.usedCodes[code] = used
+	}
+	if jti != "" {
+		used.accessTokenJTIs = append(used.accessTokenJTIs, jti)
+	}
+	if refreshToken != "" {
+		used.refreshTokens = append(used.refreshTokens, refreshToken)
+	}
+}
+
+// pruneUsedCodesLocked drops redeemed-code records older than usedCodeRetention.
+// The caller must hold idp.mu. Pruning opportunistically on each redemption
+// bounds memory without a background goroutine.
+func (idp *MockIdP) pruneUsedCodesLocked() {
+	cutoff := time.Now().Add(-usedCodeRetention)
+	for code, used := range idp.usedCodes {
+		if used.usedAt.Before(cutoff) {
+			delete(idp.usedCodes, code)
+		}
+	}
 }
 
 // CreateSession creates a new session
@@ -341,8 +523,13 @@ func (idp *MockIdP) GetSession(id string) (*models.Session, bool) {
 	return session, exists
 }
 
-// StoreRefreshToken stores a refresh token
-func (idp *MockIdP) StoreRefreshToken(token, clientID, userID, scope string, expiresAt time.Time) {
+// StoreRefreshToken stores a refresh token. authTime is the original End-User
+// authentication time, preserved so a refreshed ID Token carries the same
+// auth_time as the original (OpenID Connect Core 1.0 Section 12.2).
+func (idp *MockIdP) StoreRefreshToken(token, clientID, userID, scope string, authTime, expiresAt time.Time) {
+	if authTime.IsZero() {
+		authTime = time.Now()
+	}
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 	idp.refreshTokens[token] = &models.RefreshToken{
@@ -350,6 +537,7 @@ func (idp *MockIdP) StoreRefreshToken(token, clientID, userID, scope string, exp
 		ClientID:  clientID,
 		UserID:    userID,
 		Scope:     scope,
+		AuthTime:  authTime,
 		ExpiresAt: expiresAt,
 		CreatedAt: time.Now(),
 	}
