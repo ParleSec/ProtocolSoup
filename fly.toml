@@ -23,6 +23,20 @@ primary_region = 'syd'
   NEXT_PUBLIC_SITE_URL = 'https://protocolsoup.com'
   SHOWCASE_MOCK_IDP = 'true'
   SHOWCASE_PALETTE_DB = '/app/palette.db'
+
+  # Persistent OP signing keys on the shared /data volume. Required for OIDF
+  # certification: signing keys and their kids must survive restarts and retired
+  # public keys are retained in JWKS so previously issued tokens stay verifiable.
+  SHOWCASE_KEY_STORE_PATH = '/data/keys'
+
+  # OIDF conformance suite callback URLs registered for the two static
+  # conformance clients (exact match, no wildcards). These cover the locally run
+  # suite used for CI drift monitoring (localhost.emobix.co.uk) and the hosted
+  # official certification suite (www.certification.openid.net), which is the
+  # source of certification evidence, for the aliases the harness uses. The
+  # clients are only created when OIDC_CONFORMANCE_CLIENT_SECRET is also set as a
+  # Fly secret, so listing these URLs alone changes nothing.
+  OIDC_CONFORMANCE_REDIRECT_URIS = 'https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic-post/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-implicit/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback'
   
   # SPIFFE/SPIRE Configuration
   # The agent will connect to SPIRE Server via Fly private network
@@ -36,6 +50,15 @@ primary_region = 'syd'
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
 # - SCIM_API_TOKEN: Bearer token for SCIM authentication
+#
+# OIDF conformance secrets (set only when running certification; without them the
+# conformance clients are never registered, so production is unaffected):
+# - OIDC_CONFORMANCE_CLIENT_SECRET: secret for the conformance clients. Must match
+#   the secret the harness/suite presents (OIDC_CONFORMANCE_CLIENT_SECRET).
+# - OIDC_CONFORMANCE_CLIENT2_SECRET (optional): distinct secret for the second
+#   client; defaults to OIDC_CONFORMANCE_CLIENT_SECRET when unset.
+# - The conformance end user (alice@example.com) password used by the suite is the
+#   demo user's password; align OIDC_CONFORMANCE_PASSWORD in the harness with it.
 #
 # Optional OID4VP verifier_attestation secrets:
 # - OID4VP_VERIFIER_ATTESTATION_ISSUER: override attestation issuer URL (defaults to <SHOWCASE_BASE_URL>/oid4vp/verifier-attestation)

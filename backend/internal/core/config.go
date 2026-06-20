@@ -34,6 +34,24 @@ type Config struct {
 	// PaletteDBPath points at the prebuilt palette SQLite index. Empty
 	// disables the palette query service (and the /api/palette/query route).
 	PaletteDBPath string
+
+	// KeyStorePath is the directory that persists OP signing keys and retired
+	// public keys across restarts. Empty means ephemeral in-memory keys
+	// (development only). A certified deployment MUST set this to a durable
+	// path so issued tokens remain verifiable after a restart.
+	KeyStorePath string
+
+	// Conformance client provisioning. When ConformanceRedirectURIs is set AND
+	// both client secrets are present, two confidential clients are registered
+	// for OIDF conformance testing. The second client is required by tests that
+	// verify authorization codes are bound to the client they were issued to.
+	// Without an explicit secret no client is registered, so production is
+	// unaffected unless conformance is deliberately enabled.
+	ConformanceRedirectURIs  []string
+	ConformanceClientID      string
+	ConformanceClientSecret  string
+	ConformanceClient2ID     string
+	ConformanceClient2Secret string
 }
 
 // LoadConfig loads configuration from environment variables with sensible defaults
@@ -48,6 +66,13 @@ func LoadConfig() *Config {
 		FrontendOrigin: getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
 		DataDir:        getEnv("SHOWCASE_DATA_DIR", ""),
 		PaletteDBPath: getEnv("SHOWCASE_PALETTE_DB", ""),
+		KeyStorePath:  getEnv("SHOWCASE_KEY_STORE_PATH", ""),
+
+		ConformanceRedirectURIs:  getEnvList("OIDC_CONFORMANCE_REDIRECT_URIS", nil),
+		ConformanceClientID:      getEnv("OIDC_CONFORMANCE_CLIENT_ID", "conformance-client"),
+		ConformanceClientSecret:  getEnv("OIDC_CONFORMANCE_CLIENT_SECRET", ""),
+		ConformanceClient2ID:     getEnv("OIDC_CONFORMANCE_CLIENT2_ID", "conformance-client-2"),
+		ConformanceClient2Secret: getEnv("OIDC_CONFORMANCE_CLIENT2_SECRET", ""),
 	}
 
 	return cfg
