@@ -77,6 +77,16 @@ type IDTokenOptions struct {
 
 	// AdditionalAudiences for multi-audience scenarios (triggers azp claim)
 	AdditionalAudiences []string
+
+	// ACR is the Authentication Context Class Reference actually satisfied by the
+	// End-User authentication (OIDC Core 1.0 Section 2). It is set only when a
+	// genuine authentication context applies and reflects the authentication that
+	// was performed, never a requested value the OP did not satisfy.
+	ACR string
+
+	// AMR lists the Authentication Methods References used in the authentication
+	// (RFC 8176). For example ["pwd"] for a password login.
+	AMR []string
 }
 
 // CreateIDToken creates an OIDC ID token
@@ -125,6 +135,16 @@ func (s *JWTService) CreateIDTokenWithOptions(subject string, audience string, n
 	if options != nil && options.AuthorizationCode != "" {
 		cHash := computeHashClaim(options.AuthorizationCode, "RS256")
 		claims["c_hash"] = cHash
+	}
+
+	// Add acr/amr describing the authentication context that was actually
+	// performed (OIDC Core 1.0 Section 2, RFC 8176). These reflect the real
+	// authentication and are never set to an unsatisfied requested value.
+	if options != nil && options.ACR != "" {
+		claims["acr"] = options.ACR
+	}
+	if options != nil && len(options.AMR) > 0 {
+		claims["amr"] = options.AMR
 	}
 
 	// Add user claims
