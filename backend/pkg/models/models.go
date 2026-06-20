@@ -4,13 +4,47 @@ import "time"
 
 // User represents a user in the system
 type User struct {
-	ID        string            `json:"id"`
-	Email     string            `json:"email"`
-	Name      string            `json:"name"`
+	ID         string `json:"id"`
+	Email      string `json:"email"`
+	Name       string `json:"name"`
+	GivenName  string `json:"given_name,omitempty"`
+	FamilyName string `json:"family_name,omitempty"`
+	// Standard OpenID Connect profile-scope claims (OIDC Core 1.0 Section 5.1).
+	// They are populated for the demo users so the profile scope returns the full
+	// claim set; any left empty are simply omitted (Section 5.4 permits absent
+	// values).
+	MiddleName string            `json:"middle_name,omitempty"`
+	Nickname   string            `json:"nickname,omitempty"`
+	Profile    string            `json:"profile,omitempty"`
+	Picture    string            `json:"picture,omitempty"`
+	Website    string            `json:"website,omitempty"`
+	Gender     string            `json:"gender,omitempty"`
+	Birthdate  string            `json:"birthdate,omitempty"`
+	Zoneinfo   string            `json:"zoneinfo,omitempty"`
+	Locale     string            `json:"locale,omitempty"`
+	// phone-scope claims (OIDC Core 1.0 Section 5.1). PhoneNumber is RECOMMENDED
+	// in E.164 format; PhoneNumberVerified states whether it has been verified.
+	PhoneNumber         string `json:"phone_number,omitempty"`
+	PhoneNumberVerified bool   `json:"phone_number_verified,omitempty"`
+	// Address is the address-scope claim (OIDC Core 1.0 Section 5.1.1), a
+	// structured JSON object. Nil when the user has no address on record.
+	Address   *Address          `json:"address,omitempty"`
 	Password  string            `json:"-"` // Never serialized
 	Roles     []string          `json:"roles"`
 	Claims    map[string]string `json:"claims,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
+}
+
+// Address is the OpenID Connect address claim (OIDC Core 1.0 Section 5.1.1). All
+// members are OPTIONAL; only the populated ones are returned, since the
+// conformance suite rejects blank string members.
+type Address struct {
+	Formatted     string `json:"formatted,omitempty"`
+	StreetAddress string `json:"street_address,omitempty"`
+	Locality      string `json:"locality,omitempty"`
+	Region        string `json:"region,omitempty"`
+	PostalCode    string `json:"postal_code,omitempty"`
+	Country       string `json:"country,omitempty"`
 }
 
 // Client represents an OAuth client application
@@ -27,18 +61,26 @@ type Client struct {
 
 // AuthorizationCode represents an OAuth authorization code
 type AuthorizationCode struct {
-	Code                       string    `json:"code"`
-	ClientID                   string    `json:"client_id"`
-	UserID                     string    `json:"user_id"`
-	RedirectURI                string    `json:"redirect_uri"`
-	Scope                      string    `json:"scope"`
-	State                      string    `json:"state"`
-	Nonce                      string    `json:"nonce,omitempty"`
-	CodeChallenge              string    `json:"code_challenge,omitempty"`
-	CodeChallengeMethod        string    `json:"code_challenge_method,omitempty"`
-	CredentialConfigurationIDs []string  `json:"credential_configuration_ids,omitempty"`
-	ExpiresAt                  time.Time `json:"expires_at"`
-	CreatedAt                  time.Time `json:"created_at"`
+	Code                       string   `json:"code"`
+	ClientID                   string   `json:"client_id"`
+	UserID                     string   `json:"user_id"`
+	RedirectURI                string   `json:"redirect_uri"`
+	Scope                      string   `json:"scope"`
+	State                      string   `json:"state"`
+	Nonce                      string   `json:"nonce,omitempty"`
+	CodeChallenge              string   `json:"code_challenge,omitempty"`
+	CodeChallengeMethod        string   `json:"code_challenge_method,omitempty"`
+	CredentialConfigurationIDs []string `json:"credential_configuration_ids,omitempty"`
+	// Claims is the raw OIDC claims request parameter (OpenID Connect Core 1.0
+	// Section 5.5) supplied at the authorization endpoint, carried so the token
+	// endpoint can honour individually requested claims at issuance time.
+	Claims string `json:"claims,omitempty"`
+	// AuthTime is when the End-User authenticated for this code. It is carried
+	// into the ID Token auth_time claim so max_age can be evaluated correctly
+	// (OpenID Connect Core 1.0 Section 2 and 3.1.2.1).
+	AuthTime  time.Time `json:"auth_time"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // TokenResponse represents an OAuth token response
@@ -62,10 +104,14 @@ type Session struct {
 
 // RefreshToken represents a refresh token
 type RefreshToken struct {
-	Token     string    `json:"token"`
-	ClientID  string    `json:"client_id"`
-	UserID    string    `json:"user_id"`
-	Scope     string    `json:"scope"`
+	Token    string `json:"token"`
+	ClientID string `json:"client_id"`
+	UserID   string `json:"user_id"`
+	Scope    string `json:"scope"`
+	// AuthTime is the original End-User authentication time. An ID Token issued
+	// from a refresh request MUST carry the same auth_time as the originally
+	// issued ID Token (OpenID Connect Core 1.0 Section 12.2).
+	AuthTime  time.Time `json:"auth_time"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -128,7 +174,18 @@ type DiscoveryDocument struct {
 	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	ClaimsSupported                   []string `json:"claims_supported,omitempty"`
+	ACRValuesSupported                []string `json:"acr_values_supported,omitempty"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
+	// request_parameter_supported defaults to false and request_uri_parameter_supported
+	// defaults to true (OpenID Connect Discovery 1.0 Section 3). Both are emitted
+	// explicitly (no omitempty) so the false values are advertised accurately,
+	// since this OP supports neither the request nor request_uri parameter.
+	RequestParameterSupported    bool `json:"request_parameter_supported"`
+	RequestURIParameterSupported bool `json:"request_uri_parameter_supported"`
+	// claims_parameter_supported defaults to false (OpenID Connect Discovery 1.0
+	// Section 3). This OP honours the claims request parameter, so it is emitted
+	// explicitly as true.
+	ClaimsParameterSupported bool `json:"claims_parameter_supported"`
 }
 
 // VCCredentialOffer represents an OpenID4VCI credential offer envelope.
