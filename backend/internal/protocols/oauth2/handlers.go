@@ -252,10 +252,11 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		Reference:   "RFC 6749 Section 3.1",
 	})
 
-	// Create authorization code
+	// Create authorization code (auth_time is now: the user just authenticated).
+	// OAuth 2.0 has no OIDC claims request parameter, so claims is empty.
 	authCode, err := p.mockIdP.CreateAuthorizationCode(
 		clientID, user.ID, redirectURI, scope, state, nonce,
-		codeChallenge, codeChallengeMethod,
+		codeChallenge, codeChallengeMethod, "", time.Now(),
 	)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Authorization Code Creation Failed", map[string]interface{}{
@@ -1102,7 +1103,7 @@ func (p *Plugin) issueTokens(userID, clientID, scope string) (*models.TokenRespo
 	}
 
 	// Store refresh token
-	p.mockIdP.StoreRefreshToken(refreshToken, clientID, userID, scope, time.Now().Add(7*24*time.Hour))
+	p.mockIdP.StoreRefreshToken(refreshToken, clientID, userID, scope, time.Now(), time.Now().Add(7*24*time.Hour))
 
 	response := &models.TokenResponse{
 		AccessToken:  accessToken,
