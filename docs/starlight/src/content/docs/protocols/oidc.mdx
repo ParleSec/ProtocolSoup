@@ -31,7 +31,8 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 
 | Path | Methods | Purpose |
 |------|---------|---------|
-| `/oidc/.well-known/openid-configuration` | GET | Discovery document |
+| `/.well-known/openid-configuration` | GET | Discovery document at the issuer root (canonical path a Relying Party derives from the issuer, OIDC Discovery 1.0 Section 4) |
+| `/oidc/.well-known/openid-configuration` | GET | Discovery document (prefixed alias, same content) |
 | `/oidc/.well-known/jwks.json` | GET | JSON Web Key Set |
 | `/oidc/jwks` | GET | JWKS alias |
 | `/oidc/authorize` | GET, POST | Authorization endpoint |
@@ -40,8 +41,73 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 
 ## What To Validate
 
-- ID token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `nonce`, `at_hash`
+- ID token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `auth_time`, `nonce`, `at_hash`, `c_hash`, `acr`, `amr`
 - Discovery fields: `issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`
 - JWKS: key type, algorithm, key ID alignment with token header
 - UserInfo: scope-dependent claims, subject consistency with ID token
 - Hybrid: multiple response types in a single authorization request
+
+## Request Handling Notes
+
+- Authorization errors after `client_id` and `redirect_uri` are validated are
+  returned to the client by redirect (query for the code flow, fragment for
+  implicit and hybrid), echoing `state` (RFC 6749 Section 4.1.2.1). Invalid
+  `client_id` or `redirect_uri` is shown to the user agent and never redirected.
+- `prompt=none` returns `login_required` when no end-user session is present;
+  `prompt=login` and an exceeded `max_age` force re-authentication and set
+  `auth_time`.
+- Public clients must use PKCE: an authorization code request without a
+  `code_challenge` is rejected (RFC 7636 Section 4.4.1).
+- Authorization codes are bound to the client they were issued to; a different
+  client redeeming a code is rejected with `invalid_grant`.
+- Authorization codes are single-use. Replaying a code is rejected with
+  `invalid_grant` and additionally revokes the access (and refresh) tokens that
+  code already issued; the revoked access token is then rejected at UserInfo with
+  `401 invalid_token` (RFC 6749 Section 4.1.2, RFC 6750 Section 3.1).
+- A token-endpoint client-authentication failure made over HTTP Basic returns
+  `401` with a `WWW-Authenticate: Basic` challenge, and token-endpoint errors do
+  not carry a Bearer challenge (RFC 6749 Section 5.2).
+- The authorization endpoint accepts requests by both `GET` and `POST`
+  (OIDC Core 1.0 Section 3.1.2.1). A `POST` carrying authorization parameters is
+  handled identically to `GET`; the interactive login form posts to the same
+  path and is distinguished internally.
+- When the flow issues an access token (the code flow always does, as do the
+  `id_token token` and hybrid flows), the scope-requested claims (`profile`,
+  `email`, ...) are served from the UserInfo endpoint and are not duplicated in
+  the ID token. They appear in the ID token only for the `response_type=id_token`
+  case, where no access token is issued (OIDC Core 1.0 Section 5.4).
+- The UserInfo endpoint accepts the access token in the `Authorization: Bearer`
+  header or, for a form-encoded `POST`, in an `access_token` body parameter
+  (RFC 6750 Section 2). Presenting both in one request is an `invalid_request`.
+- The `request` and `request_uri` parameters are not supported. A request
+  carrying `request` is rejected with `request_not_supported` and one carrying
+  `request_uri` with `request_uri_not_supported` rather than being ignored
+  (OIDC Core 1.0 Section 6.2.1, 6.3.1). Discovery advertises
+  `request_parameter_supported` and `request_uri_parameter_supported` as `false`.
+- The `claims` request parameter is supported (OIDC Core 1.0 Section 5.5), and
+  discovery advertises `claims_parameter_supported` as `true`. Claims requested
+  under the `userinfo` member are returned from the UserInfo endpoint; claims
+  requested under the `id_token` member are returned in the ID token. Every
+  returned value is real data from the user record, and a value the user does
+  not have is omitted rather than erroring (Section 5.5.1). A `claims` value that
+  is not a valid JSON object is rejected with `invalid_request`.
+- The `profile` scope returns the full profile standard-claim set from UserInfo
+  (`name`, `given_name`, `family_name`, `middle_name`, `nickname`,
+  `preferred_username`, `profile`, `picture`, `website`, `gender`, `birthdate`,
+  `zoneinfo`, `locale`, `updated_at`). Every value is real data held on the demo
+  user record, not synthesised per request (OIDC Core 1.0 Section 5.4).
+- The `address` and `phone` scopes are also supported and advertised in
+  `scopes_supported`. The `address` scope returns the structured `address` claim
+  (OIDC Core 1.0 Section 5.1.1) as a JSON object with the populated members
+  (`formatted`, `street_address`, `locality`, `region`, `postal_code`,
+  `country`); blank members are omitted. The `phone` scope returns `phone_number`
+  and `phone_number_verified` (Section 5.1). All values are real data held on the
+  demo user record.
+- ID tokens carry `acr` and `amr` describing the authentication that actually
+  happened: single-factor password, reported as `acr` `urn:protocolsoup:ac:password`
+  and `amr` `["pwd"]` (OIDC Core 1.0 Section 2, RFC 8176). That value is advertised
+  in `acr_values_supported`. The OP reports the context it genuinely performed and
+  never echoes a higher assurance level (`1`, `2`, ...) requested via `acr_values`
+  that it did not satisfy.
+- ID tokens are signed with RS256 only; the discovery metadata advertises only
+  what the OP delivers.
