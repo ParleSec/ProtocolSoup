@@ -1,0 +1,389 @@
+{
+  "protocol": "oidc-op",
+  "spec_version": "OpenID Connect Core 1.0 incorporating errata set 2",
+  "note": "Platform self-adjudication of OpenID Connect OP normative requirements. The status field is the platform's own claim. The suite_modules field maps each requirement to the OIDF conformance module(s) that exercise it, so scripts/conformance/divergence.py can flag any divergence between the platform's claim and the real suite result. status verified means platform regression tests assert the rule; status pending means a known gap with remediation in CERTIFICATION_AUDIT.md.",
+  "requirements": [
+    {
+      "id": "oidc-op-discovery-issuer-match",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Discovery 1.0 Section 4.3",
+      "description": "The issuer value in the discovery document MUST be identical to the issuer URL used as the prefix to /.well-known/openid-configuration.",
+      "implementation": [
+        "backend/internal/core/server.go",
+        "backend/internal/protocols/oidc/discovery.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-server", "oidcc-discovery-endpoint-verification"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-discovery-metadata-accuracy",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Discovery 1.0 Section 3",
+      "description": "Advertised metadata MUST reflect actual behaviour: no algorithm, grant type, or claim is advertised that the OP does not deliver.",
+      "implementation": [
+        "backend/internal/protocols/oidc/discovery.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-server", "oidcc-discovery-endpoint-verification"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-idtoken-signing-alg-advertised",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 3.1.3.7 (2)",
+      "description": "ID Tokens MUST be signed with an algorithm advertised in id_token_signing_alg_values_supported.",
+      "implementation": [
+        "backend/internal/crypto/jwt.go",
+        "backend/internal/protocols/oidc/discovery.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-server", "oidcc-idtoken-signature"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-authz-error-redirect",
+      "normative_level": "MUST",
+      "spec_reference": "RFC 6749 Section 4.1.2.1 and OpenID Connect Core 1.0 Section 3.1.2.6",
+      "description": "After a valid client_id and redirect_uri are established, authorization request errors MUST be returned to the client by redirecting to redirect_uri with the error and state parameters in the correct response channel.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/authorize.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go",
+        "backend/internal/protocols/oidc/authorize_helpers_test.go"
+      ],
+      "suite_modules": ["oidcc-response-type-missing", "oidcc-ensure-request-with-unknown-parameter-succeeds", "oidcc-scope-not-openid"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-redirect-uri-validated-first",
+      "normative_level": "MUST",
+      "spec_reference": "RFC 6749 Section 4.1.2.1",
+      "description": "If client_id or redirect_uri is missing, invalid, or mismatched, the OP MUST NOT redirect and MUST inform the user agent directly.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/authorize.go",
+        "backend/internal/mockidp/provider.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go",
+        "backend/internal/protocols/oidc/conformance_test.go"
+      ],
+      "suite_modules": ["oidcc-ensure-registered-redirect-uri", "oidcc-redirect-uri-query-mismatch"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-nonce-required-with-idtoken",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 3.2.2.1",
+      "description": "nonce is REQUIRED when response_type includes id_token; the OP rejects requests that omit it.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go"
+      ],
+      "suite_modules": ["oidcc-ensure-request-without-nonce-fails", "oidcc-implicit-ensure-request-without-nonce-fails"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-pkce-public-client",
+      "normative_level": "MUST",
+      "spec_reference": "RFC 7636 Section 4.4.1 and OAuth 2.0 Security BCP",
+      "description": "A public client without a code_challenge MUST be rejected at the authorization endpoint.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go"
+      ],
+      "suite_modules": ["oidcc-ensure-pkce-required"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-prompt-none",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 3.1.2.1 and 3.1.2.6",
+      "description": "prompt=none MUST NOT display any UI; if no end-user is authenticated the OP returns login_required to the redirect_uri.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/authorize.go",
+        "backend/internal/mockidp/provider.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go",
+        "backend/internal/protocols/oidc/authorize_helpers_test.go"
+      ],
+      "suite_modules": ["oidcc-prompt-none-not-logged-in", "oidcc-prompt-none-logged-in"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-max-age",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 3.1.2.1",
+      "description": "max_age forces re-authentication when the elapsed time since auth_time exceeds it, and the resulting ID Token MUST include auth_time reflecting the actual authentication time.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/authorize.go",
+        "backend/internal/mockidp/provider.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go",
+        "backend/internal/protocols/oidc/authorize_helpers_test.go"
+      ],
+      "suite_modules": ["oidcc-max-age-1", "oidcc-max-age-10000"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-response-mode",
+      "normative_level": "MUST",
+      "spec_reference": "OAuth 2.0 Multiple Response Type Encoding Practices Section 2.1",
+      "description": "The OP honours the requested response_mode where valid and rejects combinations that would expose tokens unsafely.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/authorize.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/authorize_test.go",
+        "backend/internal/protocols/oidc/authorize_helpers_test.go"
+      ],
+      "suite_modules": ["oidcc-ensure-response-mode-query"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-at-hash-c-hash",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 3.3.2.11",
+      "description": "ID Tokens issued from the authorization endpoint include at_hash when an access token is returned and c_hash when a code is returned.",
+      "implementation": [
+        "backend/internal/crypto/jwt.go",
+        "backend/internal/protocols/oidc/userinfo.go"
+      ],
+      "tests": [
+        "backend/internal/crypto/jwt_test.go"
+      ],
+      "suite_modules": ["oidcc-hybrid-ensure-at-hash", "oidcc-hybrid-ensure-c-hash"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-idtoken-required-claims",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 2",
+      "description": "ID Tokens MUST contain iss, sub, aud, exp, and iat; nonce MUST be echoed when supplied.",
+      "implementation": [
+        "backend/internal/crypto/jwt.go"
+      ],
+      "tests": [
+        "backend/internal/crypto/jwt_test.go"
+      ],
+      "suite_modules": ["oidcc-server", "oidcc-idtoken-structure"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-refresh-idtoken-nonce",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 12.2",
+      "description": "An ID Token issued from a refresh token preserves the original auth_time; nonce is omitted, which is permitted because Section 12.2 only constrains nonce when present.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/mockidp/provider.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/refresh_test.go"
+      ],
+      "suite_modules": ["oidcc-refresh-token"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-userinfo-bearer",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 5.3 and RFC 6750 Section 2",
+      "description": "The UserInfo endpoint requires a valid bearer access token and returns a sub that matches the ID Token sub. The token is accepted in the Authorization header (RFC 6750 Section 2.1) or in a form-encoded POST body access_token parameter (Section 2.2); presenting both in one request is rejected as invalid_request.",
+      "implementation": [
+        "backend/internal/protocols/oidc/claims.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/userinfo_test.go",
+        "backend/internal/protocols/oidc/conformance_test.go"
+      ],
+      "suite_modules": ["oidcc-userinfo-get", "oidcc-userinfo-post-header", "oidcc-userinfo-post-body"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-authz-endpoint-get-post",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 3.1.2.1",
+      "description": "The authorization endpoint MUST support both HTTP GET and POST. A POST carrying authorization parameters is processed identically to GET; the interactive login form posts to the same path and is distinguished by an internal login_request_id field.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/plugin.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go"
+      ],
+      "suite_modules": ["oidcc-ensure-post-request-succeeds"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-request-param-unsupported",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 6.2.1 and 6.3.1, OpenID Connect Discovery 1.0 Section 3",
+      "description": "The OP does not support the request or request_uri parameter. An authorization request carrying request is rejected with request_not_supported, and one carrying request_uri with request_uri_not_supported, rather than being silently ignored. Discovery advertises request_parameter_supported and request_uri_parameter_supported as false; the latter is emitted explicitly because its default is true.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/discovery.go",
+        "backend/pkg/models/models.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go",
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported", "oidcc-request-uri-unsigned"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-claims-placement",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 5.4",
+      "description": "Scope-requested claims (profile, email, ...) are returned from the UserInfo endpoint whenever the flow issues an access token, and are carried in the ID Token only when no access token is issued (the response_type=id_token case). The code, hybrid, and id_token-token flows therefore return these claims from UserInfo, not the ID Token. The profile scope returns the full Section 5.4 profile claim set (name, given_name, family_name, middle_name, nickname, preferred_username, profile, picture, website, gender, birthdate, zoneinfo, locale, updated_at), sourced from real user-record data and advertised in claims_supported.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/mockidp/users.go",
+        "backend/internal/mockidp/provider.go",
+        "backend/pkg/models/models.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go",
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-scope-email", "oidcc-scope-profile"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-claims-parameter",
+      "normative_level": "SHOULD",
+      "spec_reference": "OpenID Connect Core 1.0 Section 5.5 and 5.5.1, OpenID Connect Discovery 1.0 Section 3",
+      "description": "The OP honours the claims request parameter. Claims requested under the userinfo member are returned from the UserInfo endpoint, and claims requested under the id_token member are returned in the ID Token (delivered there only, never duplicated into the other location). The requested UserInfo claim names travel with the access token so UserInfo can serve them. Values are sourced from the user record and an absent value is omitted rather than erroring (Section 5.5.1). A claims value that is not a valid JSON object is rejected as invalid_request. Discovery advertises claims_parameter_supported as true, emitted explicitly because its default is false.",
+      "implementation": [
+        "backend/internal/protocols/oidc/claims.go",
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/discovery.go",
+        "backend/internal/mockidp/users.go",
+        "backend/internal/mockidp/provider.go",
+        "backend/pkg/models/models.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go",
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-claims-essential"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-address-phone-scopes",
+      "normative_level": "MAY",
+      "spec_reference": "OpenID Connect Core 1.0 Section 5.1 and 5.1.1, Section 5.4, OpenID Connect Discovery 1.0 Section 3",
+      "description": "The OP supports the address and phone scopes. The address scope returns the structured address claim as a JSON object containing only the populated members (formatted, street_address, locality, region, postal_code, country); a blank object or blank member is never emitted. The phone scope returns phone_number as a string and phone_number_verified as a boolean. All values are real data held on the user record, never synthesised per request. scopes_supported advertises address and phone, and claims_supported advertises address, phone_number, and phone_number_verified, so the advertisement matches the claims the OP genuinely returns.",
+      "implementation": [
+        "backend/internal/protocols/oidc/discovery.go",
+        "backend/internal/mockidp/users.go",
+        "backend/internal/mockidp/provider.go",
+        "backend/pkg/models/models.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go",
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-scope-address", "oidcc-scope-phone", "oidcc-scope-all"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-acr-authentication-context",
+      "normative_level": "SHOULD",
+      "spec_reference": "OpenID Connect Core 1.0 Section 2 and Section 3.1.2.1, RFC 8176",
+      "description": "When a client requests an authentication context via acr_values, the ID Token returns an acr claim reflecting the authentication actually performed. The OP performs single-factor password authentication, reported truthfully as acr urn:protocolsoup:ac:password with amr [pwd], advertised in acr_values_supported. The OP never returns a requested assurance level it did not satisfy. acr and amr are present on authorization-code, hybrid/implicit, and refresh-issued ID Tokens.",
+      "implementation": [
+        "backend/internal/protocols/oidc/authorize.go",
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/discovery.go",
+        "backend/internal/crypto/jwt.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go",
+        "backend/internal/protocols/oidc/discovery_test.go"
+      ],
+      "suite_modules": ["oidcc-ensure-request-with-acr-values-succeeds"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-code-bound-to-client",
+      "normative_level": "MUST",
+      "spec_reference": "RFC 6749 Section 4.1.3 and OpenID Connect Core 1.0 Section 3.1.3.2",
+      "description": "An authorization code MUST be bound to the client it was issued to; redemption by a different client (even one that authenticates correctly) MUST be rejected with invalid_grant.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/mockidp/provider.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go"
+      ],
+      "suite_modules": ["oidcc-codereuse"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-code-replay-revocation",
+      "normative_level": "MUST (denial) and SHOULD (revocation)",
+      "spec_reference": "RFC 6749 Section 4.1.2, RFC 6750 Section 3.1, RFC 7009",
+      "description": "An authorization code is single-use. Replaying a code MUST be denied with invalid_grant, and the OP SHOULD revoke tokens previously issued from that code. The OP records each redeemed code together with the access (and refresh) tokens it minted; on replay it denies the request and revokes those tokens by adding the access token jti to the revocation store and dropping the refresh token. The UserInfo endpoint consults the revocation store and rejects a revoked access token with 401 invalid_token. Replay records are pruned after the access-token lifetime, since an expired token needs no revocation.",
+      "implementation": [
+        "backend/internal/mockidp/provider.go",
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/claims.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go"
+      ],
+      "suite_modules": ["oidcc-codereuse"],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-token-client-auth-error",
+      "normative_level": "MUST",
+      "spec_reference": "RFC 6749 Section 5.2",
+      "description": "When client authentication fails at the token endpoint and the client used HTTP Basic, the OP MUST return 401 with a WWW-Authenticate: Basic challenge. Token-endpoint errors MUST NOT carry a Bearer challenge.",
+      "implementation": [
+        "backend/internal/protocols/oidc/userinfo.go",
+        "backend/internal/protocols/oidc/claims.go"
+      ],
+      "tests": [
+        "backend/internal/protocols/oidc/conformance_test.go"
+      ],
+      "suite_modules": [],
+      "status": "verified"
+    },
+    {
+      "id": "oidc-op-persistent-keys",
+      "normative_level": "MUST",
+      "spec_reference": "OpenID Connect Core 1.0 Section 10.1.1 (key rotation)",
+      "description": "The certified deployment uses persistent signing keys and retains retired public keys in JWKS so previously issued tokens remain verifiable.",
+      "implementation": [
+        "backend/internal/crypto/keys.go",
+        "backend/internal/crypto/keystore.go",
+        "backend/internal/core/bootstrap.go"
+      ],
+      "tests": [
+        "backend/internal/crypto/keys_persistence_test.go"
+      ],
+      "suite_modules": ["oidcc-server-rotate-keys"],
+      "status": "verified"
+    }
+  ]
+}
