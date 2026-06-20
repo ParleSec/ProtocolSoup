@@ -1,0 +1,72 @@
+# OpenID Connect OP conformance suite stack.
+#
+# Brings up the OpenID Foundation conformance suite (Java server + nginx TLS
+# terminator + MongoDB) using the published prebuilt images. The suite drives
+# the ProtocolSoup OP test plans through standard endpoints only.
+#
+# Source: https://gitlab.com/openid/conformance-suite
+# Build & Run wiki: https://gitlab.com/openid/conformance-suite/-/wikis/Developers/Build-&-Run
+#
+# Usage:
+#   docker compose -f docker/docker-compose.conformance.yml up -d --wait
+#   scripts/conformance-run.sh
+#   docker compose -f docker/docker-compose.conformance.yml down -v
+#
+# The suite REST API and UI are reachable at https://localhost.emobix.co.uk:8443
+# (that public DNS name resolves to 127.0.0.1; add a hosts entry if your network
+# resolver blocks it). The suite reaches the OP over the public internet at the
+# URL given by OIDC_TARGET_BASE_URL, so the certified endpoints are exercised as
+# deployed, not a bespoke rig.
+#
+# IMAGE_TAG pins the suite version. Pin it to a specific release for reproducible
+# runs and record the exact tag in any certification submission. "latest" tracks
+# the suite master branch and should not be used for submission evidence.
+
+services:
+  mongodb:
+    image: ${MONGODB_IMAGE:-mongo:6.0.13}
+    # A named volume avoids the unreliable bind-mount path on Windows hosts and
+    # keeps CI runners clean.
+    volumes:
+      - conformance_mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  server:
+    image: registry.gitlab.com/openid/conformance-suite/server:${IMAGE_TAG:-release-v5.1.43}
+    command: >
+      java
+      -jar /server/fapi-test-suite.jar
+      --fintechlabs.base_url=https://localhost.emobix.co.uk:8443
+      --fintechlabs.devmode=true
+      --fintechlabs.startredir=true
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - JAVA_EXTRA_ARGS=${JAVA_EXTRA_ARGS:---fintechlabs.devmode=true}
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "http://localhost:8080/api/runner/available"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+  nginx:
+    image: registry.gitlab.com/openid/conformance-suite/nginx:${IMAGE_TAG:-release-v5.1.43}
+    ports:
+      - "8443:8443"
+    depends_on:
+      - server
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost:8443/api/runner/available"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  conformance_mongo:

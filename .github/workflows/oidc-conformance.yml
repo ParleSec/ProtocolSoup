@@ -1,0 +1,130 @@
+name: OIDC OP Conformance Monitoring
+
+# Ongoing drift monitoring for the OpenID Connect OP after certification. It runs
+# the OpenID Foundation conformance suite against the real deployment on every
+# OIDC-affecting change so a regression that breaks conformance fails CI early.
+# Conformance is driven entirely through standard OP endpoints; there is no
+# suite-specific branch in the OP.
+#
+# This workflow is NOT the source of certification evidence. The certification
+# evidence of record is produced and retained by the OIDF hosted portal
+# (https://www.certification.openid.net). The per-module logs uploaded here are
+# drift diagnostics only.
+#
+# The Go normative regression tests are not duplicated here; the main CI/CD
+# pipeline (ci-cd.yml) already runs the full backend test suite, including
+# internal/protocols/oidc, internal/crypto, and internal/mockidp, on every push.
+#
+# The suite run requires deployment secrets (the confidential client secret and
+# the conformance end-user password). When those are absent the job verifies the
+# harness can build and parse its config, then exits without claiming any result.
+# No conformance pass is ever synthesised.
+
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'ProtocolLens/backend/internal/protocols/oidc/**'
+      - 'ProtocolLens/backend/internal/mockidp/**'
+      - 'ProtocolLens/backend/internal/crypto/**'
+      - 'ProtocolLens/backend/internal/core/**'
+      - 'ProtocolLens/scripts/conformance/**'
+      - 'ProtocolLens/scripts/conformance-run.sh'
+      - 'ProtocolLens/docker/docker-compose.conformance.yml'
+      - 'ProtocolLens/.github/workflows/oidc-conformance.yml'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'ProtocolLens/backend/internal/protocols/oidc/**'
+      - 'ProtocolLens/backend/internal/mockidp/**'
+      - 'ProtocolLens/backend/internal/crypto/**'
+      - 'ProtocolLens/backend/internal/core/**'
+      - 'ProtocolLens/scripts/conformance/**'
+      - 'ProtocolLens/scripts/conformance-run.sh'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  op-conformance:
+    name: OIDF OP conformance suite
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Determine whether conformance secrets are configured
+        id: gate
+        env:
+          OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CONFORMANCE_CLIENT_SECRET }}
+          OIDC_PASSWORD: ${{ secrets.OIDC_CONFORMANCE_PASSWORD }}
+        run: |
+          if [ -n "${OIDC_CLIENT_SECRET}" ] && [ -n "${OIDC_PASSWORD}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Conformance secrets not configured; running harness self-check only."
+          fi
+
+      - name: Add suite hostname to /etc/hosts
+        run: echo "127.0.0.1 localhost.emobix.co.uk" | sudo tee -a /etc/hosts
+
+      - name: Harness self-check (no result claimed)
+        working-directory: ProtocolLens
+        run: |
+          python3 -c "import json; json.load(open('docs/compliance/oidc-op-musts.json'))"
+          python3 -c "import json; json.load(open('scripts/conformance/expected_failures.json'))"
+          python3 -m py_compile scripts/conformance/runner.py scripts/conformance/divergence.py
+          test -f docker/docker-compose.conformance.yml
+
+      - name: Start conformance suite
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: ProtocolLens
+        run: docker compose -f docker/docker-compose.conformance.yml up -d --wait
+
+      - name: Run OP test plans
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: ProtocolLens
+        env:
+          OIDC_TARGET_BASE_URL: ${{ secrets.OIDC_CONFORMANCE_TARGET_BASE_URL }}
+          OIDC_CLIENT_ID: ${{ secrets.OIDC_CONFORMANCE_CLIENT_ID }}
+          OIDC_CLIENT_SECRET: ${{ secrets.OIDC_CONFORMANCE_CLIENT_SECRET }}
+          OIDC_CLIENT2_ID: ${{ secrets.OIDC_CONFORMANCE_CLIENT2_ID }}
+          OIDC_CLIENT2_SECRET: ${{ secrets.OIDC_CONFORMANCE_CLIENT2_SECRET }}
+          OIDC_USERNAME: ${{ secrets.OIDC_CONFORMANCE_USERNAME }}
+          OIDC_PASSWORD: ${{ secrets.OIDC_CONFORMANCE_PASSWORD }}
+          CONFORMANCE_RESULTS_DIR: .artifacts/conformance
+        run: bash scripts/conformance-run.sh
+
+      - name: Reflexive audit (adjudicator versus suite)
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: ProtocolLens
+        run: |
+          python3 scripts/conformance/divergence.py \
+            --musts docs/compliance/oidc-op-musts.json \
+            --results-dir .artifacts/conformance \
+            --report .artifacts/conformance/DIVERGENCES.md
+
+      - name: Stop conformance suite
+        if: always() && steps.gate.outputs.ready == 'true'
+        working-directory: ProtocolLens
+        run: docker compose -f docker/docker-compose.conformance.yml down -v
+
+      - name: Upload conformance logs (drift diagnostics, not certification evidence)
+        if: always() && steps.gate.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: oidc-op-conformance-monitoring-logs
+          path: ProtocolLens/.artifacts/conformance/**
+          retention-days: 30
+          if-no-files-found: warn

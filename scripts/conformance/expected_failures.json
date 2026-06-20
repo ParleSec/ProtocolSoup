@@ -1,0 +1,3 @@
+{
+  "_comment": "Suite-side known issues only (for example HtmlUnit browser-driver defects in the OIDF suite). Never list a provider behaviour gap here: a real OP gap must be fixed, not masked. Each entry maps an OIDF module name to a short reason. Empty by default so nothing is masked."
+}

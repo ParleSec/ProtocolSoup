@@ -1,0 +1,32 @@
+{
+  "alias": "${OIDC_ALIAS}",
+  "description": "ProtocolSoup OpenID Connect OP self-certification run",
+  "server": {
+    "discoveryUrl": "${OIDC_DISCOVERY_URL}"
+  },
+  "client": {
+    "client_id": "${OIDC_CLIENT_ID}",
+    "client_secret": "${OIDC_CLIENT_SECRET}"
+  },
+  "client2": {
+    "client_id": "${OIDC_CLIENT2_ID}",
+    "client_secret": "${OIDC_CLIENT2_SECRET}"
+  },
+  "browser": [
+    {
+      "match": "${OIDC_AUTHORIZE_URL}*",
+      "tasks": [
+        {
+          "task": "Authenticate the end user",
+          "match": "${OIDC_AUTHORIZE_URL}*",
+          "optional": true,
+          "commands": [
+            ["text", "name", "email", "${OIDC_USERNAME}"],
+            ["text", "name", "password", "${OIDC_PASSWORD}"],
+            ["click", "css", "button[type=\"submit\"]"]
+          ]
+        }
+      ]
+    }
+  ]
+}
