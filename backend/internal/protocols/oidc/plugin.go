@@ -83,9 +83,12 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/userinfo", p.handleUserInfo)
 	router.Post("/userinfo", p.handleUserInfo)
 
-	// Authorization endpoint (extends OAuth2)
+	// Authorization endpoint (extends OAuth2). The endpoint MUST accept both GET
+	// and POST (OIDC Core 1.0 Section 3.1.2.1). POST is dispatched by
+	// handleAuthorizePost: a login form submission (carries login_request_id)
+	// versus a direct authorization request.
 	router.Get("/authorize", p.handleAuthorize)
-	router.Post("/authorize", p.handleAuthorizeSubmit)
+	router.Post("/authorize", p.handleAuthorizePost)
 
 	// Token endpoint (extends OAuth2 to include ID token)
 	router.Post("/token", p.handleToken)

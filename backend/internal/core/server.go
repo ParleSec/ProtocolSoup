@@ -139,6 +139,16 @@ func (s *Server) setupRouter() {
 			})
 			r.Method(http.MethodGet, "/.well-known/openid-credential-issuer/*", protocolRouter)
 		}
+
+		// OpenID Connect Discovery 1.0 Section 4: a Relying Party derives the
+		// configuration URL as {issuer}/.well-known/openid-configuration. The
+		// OP issuer is the site root, so the discovery document MUST be served
+		// at the root well-known path (Section 4.3 also requires the issuer in
+		// the document to equal that prefix). The /oidc-prefixed route is kept
+		// for backward compatibility; both delegate to the same handler.
+		if info.ID == "oidc" {
+			r.Method(http.MethodGet, "/.well-known/openid-configuration", protocolRouter)
+		}
 	}
 
 	// Route web traffic to the Next.js runtime when configured.
