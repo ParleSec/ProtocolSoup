@@ -38,9 +38,27 @@ func htmlEscape(s string) string {
 	return html.EscapeString(s)
 }
 
-// handleAuthorize handles OIDC authorization requests
+// handleAuthorize handles OIDC authorization requests.
+//
+// Request validation follows RFC 6749 Section 4.1.2.1 ordering strictly:
+//  1. client_id and redirect_uri are validated first; errors here are shown to
+//     the user agent and never redirected.
+//  2. response_type and response_mode are resolved so a response channel exists.
+//  3. every other request error is delivered by redirecting to the validated
+//     redirect_uri with error and state, in that channel.
+//
+// Interaction (login page versus silent session reuse) is then decided per
+// OpenID Connect Core 1.0 Section 3.1.2.1 using prompt and max_age.
 func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
+	// The authorization endpoint MUST support both HTTP GET and POST (OIDC Core
+	// 1.0 Section 3.1.2.1). r.Form merges the URL query and any form-encoded
+	// body, so a single handler serves both methods; for GET it is exactly the
+	// query parameters.
+	if err := r.ParseForm(); err != nil {
+		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, "invalid_request", "Invalid request encoding")
+		return
+	}
+	query := r.Form
 	sessionID := p.getSessionFromRequest(r)
 
 	responseType := query.Get("response_type")
@@ -51,6 +69,10 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	nonce := query.Get("nonce")
 	codeChallenge := query.Get("code_challenge")
 	codeChallengeMethod := query.Get("code_challenge_method")
+	prompt := query.Get("prompt")
+	maxAgeRaw := query.Get("max_age")
+	responseModeRaw := query.Get("response_mode")
+	claimsParam := query.Get("claims")
 
 	// Emit OIDC authorization request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authentication Request", map[string]interface{}{
@@ -58,6 +80,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"from":                   "Client",
 		"to":                     "OpenID Provider",
 		"response_type":          responseType,
+		"response_mode":          responseModeRaw,
 		"client_id":              clientID,
 		"redirect_uri":           redirectURI,
 		"scope":                  scope,
@@ -66,6 +89,8 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"state_present":          state != "",
 		"nonce":                  nonce,
 		"nonce_present":          nonce != "",
+		"prompt":                 prompt,
+		"max_age":                maxAgeRaw,
 		"code_challenge":         codeChallenge,
 		"code_challenge_present": codeChallenge != "",
 		"code_challenge_method":  codeChallengeMethod,
@@ -76,35 +101,25 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		Reference:   "OpenID Connect Core 1.0 Section 3.1.2",
 	})
 
-	// Validate openid scope is present
-	if !strings.Contains(scope, "openid") {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Missing openid Scope", map[string]interface{}{
-			"scope":     scope,
-			"client_id": clientID,
-		}, lookingglass.Annotation{
-			Type:        lookingglass.AnnotationTypeSecurityHint,
-			Title:       "openid Scope Required",
-			Description: "The 'openid' scope is mandatory for OIDC flows to receive an ID token",
-			Severity:    "error",
-		})
-		writeOIDCError(w, http.StatusBadRequest, "invalid_scope", "openid scope is required for OIDC")
+	// Step 1 (RFC 6749 Section 4.1.2.1): client_id and redirect_uri are
+	// validated BEFORE anything else, and their errors are never redirected.
+	if clientID == "" {
+		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, "invalid_request", "client_id is required")
 		return
 	}
-
-	// Emit nonce presence check
-	if nonce != "" {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Nonce Parameter Present", map[string]interface{}{
-			"nonce":        nonce,
-			"nonce_length": len(nonce),
-		}, lookingglass.Annotation{
-			Type:        lookingglass.AnnotationTypeBestPractice,
-			Title:       "Nonce for Replay Protection",
-			Description: "The nonce binds the ID token to the client session, preventing replay attacks",
-			Reference:   "OpenID Connect Core 1.0 Section 3.1.2.1",
-		})
+	client, exists := p.mockIdP.GetClient(clientID)
+	if !exists {
+		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, "invalid_client", "Unknown client")
+		return
 	}
+	normalizedRedirectURI, err := p.mockIdP.NormalizeRedirectURI(clientID, redirectURI)
+	if err != nil {
+		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, "invalid_request", "Invalid redirect_uri")
+		return
+	}
+	redirectURI = normalizedRedirectURI
 
-	// Validate response type
+	// Step 2: response_type must be recognised before a channel can be chosen.
 	validResponseTypes := map[string]bool{
 		"code":                true,
 		"token":               true,
@@ -117,52 +132,136 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"code token id_token": true,
 	}
 	if !validResponseTypes[responseType] {
-		writeOIDCError(w, http.StatusBadRequest, "unsupported_response_type", "Supported: code, token, id_token, id_token token, code id_token, code token, code id_token token")
+		// No valid response_type means no defined channel; deliver the error in
+		// the query default per RFC 6749.
+		p.redirectAuthError(w, r, redirectURI, "", "query", state,
+			"unsupported_response_type", "Unsupported response_type")
 		return
 	}
 
-	// OIDC Core 1.0 Section 3.1.2.1: Nonce is REQUIRED for implicit flows that return id_token
-	// Section 3.2.2.1: "REQUIRED. String value used to associate a Client session with an ID Token"
+	// Resolve response_mode now that response_type is known (Phase 2e).
+	responseMode, rmErrCode, rmErrDesc := resolveResponseMode(responseType, responseModeRaw)
+	if rmErrCode != "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, defaultResponseMode(responseType), state, rmErrCode, rmErrDesc)
+		return
+	}
+
+	// Step 3: every remaining request error redirects to redirect_uri.
+
+	// request and request_uri are not supported by this OP. They are rejected
+	// before any other request validation so a request object can never mask the
+	// rejection, and with the dedicated error codes the spec defines rather than
+	// being silently ignored (OIDC Core 1.0 Section 6.2.1, 6.3.1). The discovery
+	// metadata advertises request_parameter_supported and
+	// request_uri_parameter_supported as false to match.
+	if query.Get("request_uri") != "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"request_uri_not_supported", "The request_uri parameter is not supported (OIDC Core 1.0 Section 6.3.1)")
+		return
+	}
+	if query.Get("request") != "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"request_not_supported", "The request parameter is not supported (OIDC Core 1.0 Section 6.2.1)")
+		return
+	}
+
+	// The claims request parameter (OIDC Core 1.0 Section 5.5) is supported and
+	// advertised via claims_parameter_supported. Its value MUST be a JSON object;
+	// a malformed value is rejected as invalid_request rather than ignored.
+	if _, err := parseClaimsParameter(claimsParam); err != nil {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"invalid_request", "The claims parameter is not a valid JSON object (OIDC Core 1.0 Section 5.5)")
+		return
+	}
+
+	// openid scope is required for an OIDC authorization request.
+	if !containsScope(scope, "openid") {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"invalid_scope", "openid scope is required for OIDC")
+		return
+	}
+
+	// nonce is REQUIRED when response_type includes id_token (OIDC Core 1.0
+	// Section 3.2.2.1).
 	if strings.Contains(responseType, "id_token") && nonce == "" {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Missing Required Nonce", map[string]interface{}{
-			"response_type": responseType,
-			"client_id":     clientID,
-			"redirect_uri":  redirectURI,
-			"scope":         scope,
-			"scopes":        strings.Fields(scope),
-			"rfc_violation": true,
-		}, lookingglass.Annotation{
-			Type:        lookingglass.AnnotationTypeSecurityHint,
-			Title:       "Nonce Required (OIDC Core 1.0 Compliance)",
-			Description: "Per OIDC Core 1.0 Section 3.2.2.1, nonce is REQUIRED when response_type includes id_token",
-			Severity:    "error",
-			Reference:   "https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest",
-		})
-		writeOIDCErrorWithURI(w, http.StatusBadRequest, "invalid_request",
-			"nonce is REQUIRED when response_type includes id_token (OIDC Core 1.0 Section 3.2.2.1)",
-			"https://openid.net/specs/openid-connect-core-1_0.html#ImplicitAuthRequest")
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"invalid_request", "nonce is REQUIRED when response_type includes id_token (OIDC Core 1.0 Section 3.2.2.1)")
 		return
 	}
 
-	if clientID == "" {
-		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "client_id is required")
+	// prompt syntax (OIDC Core 1.0 Section 3.1.2.1).
+	prompts := promptValues(prompt)
+	if code, desc := validatePrompt(prompts); code != "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, code, desc)
 		return
 	}
 
-	// Validate client
-	client, exists := p.mockIdP.GetClient(clientID)
-	if !exists {
-		writeOIDCError(w, http.StatusBadRequest, "invalid_client", "Unknown client")
+	// max_age syntax (OIDC Core 1.0 Section 3.1.2.1).
+	maxAge, maxAgePresent, maxAgeErr := parseMaxAge(maxAgeRaw)
+	if maxAgeErr != "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, "invalid_request", maxAgeErr)
 		return
 	}
 
-	// Validate redirect URI
-	normalizedRedirectURI, err := p.mockIdP.NormalizeRedirectURI(clientID, redirectURI)
-	if err != nil {
-		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid redirect_uri")
+	// PKCE enforcement for public clients (Phase 2f). A public client that asks
+	// for an authorization code MUST supply a code_challenge (RFC 7636 Section
+	// 4.4.1, OAuth 2.0 Security BCP Section 2.1.1).
+	if client.Public && strings.Contains(responseType, "code") && codeChallenge == "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"invalid_request", "code_challenge is required for public clients (PKCE, RFC 7636 Section 4.4.1)")
 		return
 	}
-	redirectURI = normalizedRedirectURI
+	// Reject unsupported code_challenge_method when a challenge is present.
+	if codeChallenge != "" && codeChallengeMethod != "" && codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"invalid_request", "unsupported code_challenge_method (supported: S256, plain) per RFC 7636 Section 4.3")
+		return
+	}
+
+	params := authParams{
+		ClientID:            clientID,
+		RedirectURI:         redirectURI,
+		Scope:               scope,
+		State:               state,
+		Nonce:               nonce,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+		ResponseType:        responseType,
+		ResponseMode:        responseMode,
+		Claims:              claimsParam,
+	}
+
+	// Interaction decision (OIDC Core 1.0 Section 3.1.2.1).
+	session, hasSession := p.currentAuthSession(r)
+	now := time.Now()
+	needReauth := hasSession && reauthRequired(prompts, maxAge, maxAgePresent, session.CreatedAt, now)
+
+	if containsValue(prompts, "none") {
+		// prompt=none MUST NOT display any UI. Without a usable session the OP
+		// returns login_required to the client (OIDC Core 1.0 Section 3.1.2.6).
+		if !hasSession || needReauth {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "prompt=none login_required", map[string]interface{}{
+				"prompt":       prompt,
+				"has_session":  hasSession,
+				"redirect_uri": redirectURI,
+			})
+			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+				"login_required", "No End-User session is available for prompt=none")
+			return
+		}
+		p.issueAuthorizationResponse(w, r, sessionID, params, session.UserID, session.CreatedAt)
+		return
+	}
+
+	// Reuse an existing session without an interactive login when the RP
+	// explicitly bounded freshness with max_age and the session is recent
+	// enough. A request with neither prompt nor max_age keeps the interactive
+	// login so the authentication step stays visible (the OP MAY require fresh
+	// authentication, OIDC Core 1.0 Section 3.1.2.1).
+	if hasSession && !needReauth && maxAgePresent {
+		p.issueAuthorizationResponse(w, r, sessionID, params, session.UserID, session.CreatedAt)
+		return
+	}
 
 	loginRequestID := p.storeLoginRequest(loginRequestInfo{
 		ClientID:            clientID,
@@ -173,6 +272,8 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
 		ResponseType:        responseType,
+		ResponseMode:        responseMode,
+		Claims:              claimsParam,
 	})
 
 	// Generate login page with HTML-escaped values to prevent XSS
@@ -185,6 +286,37 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	)
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(loginPage))
+}
+
+// containsScope reports whether scope (a space-delimited list) contains target
+// as a whole token, avoiding substring false positives.
+func containsScope(scope, target string) bool {
+	for _, s := range strings.Fields(scope) {
+		if s == target {
+			return true
+		}
+	}
+	return false
+}
+
+// handleAuthorizePost dispatches POST requests to the authorization endpoint.
+//
+// The authorization endpoint MUST accept authorization requests by both GET and
+// POST (OIDC Core 1.0 Section 3.1.2.1). This OP also serves its interactive
+// login form by POST to the same path. The two are distinguished by the
+// login_request_id field, which only the login form carries: its presence means
+// a credential submission (handleAuthorizeSubmit); its absence means a direct
+// authorization request, handled identically to GET (handleAuthorize).
+func (p *Plugin) handleAuthorizePost(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid form data")
+		return
+	}
+	if r.PostForm.Get("login_request_id") != "" {
+		p.handleAuthorizeSubmit(w, r)
+		return
+	}
+	p.handleAuthorize(w, r)
 }
 
 // handleAuthorizeSubmit handles OIDC login form submission
@@ -246,137 +378,178 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	p.consumeLoginRequest(loginRequestID)
 
-	// Build redirect URL - redirect URI was already validated above
-	redirectURL, err := url.Parse(redirectURI)
+	// Record the fresh end-user authentication so later prompt=none and max_age
+	// requests can be answered correctly (OIDC Core 1.0 Section 3.1.2.1).
+	session := p.establishAuthSession(w, user.ID, clientID)
+
+	responseMode := requestInfo.ResponseMode
+	if responseMode == "" {
+		responseMode = defaultResponseMode(responseType)
+	}
+
+	params := authParams{
+		ClientID:            clientID,
+		RedirectURI:         redirectURI,
+		Scope:               scope,
+		State:               state,
+		Nonce:               nonce,
+		CodeChallenge:       codeChallenge,
+		CodeChallengeMethod: codeChallengeMethod,
+		ResponseType:        responseType,
+		ResponseMode:        responseMode,
+		Claims:              requestInfo.Claims,
+	}
+
+	// auth_time is the moment this session was established, so a later silent
+	// reuse of the same session reports an identical auth_time (OIDC Core 1.0
+	// Section 2; keeps max_age evaluation consistent across requests).
+	p.issueAuthorizationResponse(w, r, sessionID, params, user.ID, session.CreatedAt)
+}
+
+// issueAuthorizationResponse builds and returns the authorization response for a
+// resolved request. It is the single issuance path shared by interactive login
+// and silent session reuse, so the two can never diverge. Response parameters
+// are placed in the channel given by params.ResponseMode (OAuth 2.0 Multiple
+// Response Type Encoding Practices Section 2). authTime is the time of the
+// End-User authentication that this response is based on and is carried into the
+// ID Token (OIDC Core 1.0 Section 2).
+func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Request, sessionID string, params authParams, userID string, authTime time.Time) {
+	redirectURL, err := url.Parse(params.RedirectURI)
 	if err != nil {
-		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Malformed redirect_uri")
+		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, "invalid_request", "Malformed redirect_uri")
 		return
 	}
 
-	// Handle based on response_type per OIDC Core 1.0
-	// - "code": Authorization Code Flow (Section 3.1)
-	// - "id_token", "id_token token": Implicit Flow (Section 3.2)
-	// - "code id_token", "code token", "code id_token token": Hybrid Flow (Section 3.3)
-
-	hasCode := strings.Contains(responseType, "code")
-	// Proper token detection per OIDC Core Section 3
-	hasToken := responseType == "token" || strings.Contains(responseType, " token") || strings.HasPrefix(responseType, "token ")
-	hasIDToken := strings.Contains(responseType, "id_token")
+	hasCode := strings.Contains(params.ResponseType, "code")
+	hasToken := params.ResponseType == "token" ||
+		strings.Contains(params.ResponseType, " token") ||
+		strings.HasPrefix(params.ResponseType, "token ")
+	hasIDToken := strings.Contains(params.ResponseType, "id_token")
 
 	jwtService := p.mockIdP.JWTService()
 	var authorizationCode string
 	var accessToken string
 
-	// Generate authorization code if "code" in response_type
 	if hasCode {
 		authCode, err := p.mockIdP.CreateAuthorizationCode(
-			clientID, user.ID, redirectURI, scope, state, nonce,
-			codeChallenge, codeChallengeMethod,
+			params.ClientID, userID, params.RedirectURI, params.Scope, params.State, params.Nonce,
+			params.CodeChallenge, params.CodeChallengeMethod, params.Claims, authTime,
 		)
 		if err != nil {
-			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create authorization code")
+			// CreateAuthorizationCode validates the code_challenge format; a
+			// failure is a request error, not a server error, so it is
+			// delivered to the client.
+			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+				"invalid_request", err.Error())
 			return
 		}
 		authorizationCode = authCode.Code
 	}
 
-	// Generate access token if "token" in response_type
 	if hasToken {
-		var err error
-		accessToken, err = jwtService.CreateAccessToken(
-			user.ID,
-			clientID,
-			scope,
-			time.Hour,
-			nil,
-		)
+		// Requested UserInfo claims (OIDC Core 1.0 Section 5.5) travel with the
+		// access token so the UserInfo endpoint knows which extra claims to
+		// return; identity claim values are not embedded (Section 5.4).
+		accessToken, err = jwtService.CreateAccessToken(userID, params.ClientID, params.Scope, time.Hour, requestedUserInfoClaimNames(params.Claims))
 		if err != nil {
-			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create access token")
+			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+				"server_error", "Failed to create access token")
 			return
 		}
 	}
 
-	// Generate ID token if "id_token" in response_type
 	var idToken string
 	if hasIDToken {
-		scopes := strings.Split(scope, " ")
-		userClaims := p.mockIdP.UserClaims(user.ID, scopes)
+		// Scope-requested claims (profile, email, ...) are returned from the
+		// UserInfo endpoint whenever the flow issues an access token, and only
+		// carried in the ID Token when no access token is issued, which is the
+		// response_type=id_token case (OIDC Core 1.0 Section 5.4). hasCode covers
+		// hybrid flows where the access token is issued later at the token
+		// endpoint, so the front-channel ID Token still omits the scope claims.
+		var idClaims map[string]interface{}
+		if !hasCode && !hasToken {
+			idClaims = p.mockIdP.UserClaims(userID, strings.Fields(params.Scope))
+		}
 
-		// Build ID token options for OIDC Core 1.0 compliance
-		// Per Section 3.3.2.11: Include hash claims based on what's returned
-		idTokenOptions := &crypto.IDTokenOptions{}
+		// Claims the client requested specifically for the ID Token via the
+		// claims parameter (OIDC Core 1.0 Section 5.5) are delivered in the ID
+		// Token. UserInfo-targeted requested claims are deliberately not added
+		// here; they are served from the UserInfo endpoint instead.
+		if rc, _ := parseClaimsParameter(params.Claims); rc != nil && len(rc.idToken) > 0 {
+			if idClaims == nil {
+				idClaims = make(map[string]interface{})
+			}
+			for name, value := range p.mockIdP.UserClaimsByNames(userID, rc.idToken) {
+				idClaims[name] = value
+			}
+		}
 
-		// Include at_hash if access_token is being returned (OIDC Core 1.0 Section 3.3.2.11)
+		// at_hash and c_hash are included based on what the authorization
+		// endpoint returns (OIDC Core 1.0 Section 3.3.2.11).
+		idTokenOptions := &crypto.IDTokenOptions{
+			ACR: acrSingleFactorLogin,
+			AMR: amrSingleFactorLogin,
+		}
 		if accessToken != "" {
 			idTokenOptions.AccessToken = accessToken
 		}
-
-		// Include c_hash if authorization code is being returned (OIDC Core 1.0 Section 3.3.2.11)
-		// This is for Hybrid Flow
 		if authorizationCode != "" {
 			idTokenOptions.AuthorizationCode = authorizationCode
 		}
 
-		var err error
 		idToken, err = jwtService.CreateIDTokenWithOptions(
-			user.ID,
-			clientID,
-			nonce,
-			time.Now(),
-			time.Hour,
-			userClaims,
-			idTokenOptions,
+			userID, params.ClientID, params.Nonce, authTime, time.Hour, idClaims, idTokenOptions,
 		)
 		if err != nil {
-			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create ID token")
+			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+				"server_error", "Failed to create ID token")
 			return
 		}
 	}
 
-	// Build response based on flow type
-	if responseType == "code" {
-		// Pure Authorization Code Flow - code in query string
-		q := redirectURL.Query()
-		q.Set("code", authorizationCode)
-		if state != "" {
-			q.Set("state", state)
-		}
-		redirectURL.RawQuery = q.Encode()
-	} else if hasCode {
-		// Hybrid Flow - ALL response parameters in fragment per OIDC Core 1.0 Section 3.3.2.5:
-		// "When using the Hybrid Flow, the Authentication Response is returned from the
-		// Authorization Endpoint with the response parameters added to the fragment
-		// component of the Redirection URI."
-		fragment := url.Values{}
-		fragment.Set("code", authorizationCode)
-		if accessToken != "" {
-			fragment.Set("access_token", accessToken)
-			fragment.Set("token_type", "Bearer")
-			fragment.Set("expires_in", "3600")
-		}
-		if idToken != "" {
-			fragment.Set("id_token", idToken)
-		}
-		if state != "" {
-			fragment.Set("state", state)
-		}
-		redirectURL.Fragment = fragment.Encode()
-	} else {
-		// Implicit Flow - everything in fragment (per OIDC Core 1.0 Section 3.2)
-		fragment := url.Values{}
-		if accessToken != "" {
-			fragment.Set("access_token", accessToken)
-			fragment.Set("token_type", "Bearer")
-			fragment.Set("expires_in", "3600")
-		}
-		if idToken != "" {
-			fragment.Set("id_token", idToken)
-		}
-		if state != "" {
-			fragment.Set("state", state)
-		}
-		redirectURL.Fragment = fragment.Encode()
+	// Assemble response parameters and place them in the resolved channel. The
+	// same assembly serves code, implicit, and hybrid flows.
+	out := url.Values{}
+	if authorizationCode != "" {
+		out.Set("code", authorizationCode)
 	}
+	if accessToken != "" {
+		out.Set("access_token", accessToken)
+		out.Set("token_type", "Bearer")
+		out.Set("expires_in", "3600")
+	}
+	if idToken != "" {
+		out.Set("id_token", idToken)
+	}
+	if params.State != "" {
+		out.Set("state", params.State)
+	}
+
+	if params.ResponseMode == "fragment" {
+		redirectURL.Fragment = out.Encode()
+	} else {
+		existing := redirectURL.Query()
+		for key := range out {
+			existing.Set(key, out.Get(key))
+		}
+		redirectURL.RawQuery = existing.Encode()
+	}
+
+	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authorization Response", map[string]interface{}{
+		"from":             "OpenID Provider",
+		"to":               "Client",
+		"response_type":    params.ResponseType,
+		"response_mode":    params.ResponseMode,
+		"code_present":     authorizationCode != "",
+		"token_present":    accessToken != "",
+		"id_token_present": idToken != "",
+		"state":            params.State,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "Authorization Response",
+		Description: "Response parameters are returned in the query for the code flow and in the fragment for implicit and hybrid flows.",
+		Reference:   "OpenID Connect Core 1.0 Section 3",
+	})
 
 	// Redirect to client (safe - redirect URI validated against registered URIs)
 	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
@@ -402,7 +575,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := r.ParseForm(); err != nil {
-		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "Invalid form data")
+		writeOIDCTokenError(w, http.StatusBadRequest, "invalid_request", "Invalid form data", "")
 		return
 	}
 
@@ -455,7 +628,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 			"grant_type": grantType,
 			"endpoint":   "/oidc/token",
 		})
-		writeOIDCError(w, http.StatusBadRequest, "unsupported_grant_type", "Grant type not supported")
+		writeOIDCTokenError(w, http.StatusBadRequest, "unsupported_grant_type", "Grant type not supported", "")
 	}
 }
 
@@ -504,7 +677,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 			"client_id":          clientID,
 			"client_auth_method": clientAuthMethod,
 		})
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_client", "Unknown client")
+		writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Unknown client", basicChallenge(clientAuthMethod))
 		return
 	}
 
@@ -514,7 +687,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 				"client_id":          clientID,
 				"client_auth_method": clientAuthMethod,
 			})
-			writeOIDCError(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed")
+			writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", basicChallenge(clientAuthMethod))
 			return
 		}
 	}
@@ -529,14 +702,14 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 			"code":                  code,
 			"code_verifier_present": codeVerifier != "",
 		})
-		writeOIDCError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+		writeOIDCTokenError(w, http.StatusBadRequest, "invalid_grant", err.Error(), "")
 		return
 	}
 
 	// Generate tokens including ID token
 	tokenResponse, err := p.issueOIDCTokens(authCode)
 	if err != nil {
-		writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to issue tokens")
+		writeOIDCTokenError(w, http.StatusInternalServerError, "server_error", "Failed to issue tokens", "")
 		return
 	}
 
@@ -621,13 +794,13 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	// Validate client
 	client, exists := p.mockIdP.GetClient(clientID)
 	if !exists {
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_client", "Unknown client")
+		writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Unknown client", basicChallenge(clientAuthMethod))
 		return
 	}
 
 	if !client.Public {
 		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
-			writeOIDCError(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed")
+			writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", basicChallenge(clientAuthMethod))
 			return
 		}
 	}
@@ -641,7 +814,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 			"refresh_token":        refreshToken,
 			"refresh_token_length": len(refreshToken),
 		})
-		writeOIDCError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+		writeOIDCTokenError(w, http.StatusBadRequest, "invalid_grant", err.Error(), "")
 		return
 	}
 
@@ -653,18 +826,19 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	// Generate new tokens (including new ID token if openid scope)
 	jwtService := p.mockIdP.JWTService()
 	scopes := strings.Split(scope, " ")
-	userClaims := p.mockIdP.UserClaims(rt.UserID, scopes)
 
-	// Create access token
+	// As with the code flow, the access token carries the granted scope and the
+	// UserInfo endpoint serves the scope-requested claims; the token does not
+	// embed identity claims (OIDC Core 1.0 Section 5.4).
 	accessToken, err := jwtService.CreateAccessToken(
 		rt.UserID,
 		clientID,
 		scope,
 		time.Hour,
-		userClaims,
+		nil,
 	)
 	if err != nil {
-		writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create access token")
+		writeOIDCTokenError(w, http.StatusInternalServerError, "server_error", "Failed to create access token", "")
 		return
 	}
 
@@ -676,12 +850,13 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		7*24*time.Hour,
 	)
 	if err != nil {
-		writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to create refresh token")
+		writeOIDCTokenError(w, http.StatusInternalServerError, "server_error", "Failed to create refresh token", "")
 		return
 	}
 
-	// Store new refresh token
-	p.mockIdP.StoreRefreshToken(newRefreshToken, clientID, rt.UserID, scope, time.Now().Add(7*24*time.Hour))
+	// Store new refresh token, preserving the original authentication time so a
+	// rotated chain keeps reporting the same auth_time (OIDC Core 1.0 Section 12.2).
+	p.mockIdP.StoreRefreshToken(newRefreshToken, clientID, rt.UserID, scope, rt.AuthTime, time.Now().Add(7*24*time.Hour))
 
 	response := models.TokenResponse{
 		AccessToken:  accessToken,
@@ -701,13 +876,21 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	}
 
 	if hasOpenID {
-		idToken, err := jwtService.CreateIDToken(
+		// auth_time MUST be the original authentication time, not now: the
+		// End-User did not re-authenticate to refresh. nonce is omitted, which
+		// is permitted (OIDC Core 1.0 Section 12.2 only constrains nonce when
+		// present). Scope claims are served from UserInfo, so the refreshed ID
+		// Token carries only authentication claims (Section 5.4).
+		// acr/amr describe the original authentication context, which persists
+		// across refresh (the session was established by a password login).
+		idToken, err := jwtService.CreateIDTokenWithOptions(
 			rt.UserID,
 			clientID,
 			"", // No nonce for refresh
-			time.Now(),
+			rt.AuthTime,
 			time.Hour,
-			userClaims,
+			nil,
+			&crypto.IDTokenOptions{ACR: acrSingleFactorLogin, AMR: amrSingleFactorLogin},
 		)
 		if err == nil {
 			response.IDToken = idToken
@@ -745,15 +928,18 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 
 	// Parse scopes
 	scopes := strings.Split(authCode.Scope, " ")
-	userClaims := p.mockIdP.UserClaims(authCode.UserID, scopes)
 
-	// Create access token
+	// The access token carries the granted scope; the UserInfo endpoint derives
+	// the profile/email/... claims from that scope on demand. The token itself
+	// does not embed identity claims (OIDC Core 1.0 Section 5.4). Any UserInfo
+	// claims the client requested via the claims parameter (Section 5.5) ride
+	// along as claim names so UserInfo can return them.
 	accessToken, err := jwtService.CreateAccessToken(
 		authCode.UserID,
 		authCode.ClientID,
 		authCode.Scope,
 		time.Hour,
-		userClaims,
+		requestedUserInfoClaimNames(authCode.Claims),
 	)
 	if err != nil {
 		return nil, err
@@ -770,8 +956,13 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 		return nil, err
 	}
 
-	// Store refresh token
-	p.mockIdP.StoreRefreshToken(refreshToken, authCode.ClientID, authCode.UserID, authCode.Scope, time.Now().Add(7*24*time.Hour))
+	// Store refresh token, carrying the authentication time so a refreshed ID
+	// Token keeps the same auth_time (OIDC Core 1.0 Section 12.2).
+	p.mockIdP.StoreRefreshToken(refreshToken, authCode.ClientID, authCode.UserID, authCode.Scope, authCode.AuthTime, time.Now().Add(7*24*time.Hour))
+
+	// Bind the issued tokens to the redeemed code so that, if the code is ever
+	// replayed, these exact tokens are revoked (RFC 6749 Section 4.1.2).
+	p.mockIdP.RecordIssuedTokens(authCode.Code, accessToken, refreshToken)
 
 	response := &models.TokenResponse{
 		AccessToken:  accessToken,
@@ -791,13 +982,21 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	}
 
 	if hasOpenID {
-		idToken, err := jwtService.CreateIDToken(
+		// The code flow always issues an access token, so the scope-requested
+		// claims are served from UserInfo and the ID Token carries only the
+		// authentication claims (sub, auth_time, nonce, ...) per OIDC Core 1.0
+		// Section 5.4. auth_time reflects when the End-User actually
+		// authenticated, captured at the authorization endpoint (Section 2).
+		// acr/amr reflect the password authentication performed at the
+		// authorization endpoint (OIDC Core 1.0 Section 2, RFC 8176).
+		idToken, err := jwtService.CreateIDTokenWithOptions(
 			authCode.UserID,
 			authCode.ClientID,
 			authCode.Nonce,
-			time.Now(),
+			authCode.AuthTime,
 			time.Hour,
-			userClaims,
+			nil,
+			&crypto.IDTokenOptions{ACR: acrSingleFactorLogin, AMR: amrSingleFactorLogin},
 		)
 		if err != nil {
 			return nil, err
@@ -1064,6 +1263,8 @@ type loginRequestInfo struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 	ResponseType        string
+	ResponseMode        string
+	Claims              string
 	CreatedAt           time.Time
 }
 

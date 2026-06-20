@@ -28,29 +28,54 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		Reference:   "OpenID Connect Core 1.0 Section 5.3",
 	})
 
-	// Extract access token from Authorization header
+	// Extract the access token. RFC 6750 defines two transmission methods the
+	// UserInfo endpoint accepts: the Authorization request header field
+	// (Section 2.1) and, for form-encoded bodies, an access_token form parameter
+	// (Section 2.2). A client MUST NOT use more than one method per request
+	// (Section 2); doing so is an invalid_request.
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
+	var bodyToken string
+	if r.Method == http.MethodPost {
+		// Only an application/x-www-form-urlencoded body may carry the token
+		// (RFC 6750 Section 2.2).
+		if ct := r.Header.Get("Content-Type"); strings.HasPrefix(strings.ToLower(strings.TrimSpace(ct)), "application/x-www-form-urlencoded") {
+			if err := r.ParseForm(); err == nil {
+				bodyToken = r.PostForm.Get("access_token")
+			}
+		}
+	}
+
+	var accessToken string
+	switch {
+	case authHeader != "" && bodyToken != "":
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Multiple Token Methods", map[string]interface{}{
+			"error":    "invalid_request",
+			"endpoint": "/oidc/userinfo",
+		})
+		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "More than one method used to transmit the access token (RFC 6750 Section 2)")
+		return
+	case authHeader != "":
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Authorization Format", map[string]interface{}{
+				"error":           "expected_bearer",
+				"authorization":   authHeader,
+				"expected_scheme": "Bearer",
+			})
+			writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Invalid Authorization header format")
+			return
+		}
+		accessToken = parts[1]
+	case bodyToken != "":
+		accessToken = bodyToken
+	default:
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Missing Authorization", map[string]interface{}{
 			"error":    "invalid_token",
 			"endpoint": "/oidc/userinfo",
 		})
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Missing Authorization header")
+		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "No access token presented (RFC 6750 Section 2)")
 		return
 	}
-
-	parts := strings.SplitN(authHeader, " ", 2)
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Authorization Format", map[string]interface{}{
-			"error":           "expected_bearer",
-			"authorization":   authHeader,
-			"expected_scheme": "Bearer",
-		})
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Invalid Authorization header format")
-		return
-	}
-
-	accessToken := parts[1]
 
 	// Validate the access token
 	jwtService := p.mockIdP.JWTService()
@@ -61,6 +86,20 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 			"token_length": len(accessToken),
 		})
 		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Token validation failed")
+		return
+	}
+
+	// A revoked access token MUST NOT grant access, even though its signature and
+	// expiry still check out. This covers tokens revoked via the revocation
+	// endpoint (RFC 7009) and tokens revoked because their authorization code was
+	// replayed (RFC 6749 Section 4.1.2). RFC 6750 Section 3.1 maps a revoked
+	// token to the invalid_token error with a 401 response.
+	if p.mockIdP.IsTokenRevoked(accessToken) {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Revoked Token Presented", map[string]interface{}{
+			"error":    "invalid_token",
+			"endpoint": "/oidc/userinfo",
+		})
+		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "The access token has been revoked (RFC 6750 Section 3.1)")
 		return
 	}
 
@@ -80,6 +119,19 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	if userClaims == nil {
 		writeOIDCError(w, http.StatusNotFound, "invalid_request", "User not found")
 		return
+	}
+
+	// Honour the claims request parameter (OpenID Connect Core 1.0 Section 5.5):
+	// claims the client explicitly requested for the UserInfo endpoint are
+	// returned alongside the scope-derived claims, sourced from the user record.
+	// The requested claim names travel with the access token from the
+	// authorization request.
+	if requested := requestedUserInfoClaimsFromToken(claims); len(requested) > 0 {
+		for name, value := range p.mockIdP.UserClaimsByNames(userID, requested) {
+			if _, present := userClaims[name]; !present {
+				userClaims[name] = value
+			}
+		}
 	}
 
 	// Emit UserInfo response
@@ -107,6 +159,91 @@ func keysFromMap(input map[string]interface{}) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// requestedUserInfoClaimsTokenKey is the private access-token claim that carries
+// the UserInfo claim names a client requested via the claims parameter (OpenID
+// Connect Core 1.0 Section 5.5). It is request metadata, not an identity claim,
+// so it does not breach the Section 5.4 rule about embedding identity claims in
+// tokens; the UserInfo endpoint reads it to know which extra claims to return.
+const requestedUserInfoClaimsTokenKey = "requested_userinfo_claims"
+
+// requestedClaims holds the claim names a client asked for via the claims
+// request parameter (OpenID Connect Core 1.0 Section 5.5), split by the delivery
+// location the client targeted.
+type requestedClaims struct {
+	userInfo []string
+	idToken  []string
+}
+
+// parseClaimsParameter parses the OIDC claims request parameter (OpenID Connect
+// Core 1.0 Section 5.5). It returns the claim names requested for the UserInfo
+// endpoint and for the ID Token. An empty value yields (nil, nil). A value that
+// is not a JSON object is malformed, returning an error so the caller can reject
+// the request with invalid_request (Section 5.5). Top-level members other than
+// userinfo and id_token are ignored, as the specification allows.
+func parseClaimsParameter(raw string) (*requestedClaims, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	var top struct {
+		UserInfo map[string]json.RawMessage `json:"userinfo"`
+		IDToken  map[string]json.RawMessage `json:"id_token"`
+	}
+	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		return nil, err
+	}
+	return &requestedClaims{
+		userInfo: sortedClaimNames(top.UserInfo),
+		idToken:  sortedClaimNames(top.IDToken),
+	}, nil
+}
+
+func sortedClaimNames(members map[string]json.RawMessage) []string {
+	if len(members) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(members))
+	for name := range members {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// requestedUserInfoClaimNames builds the access-token custom-claims map that
+// carries the UserInfo claim names requested via the claims parameter. It
+// returns nil when nothing was requested, so the token gains no extra claim.
+func requestedUserInfoClaimNames(rawClaims string) map[string]interface{} {
+	rc, err := parseClaimsParameter(rawClaims)
+	if err != nil || rc == nil || len(rc.userInfo) == 0 {
+		return nil
+	}
+	return map[string]interface{}{requestedUserInfoClaimsTokenKey: rc.userInfo}
+}
+
+// requestedUserInfoClaimsFromToken extracts the requested UserInfo claim names
+// from a validated access token's claims. After a JWT round-trip a JSON array
+// decodes to []interface{}, so both that and []string are handled.
+func requestedUserInfoClaimsFromToken(claims map[string]interface{}) []string {
+	raw, ok := claims[requestedUserInfoClaimsTokenKey]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		names := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				names = append(names, s)
+			}
+		}
+		return names
+	}
+	return nil
 }
 
 // StandardClaims defines the standard OIDC claims and their descriptions
@@ -409,6 +546,8 @@ var oidcErrorURIs = map[string]string{
 	"server_error":              "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
 	"invalid_token":             "https://openid.net/specs/openid-connect-core-1_0.html#UserInfoError",
 	"login_required":            "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"request_not_supported":     "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
+	"request_uri_not_supported": "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
 	"consent_required":          "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
 	"interaction_required":      "https://openid.net/specs/openid-connect-core-1_0.html#AuthError",
 }
@@ -416,6 +555,43 @@ var oidcErrorURIs = map[string]string{
 // Helper function for OIDC errors - includes error_uri per RFC 6749 Section 5.2 and OIDC Core
 func writeOIDCError(w http.ResponseWriter, status int, errorCode, description string) {
 	writeOIDCErrorWithURI(w, status, errorCode, description, "")
+}
+
+// writeOIDCTokenError writes a token-endpoint error response (RFC 6749 Section
+// 5.2). The token endpoint is not a Bearer-protected resource, so these errors
+// MUST NOT carry a Bearer challenge. When the client attempted HTTP Basic
+// authentication and it failed, the 401 MUST include a matching
+// "WWW-Authenticate: Basic" header (RFC 6749 Section 5.2). Pass an empty
+// wwwAuthenticate for every other case.
+func writeOIDCTokenError(w http.ResponseWriter, status int, errorCode, description, wwwAuthenticate string) {
+	w.Header().Set("Content-Type", "application/json")
+	// RFC 6749 Section 5.1 requires no-store/no-cache on token responses; the
+	// same applies to error responses so credentials are never cached.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	if wwwAuthenticate != "" {
+		w.Header().Set("WWW-Authenticate", wwwAuthenticate)
+	}
+	w.WriteHeader(status)
+
+	response := map[string]string{
+		"error":             errorCode,
+		"error_description": description,
+	}
+	if uri, exists := oidcErrorURIs[errorCode]; exists {
+		response["error_uri"] = uri
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
+// basicChallenge returns the WWW-Authenticate value for a failed token-endpoint
+// client authentication when the client used HTTP Basic, and "" otherwise so no
+// Bearer challenge is emitted on the token endpoint (RFC 6749 Section 5.2).
+func basicChallenge(clientAuthMethod string) string {
+	if clientAuthMethod == "basic" {
+		return `Basic realm="oidc"`
+	}
+	return ""
 }
 
 // writeOIDCErrorWithURI writes an OIDC-compliant error response with optional error_uri
