@@ -24,7 +24,16 @@ type KeySet struct {
 	ecKeyID      string
 	ed25519KeyID string
 	createdAt    time.Time
-	mu           sync.RWMutex
+	// retired holds public JWKs from previous key generations so that tokens
+	// signed before a rotation remain verifiable. Required for an OIDF-certified
+	// deployment per OpenID Connect Core 1.0 Section 10.1.1 (signing key rotation
+	// keeps old keys published until dependent tokens have expired).
+	retired []JWK
+	// storePath is the directory backing this key set. Empty means ephemeral
+	// (in-memory only), which is acceptable for development but never for the
+	// certified deployment.
+	storePath string
+	mu        sync.RWMutex
 }
 
 // NewKeySet generates a new key set with RSA, EC, and Ed25519 keys.
@@ -157,18 +166,21 @@ type JWKS struct {
 	Keys []JWK `json:"keys"`
 }
 
-// PublicJWKS returns the public keys in JWKS format
+// PublicJWKS returns the public keys in JWKS format. It includes the current
+// active keys plus any retired keys retained for historical token validation,
+// so a Relying Party that cached a token signed before a rotation can still
+// resolve its kid (OpenID Connect Core 1.0 Section 10.1.1).
 func (ks *KeySet) PublicJWKS() JWKS {
 	ks.mu.RLock()
 	defer ks.mu.RUnlock()
 
-	return JWKS{
-		Keys: []JWK{
-			ks.rsaPublicJWK(),
-			ks.ecPublicJWK(),
-			ks.ed25519PublicJWK(),
-		},
+	keys := []JWK{
+		ks.rsaPublicJWK(),
+		ks.ecPublicJWK(),
+		ks.ed25519PublicJWK(),
 	}
+	keys = append(keys, ks.retired...)
+	return JWKS{Keys: keys}
 }
 
 // rsaPublicJWK creates a JWK from the RSA public key
@@ -198,9 +210,11 @@ func (ks *KeySet) ecPublicJWK() JWK {
 	}
 }
 
-// ed25519PublicJWK creates a JWK from the Ed25519 public key.
+// ed25519PublicJWK creates a JWK from the Ed25519 public key. Like its RSA and
+// EC siblings it reads the key field directly and never takes the lock, so it
+// is safe to call while either the read or write lock is already held.
 func (ks *KeySet) ed25519PublicJWK() JWK {
-	pub := ks.Ed25519PublicKey()
+	pub, _ := ks.ed25519Key.Public().(ed25519.PublicKey)
 	return JWK{
 		Kty: "OKP",
 		Use: "sig",
@@ -223,12 +237,21 @@ func (ks *KeySet) GetJWKByID(kid string) (JWK, bool) {
 		return ks.ecPublicJWK(), true
 	case ks.ed25519KeyID:
 		return ks.ed25519PublicJWK(), true
-	default:
-		return JWK{}, false
 	}
+	// Fall back to retired keys so historical tokens remain resolvable.
+	for _, jwk := range ks.retired {
+		if jwk.Kid == kid {
+			return jwk, true
+		}
+	}
+	return JWK{}, false
 }
 
-// Rotate generates new keys (useful for demonstrating key rotation)
+// Rotate generates new keys. The outgoing public keys are retained in the
+// retired set so tokens already issued under the previous kids remain
+// verifiable until they expire (OpenID Connect Core 1.0 Section 10.1.1). When
+// the key set is backed by a store, the new state is persisted before return so
+// a restart does not lose continuity.
 func (ks *KeySet) Rotate() error {
 	ks.mu.Lock()
 	defer ks.mu.Unlock()
@@ -251,6 +274,9 @@ func (ks *KeySet) Rotate() error {
 		return fmt.Errorf("failed to generate Ed25519 key: %w", err)
 	}
 
+	// Retain the outgoing public keys before replacing them.
+	ks.retired = append(ks.retired, ks.rsaPublicJWK(), ks.ecPublicJWK(), ks.ed25519PublicJWK())
+
 	ks.rsaKey = rsaKey
 	ks.ecKey = ecKey
 	ks.ed25519Key = ed25519Key
@@ -258,6 +284,12 @@ func (ks *KeySet) Rotate() error {
 	ks.ecKeyID = generateKeyID("ec")
 	ks.ed25519KeyID = generateKeyID("okp")
 	ks.createdAt = time.Now()
+
+	if ks.storePath != "" {
+		if err := ks.persistLocked(); err != nil {
+			return fmt.Errorf("failed to persist rotated key set: %w", err)
+		}
+	}
 
 	return nil
 }
