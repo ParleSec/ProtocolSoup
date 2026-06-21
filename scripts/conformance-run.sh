@@ -88,6 +88,11 @@ render_config() {
 # authentication methods the OP advertises (client_secret_basic and
 # client_secret_post); the OP enforces the same code path for both, so each must
 # be exercised. Implicit and hybrid plans use the same discovery+static axes.
+#
+# The form post plans (Form Post OP) exercise response_mode=form_post for each
+# authentication profile the OP supports (basic, implicit, hybrid); the OP
+# advertises form_post in response_modes_supported and delivers the response in
+# an HTTP POST body (OAuth 2.0 Form Post Response Mode).
 VARIANT_DISCOVERY_STATIC='{"server_metadata":"discovery","client_registration":"static_client"}'
 VARIANT_BASIC_POST='{"server_metadata":"discovery","client_registration":"static_client","client_auth_type":"client_secret_post"}'
 
@@ -97,6 +102,9 @@ declare -a PLANS=(
   "oidcc-basic-certification-test-plan|${VARIANT_BASIC_POST}|basic-post"
   "oidcc-implicit-certification-test-plan|${VARIANT_DISCOVERY_STATIC}|implicit"
   "oidcc-hybrid-certification-test-plan|${VARIANT_DISCOVERY_STATIC}|hybrid"
+  "oidcc-formpost-basic-certification-test-plan|${VARIANT_DISCOVERY_STATIC}|formpost-basic"
+  "oidcc-formpost-implicit-certification-test-plan|${VARIANT_DISCOVERY_STATIC}|formpost-implicit"
+  "oidcc-formpost-hybrid-certification-test-plan|${VARIANT_DISCOVERY_STATIC}|formpost-hybrid"
 )
 
 overall=0
