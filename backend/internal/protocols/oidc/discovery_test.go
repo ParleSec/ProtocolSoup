@@ -101,9 +101,13 @@ func TestDiscoveryMetadataIsAccurate(t *testing.T) {
 		t.Errorf("acr_values_supported must advertise the password context, got %v", doc.ACRValuesSupported)
 	}
 
-	// Response modes the OP actually implements.
-	if !contains(doc.ResponseModesSupported, "query") || !contains(doc.ResponseModesSupported, "fragment") {
-		t.Errorf("response_modes_supported must include query and fragment, got %v", doc.ResponseModesSupported)
+	// Response modes the OP actually implements. form_post is advertised because
+	// the authorization endpoint delivers responses in a POST body for it,
+	// enabling the Form Post OP profiles (OAuth 2.0 Form Post Response Mode).
+	for _, mode := range []string{"query", "fragment", "form_post"} {
+		if !contains(doc.ResponseModesSupported, mode) {
+			t.Errorf("response_modes_supported must include %q, got %v", mode, doc.ResponseModesSupported)
+		}
 	}
 
 	// The OP supports neither request nor request_uri, so both must be advertised

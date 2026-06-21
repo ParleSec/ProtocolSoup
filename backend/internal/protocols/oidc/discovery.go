@@ -12,19 +12,22 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	issuer := p.mockIdP.GetIssuer()
 
 	discovery := models.DiscoveryDocument{
-		Issuer:                            issuer,
-		AuthorizationEndpoint:             issuer + "/oidc/authorize",
-		TokenEndpoint:                     issuer + "/oidc/token",
-		UserinfoEndpoint:                  issuer + "/oidc/userinfo",
-		JwksURI:                           issuer + "/oidc/.well-known/jwks.json",
-		RevocationEndpoint:                issuer + "/oauth2/revoke",
-		IntrospectionEndpoint:             issuer + "/oauth2/introspect",
-		ScopesSupported: []string{"openid", "profile", "email", "address", "phone", "roles"},
+		Issuer:                issuer,
+		AuthorizationEndpoint: issuer + "/oidc/authorize",
+		TokenEndpoint:         issuer + "/oidc/token",
+		UserinfoEndpoint:      issuer + "/oidc/userinfo",
+		JwksURI:               issuer + "/oidc/.well-known/jwks.json",
+		RevocationEndpoint:    issuer + "/oauth2/revoke",
+		IntrospectionEndpoint: issuer + "/oauth2/introspect",
+		ScopesSupported:       []string{"openid", "profile", "email", "address", "phone", "roles"},
 		// Canonical response_type sets actually handled by the authorization
 		// endpoint (OIDC Core 1.0 Section 3). response_type is an unordered
 		// space-delimited set, so the canonical OIDF orderings are advertised.
 		ResponseTypesSupported: []string{"code", "token", "id_token", "id_token token", "code id_token", "code token", "code id_token token"},
-		ResponseModesSupported: []string{"query", "fragment"},
+		// query and fragment are the OAuth 2.0 defaults; form_post is supported
+		// for every response type and delivers the response in an HTTP POST body
+		// (OAuth 2.0 Form Post Response Mode), enabling the Form Post OP profiles.
+		ResponseModesSupported: []string{"query", "fragment", "form_post"},
 		// Only grant types the OIDC token endpoint actually accepts. The
 		// client_credentials grant lives on the OAuth 2.0 token endpoint, not
 		// here, so advertising it would be false metadata (OIDC Discovery 1.0
@@ -51,7 +54,7 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// password). It is advertised so a client can request it via acr_values and
 		// receive it back truthfully (OIDC Core 1.0 Section 2). No higher assurance
 		// level is advertised because none is performed.
-		ACRValuesSupported: []string{acrSingleFactorLogin},
+		ACRValuesSupported:            []string{acrSingleFactorLogin},
 		CodeChallengeMethodsSupported: []string{"S256", "plain"},
 		// The OP supports neither the request nor request_uri parameter; an
 		// authorization request carrying either is rejected with
