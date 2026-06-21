@@ -84,6 +84,20 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
   `request_uri` with `request_uri_not_supported` rather than being ignored
   (OIDC Core 1.0 Section 6.2.1, 6.3.1). Discovery advertises
   `request_parameter_supported` and `request_uri_parameter_supported` as `false`.
+  Because that rejection is an authorization error response, it is delivered to
+  the validated redirect URI using the requested `response_mode` and echoes
+  `state` (RFC 6749 Section 4.1.2.1). When a by-value request object carries
+  `response_mode` and `state` inside the JWT, the OP reads only those two
+  delivery values from the object (without verifying it or using any other
+  claim) so the error reaches the client in the correct channel, for example as
+  a `form_post` `POST`.
+- The authorization response is delivered in the requested `response_mode`:
+  `query`, `fragment`, or `form_post`, all advertised in
+  `response_modes_supported`. `query` is rejected for response types that return
+  tokens in the front channel. For `form_post` the OP returns a self-submitting
+  HTML form that `POST`s the response parameters (success or error) to the
+  redirect URI, so nothing is placed in a URL (OAuth 2.0 Form Post Response
+  Mode). This enables the Form Post OP profiles.
 - The `claims` request parameter is supported (OIDC Core 1.0 Section 5.5), and
   discovery advertises `claims_parameter_supported` as `true`. Claims requested
   under the `userinfo` member are returned from the UserInfo endpoint; claims
