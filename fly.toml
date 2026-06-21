@@ -34,9 +34,12 @@ primary_region = 'syd'
   # suite used for CI drift monitoring (localhost.emobix.co.uk) and the hosted
   # official certification suite (www.certification.openid.net), which is the
   # source of certification evidence, for the aliases the harness uses. The
-  # clients are only created when OIDC_CONFORMANCE_CLIENT_SECRET is also set as a
-  # Fly secret, so listing these URLs alone changes nothing.
-  OIDC_CONFORMANCE_REDIRECT_URIS = 'https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic-post/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-implicit/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback'
+  # alias is protocolsoup-<label> for each harness label (basic, basic-post,
+  # implicit, hybrid, formpost-basic, formpost-implicit, formpost-hybrid), so the
+  # hosted portal plan must use the matching alias. The clients are only created
+  # when OIDC_CONFORMANCE_CLIENT_SECRET is also set as a Fly secret, so listing
+  # these URLs alone changes nothing.
+  OIDC_CONFORMANCE_REDIRECT_URIS = 'https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic-post/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-implicit/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-hybrid/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-formpost-basic/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-formpost-implicit/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-formpost-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-hybrid/callback'
   
   # SPIFFE/SPIRE Configuration
   # The agent will connect to SPIRE Server via Fly private network
