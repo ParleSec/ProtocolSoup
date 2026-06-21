@@ -1,8 +1,12 @@
 package oidc
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"html/template"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +73,11 @@ func defaultResponseMode(responseType string) string {
 // channel: a token in the query string leaks through Referer headers, browser
 // history, and server logs (OAuth 2.0 Multiple Response Type Encoding Practices
 // Section 2.1, OAuth 2.0 Security BCP Section 4.1).
+//
+// form_post is valid for every response type: the response parameters are
+// delivered in an HTTP POST body rather than a URL, so there is no
+// front-channel leakage even when tokens are returned (OAuth 2.0 Form Post
+// Response Mode, Section 2).
 func resolveResponseMode(responseType, requested string) (mode, errCode, errDesc string) {
 	def := defaultResponseMode(responseType)
 	if requested == "" {
@@ -82,9 +91,59 @@ func resolveResponseMode(responseType, requested string) (mode, errCode, errDesc
 		return "query", "", ""
 	case "fragment":
 		return "fragment", "", ""
+	case "form_post":
+		return "form_post", "", ""
 	default:
-		return "", "invalid_request", "unsupported response_mode (supported: query, fragment)"
+		return "", "invalid_request", "unsupported response_mode (supported: query, fragment, form_post)"
 	}
+}
+
+// errorResponseModeForMissingType selects the channel for delivering an error
+// when response_type is missing or unrecognised, so no per-response-type default
+// applies. An explicitly requested form_post or fragment is honoured (both are
+// safe for any response type), so a client receives the error in the channel it
+// asked for (OAuth 2.0 Form Post Response Mode; OAuth 2.0 Multiple Response Type
+// Encoding Section 2). Otherwise the error is delivered in the query, the RFC
+// 6749 default, which is safe because an error response carries no token.
+func errorResponseModeForMissingType(requested string) string {
+	switch requested {
+	case "form_post":
+		return "form_post"
+	case "fragment":
+		return "fragment"
+	default:
+		return "query"
+	}
+}
+
+// requestObjectResponseHints extracts only the response_mode and state from a
+// by-value request object (the JWT passed in the request parameter), WITHOUT
+// verifying its signature and without using any other claim. The OP does not
+// support request objects and rejects them with request_not_supported, but that
+// rejection is an authorization error response that must be returned in the
+// client's requested response_mode and must echo state (RFC 6749 Section
+// 4.1.2.1, OIDC Core 1.0 Section 6.2). For a by-value request object the
+// suite carries these response-delivery values inside the JWT, so they are read
+// from it purely to deliver the rejection in the correct channel. Any parse
+// failure yields empty strings, so the caller falls back to the top-level
+// request values.
+func requestObjectResponseHints(raw string) (responseMode, state string) {
+	parts := strings.Split(raw, ".")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimRight(parts[1], "="))
+	if err != nil {
+		return "", ""
+	}
+	var claims struct {
+		ResponseMode string `json:"response_mode"`
+		State        string `json:"state"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", ""
+	}
+	return claims.ResponseMode, claims.State
 }
 
 // promptValues splits the space-delimited prompt parameter.
@@ -178,6 +237,21 @@ func (p *Plugin) redirectAuthError(w http.ResponseWriter, r *http.Request, redir
 	if mode == "" {
 		mode = defaultResponseMode(responseType)
 	}
+	// form_post errors are delivered in an HTTP POST body, not a redirect, so
+	// the same response mode is honoured for errors as for success (OAuth 2.0
+	// Form Post Response Mode, Section 2).
+	if mode == "form_post" {
+		params := url.Values{}
+		params.Set("error", errorCode)
+		if errorDescription != "" {
+			params.Set("error_description", errorDescription)
+		}
+		if state != "" {
+			params.Set("state", state)
+		}
+		p.writeFormPost(w, redirectURI, params)
+		return
+	}
 	target, err := buildErrorRedirect(redirectURI, mode, state, errorCode, errorDescription)
 	if err != nil {
 		// A malformed redirect_uri should already have been rejected before
@@ -186,6 +260,54 @@ func (p *Plugin) redirectAuthError(w http.ResponseWriter, r *http.Request, redir
 		return
 	}
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// formPostField is one hidden input in a Form Post response document.
+type formPostField struct {
+	Name  string
+	Value string
+}
+
+// formPostResponseTemplate renders the OAuth 2.0 Form Post Response Mode
+// document: a self-submitting HTML form that POSTs the authorization response
+// parameters to the redirect URI. html/template escapes the action URL and each
+// field value in their respective HTML contexts, so a parameter value can never
+// break out of the markup (defence in depth; values are OP-generated). The form
+// auto-submits on load, with a no-script submit button as a fallback.
+var formPostResponseTemplate = template.Must(template.New("form_post").Parse(
+	`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">` +
+		`<title>Submit This Form</title></head>` +
+		`<body onload="document.forms[0].submit()">` +
+		`<form method="post" action="{{.Action}}">` +
+		`{{range .Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}"/>{{end}}` +
+		`<noscript><button type="submit">Continue</button></noscript>` +
+		`</form></body></html>`))
+
+// writeFormPost delivers authorization response parameters to redirectURI using
+// OAuth 2.0 Form Post Response Mode (Section 2): a self-submitting HTML form
+// POSTs the parameters as an application/x-www-form-urlencoded body. The
+// redirect URI has already been validated against the client's registered set,
+// so it is a trusted form action. Parameters are emitted in a stable order, and
+// the page is marked non-cacheable because it may carry credentials (RFC 6749
+// Section 5.1).
+func (p *Plugin) writeFormPost(w http.ResponseWriter, redirectURI string, params url.Values) {
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	fields := make([]formPostField, 0, len(keys))
+	for _, k := range keys {
+		fields = append(fields, formPostField{Name: k, Value: params.Get(k)})
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	_ = formPostResponseTemplate.Execute(w, struct {
+		Action string
+		Fields []formPostField
+	}{Action: redirectURI, Fields: fields})
 }
 
 // writeAuthorizationErrorPage informs the user agent of an authorization error

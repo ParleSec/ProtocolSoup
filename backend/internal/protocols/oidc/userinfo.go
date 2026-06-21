@@ -132,9 +132,14 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"code token id_token": true,
 	}
 	if !validResponseTypes[responseType] {
-		// No valid response_type means no defined channel; deliver the error in
-		// the query default per RFC 6749.
-		p.redirectAuthError(w, r, redirectURI, "", "query", state,
+		// response_type is missing or unrecognised, so no per-response-type
+		// default channel applies. The requested response_mode still governs how
+		// the response is returned (OAuth 2.0 Multiple Response Type Encoding
+		// Section 2), so an explicitly requested form_post or fragment is
+		// honoured for the error; otherwise it goes in the query default (RFC
+		// 6749), which is safe because an error response carries no token.
+		mode := errorResponseModeForMissingType(responseModeRaw)
+		p.redirectAuthError(w, r, redirectURI, "", mode, state,
 			"unsupported_response_type", "Unsupported response_type")
 		return
 	}
@@ -159,8 +164,27 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			"request_uri_not_supported", "The request_uri parameter is not supported (OIDC Core 1.0 Section 6.3.1)")
 		return
 	}
-	if query.Get("request") != "" {
-		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+	if rawRequestObject := query.Get("request"); rawRequestObject != "" {
+		// The OP does not support request objects and rejects them with
+		// request_not_supported (OIDC Core 1.0 Section 6.2). The rejection is an
+		// authorization error response, so it MUST be delivered to redirect_uri
+		// using the client's requested response_mode and echo state (RFC 6749
+		// Section 4.1.2.1). For a by-value request object the requested
+		// response_mode and state are carried inside the JWT, not at top level,
+		// so they are read from it (signature not verified, no other claim used)
+		// purely to deliver the rejection in the correct channel.
+		rejMode, rejState := responseMode, state
+		if objMode, objState := requestObjectResponseHints(rawRequestObject); objMode != "" || objState != "" {
+			if objMode != "" {
+				if m, ec, _ := resolveResponseMode(responseType, objMode); ec == "" {
+					rejMode = m
+				}
+			}
+			if objState != "" {
+				rejState = objState
+			}
+		}
+		p.redirectAuthError(w, r, redirectURI, responseType, rejMode, rejState,
 			"request_not_supported", "The request parameter is not supported (OIDC Core 1.0 Section 6.2.1)")
 		return
 	}
@@ -525,16 +549,6 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		out.Set("state", params.State)
 	}
 
-	if params.ResponseMode == "fragment" {
-		redirectURL.Fragment = out.Encode()
-	} else {
-		existing := redirectURL.Query()
-		for key := range out {
-			existing.Set(key, out.Get(key))
-		}
-		redirectURL.RawQuery = existing.Encode()
-	}
-
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authorization Response", map[string]interface{}{
 		"from":             "OpenID Provider",
 		"to":               "Client",
@@ -547,9 +561,28 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Authorization Response",
-		Description: "Response parameters are returned in the query for the code flow and in the fragment for implicit and hybrid flows.",
-		Reference:   "OpenID Connect Core 1.0 Section 3",
+		Description: "Response parameters are returned in the query (code flow default), the fragment (implicit and hybrid), or a self-submitting form body (response_mode=form_post).",
+		Reference:   "OpenID Connect Core 1.0 Section 3; OAuth 2.0 Form Post Response Mode",
 	})
+
+	// form_post delivers the parameters in an HTTP POST body via a
+	// self-submitting form rather than a redirect (OAuth 2.0 Form Post Response
+	// Mode, Section 2). The redirect URI was validated against the registered
+	// set, so it is a trusted form action.
+	if params.ResponseMode == "form_post" {
+		p.writeFormPost(w, params.RedirectURI, out)
+		return
+	}
+
+	if params.ResponseMode == "fragment" {
+		redirectURL.Fragment = out.Encode()
+	} else {
+		existing := redirectURL.Query()
+		for key := range out {
+			existing.Set(key, out.Get(key))
+		}
+		redirectURL.RawQuery = existing.Encode()
+	}
 
 	// Redirect to client (safe - redirect URI validated against registered URIs)
 	http.Redirect(w, r, redirectURL.String(), http.StatusFound)

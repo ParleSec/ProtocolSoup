@@ -26,7 +26,7 @@ const (
 	testConfClient   = "demo-app"   // confidential client
 	testPublicClient = "public-app" // public client (PKCE required)
 	testRedirectURI  = "http://localhost:3000/callback"
-	testUserID       = "alice"      // demo subject identifier, not a secret
+	testUserID       = "alice" // demo subject identifier, not a secret
 )
 
 func newTestPlugin(t *testing.T) *Plugin {
@@ -210,7 +210,7 @@ func TestAuthorizeUnknownResponseModeRejected(t *testing.T) {
 	p := newTestPlugin(t)
 	rr := doAuthorize(t, p, url.Values{
 		"response_type": {"code"},
-		"response_mode": {"form_post"}, // not supported by this OP
+		"response_mode": {"octopus"}, // not a defined response_mode
 		"client_id":     {testConfClient},
 		"redirect_uri":  {testRedirectURI},
 		"scope":         {"openid"},
@@ -222,6 +222,168 @@ func TestAuthorizeUnknownResponseModeRejected(t *testing.T) {
 	got := locationError(t, rr.Header().Get("Location"))
 	if got.Get("error") != "invalid_request" {
 		t.Fatalf("error = %q, want invalid_request for unsupported response_mode", got.Get("error"))
+	}
+}
+
+// --- Form Post Response Mode (OAuth 2.0 Form Post Response Mode) ---
+
+// A successful form_post response is not a redirect: the OP returns a 200
+// text/html page with a self-submitting form that POSTs the response parameters
+// to the redirect URI. The parameters must appear as hidden inputs, never in a
+// URL (OAuth 2.0 Form Post Response Mode Section 2).
+func TestFormPostSuccessRendersSelfSubmittingForm(t *testing.T) {
+	p := newTestPlugin(t)
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/oidc/authorize", nil)
+	p.issueAuthorizationResponse(rr, req, "", authParams{
+		ClientID:     testConfClient,
+		RedirectURI:  testRedirectURI,
+		Scope:        "openid",
+		State:        "abc123",
+		Nonce:        "n1",
+		ResponseType: "code",
+		ResponseMode: "form_post",
+	}, testUserID, time.Now())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for form_post success", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", ct)
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Fatalf("form_post must not redirect, got Location=%q", loc)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`method="post"`,
+		`action="` + testRedirectURI + `"`,
+		`name="code"`,
+		`name="state"`,
+		`value="abc123"`,
+		`document.forms[0].submit()`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("form_post success body missing %q\nbody: %s", want, body)
+		}
+	}
+	// The code must be delivered in the form body, not appended to a URL.
+	if strings.Contains(body, testRedirectURI+"?") {
+		t.Fatalf("form_post must not place parameters on the redirect URI: %s", body)
+	}
+}
+
+// A missing or unrecognised response_type leaves no per-type default channel,
+// but an explicitly requested response_mode=form_post must still be honoured for
+// the error: the suite (oidcc-response-type-missing under a Form Post plan)
+// expects the error in a POST body, not a query redirect.
+func TestFormPostMissingResponseTypeDeliversErrorViaFormPost(t *testing.T) {
+	p := newTestPlugin(t)
+	rr := doAuthorize(t, p, url.Values{
+		// response_type intentionally omitted
+		"response_mode": {"form_post"},
+		"client_id":     {testConfClient},
+		"redirect_uri":  {testRedirectURI},
+		"scope":         {"openid"},
+		"state":         {"s1"},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (form_post error), Location=%q", rr.Code, rr.Header().Get("Location"))
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Fatalf("missing response_type with form_post must not redirect, got Location=%q", loc)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`method="post"`,
+		`action="` + testRedirectURI + `"`,
+		`name="error"`,
+		`value="unsupported_response_type"`,
+		`name="state"`,
+		`value="s1"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("form_post missing-response_type body missing %q\nbody: %s", want, body)
+		}
+	}
+}
+
+// On the rejected-as-unsupported branch, a by-value request object that carries
+// response_mode=form_post (the suite places it inside the object, not at top
+// level) must still have its request_not_supported error delivered via form_post
+// and echo the state from the object. Mirrors
+// oidcc-unsigned-request-object-supported-correctly-or-rejected-as-unsupported
+// under a Form Post plan.
+func TestFormPostRequestObjectRejectionUsesObjectResponseMode(t *testing.T) {
+	p := newTestPlugin(t)
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	payloadJSON, _ := json.Marshal(map[string]string{
+		"response_mode": "form_post",
+		"state":         "obj-state",
+		"scope":         "openid",
+		"nonce":         "n1",
+	})
+	payload := base64.RawURLEncoding.EncodeToString(payloadJSON)
+	requestObject := header + "." + payload + "."
+
+	rr := doAuthorize(t, p, url.Values{
+		"response_type": {"code"},
+		"client_id":     {testConfClient},
+		"redirect_uri":  {testRedirectURI},
+		// no top-level response_mode or state; both live inside the object
+		"request": {requestObject},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (form_post error); Location=%q", rr.Code, rr.Header().Get("Location"))
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Fatalf("form_post request-object rejection must not redirect, got Location=%q", loc)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`method="post"`,
+		`action="` + testRedirectURI + `"`,
+		`name="error"`,
+		`value="request_not_supported"`,
+		`name="state"`,
+		`value="obj-state"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("form_post request-object rejection body missing %q\nbody: %s", want, body)
+		}
+	}
+}
+
+// A form_post request that errors after redirect_uri validation must deliver the
+// error in the same response mode, i.e. as a self-submitting form, not a
+// redirect (OAuth 2.0 Form Post Response Mode Section 2).
+func TestFormPostErrorRendersSelfSubmittingForm(t *testing.T) {
+	p := newTestPlugin(t)
+	rr := doAuthorize(t, p, url.Values{
+		"response_type": {"code"},
+		"response_mode": {"form_post"},
+		"client_id":     {testConfClient},
+		"redirect_uri":  {testRedirectURI},
+		"scope":         {"profile"}, // missing openid -> invalid_scope
+		"state":         {"s1"},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for form_post error", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "" {
+		t.Fatalf("form_post error must not redirect, got Location=%q", loc)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{
+		`action="` + testRedirectURI + `"`,
+		`name="error"`,
+		`value="invalid_scope"`,
+		`name="state"`,
+		`value="s1"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("form_post error body missing %q\nbody: %s", want, body)
+		}
 	}
 }
 

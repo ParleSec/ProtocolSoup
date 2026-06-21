@@ -1,6 +1,7 @@
 package oidc
 
 import (
+	"encoding/base64"
 	"net/url"
 	"testing"
 	"time"
@@ -40,8 +41,14 @@ func TestResolveResponseMode(t *testing.T) {
 		{"id_token", "query", "", true},
 		{"code id_token", "query", "", true},
 		{"token", "query", "", true},
-		// unknown modes are rejected rather than silently defaulted.
-		{"code", "form_post", "", true},
+		// form_post is valid for every response type: parameters travel in the
+		// POST body, so there is no front-channel leakage (OAuth 2.0 Form Post
+		// Response Mode, Section 2).
+		{"code", "form_post", "form_post", false},
+		{"id_token", "form_post", "form_post", false},
+		{"code id_token token", "form_post", "form_post", false},
+		// genuinely unknown modes are rejected rather than silently defaulted.
+		{"code", "octopus", "", true},
 	}
 	for _, c := range cases {
 		mode, errCode, _ := resolveResponseMode(c.responseType, c.requested)
@@ -56,6 +63,36 @@ func TestResolveResponseMode(t *testing.T) {
 		}
 		if mode != c.wantMode {
 			t.Errorf("resolveResponseMode(%q,%q) = %q, want %q", c.responseType, c.requested, mode, c.wantMode)
+		}
+	}
+}
+
+func TestErrorResponseModeForMissingType(t *testing.T) {
+	cases := map[string]string{
+		"":          "query",
+		"query":     "query",
+		"fragment":  "fragment",
+		"form_post": "form_post",
+		"octopus":   "query", // unrecognised falls back to the safe default
+	}
+	for requested, want := range cases {
+		if got := errorResponseModeForMissingType(requested); got != want {
+			t.Errorf("errorResponseModeForMissingType(%q) = %q, want %q", requested, got, want)
+		}
+	}
+}
+
+func TestRequestObjectResponseHints(t *testing.T) {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"response_mode":"form_post","state":"s9","scope":"openid"}`))
+	if mode, state := requestObjectResponseHints(header + "." + payload + "."); mode != "form_post" || state != "s9" {
+		t.Fatalf("hints = (%q,%q), want (form_post, s9)", mode, state)
+	}
+	// Unparsable or non-JWT input yields empty hints so the caller falls back to
+	// the top-level request values.
+	for _, bad := range []string{"", "not-a-jwt", "only.two"} {
+		if mode, state := requestObjectResponseHints(bad); mode != "" || state != "" {
+			t.Fatalf("requestObjectResponseHints(%q) = (%q,%q), want empty", bad, mode, state)
 		}
 	}
 }
