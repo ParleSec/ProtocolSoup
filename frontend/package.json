@@ -17,31 +17,31 @@
     "generate-og-image": "node scripts/generate-og-image.mjs"
   },
   "dependencies": {
-    "framer-motion": "^12.40.0",
-    "lucide-react": "^1.16.0",
-    "next": "^16.2.6",
+    "framer-motion": "^12.42.0",
+    "lucide-react": "^1.22.0",
+    "next": "^16.2.9",
     "qrcode": "^1.5.4",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@fontsource/space-grotesk": "^5.2.7",
-    "@tailwindcss/postcss": "^4.3.0",
-    "@types/node": "^25.9.1",
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/node": "^26.0.1",
     "@types/qrcode": "^1.5.6",
-    "@types/react": "^19.2.15",
+    "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.5.0",
-    "eslint": "^10.4.0",
+    "autoprefixer": "^10.5.2",
+    "eslint": "^10.6.0",
     "eslint-plugin-react-hooks": "7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17.6.0",
-    "postcss": "^8.5.15",
-    "sharp": "^0.34.5",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
+    "postcss": "^8.5.16",
+    "sharp": "^0.35.2",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.60.0"
+    "typescript-eslint": "^8.62.1"
   },
   "overrides": {
     "@typescript-eslint/typescript-estree": {
