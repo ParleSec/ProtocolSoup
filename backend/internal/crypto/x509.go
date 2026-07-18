@@ -32,22 +32,31 @@ func ParseX5CCertificateChain(raw interface{}) ([]*x509.Certificate, error) {
 	return certificates, nil
 }
 
-// ValidateCertificateChain verifies the certificate chain and returns the leaf certificate.
+// ValidateCertificateChain verifies a certificate chain against the operating
+// system trust store and returns the leaf certificate. Certificates supplied in
+// x5c are untrusted chain material; a self-signed certificate in that header is
+// never promoted to a trust anchor.
 func ValidateCertificateChain(certificates []*x509.Certificate, now time.Time) (*x509.Certificate, error) {
-	if len(certificates) == 0 {
-		return nil, fmt.Errorf("certificate chain is required")
-	}
-	leaf := certificates[0]
 	roots, err := x509.SystemCertPool()
 	if err != nil || roots == nil {
 		roots = x509.NewCertPool()
 	}
+	return ValidateCertificateChainAgainstRoots(certificates, roots, now)
+}
+
+// ValidateCertificateChainAgainstRoots verifies x5c chain material against an
+// independently configured trust pool. The caller, not the untrusted message,
+// determines which roots are trusted.
+func ValidateCertificateChainAgainstRoots(certificates []*x509.Certificate, roots *x509.CertPool, now time.Time) (*x509.Certificate, error) {
+	if len(certificates) == 0 {
+		return nil, fmt.Errorf("certificate chain is required")
+	}
+	if roots == nil {
+		return nil, fmt.Errorf("certificate trust roots are required")
+	}
+	leaf := certificates[0]
 	intermediates := x509.NewCertPool()
-	for idx, certificate := range certificates[1:] {
-		if idx == len(certificates[1:])-1 && isSelfSignedCertificate(certificate) {
-			roots.AddCert(certificate)
-			continue
-		}
+	for _, certificate := range certificates[1:] {
 		intermediates.AddCert(certificate)
 	}
 	if _, err := leaf.Verify(x509.VerifyOptions{
@@ -59,11 +68,4 @@ func ValidateCertificateChain(certificates []*x509.Certificate, now time.Time) (
 		return nil, fmt.Errorf("verify certificate chain: %w", err)
 	}
 	return leaf, nil
-}
-
-func isSelfSignedCertificate(certificate *x509.Certificate) bool {
-	if certificate == nil {
-		return false
-	}
-	return certificate.CheckSignatureFrom(certificate) == nil
 }

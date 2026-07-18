@@ -48,3 +48,14 @@ func ValidateOID4VCIProofType(typ string) error {
 	}
 	return nil
 }
+
+// ValidateKeyAttestationRequirement enforces OID4VCI 1.0 Appendix D/F.1
+// key_attestations_required: when a credential configuration's metadata
+// declares the requirement, every proof in the request must carry a
+// key_attestation JOSE header.
+func ValidateKeyAttestationRequirement(required bool, keyAttestationPresent bool) error {
+	if required && !keyAttestationPresent {
+		return fmt.Errorf("key_attestation is required for this credential_configuration_id")
+	}
+	return nil
+}

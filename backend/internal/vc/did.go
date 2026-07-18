@@ -24,7 +24,16 @@ func DIDKeyFromECPublicKey(pub *ecdsa.PublicKey) (string, error) {
 	if pub.Curve != elliptic.P256() {
 		return "", fmt.Errorf("only P-256 curve is supported for did:key derivation")
 	}
-	compressed := elliptic.MarshalCompressed(pub.Curve, pub.X, pub.Y)
+	uncompressed, err := pub.Bytes()
+	if err != nil {
+		return "", fmt.Errorf("encode P-256 public key: %w", err)
+	}
+	if len(uncompressed) != 65 || uncompressed[0] != 0x04 {
+		return "", fmt.Errorf("unexpected P-256 public key encoding length %d", len(uncompressed))
+	}
+	compressed := make([]byte, 33)
+	compressed[0] = 0x02 | (uncompressed[len(uncompressed)-1] & 1)
+	copy(compressed[1:], uncompressed[1:33])
 	// Multicodec 0x1200 as unsigned varint: [0x80, 0x24]
 	payload := make([]byte, 0, 2+len(compressed))
 	payload = append(payload, 0x80, 0x24)
@@ -98,7 +107,15 @@ func DecodeMultibaseMulticodecKey(encoded string) (interface{}, string, error) {
 		if x == nil {
 			return nil, "", fmt.Errorf("invalid P-256 compressed point")
 		}
-		return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, "EC", nil
+		uncompressed := make([]byte, 65)
+		uncompressed[0] = 0x04
+		x.FillBytes(uncompressed[1:33])
+		y.FillBytes(uncompressed[33:])
+		pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), uncompressed)
+		if err != nil {
+			return nil, "", fmt.Errorf("parse P-256 public key: %w", err)
+		}
+		return pub, "EC", nil
 	}
 	// RSA PKCS#1 public key: varint [0x85, 0x24] + DER bytes
 	if raw[0] == 0x85 && raw[1] == 0x24 {

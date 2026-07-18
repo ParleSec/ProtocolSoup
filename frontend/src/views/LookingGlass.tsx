@@ -42,7 +42,10 @@ import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
 const SAFE_QR_DATA_URL_PREFIX = 'data:image/png;base64,'
+// The mDL mso_mdoc is the lead (default) credential profile; the
+// SD-JWT VC and W3C profiles remain selectable as non-default options.
 const OID4VCI_CREDENTIAL_PROFILES = [
+  { id: 'MobileDrivingLicenceMsoMdoc', format: 'mso_mdoc', label: 'mso_mdoc (mDL)' },
   { id: 'UniversityDegreeCredential', format: 'dc+sd-jwt', label: 'dc+sd-jwt' },
   { id: 'UniversityDegreeCredentialJWT', format: 'jwt_vc_json', label: 'jwt_vc_json' },
   { id: 'UniversityDegreeCredentialJWTLD', format: 'jwt_vc_json-ld', label: 'jwt_vc_json-ld' },
@@ -119,7 +122,7 @@ export function LookingGlass() {
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
-  const [oid4vciCredentialConfigurationID, setOID4VCICredentialConfigurationID] = useState('UniversityDegreeCredential')
+  const [oid4vciCredentialConfigurationID, setOID4VCICredentialConfigurationID] = useState('MobileDrivingLicenceMsoMdoc')
   const [wireSessionId, setWireSessionId] = useState<string | null>(null)
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
   const [pendingExecute, setPendingExecute] = useState(false)

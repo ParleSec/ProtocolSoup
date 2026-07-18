@@ -137,14 +137,22 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     const responseMode = this.flowConfig.responseMode || 'direct_post'
     const configuredClientID = String(this.flowConfig.clientID || '').trim()
     const configuredClientIDScheme = String(this.flowConfig.clientIDScheme || '').trim()
+    // Default: the canonical presentation request targets the ISO/IEC
+    // 18013-5 mobile driving licence (mso_mdoc), matching the verifier's default
+    // DCQL. SD-JWT VC and the W3C formats remain selectable by supplying an
+    // explicit dcqlQueryJSON (or scopeAlias).
     const defaultDCQLQuery = {
       credentials: [
         {
-          id: 'university_degree',
+          id: 'mdl',
+          format: 'mso_mdoc',
           meta: {
-            vct_values: ['https://protocolsoup.com/credentials/university_degree'],
+            doctype_values: ['org.iso.18013.5.1.mDL'],
           },
-          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
+          claims: [
+            { path: ['org.iso.18013.5.1', 'family_name'] },
+            { path: ['org.iso.18013.5.1', 'document_number'] },
+          ],
         },
       ],
     }

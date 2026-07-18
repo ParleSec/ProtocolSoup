@@ -101,20 +101,26 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | Pre-Authorized + tx_code | Issuance with transaction code challenge |
 | Deferred Issuance | Credential issued asynchronously |
 
-**Credential type:** UniversityDegreeCredential
+**Default credential:** Mobile Driving Licence (`mso_mdoc`, `MobileDrivingLicenceMsoMdoc`) — the default and lead configuration. UniversityDegreeCredential (SD-JWT VC) and the W3C formats remain selectable.
 
-**Credential formats:** `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity with `ecdsa-rdfc-2019` / `eddsa-rdfc-2022` cryptosuites)
+**Credential formats:** `mso_mdoc` (ISO/IEC 18013-5 mDL, **default**), `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity with `ecdsa-rdfc-2019` / `eddsa-rdfc-2022` cryptosuites)
 
 ## OID4VP
 
-**Standards:** OpenID4VP 1.0
+**Standards:** OpenID4VP 1.0, HAIP 1.0, W3C Digital Credentials API
 
 | Flow | Description |
 |------|-------------|
 | DCQL + direct_post | DCQL query with direct_post response mode |
 | DCQL + direct_post.jwt | DCQL query with encrypted JWT response |
 
-**Client ID schemes:** `redirect_uri`, `did:web` (`decentralized_identifier`), `verifier_attestation`, `x509_san_dns`
+**Default request:** the canonical presentation request targets the mDL (`mso_mdoc`, doctype `org.iso.18013.5.1.mDL`). An authorization request without an explicit `dcql_query` or `scope` receives it; SD-JWT VC and the W3C formats remain selectable via an explicit query.
+
+**Response modes:** `direct_post`, `direct_post.jwt`, and `dc_api` / `dc_api.jwt` (W3C Digital Credentials API, for both SD-JWT VC and `mso_mdoc`)
+
+**HAIP mode:** opt-in `profile: "haip"` enforces the High Assurance Interoperability Profile (DCQL, encrypted response, `x509_hash`, A128GCM + A256GCM) and rejects out-of-profile choices
+
+**Client ID schemes:** `redirect_uri`, `did:web` (`decentralized_identifier`), `verifier_attestation`, `x509_san_dns`, `x509_hash`
 
 ## Related
 

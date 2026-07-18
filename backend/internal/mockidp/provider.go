@@ -24,6 +24,7 @@ type MockIdP struct {
 	keySet        *crypto.KeySet
 	jwtService    *crypto.JWTService
 	issuer        string
+	defaultUserID string
 	mu            sync.RWMutex
 }
 
@@ -51,8 +52,8 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		authCodes:     make(map[string]*models.AuthorizationCode),
 		sessions:      make(map[string]*models.Session),
 		refreshTokens: make(map[string]*models.RefreshToken),
-		revokedTokens: make(map[string]time.Time),                // RFC 7009: Revoked token tracking
-		usedCodes:     make(map[string]*usedAuthorizationCode),   // RFC 6749 Section 4.1.2: replayed-code detection
+		revokedTokens: make(map[string]time.Time),              // RFC 7009: Revoked token tracking
+		usedCodes:     make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
 		keySet:        keySet,
 		issuer:        "http://localhost:8080",
 	}
@@ -89,21 +90,21 @@ func (idp *MockIdP) initDemoData() {
 	machineClientSecret := envOrRandom("MOCKIDP_MACHINE_CLIENT_SECRET", 32)
 
 	// Demo users
-	idp.users["alice"] = &models.User{
-		ID:         "alice",
-		Email:      "alice@example.com",
-		Name:       "Alice Johnson",
-		GivenName:  "Alice",
-		FamilyName: "Johnson",
-		MiddleName: "Marie",
-		Nickname:   "Ali",
-		Profile:    "https://www.protocolsoup.com/u/alice",
-		Picture:    "https://www.protocolsoup.com/u/alice/avatar.png",
-		Website:    "https://alice.example.com",
-		Gender:     "female",
-		Birthdate:  "1990-03-12",
-		Zoneinfo:   "Australia/Sydney",
-		Locale:     "en-AU",
+	alice := &models.User{
+		ID:                  "alice",
+		Email:               "alice@example.com",
+		Name:                "Alice Johnson",
+		GivenName:           "Alice",
+		FamilyName:          "Johnson",
+		MiddleName:          "Marie",
+		Nickname:            "Ali",
+		Profile:             "https://www.protocolsoup.com/u/alice",
+		Picture:             "https://www.protocolsoup.com/u/alice/avatar.png",
+		Website:             "https://alice.example.com",
+		Gender:              "female",
+		Birthdate:           "1990-03-12",
+		Zoneinfo:            "Australia/Sydney",
+		Locale:              "en-AU",
 		PhoneNumber:         "+61 2 5550 1234",
 		PhoneNumberVerified: true,
 		Address: &models.Address{
@@ -117,26 +118,32 @@ func (idp *MockIdP) initDemoData() {
 		Password: alicePassword, // In a real system, this would be hashed
 		Roles:    []string{"user"},
 		Claims: map[string]string{
-			"department": "Engineering",
+			"department":                  "Engineering",
+			"degree":                      "Bachelor of Engineering",
+			"graduation_year":             "2018",
+			"mdl_document_number":         "D-ALICE-001",
+			"mdl_driving_privilege_codes": "B",
 		},
 		CreatedAt: time.Now(),
 	}
+	idp.users[alice.ID] = alice
+	idp.defaultUserID = alice.ID
 
 	idp.users["bob"] = &models.User{
-		ID:         "bob",
-		Email:      "bob@example.com",
-		Name:       "Bob Smith",
-		GivenName:  "Bob",
-		FamilyName: "Smith",
-		MiddleName: "Daniel",
-		Nickname:   "Bobby",
-		Profile:    "https://www.protocolsoup.com/u/bob",
-		Picture:    "https://www.protocolsoup.com/u/bob/avatar.png",
-		Website:    "https://bob.example.com",
-		Gender:     "male",
-		Birthdate:  "1985-07-23",
-		Zoneinfo:   "Australia/Melbourne",
-		Locale:     "en-AU",
+		ID:                  "bob",
+		Email:               "bob@example.com",
+		Name:                "Bob Smith",
+		GivenName:           "Bob",
+		FamilyName:          "Smith",
+		MiddleName:          "Daniel",
+		Nickname:            "Bobby",
+		Profile:             "https://www.protocolsoup.com/u/bob",
+		Picture:             "https://www.protocolsoup.com/u/bob/avatar.png",
+		Website:             "https://bob.example.com",
+		Gender:              "male",
+		Birthdate:           "1985-07-23",
+		Zoneinfo:            "Australia/Melbourne",
+		Locale:              "en-AU",
 		PhoneNumber:         "+61 3 5550 5678",
 		PhoneNumberVerified: true,
 		Address: &models.Address{
@@ -150,26 +157,30 @@ func (idp *MockIdP) initDemoData() {
 		Password: bobPassword,
 		Roles:    []string{"user"},
 		Claims: map[string]string{
-			"department": "Marketing",
+			"department":                  "Marketing",
+			"degree":                      "Bachelor of Commerce",
+			"graduation_year":             "2007",
+			"mdl_document_number":         "D-BOB-001",
+			"mdl_driving_privilege_codes": "B",
 		},
 		CreatedAt: time.Now(),
 	}
 
 	idp.users["admin"] = &models.User{
-		ID:         "admin",
-		Email:      "admin@example.com",
-		Name:       "Admin User",
-		GivenName:  "Admin",
-		FamilyName: "User",
-		MiddleName: "System",
-		Nickname:   "Admin",
-		Profile:    "https://www.protocolsoup.com/u/admin",
-		Picture:    "https://www.protocolsoup.com/u/admin/avatar.png",
-		Website:    "https://www.protocolsoup.com",
-		Gender:     "other",
-		Birthdate:  "1980-11-05",
-		Zoneinfo:   "Australia/Brisbane",
-		Locale:     "en-AU",
+		ID:                  "admin",
+		Email:               "admin@example.com",
+		Name:                "Admin User",
+		GivenName:           "Admin",
+		FamilyName:          "User",
+		MiddleName:          "System",
+		Nickname:            "Admin",
+		Profile:             "https://www.protocolsoup.com/u/admin",
+		Picture:             "https://www.protocolsoup.com/u/admin/avatar.png",
+		Website:             "https://www.protocolsoup.com",
+		Gender:              "other",
+		Birthdate:           "1980-11-05",
+		Zoneinfo:            "Australia/Brisbane",
+		Locale:              "en-AU",
 		PhoneNumber:         "+61 7 5550 9012",
 		PhoneNumberVerified: true,
 		Address: &models.Address{
@@ -183,7 +194,11 @@ func (idp *MockIdP) initDemoData() {
 		Password: adminPassword,
 		Roles:    []string{"user", "admin"},
 		Claims: map[string]string{
-			"department": "IT",
+			"department":                  "IT",
+			"degree":                      "Bachelor of Information Technology",
+			"graduation_year":             "2002",
+			"mdl_document_number":         "D-ADMIN-001",
+			"mdl_driving_privilege_codes": "B",
 		},
 		CreatedAt: time.Now(),
 	}
@@ -248,6 +263,14 @@ func (idp *MockIdP) GetUser(id string) (*models.User, bool) {
 	defer idp.mu.RUnlock()
 	user, exists := idp.users[id]
 	return user, exists
+}
+
+// DefaultUserID returns the seeded identity used by interactive demo flows when
+// the caller does not select a specific identity.
+func (idp *MockIdP) DefaultUserID() string {
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	return idp.defaultUserID
 }
 
 // GetUserByEmail retrieves a user by email

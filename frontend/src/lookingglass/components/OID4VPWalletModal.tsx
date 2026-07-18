@@ -175,7 +175,7 @@ export function OID4VPWalletModal({
               value={credentialJWTInput}
               onChange={(event) => onCredentialJWTInputChange(event.target.value)}
               rows={5}
-              placeholder="Paste SD-JWT VC or issuer credential JWT (or leave blank to auto-issue one)"
+              placeholder="Paste an mso_mdoc, SD-JWT VC, or issuer credential JWT (or leave blank to auto-issue the default mDL)"
               className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
             />
           </div>

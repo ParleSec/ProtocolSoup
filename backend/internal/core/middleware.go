@@ -35,7 +35,7 @@ func RequestLogger(next http.Handler) http.Handler {
 				r.URL.Path,
 				ww.Status(),
 				time.Since(start),
-				r.RemoteAddr,
+				resolveClientIP(r),
 			)
 		}()
 
@@ -119,22 +119,31 @@ func resolveClientIP(r *http.Request) string {
 		return ""
 	}
 
-	// Fly.io sets Fly-Client-IP; other proxies commonly set X-Forwarded-For/X-Real-IP.
-	candidates := []string{
+	remoteIP := normalizeClientIP(r.RemoteAddr)
+	if !isTrustedProxyIP(remoteIP) {
+		return remoteIP
+	}
+
+	// Proxy-supplied headers are authoritative only when the direct peer is on
+	// a private or loopback network. This preserves Fly.io client attribution
+	// without allowing public clients to spoof rate-limit identities.
+	for _, candidate := range []string{
 		r.Header.Get("Fly-Client-IP"),
 		r.Header.Get("X-Forwarded-For"),
 		r.Header.Get("X-Real-IP"),
-		r.RemoteAddr,
-	}
-
-	for _, candidate := range candidates {
+	} {
 		clientIP := normalizeClientIP(candidate)
 		if clientIP != "" {
 			return clientIP
 		}
 	}
 
-	return ""
+	return remoteIP
+}
+
+func isTrustedProxyIP(value string) bool {
+	ip := net.ParseIP(value)
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback())
 }
 
 func normalizeClientIP(value string) string {
@@ -157,7 +166,7 @@ func normalizeClientIP(value string) string {
 
 	parsed := net.ParseIP(token)
 	if parsed == nil {
-		return token
+		return ""
 	}
 	return parsed.String()
 }

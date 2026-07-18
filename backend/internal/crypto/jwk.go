@@ -169,11 +169,7 @@ func (jwk *JWK) toECPublicKey() (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to decode y coordinate: %w", err)
 	}
 
-	return &ecdsa.PublicKey{
-		Curve: curve,
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}, nil
+	return parseECPublicKeyCoordinates(curve, xBytes, yBytes)
 }
 
 func (jwk *JWK) toOKPPublicKey() (ed25519.PublicKey, error) {
@@ -206,7 +202,9 @@ func JWKFromRSAPublicKey(pub *rsa.PublicKey, kid string) JWK {
 	}
 }
 
-// JWKFromECPublicKey creates a JWK from an EC public key
+// JWKFromECPublicKey creates a JWK from a validated EC public key. It panics
+// only if the caller violates that invariant; all protocol call sites pass keys
+// returned by the standard library's generation or parsing APIs.
 func JWKFromECPublicKey(pub *ecdsa.PublicKey, kid string) JWK {
 	var crv, alg string
 	switch pub.Curve {
@@ -220,6 +218,10 @@ func JWKFromECPublicKey(pub *ecdsa.PublicKey, kid string) JWK {
 		crv = "P-521"
 		alg = "ES512"
 	}
+	x, y, err := ecPublicKeyCoordinates(pub)
+	if err != nil {
+		panic(fmt.Sprintf("crypto: encode EC public key as JWK: %v", err))
+	}
 
 	return JWK{
 		Kty: "EC",
@@ -227,9 +229,57 @@ func JWKFromECPublicKey(pub *ecdsa.PublicKey, kid string) JWK {
 		Kid: kid,
 		Alg: alg,
 		Crv: crv,
-		X:   base64.RawURLEncoding.EncodeToString(pub.X.Bytes()),
-		Y:   base64.RawURLEncoding.EncodeToString(pub.Y.Bytes()),
+		X:   base64.RawURLEncoding.EncodeToString(x),
+		Y:   base64.RawURLEncoding.EncodeToString(y),
 	}
+}
+
+// ecPublicKeyCoordinates extracts fixed-width affine coordinates from the SEC 1
+// uncompressed encoding returned by Go's validated ECDSA API. RFC 7518
+// Sections 6.2.1.2 and 6.2.1.3 require these exact-width octet sequences for
+// the JWK x and y members.
+func ecPublicKeyCoordinates(pub *ecdsa.PublicKey) ([]byte, []byte, error) {
+	if pub == nil || pub.Curve == nil {
+		return nil, nil, errors.New("EC public key is required")
+	}
+	encoded, err := pub.Bytes()
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode EC public key: %w", err)
+	}
+	coordinateSize := (pub.Curve.Params().BitSize + 7) / 8
+	if len(encoded) != 1+2*coordinateSize || encoded[0] != 0x04 {
+		return nil, nil, fmt.Errorf("unexpected SEC 1 public key length %d", len(encoded))
+	}
+	x := append([]byte(nil), encoded[1:1+coordinateSize]...)
+	y := append([]byte(nil), encoded[1+coordinateSize:]...)
+	return x, y, nil
+}
+
+// parseECPublicKeyCoordinates validates fixed-width JWK/COSE coordinates and
+// reconstructs the key through Go's SEC 1 parser rather than mutable big.Int
+// fields.
+func parseECPublicKeyCoordinates(curve elliptic.Curve, x, y []byte) (*ecdsa.PublicKey, error) {
+	if curve == nil {
+		return nil, errors.New("EC curve is required")
+	}
+	coordinateSize := (curve.Params().BitSize + 7) / 8
+	if len(x) != coordinateSize || len(y) != coordinateSize {
+		return nil, fmt.Errorf(
+			"invalid EC coordinate lengths x=%d y=%d, expected %d",
+			len(x),
+			len(y),
+			coordinateSize,
+		)
+	}
+	encoded := make([]byte, 1+2*coordinateSize)
+	encoded[0] = 0x04
+	copy(encoded[1:1+coordinateSize], x)
+	copy(encoded[1+coordinateSize:], y)
+	pub, err := ecdsa.ParseUncompressedPublicKey(curve, encoded)
+	if err != nil {
+		return nil, fmt.Errorf("parse EC public key: %w", err)
+	}
+	return pub, nil
 }
 
 // JWKFromEd25519PublicKey creates a JWK from an Ed25519 public key.

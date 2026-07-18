@@ -37,12 +37,28 @@ type createAuthorizationRequest struct {
 	Scope          string                 `json:"scope,omitempty"`
 	DCQLQuery      json.RawMessage        `json:"dcql_query,omitempty"`
 	ClientMetadata map[string]interface{} `json:"client_metadata,omitempty"`
+	// Profile, when "haip", enforces the OpenID4VC HAIP 1.0 presentation
+	// constraints and rejects out-of-profile choices.
+	Profile string `json:"profile,omitempty"`
+	// Origin is the Verifier Web Origin for the W3C Digital Credentials API path
+	// (response_mode dc_api / dc_api.jwt). ExpectedOrigins is the
+	// expected_origins request parameter for signed DC API requests (OID4VP 1.0
+	// Appendix A.2).
+	Origin          string   `json:"origin,omitempty"`
+	ExpectedOrigins []string `json:"expected_origins,omitempty"`
 }
 
 type walletResponsePayload struct {
-	State    string `json:"state"`
-	VPToken  string `json:"vp_token,omitempty"`
+	State   string `json:"state"`
+	VPToken string `json:"vp_token,omitempty"`
+	// Response carries the encrypted (JWE) Authorization Response for
+	// direct_post.jwt and dc_api.jwt.
 	Response string `json:"response,omitempty"`
+	// RequestID correlates a W3C Digital Credentials API response to its request
+	// session. The DC API does not carry the OAuth state parameter (OID4VP 1.0
+	// Appendix A.2), so the Verifier frontend, which holds the request_id from
+	// the same browser context, submits it here for correlation.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
@@ -67,15 +83,44 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 
 	req.ResponseMode = strings.TrimSpace(req.ResponseMode)
 	if req.ResponseMode == "" {
-		req.ResponseMode = "direct_post"
+		req.ResponseMode = responseModeDirectPost
 	}
-	req.ResponseURI = strings.TrimSpace(req.ResponseURI)
-	if req.ResponseURI == "" {
-		req.ResponseURI = p.verifierBaseURL() + "/response"
+	req.Profile = strings.ToLower(strings.TrimSpace(req.Profile))
+	isDCAPI := isDCAPIResponseMode(req.ResponseMode)
+
+	// W3C Digital Credentials API path (OID4VP 1.0 Appendix A, HAIP 1.0 Section
+	// 5.2): there is no response_uri; the Verifier Origin binds the response
+	// (OpenID4VPDCAPIHandover + the origin: audience). The redirect path keeps
+	// its existing response_uri defaulting, untouched.
+	var verifierOrigin string
+	if isDCAPI {
+		origin := strings.TrimSpace(req.Origin)
+		if origin == "" {
+			origin = p.baseURL
+		}
+		normalized, err := normalizeOrigin(origin)
+		if err != nil {
+			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		verifierOrigin = normalized
+		req.ResponseURI = ""
+	} else {
+		req.ResponseURI = strings.TrimSpace(req.ResponseURI)
+		if req.ResponseURI == "" {
+			req.ResponseURI = p.verifierBaseURL() + "/response"
+		}
 	}
 
 	req.ClientID = strings.TrimSpace(req.ClientID)
 	req.ClientIDScheme = strings.TrimSpace(req.ClientIDScheme)
+	// HAIP and the DC API path are signed-request profiles. When neither a
+	// client_id nor a scheme is supplied, default to the HAIP-mandated x509_hash
+	// Client Identifier Prefix (HAIP 1.0 Section 5) rather than the
+	// response_uri-bound redirect_uri scheme, which cannot sign requests.
+	if req.ClientID == "" && req.ClientIDScheme == "" && (req.Profile == profileHAIP || isDCAPI) {
+		req.ClientIDScheme = string(ClientIDSchemeX509Hash)
+	}
 	requestedClientIDScheme := ClientIDSchemeUnknown
 	if req.ClientIDScheme != "" {
 		scheme, err := ParseClientIDSchemeName(req.ClientIDScheme)
@@ -106,6 +151,18 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		defaultDCQLBytes, _ := json.Marshal(defaultDCQLQuery)
 		req.DCQLQuery = defaultDCQLBytes
 		dcqlQuery = strings.TrimSpace(string(defaultDCQLBytes))
+	}
+
+	// HAIP 1.0 Section 5: advertise the AKI Trusted Authorities Query for any
+	// mso_mdoc credential in the query, derived from the configured IACA root(s).
+	// The wallet uses it to select an issuer the verifier trusts; the verifier
+	// still validates that the returned credential chains to that same root. This
+	// is HAIP-only so the general profile's queries are emitted unchanged.
+	if req.Profile == profileHAIP && dcqlQuery != "" {
+		if augmented, changed, aerr := injectMdocTrustedAuthorities(req.DCQLQuery, p.mdocTrustedAuthorityAKIs()); aerr == nil && changed {
+			req.DCQLQuery = augmented
+			dcqlQuery = strings.TrimSpace(string(augmented))
+		}
 	}
 
 	if err := ValidateDCQLQueryContract(dcqlQuery, req.Scope); err != nil {
@@ -145,6 +202,16 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		}
 	}
 
+	// HAIP 1.0 Section 5: in HAIP mode the verifier enforces the pinned profile
+	// (DCQL, encrypted response mode, x509_hash for signed requests) and rejects
+	// out-of-profile choices. The general profile is unaffected.
+	if req.Profile == profileHAIP {
+		if err := validateHAIPProfile(req.ResponseMode, dcqlQuery, req.Scope, clientIDScheme); err != nil {
+			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+	}
+
 	nonce := p.randomValue(24)
 	state := p.randomValue(24)
 	if err := ValidateNoncePresence(nonce); err != nil {
@@ -161,12 +228,23 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		"client_id_scheme": string(clientIDScheme),
 		"response_type":    "vp_token",
 		"response_mode":    req.ResponseMode,
-		"response_uri":     req.ResponseURI,
 		"nonce":            nonce,
-		"state":            state,
 		"iat":              now.Unix(),
 		"exp":              now.Add(requestObjectTTL).Unix(),
 		"jti":              requestID,
+	}
+	if isDCAPI {
+		// OID4VP 1.0 Appendix A.2: response_uri and state are not used over the
+		// DC API; signed DC API requests carry expected_origins so the Wallet can
+		// detect request replay from a malicious Verifier.
+		expectedOrigins := req.ExpectedOrigins
+		if len(expectedOrigins) == 0 {
+			expectedOrigins = []string{verifierOrigin}
+		}
+		requestClaims["expected_origins"] = expectedOrigins
+	} else {
+		requestClaims["response_uri"] = req.ResponseURI
+		requestClaims["state"] = state
 	}
 	if req.Scope != "" {
 		requestClaims["scope"] = req.Scope
@@ -188,6 +266,31 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	if _, hasFormats := clientMetadata["vp_formats_supported"]; !hasFormats {
 		clientMetadata["vp_formats_supported"] = defaultVPFormatsSupported()
 	}
+
+	// ECDH-ES response encryption (OID4VP 1.0 Section 8.3): provision an
+	// ephemeral EC P-256 key, advertise its public half in client_metadata.jwks,
+	// and retain the private half on the session. The key's RFC 7638 thumbprint
+	// binds the SessionTranscript handover to the encryption (anti-substitution).
+	//
+	// HAIP 1.0 Section 5 requires ECDH-ES response encryption for every supported
+	// credential format. Non-HAIP direct_post.jwt retains the legacy RSA path
+	// except for mso_mdoc, whose online profile also uses ECDH-ES.
+	encValues := []string{mdocResponseEncEnc}
+	if req.Profile == profileHAIP || isDCAPI {
+		encValues = []string{encA128GCM, encA256GCM}
+	}
+	needsECDHES := req.Profile == profileHAIP ||
+		req.ResponseMode == responseModeDCAPIJWT ||
+		(req.ResponseMode == responseModeDirectPostJWT && dcqlRequestsMdoc(dcqlQuery))
+	var responseEncKey *crypto.JWK
+	if needsECDHES {
+		privateEncJWK, err := injectResponseEncryption(clientMetadata, p.randomValue(8), encValues)
+		if err != nil {
+			writeServerError(w, "provision response encryption key", err)
+			return
+		}
+		responseEncKey = &privateEncJWK
+	}
 	requestClaims["client_metadata"] = clientMetadata
 
 	requestJWT, err := p.signAuthorizationRequestObject(clientIDScheme, req.ClientID, requestClaims, req.ResponseURI)
@@ -196,20 +299,29 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		return
 	}
 
+	responseEncEnc := ""
+	if responseEncKey != nil {
+		responseEncEnc = encValues[len(encValues)-1]
+	}
 	session := &requestSession{
-		ID:             requestID,
-		ClientID:       req.ClientID,
-		ClientIDScheme: clientIDScheme,
-		Nonce:          nonce,
-		State:          state,
-		ResponseMode:   req.ResponseMode,
-		ResponseURI:    req.ResponseURI,
-		RedirectURI:    req.RedirectURI,
-		ScopeAlias:     req.Scope,
-		DCQLQuery:      dcqlQuery,
-		RequestJWT:     requestJWT,
-		CreatedAt:      now,
-		ExpiresAt:      now.Add(requestObjectTTL),
+		ID:                    requestID,
+		ClientID:              req.ClientID,
+		ClientIDScheme:        clientIDScheme,
+		Nonce:                 nonce,
+		State:                 state,
+		ResponseMode:          req.ResponseMode,
+		ResponseURI:           req.ResponseURI,
+		RedirectURI:           req.RedirectURI,
+		ScopeAlias:            req.Scope,
+		DCQLQuery:             dcqlQuery,
+		RequestJWT:            requestJWT,
+		ResponseEncryptionJWK: responseEncKey,
+		Profile:               req.Profile,
+		Origin:                verifierOrigin,
+		ExpectedOrigins:       req.ExpectedOrigins,
+		ResponseEncEnc:        responseEncEnc,
+		CreatedAt:             now,
+		ExpiresAt:             now.Add(requestObjectTTL),
 	}
 
 	p.mu.Lock()
@@ -234,8 +346,20 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		"state":                 state,
 		"trust_mode":            p.trustMode(),
 		"did_web_allowed_hosts": p.didWebAllowedHosts,
+		"profile":               firstNonEmpty(req.Profile, "general"),
 	}
-	if clientIDScheme == ClientIDSchemeX509SANDNS && p.x509SANDNSSigner != nil {
+	if isDCAPI {
+		eventData["invocation"] = "w3c_digital_credentials_api"
+		eventData["origin"] = verifierOrigin
+		eventData["response_audience"] = dcAPIAudience(verifierOrigin)
+		if originsClaim, ok := requestClaims["expected_origins"]; ok {
+			eventData["expected_origins"] = originsClaim
+		}
+	}
+	if responseEncKey != nil {
+		eventData["response_enc_values_supported"] = encValues
+	}
+	if (clientIDScheme == ClientIDSchemeX509SANDNS || clientIDScheme == ClientIDSchemeX509Hash) && p.x509SANDNSSigner != nil {
 		eventData["x509_chain"] = p.describeX509Chain()
 	}
 
@@ -256,7 +380,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		)...,
 	)
 
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
+	responsePayload := map[string]interface{}{
 		"request_id":            requestID,
 		"request_uri":           p.verifierBaseURL() + "/request/" + requestID,
 		"request_uri_method":    "get",
@@ -271,7 +395,19 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		"dcql_query_supplied":   dcqlQuery != "",
 		"trust_mode":            p.trustMode(),
 		"did_web_allowed_hosts": p.didWebAllowedHosts,
-	})
+		"profile":               firstNonEmpty(req.Profile, "general"),
+	}
+	if isDCAPI {
+		responsePayload["origin"] = verifierOrigin
+		responsePayload["response_audience"] = dcAPIAudience(verifierOrigin)
+		if originsClaim, ok := requestClaims["expected_origins"]; ok {
+			responsePayload["expected_origins"] = originsClaim
+		}
+	}
+	if responseEncKey != nil {
+		responsePayload["encrypted_response_enc_values_supported"] = encValues
+	}
+	writeJSON(w, http.StatusCreated, responsePayload)
 }
 
 func (p *Plugin) handleGetAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
@@ -372,17 +508,25 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	if strings.TrimSpace(payload.State) == "" {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state is required")
+	// Correlate the response to its request session. The redirect path uses the
+	// OAuth state parameter; the W3C Digital Credentials API path has no state
+	// (OID4VP 1.0 Appendix A.2), so the Verifier frontend supplies the request_id
+	// from the same browser context.
+	state := strings.TrimSpace(payload.State)
+	requestID := strings.TrimSpace(payload.RequestID)
+	if state == "" && requestID == "" {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state or request_id is required")
 		return
 	}
 
 	p.mu.RLock()
-	requestID, ok := p.requestsByState[payload.State]
+	if state != "" {
+		requestID = p.requestsByState[state]
+	}
 	session := p.requests[requestID]
 	p.mu.RUnlock()
-	if !ok || session == nil {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state does not map to active request")
+	if session == nil {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state or request_id does not map to active request")
 		return
 	}
 	if time.Now().UTC().After(session.ExpiresAt) {
@@ -391,21 +535,48 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vpToken := payload.VPToken
-	if session.ResponseMode == "direct_post.jwt" {
+	if isEncryptedResponseMode(session.ResponseMode) {
 		if strings.TrimSpace(payload.Response) == "" {
-			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "response is required for direct_post.jwt")
+			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("response is required for %s", session.ResponseMode))
 			return
 		}
-		extractedVPToken, extractedState, err := p.decryptAndExtractDirectPostJWT(payload.Response, session)
-		if err != nil {
-			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
-			return
+		// ECDH-ES path: the response is an encrypted JWT (JWE) whose payload
+		// carries the (DCQL-keyed) vp_token directly. This covers the mdoc
+		// direct_post.jwt online profile and every dc_api.jwt response. Routed
+		// only when the session provisioned an
+		// ECDH-ES response-encryption key, so the SD-JWT RSA-OAEP redirect path
+		// (the else branch) is untouched.
+		if session.ResponseEncryptionJWK != nil {
+			extractedVPToken, extractedState, err := decryptMdocResponse(payload.Response, *session.ResponseEncryptionJWK)
+			if err != nil {
+				writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				return
+			}
+			// The DC API response has no state (OID4VP Appendix A.2); only
+			// enforce a state match when the wallet actually returned one.
+			if extractedState != "" {
+				expectedState := session.State
+				if state != "" {
+					expectedState = state
+				}
+				if extractedState != expectedState {
+					writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state mismatch in encrypted response payload")
+					return
+				}
+			}
+			vpToken = extractedVPToken
+		} else {
+			extractedVPToken, extractedState, err := p.decryptAndExtractDirectPostJWT(payload.Response, session)
+			if err != nil {
+				writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
+				return
+			}
+			if extractedState != state {
+				writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state mismatch in direct_post.jwt payload")
+				return
+			}
+			vpToken = extractedVPToken
 		}
-		if extractedState != payload.State {
-			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state mismatch in direct_post.jwt payload")
-			return
-		}
-		vpToken = extractedVPToken
 	}
 	if strings.TrimSpace(vpToken) == "" {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "vp_token is required")
@@ -450,7 +621,8 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 			"policy_reasons":            result.Policy.Reasons,
 			"policy_reason_codes":       result.Policy.ReasonCodes,
 			"vp_token_present":          vpToken != "",
-			"direct_post_jwt_encrypted": session.ResponseMode == "direct_post.jwt",
+			"direct_post_jwt_encrypted": isEncryptedResponseMode(session.ResponseMode),
+			"invocation":                map[bool]string{true: "w3c_digital_credentials_api", false: "redirect"}[session.isDCAPI()],
 		},
 		append(
 			p.vpAnnotation("nonce_binding"),
@@ -515,8 +687,24 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 		},
 	}
 
+	// OID4VP 1.0 Appendix B.2 keys the vp_token by DCQL credential id for every
+	// format. For SD-JWT VC (e.g. the HAIP DC API path) unwrap the keyed object
+	// to the bare compact serialization the SD-JWT evaluator expects. mdoc and
+	// JSON-LD tokens are never matched (they contain no "~").
+	if normalized, ok := extractDCQLKeyedSDJWT(vpToken); ok {
+		vpToken = normalized
+	}
+
 	if strings.Contains(vpToken, "~") {
 		return p.evaluateSDJWTPresentation(session, vpToken, result)
+	}
+	// mso_mdoc (ISO/IEC 18013-5) vp_tokens are base64url CBOR DeviceResponses,
+	// carried either bare or inside the OID4VP 1.0 DCQL-keyed object. This is
+	// checked before the JSON-LD '{' branch because the DCQL-keyed mdoc vp_token
+	// is also a JSON object; the discriminator only matches when a DeviceResponse
+	// actually decodes, so JSON-LD VPs are unaffected.
+	if looksLikeMdocDeviceResponse(vpToken) {
+		return p.evaluateMdocPresentation(session, vpToken, result)
 	}
 	if strings.HasPrefix(strings.TrimSpace(vpToken), "{") {
 		return p.evaluateJSONLDPresentation(session, vpToken, result)
@@ -579,7 +767,7 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 		addPolicyReason(result, "nonce_mismatch", "nonce mismatch")
 	}
 
-	if audienceIncludes(claims["aud"], session.ClientID) {
+	if audienceIncludes(claims["aud"], session.expectedResponseAudience()) {
 		result.AudienceValidated = true
 	} else {
 		addPolicyReason(result, "audience_mismatch", "audience mismatch")
@@ -693,7 +881,7 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 				if strings.TrimSpace(kbTyp) != "kb+jwt" {
 					addPolicyReason(result, "kb_jwt_invalid", "kb-jwt typ must be kb+jwt")
 				}
-				if kbAud, _ := kbClaims["aud"].(string); strings.TrimSpace(kbAud) != session.ClientID {
+				if kbAud, _ := kbClaims["aud"].(string); strings.TrimSpace(kbAud) != session.expectedResponseAudience() {
 					addPolicyReason(result, "audience_mismatch", "kb-jwt audience mismatch")
 				} else {
 					result.AudienceValidated = true
@@ -979,6 +1167,12 @@ func defaultVPFormatsSupported() map[string]interface{} {
 			"proof_type_values_supported": []string{
 				"DataIntegrityProof",
 			},
+		},
+		credentialFormatMsoMdoc: map[string]interface{}{
+			// ISO/IEC 18013-5 IssuerAuth and DeviceAuth both use ES256 (P-256)
+			// in this build (OID4VP 1.0 Appendix B.2).
+			"issuerauth_alg_values": []string{"ES256"},
+			"deviceauth_alg_values": []string{"ES256"},
 		},
 	}
 }

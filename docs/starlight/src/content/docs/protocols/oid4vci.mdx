@@ -9,9 +9,14 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 
 - OpenID for Verifiable Credential Issuance 1.0 (final)
 - OAuth 2.0 Authorization Framework (token and grant semantics)
+- RFC 8414 OAuth 2.0 Authorization Server Metadata
+- OAuth 2.0 Attestation-Based Client Authentication (draft-ietf-oauth-attestation-based-client-auth)
+- OID4VCI 1.0 Appendix D Key Attestation
+- High Assurance Interoperability Profile (HAIP) 1.0 building blocks (full profile conformance is not claimed)
 - SD-JWT VC profile (`dc+sd-jwt` credential format)
 - W3C Verifiable Credentials Data Model 1.1 / 2.0 (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` formats)
 - W3C VC Data Integrity 1.0 (`ecdsa-rdfc-2019`, `eddsa-rdfc-2022` cryptosuites for `ldp_vc`)
+- ISO/IEC 18013-5 mobile driving licence (`mso_mdoc` credential format, doctype `org.iso.18013.5.1.mDL`)
 
 ## Available Flows
 
@@ -23,17 +28,22 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 
 ## Demo Scenarios
 
-- **Pre-Authorized Issuance** -- Resolve by-reference offer, exchange token, submit proof, receive issued credential (format per credential configuration)
+- **Pre-Authorized Issuance** -- Resolve by-reference offer, exchange token, submit proof, receive issued credential. The default and lead credential configuration is the ISO/IEC 18013-5 mobile driving licence (`mso_mdoc`); an offer or credential request that does not name a configuration receives the mDL.
 - **Pre-Authorized + tx_code** -- Enforce out-of-band `tx_code` before token issuance
 - **Deferred Issuance Polling** -- Receive `transaction_id`, poll until credential is ready
+
+:::note[Default credential format]
+The issuer's default and lead `credential_configurations_supported` entry is the mDL `mso_mdoc` (`MobileDrivingLicenceMsoMdoc`). A request that omits an explicit configuration now receives the mDL. SD-JWT VC (`dc+sd-jwt`) and the W3C formats (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`) remain fully selectable by naming their configuration explicitly. See the [behavioural change note](#default-credential-format-behavioural-change) below.
+:::
 
 ## Credential Details
 
 | Property | Value |
 |----------|-------|
-| Credential configuration selection | Wallet chooses from `credential_configurations_supported` (e.g., one configuration describing a university degree VC type) |
-| Credential formats | `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
+| Credential configuration selection | Wallet chooses from `credential_configurations_supported`. The default and lead entry is the mDL (`MobileDrivingLicenceMsoMdoc`); omitting an explicit configuration selects it. |
+| Credential formats | `mso_mdoc` (ISO/IEC 18013-5 mDL, **default**), `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
 | Proof container | `proof` or `proofs` with `proof_type: jwt` (e.g., `{"proof_type":"jwt","jwt":"<compact-jws>"}`) |
+| `mso_mdoc` device key binding | Proof `cnf.jwk` must be an EC P-256 key; it is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key |
 | Proof JWT header type | `openid4vci-proof+jwt` |
 | Proof JWT required claims | `iss`, `sub`, `aud`, `nonce`, `iat`, `exp`, `cnf.jwk` |
 | Deferred issuance indicator | `transaction_id` returned by credential endpoint (e.g., an opaque identifier such as `"txn_..."`) |
@@ -46,8 +56,72 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 4. **Token Response** — Authorization Server validates the pre-authorized code (and `tx_code` if required) and returns `access_token`, `token_type`, `scope` (if applicable), `c_nonce`, and `c_nonce_expires_in`.
 5. **Credential Request** — Wallet submits `credential_configuration_id` and `proof`/`proofs` (`proof_type: jwt`) with a proof JWT bound to the active `c_nonce` and the credential issuer audience.
 6. **Credential Response** — Issuer validates proof key binding, nonce freshness, and audience/subject constraints, then returns:
-   - **Immediate**: `format` matching the credential configuration (e.g. `dc+sd-jwt` with disclosures, `jwt_vc_json`, `jwt_vc_json-ld`, or `ldp_vc` with Data Integrity proof), `credential`, next `c_nonce`, or
+   - **Immediate**: `format` matching the credential configuration (e.g. `dc+sd-jwt` with disclosures, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` with Data Integrity proof, or `mso_mdoc` as base64url-encoded CBOR `IssuerSigned`), `credential`, next `c_nonce`, or
    - **Deferred**: `transaction_id`, next `c_nonce` — wallet then polls `deferred_credential` endpoint until credential is ready.
+
+## Authorization Code Flow
+
+In addition to `pre-authorized_code`, the token endpoint accepts
+`grant_type=authorization_code`. The Authorization Server (the mockidp-backed
+`/oidc/authorize` and `/oid4vci/token`) is discoverable via RFC 8414 metadata:
+
+1. Wallet reads `authorization_servers` from the Credential Issuer Metadata
+   (defaults to the issuer's own identifier).
+2. Wallet fetches `{authorization_server}/.well-known/oauth-authorization-server`
+   (RFC 8414 Section 3.1 well-known URI insertion — for issuer
+   `https://host/oid4vci` this resolves to
+   `https://host/.well-known/oauth-authorization-server/oid4vci`) to discover
+   `authorization_endpoint`, `token_endpoint`, `grant_types_supported`,
+   `code_challenge_methods_supported` (`S256`), and
+   `token_endpoint_auth_methods_supported`.
+3. Wallet drives the standard OAuth 2.0 authorization code flow (with PKCE)
+   against `authorization_endpoint`, then exchanges the code at
+   `token_endpoint` exactly as it would for `pre-authorized_code`, receiving
+   `access_token` and `c_nonce`.
+
+This path is implemented and covered at the HTTP/API layer. The current Looking
+Glass OID4VCI executors demonstrate only the pre-authorized-code variants; they
+do not yet drive this authorization-code flow.
+
+## HAIP issuance building blocks
+
+The issuer implements the following HAIP-related issuance controls as opt-in,
+trust-anchor-gated API features. This is not a claim of complete HAIP issuer
+support: DPoP sender-constrained access tokens are not implemented, and the
+Looking Glass and wallet harness do not yet generate the client-attestation,
+key-attestation, and encrypted-credential-request material for an end-to-end
+HAIP issuance demo. The unattested Final flow remains unaffected by default.
+
+- **Client attestation (OAuth 2.0 Attestation-Based Client Authentication).**
+  The token endpoint accepts an `OAuth-Client-Attestation` +
+  `OAuth-Client-Attestation-PoP` header pair as an alternative to
+  `client_secret`/Basic auth. The attestation JWT's `x5c` chain is verified
+  against a configured trust anchor, its `cnf.jwk` becomes the Client Instance
+  Key that must sign the PoP JWT, and the PoP's `jti` is single-use. When both
+  headers are present, they are the authentication verdict for the request —
+  a failed attestation is never silently downgraded to a weaker method. The
+  attested `sub` becomes the authoritative `client_id`. Advertised in AS
+  metadata's `token_endpoint_auth_methods_supported` as
+  `attest_jwt_client_auth` only once a trust anchor is configured.
+- **Key attestation (OID4VCI 1.0 Appendix D).** Credential configurations may
+  set `key_attestations_required` (advertised under
+  `proof_types_supported.jwt` in Credential Issuer Metadata). For those
+  configurations, the proof JWT's JOSE header must carry a `key_attestation`
+  JWT (`typ: key-attestation+jwt`) whose `x5c` chain is verified against a
+  configured trust anchor, and whose `attested_keys` must include the proof's
+  `cnf.jwk` holder key and satisfy any required `key_storage` /
+  `user_authentication` attack-potential levels.
+- **Encrypted credential responses.** A wallet may include a
+  `credential_response_encryption` object (`jwk`, `enc`) on the Credential or
+  Deferred Credential Request. When present and valid, the response is
+  returned as a compact JWE (`Content-Type: application/jwt`) — ECDH-ES key
+  agreement to the wallet's ephemeral key, then AES-GCM content encryption
+  (`A128GCM` or `A256GCM`) — instead of plain JSON.  Advertised in Credential
+  Issuer Metadata's `credential_response_encryption` object;
+  `encryption_required` stays `false`.
+
+These controls are exercised by backend regression tests. OIDF suite validation
+is still required before any certification or external-conformance claim.
 
 ## Contract Enforcement
 
@@ -64,8 +138,9 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 | Endpoint Role | Discovery Source | Purpose |
 |---------------|------------------|---------|
 | Credential Issuer Metadata Endpoint | `/.well-known/openid-credential-issuer/{issuer-path}` | Discover issuer metadata, credential configurations, and endpoint URLs |
+| Authorization Server Metadata Endpoint | `/.well-known/oauth-authorization-server/{issuer-path}` (RFC 8414) | Discover `authorization_endpoint`, `token_endpoint`, and supported grant/auth methods for `authorization_code` |
 | Credential Offer URI | `credential_offer_uri` | Retrieve a credential offer by reference |
-| Token Endpoint | Issuer/Authorization Server metadata | Exchange `pre-authorized_code` (or authorization grant) for access token and nonce |
+| Token Endpoint | Issuer/Authorization Server metadata | Exchange `pre-authorized_code` or `authorization_code` for access token and nonce; accepts client attestation headers |
 | Nonce Endpoint | `nonce_endpoint` from issuer metadata | Request a fresh `c_nonce` challenge when needed |
 | Credential Endpoint | `credential_endpoint` from issuer metadata | Submit proof and request credential issuance |
 | Deferred Credential Endpoint | `deferred_credential_endpoint` from issuer metadata | Poll a pending issuance transaction with `transaction_id` |
@@ -73,8 +148,25 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 ## Illustrative Examples (Non-Normative)
 
 - Pre-authorized token request body (form-encoded): `grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code&pre-authorized_code=...`
-- Proof JWT protected header: `{"typ":"openid4vci-proof+jwt","alg":"<wallet-signing-alg>"}` and payload includes `aud`, `nonce`, `cnf.jwk`
+- Proof JWT protected header for the default mDL `mso_mdoc`: `{"typ":"openid4vci-proof+jwt","alg":"ES256","kid":"..."}` with an EC P-256 `cnf.jwk` (the device key bound into the MSO). The SD-JWT VC and JOSE formats accept any wallet-supported signing algorithm.
 - Deferred credential response shape: `{"transaction_id":"...","c_nonce":"...","c_nonce_expires_in":...}`
+
+## Default credential format (behavioural change)
+
+As of the parity-then-flip change, the issuer's **default and lead** credential configuration is the ISO/IEC 18013-5 mobile driving licence (`mso_mdoc`, configuration ID `MobileDrivingLicenceMsoMdoc`). This was previously the SD-JWT VC university-degree configuration.
+
+**What changed:** a request that omits an explicit credential configuration (an offer with no `credential_configuration_ids`, or a credential request that relies on the issuer default) now receives the mDL `mso_mdoc` instead of the SD-JWT VC.
+
+**What did not change:** explicit format selection behaves exactly as before. SD-JWT VC and the W3C formats remain fully supported and selectable by naming their configuration:
+
+- SD-JWT VC: `credential_configuration_ids: ["UniversityDegreeCredential"]`
+- JWT VC JSON: `credential_configuration_ids: ["UniversityDegreeCredentialJWT"]`
+- JWT VC JSON-LD: `credential_configuration_ids: ["UniversityDegreeCredentialJWTLD"]`
+- LDP VC: `credential_configuration_ids: ["UniversityDegreeCredentialLDP"]`
+
+**Action for consumers:** API consumers that relied on the implicit SD-JWT VC default must now name `UniversityDegreeCredential` (or the desired configuration) explicitly to continue receiving SD-JWT VC. The wallet harness honours the `WALLET_DEFAULT_CREDENTIAL_FORMAT` environment variable (default `mso_mdoc`) for its stored and presented format.
+
+Note that the mDL proof uses an EC P-256 device key signed with `ES256`: the proof `cnf.jwk` is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key, per ISO/IEC 18013-5.
 
 ## What To Validate
 
@@ -83,5 +175,9 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 - Token exchange: `pre-authorized_code` grant processing and `tx_code` enforcement when offered
 - Proof JWT: `typ=openid4vci-proof+jwt`, `cnf.jwk` key binding, `aud` matches issuer, `nonce` matches active `c_nonce`
 - Nonce behavior: replayed or expired `c_nonce` is rejected; next nonce is returned after successful issuance
-- Credential response: serialization matches negotiated format (e.g. `dc+sd-jwt` includes issuer-signed JWT + disclosures, `ldp_vc` includes Data Integrity proof)
+- Credential response: serialization matches negotiated format (e.g. `dc+sd-jwt` includes issuer-signed JWT + disclosures, `ldp_vc` includes Data Integrity proof, `mso_mdoc` is base64url-encoded CBOR `IssuerSigned` with a COSE_Sign1 `IssuerAuth`)
 - Deferred flow: `issuance_pending` before ready time, then final credential on successful poll
+- Authorization Server metadata: `authorization_endpoint`/`token_endpoint` resolve and accept the discovered `authorization_code` grant
+- Client attestation (when configured): a request presenting `OAuth-Client-Attestation`/`-PoP` is authenticated by that mechanism, not silently downgraded on failure; replayed PoP `jti` is rejected
+- Key attestation (when a configuration requires it): credential requests without a valid `key_attestation` proof header are rejected with `invalid_proof`
+- Encrypted responses (when requested): `credential_response_encryption` is validated against advertised `alg`/`enc` values and the response is returned as a JWE

@@ -26,9 +26,15 @@ Use wallet service to simulate wallet-side OID4VP presentation submission agains
 | `WALLET_TARGET_BASE_URL` | No | `https://protocolsoup.com` | VC verifier service URL for OID4VP submissions |
 | `WALLET_ALLOWED_CORS_ORIGINS` | No | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins |
 | `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default DID subject for demo sessions |
+| `WALLET_DEFAULT_CREDENTIAL_FORMAT` | No | `mso_mdoc` | Default stored and presented credential format when a request omits a format/configuration. `mso_mdoc` (mDL) is the default; `dc+sd-jwt` and the W3C formats remain selectable |
+| `WALLET_DID_METHOD` | No | `key` | DID method for the wallet holder identifier (e.g. `key`, `web`) |
+| `WALLET_DEFAULT_SIGNING_ALG` | No | `ES256` | Default holder-binding signing algorithm; `ES256` (EC P-256) matches the `mso_mdoc` default |
 | `WALLET_SESSION_TTL` | No | Go duration (e.g. `30m`) | Session lifetime; omit for server default |
 | `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Enforce strict session boundaries between demo runs |
 | `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` | No | `(empty)` | Comma-separated issuer URLs the wallet trusts for `verifier_attestation` request validation |
+| `WALLET_DEVICE_KEY_PATH` | No | `(empty)` | File path for the persistent `mso_mdoc` holder device key (EC P-256). Empty uses an ephemeral key; set a durable path so the device binding of stored mdoc credentials survives restarts |
+| `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` | No | System roots only | Additional PEM CA roots trusted for `x509_san_dns` / `x509_hash` request objects; roots carried in `x5c` are never self-trusted |
+| `WALLET_MDOC_IACA_ROOT_PEM` | Required for mdoc storage | `(empty)` | PEM IACA roots used to verify `IssuerAuth` before storing an issued `mso_mdoc` |
 
 ## Run
 
@@ -45,3 +51,6 @@ docker run -p 8081:8080 \
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
 - Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.
+- Set `WALLET_DEVICE_KEY_PATH` to a durable file for `mso_mdoc` (ISO/IEC 18013-5) credentials: the device key bound at issuance must be reused to sign the `DeviceResponse`, so regenerating it silently breaks every stored mdoc credential's device binding.
+- Set `WALLET_MDOC_IACA_ROOT_PEM` to an independently obtained IACA root. The wallet rejects mdoc issuance when no root is configured or when the credential's document-signer chain, signature, digests, or validity fail verification.
+- The harness presents to encrypted `mso_mdoc` requests (`response_mode=direct_post.jwt`): it reads the verifier's ephemeral ECDH-ES response-encryption key from `client_metadata.jwks`, binds its RFC 7638 thumbprint into the `OpenID4VPHandover`, and returns an ECDH-ES JWE (A256GCM when the verifier advertises it, else A128GCM). For `x509_hash`, the request object's `x5c` chain must validate to system roots or a root configured in `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`; the chain cannot establish its own trust.

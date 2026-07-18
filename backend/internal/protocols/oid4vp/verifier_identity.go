@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,6 +34,16 @@ const (
 	x509SANDNSClientIDEnv            = "OID4VP_X509_SANDNS_CLIENT_ID"
 	x509SANDNSCertificateChainPEMEnv = "OID4VP_X509_SANDNS_CERT_CHAIN_PEM"
 	x509SANDNSPrivateKeyPEMEnv       = "OID4VP_X509_SANDNS_PRIVATE_KEY_PEM"
+
+	// x509SignerChainFile / x509SignerKeyFile are the persisted auto-generated
+	// request-signing chain and key (relative to {DataDir}/oid4vp), kept so the
+	// x509_hash Client Identifier stays stable across restarts.
+	x509SignerChainFile = "x509_request_signer_chain.pem"
+	x509SignerKeyFile   = "x509_request_signer_key.pem"
+	// persistedX509SignerValidity keeps the persisted leaf long-lived so its
+	// SHA-256 (the x509_hash client_id) does not churn across a certification
+	// window; the wallet trusts the request signature by that leaf hash.
+	persistedX509SignerValidity = 365 * 24 * time.Hour
 )
 
 type verifierAttestationIssuer struct {
@@ -63,15 +75,32 @@ func (p *Plugin) configureVerifierIdentities() error {
 	p.verifierAttestation = attestationIssuer
 	p.supportedClientIDSchemes[ClientIDSchemeVerifierAttestation] = struct{}{}
 
-	x509Signer, err := newX509RequestSigner(p.baseURL)
+	x509Signer, err := newX509RequestSigner(p.baseURL, p.dataDir)
 	if err != nil {
 		return err
 	}
 	p.x509SANDNSSigner = x509Signer
 	if x509Signer != nil {
 		p.supportedClientIDSchemes[ClientIDSchemeX509SANDNS] = struct{}{}
+		// The same provisioned leaf certificate + chain serves the HAIP-mandated
+		// x509_hash Client Identifier Prefix (HAIP 1.0 Section 5; OID4VP 1.0
+		// Section 5.9.3). x509_hash differs from x509_san_dns only in the
+		// client_id value (the base64url SHA-256 of the DER leaf, not a DNS name)
+		// and in how the wallet matches it; the signing (x5c chain) is identical.
+		p.supportedClientIDSchemes[ClientIDSchemeX509Hash] = struct{}{}
 	}
 	return nil
+}
+
+// x509HashClientID computes the x509_hash Client Identifier for the signer's
+// leaf certificate: "x509_hash:" + base64url(SHA-256(DER(leaf))) (OID4VP 1.0
+// Section 5.9.3).
+func (s *x509RequestSigner) x509HashClientID() (string, error) {
+	if s == nil || len(s.certificates) == 0 || s.certificates[0] == nil {
+		return "", fmt.Errorf("x509_hash signer has no leaf certificate")
+	}
+	digest := sha256.Sum256(s.certificates[0].Raw)
+	return string(ClientIDSchemeX509Hash) + ":" + base64.RawURLEncoding.EncodeToString(digest[:]), nil
 }
 
 func newVerifierAttestationIssuer(baseURL string) (*verifierAttestationIssuer, error) {
@@ -142,12 +171,12 @@ func resolveVerifierAttestationSigningMaterial(rawPrivateKey string) (interface{
 	return privateKey, publicJWK, signingMethod, nil
 }
 
-func newX509RequestSigner(baseURL string) (*x509RequestSigner, error) {
+func newX509RequestSigner(baseURL, dataDir string) (*x509RequestSigner, error) {
 	rawCertificateChain := strings.TrimSpace(os.Getenv(x509SANDNSCertificateChainPEMEnv))
 	rawPrivateKey := strings.TrimSpace(os.Getenv(x509SANDNSPrivateKeyPEMEnv))
 
 	if rawCertificateChain == "" && rawPrivateKey == "" {
-		return newEphemeralX509RequestSigner(baseURL)
+		return newEphemeralX509RequestSigner(baseURL, dataDir)
 	}
 	if rawCertificateChain == "" || rawPrivateKey == "" {
 		return nil, fmt.Errorf("x509_san_dns signing requires both %s and %s", x509SANDNSCertificateChainPEMEnv, x509SANDNSPrivateKeyPEMEnv)
@@ -187,27 +216,109 @@ func newX509RequestSigner(baseURL string) (*x509RequestSigner, error) {
 	}, nil
 }
 
-func newEphemeralX509RequestSigner(baseURL string) (*x509RequestSigner, error) {
+func newEphemeralX509RequestSigner(baseURL, dataDir string) (*x509RequestSigner, error) {
 	hostname := verifierIdentityHostname(baseURL)
 	if !isDNSNameHost(hostname) {
 		return nil, nil
 	}
 	clientID := string(ClientIDSchemeX509SANDNS) + ":" + hostname
 
-	certificates, leafKey, err := generateEphemeralX509Chain(hostname)
-	if err != nil {
-		return nil, fmt.Errorf("generate ephemeral x509_san_dns chain: %w", err)
+	// With no persistence root the signer is a fresh per-process ephemeral chain
+	// (24h), exactly as before. With a data dir, the chain is persisted so the
+	// x509_hash Client Identifier (the SHA-256 of the leaf, HAIP 1.0 Section 5)
+	// stays stable across restarts; the wallet pins by that hash, so a changing
+	// leaf would invalidate trust mid-certification.
+	if strings.TrimSpace(dataDir) == "" {
+		certificates, leafKey, err := generateEphemeralX509Chain(hostname)
+		if err != nil {
+			return nil, fmt.Errorf("generate ephemeral x509_san_dns chain: %w", err)
+		}
+		log.Printf("[oid4vp] x509_san_dns: generated ephemeral certificate chain (leaf SAN: %s, CA: %s, expires: %s)",
+			hostname, certificates[1].Subject.CommonName, certificates[0].NotAfter.Format(time.RFC3339))
+		return &x509RequestSigner{clientID: clientID, certificates: certificates, privateKey: leafKey}, nil
 	}
-	log.Printf("[oid4vp] x509_san_dns: generated ephemeral certificate chain (leaf SAN: %s, CA: %s, expires: %s)",
+
+	dir := filepath.Join(dataDir, "oid4vp")
+	if signer, ok := loadPersistedX509Signer(dir, hostname, clientID); ok {
+		log.Printf("[oid4vp] x509_san_dns: loaded persisted certificate chain (leaf SAN: %s, expires: %s)",
+			hostname, signer.certificates[0].NotAfter.Format(time.RFC3339))
+		return signer, nil
+	}
+
+	certificates, leafKey, err := generateX509RequestSignerChain(hostname, persistedX509SignerValidity)
+	if err != nil {
+		return nil, fmt.Errorf("generate persisted x509_san_dns chain: %w", err)
+	}
+	if err := persistX509Signer(dir, certificates, leafKey); err != nil {
+		return nil, fmt.Errorf("persist x509_san_dns chain: %w", err)
+	}
+	log.Printf("[oid4vp] x509_san_dns: generated and persisted certificate chain (leaf SAN: %s, CA: %s, expires: %s)",
 		hostname, certificates[1].Subject.CommonName, certificates[0].NotAfter.Format(time.RFC3339))
-	return &x509RequestSigner{
-		clientID:     clientID,
-		certificates: certificates,
-		privateKey:   leafKey,
-	}, nil
+	return &x509RequestSigner{clientID: clientID, certificates: certificates, privateKey: leafKey}, nil
+}
+
+// loadPersistedX509Signer reloads a previously persisted request-signing chain
+// and key, returning ok=false (so the caller regenerates) if either file is
+// absent, fails to parse, no longer matches the verifier hostname/key, or is
+// within a day of expiry. Regenerating changes the x509_hash client_id, so it
+// only happens on first run or at renewal.
+func loadPersistedX509Signer(dir, hostname, clientID string) (*x509RequestSigner, bool) {
+	chainPEM, err := os.ReadFile(filepath.Join(dir, x509SignerChainFile))
+	if err != nil {
+		return nil, false
+	}
+	keyPEM, err := os.ReadFile(filepath.Join(dir, x509SignerKeyFile))
+	if err != nil {
+		return nil, false
+	}
+	certificates, err := parsePEMCertificateChain(string(chainPEM))
+	if err != nil || len(certificates) == 0 {
+		return nil, false
+	}
+	privateKey, err := parsePEMPrivateKey(string(keyPEM))
+	if err != nil {
+		return nil, false
+	}
+	if err := certificates[0].VerifyHostname(hostname); err != nil {
+		return nil, false
+	}
+	if err := verifyPrivateKeyMatchesCertificate(certificates[0], privateKey); err != nil {
+		return nil, false
+	}
+	if time.Now().UTC().After(certificates[0].NotAfter.Add(-24 * time.Hour)) {
+		return nil, false
+	}
+	return &x509RequestSigner{clientID: clientID, certificates: certificates, privateKey: privateKey}, true
+}
+
+// persistX509Signer writes the chain (leaf first) and the EC private key under
+// the data dir with 0600 permissions; the private key never leaves the verifier.
+func persistX509Signer(dir string, certificates []*x509.Certificate, leafKey *ecdsa.PrivateKey) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	var chainBuf bytes.Buffer
+	for _, certificate := range certificates {
+		if err := pem.Encode(&chainBuf, &pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, x509SignerChainFile), chainBuf.Bytes(), 0o600); err != nil {
+		return err
+	}
+	keyDER, err := x509.MarshalECPrivateKey(leafKey)
+	if err != nil {
+		return err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return os.WriteFile(filepath.Join(dir, x509SignerKeyFile), keyPEM, 0o600)
 }
 
 func generateEphemeralX509Chain(hostname string) ([]*x509.Certificate, *ecdsa.PrivateKey, error) {
+	return generateX509RequestSignerChain(hostname, 24*time.Hour)
+}
+
+func generateX509RequestSignerChain(hostname string, validity time.Duration) ([]*x509.Certificate, *ecdsa.PrivateKey, error) {
 	now := time.Now().UTC()
 
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -218,7 +329,7 @@ func generateEphemeralX509Chain(hostname string) ([]*x509.Certificate, *ecdsa.Pr
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "ProtocolSoup Ephemeral CA", Organization: []string{"ProtocolSoup"}},
 		NotBefore:             now.Add(-5 * time.Minute),
-		NotAfter:              now.Add(24 * time.Hour),
+		NotAfter:              now.Add(validity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		IsCA:                  true,
 		BasicConstraintsValid: true,
@@ -241,7 +352,7 @@ func generateEphemeralX509Chain(hostname string) ([]*x509.Certificate, *ecdsa.Pr
 		Subject:               pkix.Name{CommonName: hostname, Organization: []string{"ProtocolSoup"}},
 		DNSNames:              []string{hostname},
 		NotBefore:             now.Add(-5 * time.Minute),
-		NotAfter:              now.Add(24 * time.Hour),
+		NotAfter:              now.Add(validity),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
@@ -271,6 +382,12 @@ func (p *Plugin) defaultClientIDForScheme(scheme ClientIDScheme, responseURI str
 	case ClientIDSchemeX509SANDNS:
 		if p.x509SANDNSSigner != nil {
 			return p.x509SANDNSSigner.clientID
+		}
+	case ClientIDSchemeX509Hash:
+		if p.x509SANDNSSigner != nil {
+			if clientID, err := p.x509SANDNSSigner.x509HashClientID(); err == nil {
+				return clientID
+			}
 		}
 	}
 	return ""
@@ -314,6 +431,21 @@ func (p *Plugin) validateVerifierIdentityRequest(scheme ClientIDScheme, clientID
 		if !strings.EqualFold(strings.TrimSpace(parsedResponseURI.Hostname()), clientDNSName) {
 			return fmt.Errorf("response_uri host %q must match x509_san_dns client_id %q", parsedResponseURI.Hostname(), clientDNSName)
 		}
+	case ClientIDSchemeX509Hash:
+		if p.x509SANDNSSigner == nil {
+			return fmt.Errorf("x509_hash is not configured")
+		}
+		expected, err := p.x509SANDNSSigner.x509HashClientID()
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(strings.TrimSpace(clientID), strings.TrimSpace(expected)) {
+			return fmt.Errorf("client_id %q does not match the leaf certificate x509_hash %q", clientID, expected)
+		}
+		// x509_hash binds the Verifier by certificate hash rather than by DNS
+		// name (OID4VP 1.0 Section 5.9.3), so no response_uri host match is
+		// required. This is the HAIP-mandated prefix and is commonly paired with
+		// the DC API path (no response_uri at all).
 	}
 	return nil
 }
@@ -341,9 +473,9 @@ func (p *Plugin) signAuthorizationRequestObject(
 			return "", err
 		}
 		return requestObject.SignedString(p.keySet.ECPrivateKey())
-	case ClientIDSchemeX509SANDNS:
+	case ClientIDSchemeX509SANDNS, ClientIDSchemeX509Hash:
 		if p.x509SANDNSSigner == nil {
-			return "", fmt.Errorf("x509_san_dns is not configured")
+			return "", fmt.Errorf("%s is not configured", clientIDScheme)
 		}
 		method, err := signingMethodForPrivateKey(p.x509SANDNSSigner.privateKey)
 		if err != nil {
@@ -525,7 +657,7 @@ func verifyPrivateKeyMatchesCertificate(certificate *x509.Certificate, privateKe
 		if !ok {
 			return fmt.Errorf("certificate public key is not EC")
 		}
-		if publicKey.X.Cmp(typed.X) != 0 || publicKey.Y.Cmp(typed.Y) != 0 || publicKey.Curve != typed.Curve {
+		if !publicKey.Equal(&typed.PublicKey) {
 			return fmt.Errorf("ecdsa public key mismatch")
 		}
 	case ed25519.PrivateKey:

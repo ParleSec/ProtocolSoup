@@ -13,14 +13,40 @@ export interface OID4VPDCQLCredentialRequirement {
 }
 
 export const OID4VP_DEFAULT_DISCLOSURE_HINTS = [
+  'family_name',
+  'given_name',
+  'document_number',
+  'birth_date',
   'degree',
   'graduation_year',
   'department',
-  'given_name',
-  'family_name',
 ]
 
 export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
+  {
+    id: 'mdl-mso-mdoc',
+    label: 'Mobile Driving Licence mso_mdoc',
+    description: 'Requests family_name + document_number from an ISO/IEC 18013-5 mDL (mso_mdoc).',
+    query: JSON.stringify(
+      {
+        credentials: [
+          {
+            id: 'mdl',
+            format: 'mso_mdoc',
+            meta: {
+              doctype_values: ['org.iso.18013.5.1.mDL'],
+            },
+            claims: [
+              { path: ['org.iso.18013.5.1', 'family_name'] },
+              { path: ['org.iso.18013.5.1', 'document_number'] },
+            ],
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+  },
   {
     id: 'degree-sdjwt',
     label: 'Degree dc+sd-jwt',
@@ -136,7 +162,7 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
   },
 ]
 
-export const DEFAULT_OID4VP_DCQL_PRESET_ID = OID4VP_DCQL_PRESETS[0]?.id || 'degree-core'
+export const DEFAULT_OID4VP_DCQL_PRESET_ID = OID4VP_DCQL_PRESETS[0]?.id || 'mdl-mso-mdoc'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {

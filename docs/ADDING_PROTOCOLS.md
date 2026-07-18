@@ -363,30 +363,12 @@ Add `backend/internal/protocols/<id>/README.md`:
 - RFC/spec references
 - Any config knobs or special behavior
 
-## Compliance manifest mapping (required)
+## Protocol verification
 
-Protocol implementations must map normative requirements to code, tests, and Looking Glass annotations.
+Keep normative behavior tied directly to executable tests and Looking Glass
+events rather than maintaining a duplicate JSON compliance manifest.
 
-1) Add or update the protocol manifest in `docs/compliance/` (JSON):
-
-- `protocol`: protocol id
-- `spec_version`: pinned spec version
-- `requirements[]`: each requirement includes:
-  - `id`
-  - `normative_level` (`MUST`, `SHALL`, `SHOULD`, `MAY`)
-  - `spec_reference`
-  - `description`
-  - `implementation` (one or more code paths)
-  - `tests` (one or more test paths)
-  - `annotations` (annotation keys used in Looking Glass)
-  - `status` (`planned`, `implemented`, `verified`)
-
-2) Keep manifest mappings synchronized with file moves and refactors:
-
-- Update `implementation` and `tests` paths whenever protocol files are relocated.
-- Keep `MUST`/`SHALL` entries tied to concrete tests and annotations.
-
-3) Run runtime conformance checks from `backend/`:
+Run runtime conformance checks from `backend/`:
 
 ```bash
 go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
@@ -394,7 +376,7 @@ go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
 
 This command executes real end-to-end OID4VCI and OID4VP HTTP flows, including issuance-to-presentation lineage checks.
 
-4) External interoperability checks:
+External interoperability checks:
 
 - Configure `CONFORMANCE_BASE_URL` and `CONFORMANCE_EXTERNAL_WALLET_SUBMIT_URL` GitHub secrets.
 - The `Protocol Conformance` workflow runs nightly/manual external interop checks via `TestExternalInteropConformance`.
@@ -413,7 +395,7 @@ When adding Verifiable Credential flows, follow these additional constraints:
 - For OID4VCI metadata, serve the issuer-derived canonical `.well-known` path from the root router (for path-bound issuer identifiers).
 - Emit parameter-level denial diagnostics (nonce/audience/expiry/holder-binding plus policy reasons) so failures are teachable, not opaque.
 - Keep negative/replay validation in handler logic, tests, and conformance checks; avoid exposing diagnostic-only failure scenarios as primary executable flow catalog entries.
-- Promote compliance manifest statuses from `planned` to `implemented`/`verified` only when tests and Looking Glass evidence exist.
+- Document only behavior exercised by tests or live Looking Glass flows.
 
 ## Acceptance criteria
 

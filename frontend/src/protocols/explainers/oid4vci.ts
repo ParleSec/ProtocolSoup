@@ -331,9 +331,10 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
   credential: {
     purpose:
       'The issuer-signed verifiable credential returned to the wallet. ' +
-      'Format depends on `credential_configuration_id` — typically SD-JWT-VC ' +
-      '(`dc+sd-jwt`), JWT-VC JSON, JWT-VC JSON-LD, or LDP-VC. Each format ' +
-      'has its own signature and integrity model.',
+      'Format depends on `credential_configuration_id` — the default and lead ' +
+      'configuration is the ISO/IEC 18013-5 mDL (`mso_mdoc`), with SD-JWT-VC ' +
+      '(`dc+sd-jwt`), JWT-VC JSON, JWT-VC JSON-LD, and LDP-VC selectable. Each ' +
+      'format has its own signature and integrity model.',
     attacks: [
       {
         id: 'issuer-signature-skip',

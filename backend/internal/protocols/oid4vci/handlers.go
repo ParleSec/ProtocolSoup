@@ -27,10 +27,11 @@ type createOfferRequest struct {
 }
 
 type credentialRequest struct {
-	Format                    string            `json:"format,omitempty"`
-	CredentialConfigurationID string            `json:"credential_configuration_id,omitempty"`
-	Proof                     *credentialProof  `json:"proof,omitempty"`
-	Proofs                    []credentialProof `json:"proofs,omitempty"`
+	Format                       string                               `json:"format,omitempty"`
+	CredentialConfigurationID    string                               `json:"credential_configuration_id,omitempty"`
+	Proof                        *credentialProof                     `json:"proof,omitempty"`
+	Proofs                       []credentialProof                    `json:"proofs,omitempty"`
+	CredentialResponseEncryption *credentialResponseEncryptionRequest `json:"credential_response_encryption,omitempty"`
 }
 
 type credentialProof struct {
@@ -39,7 +40,8 @@ type credentialProof struct {
 }
 
 type deferredCredentialRequest struct {
-	TransactionID string `json:"transaction_id"`
+	TransactionID                string                               `json:"transaction_id"`
+	CredentialResponseEncryption *credentialResponseEncryptionRequest `json:"credential_response_encryption,omitempty"`
 }
 
 func (p *Plugin) handleCredentialIssuerMetadata(w http.ResponseWriter, r *http.Request) {
@@ -71,9 +73,7 @@ func (p *Plugin) handleCredentialIssuerMetadata(w http.ResponseWriter, r *http.R
 				"locale": "en-US",
 			},
 		},
-		"credential_response_encryption": map[string]interface{}{
-			"required": false,
-		},
+		"credential_response_encryption": credentialResponseEncryptionMetadata(),
 	}
 
 	p.emitEvent(
@@ -234,18 +234,37 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// OAuth 2.0 Attestation-Based Client Authentication: when a
+	// request presents OAuth-Client-Attestation(-PoP) headers at all, that is
+	// the authentication verdict -- a failure here is never treated as "no
+	// attestation attempted, fall back to client_secret", since that would
+	// silently downgrade a rejected stronger method to a weaker one.
+	attestation, attestationUsed, err := p.authenticateClientAttestation(r)
+	if attestationUsed && err != nil {
+		p.emitEvent(
+			sessionID,
+			lookingglass.EventTypeSecurityWarning,
+			"Client Attestation Rejected",
+			map[string]interface{}{"reason": err.Error()},
+			p.vcAnnotation("client_attestation")...,
+		)
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", err.Error())
+		return
+	}
+
 	grantType := r.FormValue("grant_type")
 	switch grantType {
 	case "urn:ietf:params:oauth:grant-type:pre-authorized_code":
-		p.handlePreAuthorizedTokenGrant(w, r, sessionID)
+		p.handlePreAuthorizedTokenGrant(w, r, sessionID, attestation, attestationUsed)
 	case "authorization_code":
-		p.handleAuthorizationCodeTokenGrant(w, r, sessionID)
+		p.handleAuthorizationCodeTokenGrant(w, r, sessionID, attestation, attestationUsed)
 	default:
 		writeOID4VCIError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type is not supported")
 	}
 }
 
-func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
+func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool) {
 	preAuthorizedCode := strings.TrimSpace(r.FormValue("pre-authorized_code"))
 	txCode := strings.TrimSpace(r.FormValue("tx_code"))
 	if preAuthorizedCode == "" {
@@ -341,29 +360,33 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		"c_nonce_expires_in": int(nonceTTL.Seconds()),
 	}
 
+	eventData := map[string]interface{}{
+		"grant_type":             "pre-authorized_code",
+		"offer_id":               offerID,
+		"tx_code_required":       record.TxCodeRequired,
+		"tx_code_supplied":       txCode != "",
+		"credential_ids":         record.Offer.CredentialConfigurationIDs,
+		"deferred":               record.Deferred,
+		"wallet_id":              wallet.ID,
+		"wallet_subject":         wallet.Subject,
+		"c_nonce_expires_in":     int(nonceTTL.Seconds()),
+		"access_token_expires":   int(tokenTTL.Seconds()),
+		"access_token_issued_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if attestationUsed {
+		eventData["client_attestation_client_id"] = attestation.ClientID
+	}
 	p.emitEvent(
 		sessionID,
 		lookingglass.EventTypeFlowStep,
 		"Pre-Authorized Token Issued",
-		map[string]interface{}{
-			"grant_type":             "pre-authorized_code",
-			"offer_id":               offerID,
-			"tx_code_required":       record.TxCodeRequired,
-			"tx_code_supplied":       txCode != "",
-			"credential_ids":         record.Offer.CredentialConfigurationIDs,
-			"deferred":               record.Deferred,
-			"wallet_id":              wallet.ID,
-			"wallet_subject":         wallet.Subject,
-			"c_nonce_expires_in":     int(nonceTTL.Seconds()),
-			"access_token_expires":   int(tokenTTL.Seconds()),
-			"access_token_issued_at": time.Now().UTC().Format(time.RFC3339),
-		},
+		eventData,
 		p.vcAnnotation("c_nonce")...,
 	)
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
+func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool) {
 	if p.mockIDP == nil {
 		writeOID4VCIError(w, http.StatusServiceUnavailable, "server_error", "mock identity provider is unavailable")
 		return
@@ -374,7 +397,18 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	clientID := strings.TrimSpace(r.FormValue("client_id"))
 	clientSecret := strings.TrimSpace(r.FormValue("client_secret"))
 	codeVerifier := strings.TrimSpace(r.FormValue("code_verifier"))
-	if clientID == "" {
+	if attestationUsed {
+		// draft-ietf-oauth-attestation-based-client-auth-09 §7: the Client
+		// Attestation authenticates the Client Instance; its sub claim is the
+		// authoritative client_id, so it takes precedence over (and must not
+		// contradict) any client_id form parameter.
+		if clientID == "" {
+			clientID = attestation.ClientID
+		} else if clientID != attestation.ClientID {
+			writeOID4VCIError(w, http.StatusBadRequest, "invalid_client", "client_id does not match the authenticated client attestation subject")
+			return
+		}
+	} else if clientID == "" {
 		clientID, clientSecret, _ = r.BasicAuth()
 	}
 
@@ -389,7 +423,10 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
 		return
 	}
-	if !client.Public {
+	if !attestationUsed && !client.Public {
+		// draft-ietf-oauth-attestation-based-client-auth-09 §7: a validated
+		// Client Attestation + PoP already authenticates the Client Instance,
+		// replacing (not stacking with) client_secret authentication.
 		if _, err := p.mockIDP.ValidateClient(clientID, clientSecret); err != nil {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
@@ -457,21 +494,23 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	}
 	p.mu.Unlock()
 
+	authEventData := map[string]interface{}{
+		"grant_type":                           "authorization_code",
+		"client_id":                            clientID,
+		"user_id":                              authCode.UserID,
+		"wallet_id":                            wallet.ID,
+		"wallet_subject":                       wallet.Subject,
+		"scope":                                scope,
+		"c_nonce":                              nonce.Value,
+		"expires_in":                           int(tokenTTL.Seconds()),
+		"nonce_expires":                        int(nonceTTL.Seconds()),
+		"client_authenticated_via_attestation": attestationUsed,
+	}
 	p.emitEvent(
 		sessionID,
 		lookingglass.EventTypeFlowStep,
 		"Authorization Code Token Issued",
-		map[string]interface{}{
-			"grant_type":     "authorization_code",
-			"client_id":      clientID,
-			"user_id":        authCode.UserID,
-			"wallet_id":      wallet.ID,
-			"wallet_subject": wallet.Subject,
-			"scope":          scope,
-			"c_nonce":        nonce.Value,
-			"expires_in":     int(tokenTTL.Seconds()),
-			"nonce_expires":  int(nonceTTL.Seconds()),
-		},
+		authEventData,
 		p.vcAnnotation("c_nonce")...,
 	)
 
@@ -573,6 +612,16 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "format does not match credential_configuration_id")
 		return
 	}
+	if req.CredentialResponseEncryption != nil {
+		// OID4VCI 1.0 §8.2/§10: the
+		// wallet MAY request an encrypted response; encryption_required stays
+		// false (credentialResponseEncryptionMetadata), so a missing object is
+		// never rejected here.
+		if err := req.CredentialResponseEncryption.validate(); err != nil {
+			writeOID4VCIError(w, http.StatusBadRequest, "invalid_encryption_parameters", err.Error())
+			return
+		}
+	}
 
 	proofs := p.collectProofs(req)
 	if err := ValidateProofRequirement(true, len(proofs)); err != nil {
@@ -611,7 +660,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	proofDeclaredSubject := ""
 	var holderJWK *crypto.JWK
 	for _, proof := range proofs {
-		nonce, proofSub, proofKey, err := p.validateProofJWT(proof, p.issuerID(), grant.Subject)
+		nonce, proofSub, proofKey, keyAttestationJWT, err := p.validateProofJWT(proof, p.issuerID(), grant.Subject)
 		if err != nil {
 			p.emitEvent(
 				sessionID,
@@ -648,6 +697,36 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			writeOID4VCIError(w, http.StatusBadRequest, "invalid_nonce", "proof nonce does not match active c_nonce")
 			return
 		}
+
+		// OID4VCI 1.0 Appendix D.1/F.1 key_attestations_required (registry.go
+		// RequireKeyAttestation): gated per credential_configuration_id so the
+		// unattested Final plan keeps working while a HAIP-flavoured
+		// configuration can demand it.
+		if credentialConfiguration.RequireKeyAttestation {
+			if err := ValidateKeyAttestationRequirement(true, keyAttestationJWT != ""); err != nil {
+				writeOID4VCIError(w, http.StatusBadRequest, "invalid_proof", err.Error())
+				return
+			}
+			attestation, err := p.validateKeyAttestationJWT(keyAttestationJWT, grant.CNonce.Value)
+			if err != nil {
+				p.emitEvent(
+					sessionID,
+					lookingglass.EventTypeSecurityWarning,
+					"Credential Request Rejected",
+					map[string]interface{}{
+						"reason":        "key_attestation_invalid",
+						"proof_message": err.Error(),
+					},
+					p.vcAnnotation("proof_validation")...,
+				)
+				writeOID4VCIError(w, http.StatusBadRequest, "invalid_proof", fmt.Sprintf("key_attestation: %v", err))
+				return
+			}
+			if err := keyAttestationSatisfiesRequirement(attestation, proofKey, credentialConfiguration.KeyAttestationKeyStorage, credentialConfiguration.KeyAttestationUserAuth); err != nil {
+				writeOID4VCIError(w, http.StatusBadRequest, "invalid_proof", fmt.Sprintf("key_attestation: %v", err))
+				return
+			}
+		}
 	}
 
 	effectiveSubject := grant.Subject
@@ -657,17 +736,8 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 
 	wallet, ok := p.getWalletByID(grant.WalletID)
 	if !ok {
-		wallet = &walletIdentity{
-			ID:             "derived-" + p.randomValue(12),
-			UserID:         effectiveSubject,
-			Subject:        effectiveSubject,
-			GivenName:      "Credential",
-			FamilyName:     "Holder",
-			Department:     "General",
-			Degree:         "General Credential",
-			GraduationYear: time.Now().UTC().Year() - 5,
-			CreatedAt:      time.Now().UTC(),
-		}
+		writeServerError(w, "resolve wallet identity", fmt.Errorf("wallet identity %q is unavailable", grant.WalletID))
+		return
 	}
 
 	p.mu.Lock()
@@ -762,13 +832,15 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			p.vcAnnotation("proof_validation")...,
 		)
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		if err := writeCredentialResponse(w, http.StatusOK, map[string]interface{}{
 			"transaction_id":               transactionID,
 			"c_nonce":                      nextNonce.Value,
 			"c_nonce_expires_in":           int(nonceTTL.Seconds()),
 			"credential_response":          "deferred",
 			"deferred_retry_after_seconds": deferredRetryAfterSeconds,
-		})
+		}, req.CredentialResponseEncryption); err != nil {
+			writeServerError(w, "encrypt credential response", err)
+		}
 		return
 	}
 
@@ -784,12 +856,14 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		p.vcAnnotation("credential_endpoint")...,
 	)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	if err := writeCredentialResponse(w, http.StatusOK, map[string]interface{}{
 		"format":             issuedCredential.Format,
 		"credential":         issuedCredential.Credential,
 		"c_nonce":            nextNonce.Value,
 		"c_nonce_expires_in": int(nonceTTL.Seconds()),
-	})
+	}, req.CredentialResponseEncryption); err != nil {
+		writeServerError(w, "encrypt credential response", err)
+	}
 }
 
 func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request) {
@@ -813,6 +887,15 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 	if req.TransactionID == "" {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", "transaction_id is required")
 		return
+	}
+	if req.CredentialResponseEncryption != nil {
+		// OID4VCI 1.0 §9.1: the Deferred Credential Request's own encryption
+		// parameters govern the Deferred Credential Response, independent of
+		// what (if anything) was sent on the original Credential Request.
+		if err := req.CredentialResponseEncryption.validate(); err != nil {
+			writeOID4VCIError(w, http.StatusBadRequest, "invalid_encryption_parameters", err.Error())
+			return
+		}
 	}
 
 	p.mu.RLock()
@@ -885,12 +968,14 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		p.vcAnnotation("deferred_credential")...,
 	)
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	if err := writeCredentialResponse(w, http.StatusOK, map[string]interface{}{
 		"format":             transaction.Model.Format,
 		"credential":         transaction.Credential,
 		"c_nonce":            nextNonce.Value,
 		"c_nonce_expires_in": int(nonceTTL.Seconds()),
-	})
+	}, req.CredentialResponseEncryption); err != nil {
+		writeServerError(w, "encrypt deferred credential response", err)
+	}
 }
 
 func (p *Plugin) normalizeCredentialConfigurationIDs(rawIDs []string) []string {
@@ -906,38 +991,44 @@ func (p *Plugin) collectProofs(req credentialRequest) []credentialProof {
 	return proofs
 }
 
-func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string, expectedSubject string) (string, string, crypto.JWK, error) {
+// validateProofJWT validates an OID4VCI 1.0 §7 proof JWT and returns its
+// nonce, declared subject, cnf.jwk holder key, and (if present) the raw
+// key_attestation JOSE header value (Appendix F.1) for the caller to validate
+// separately against a credential configuration's key_attestations_required
+// (registry.go, key_attestation.go).
+func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string, expectedSubject string) (nonce string, subject string, holderJWK crypto.JWK, keyAttestationJWT string, err error) {
 	emptyJWK := crypto.JWK{}
 	if strings.TrimSpace(proof.JWT) == "" {
-		return "", "", emptyJWK, fmt.Errorf("proof jwt is required")
+		return "", "", emptyJWK, "", fmt.Errorf("proof jwt is required")
 	}
 	if strings.TrimSpace(strings.ToLower(proof.ProofType)) != "jwt" {
-		return "", "", emptyJWK, fmt.Errorf("unsupported proof_type %q", proof.ProofType)
+		return "", "", emptyJWK, "", fmt.Errorf("unsupported proof_type %q", proof.ProofType)
 	}
 
 	decodedToken, err := crypto.DecodeTokenWithoutValidation(proof.JWT)
 	if err != nil {
-		return "", "", emptyJWK, fmt.Errorf("proof jwt decode failed: %w", err)
+		return "", "", emptyJWK, "", fmt.Errorf("proof jwt decode failed: %w", err)
 	}
 	if err := ValidateOID4VCIProofType(fmt.Sprint(decodedToken.Header["typ"])); err != nil {
-		return "", "", emptyJWK, err
+		return "", "", emptyJWK, "", err
 	}
+	keyAttestationHeader, _ := decodedToken.Header["key_attestation"].(string)
 	iss, _ := decodedToken.Payload["iss"].(string)
 	sub, _ := decodedToken.Payload["sub"].(string)
 	if strings.TrimSpace(iss) == "" || strings.TrimSpace(sub) == "" {
-		return "", "", emptyJWK, fmt.Errorf("proof iss and sub are required")
+		return "", "", emptyJWK, "", fmt.Errorf("proof iss and sub are required")
 	}
 	proofSubject := strings.TrimSpace(iss)
 
 	if strings.HasPrefix(expectedSubject, "did:example:") &&
 		strings.HasPrefix(proofSubject, "did:example:") &&
 		proofSubject != expectedSubject {
-		return "", "", emptyJWK, fmt.Errorf("proof subject %q does not match grant subject %q", proofSubject, expectedSubject)
+		return "", "", emptyJWK, "", fmt.Errorf("proof subject %q does not match grant subject %q", proofSubject, expectedSubject)
 	}
 
 	verificationKey, expectedAlgPrefix, proofJWK, err := proofVerificationKeyFromClaims(decodedToken.Payload)
 	if err != nil {
-		return "", "", emptyJWK, err
+		return "", "", emptyJWK, "", err
 	}
 	parsed, err := jwt.Parse(proof.JWT, func(token *jwt.Token) (interface{}, error) {
 		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
@@ -950,42 +1041,42 @@ func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string
 		return verificationKey, nil
 	})
 	if err != nil {
-		return "", "", emptyJWK, fmt.Errorf("invalid proof jwt: %w", err)
+		return "", "", emptyJWK, "", fmt.Errorf("invalid proof jwt: %w", err)
 	}
 	if !parsed.Valid {
-		return "", "", emptyJWK, fmt.Errorf("proof jwt failed signature validation")
+		return "", "", emptyJWK, "", fmt.Errorf("proof jwt failed signature validation")
 	}
 	if err := ValidateOID4VCIProofType(fmt.Sprint(parsed.Header["typ"])); err != nil {
-		return "", "", emptyJWK, err
+		return "", "", emptyJWK, "", err
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", "", emptyJWK, fmt.Errorf("proof claims are invalid")
+		return "", "", emptyJWK, "", fmt.Errorf("proof claims are invalid")
 	}
 	if err := validateAudienceClaim(claims["aud"], expectedAudience); err != nil {
-		return "", "", emptyJWK, err
+		return "", "", emptyJWK, "", err
 	}
 	expUnix, err := numericDateToInt64(claims["exp"])
 	if err != nil {
-		return "", "", emptyJWK, fmt.Errorf("proof exp claim is invalid")
+		return "", "", emptyJWK, "", fmt.Errorf("proof exp claim is invalid")
 	}
 	iatUnix, err := numericDateToInt64(claims["iat"])
 	if err != nil {
-		return "", "", emptyJWK, fmt.Errorf("proof iat claim is invalid")
+		return "", "", emptyJWK, "", fmt.Errorf("proof iat claim is invalid")
 	}
 	now := time.Now().UTC().Unix()
 	if now >= expUnix {
-		return "", "", emptyJWK, fmt.Errorf("proof is expired")
+		return "", "", emptyJWK, "", fmt.Errorf("proof is expired")
 	}
 	if iatUnix > now+60 {
-		return "", "", emptyJWK, fmt.Errorf("proof iat is in the future")
+		return "", "", emptyJWK, "", fmt.Errorf("proof iat is in the future")
 	}
 	nonceValue, _ := claims["nonce"].(string)
 	if strings.TrimSpace(nonceValue) == "" {
-		return "", "", emptyJWK, fmt.Errorf("proof nonce is required")
+		return "", "", emptyJWK, "", fmt.Errorf("proof nonce is required")
 	}
-	return nonceValue, proofSubject, proofJWK, nil
+	return nonceValue, proofSubject, proofJWK, strings.TrimSpace(keyAttestationHeader), nil
 }
 
 func proofVerificationKeyFromClaims(claims map[string]interface{}) (interface{}, string, crypto.JWK, error) {
@@ -1001,22 +1092,11 @@ func proofVerificationKeyFromClaims(claims map[string]interface{}) (interface{},
 	if err != nil {
 		return nil, "", crypto.JWK{}, err
 	}
-	switch strings.ToUpper(strings.TrimSpace(jwk.Kty)) {
-	case "RSA":
-		key, parseErr := crypto.ParseRSAPublicKeyFromJWK(jwk)
-		if parseErr != nil {
-			return nil, "", crypto.JWK{}, fmt.Errorf("proof cnf.jwk RSA parse failed: %w", parseErr)
-		}
-		return key, "RS", jwk, nil
-	case "EC":
-		key, parseErr := crypto.ParseECPublicKeyFromJWK(jwk)
-		if parseErr != nil {
-			return nil, "", crypto.JWK{}, fmt.Errorf("proof cnf.jwk EC parse failed: %w", parseErr)
-		}
-		return key, "ES", jwk, nil
-	default:
-		return nil, "", crypto.JWK{}, fmt.Errorf("unsupported proof cnf.jwk kty %q", jwk.Kty)
+	key, algPrefix, err := verificationKeyFromJWK(jwk)
+	if err != nil {
+		return nil, "", crypto.JWK{}, fmt.Errorf("proof cnf.jwk: %w", err)
 	}
+	return key, algPrefix, jwk, nil
 }
 
 func parseProofJWK(raw interface{}) (crypto.JWK, error) {

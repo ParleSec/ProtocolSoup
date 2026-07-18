@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"
@@ -45,12 +47,28 @@ type walletHarnessServer struct {
 
 	defaultWalletSubject              string
 	walletDIDMethod                   string
+	walletDefaultCredentialFormat     string
 	trustedVerifierAttestationIssuers map[string]struct{}
 	oid4vciClientID                   string
 	oid4vciClientSecret               string
 	walletSessionTTL                  time.Duration
 	strictIsolation                   bool
 	allowedCORSOrigins                map[string]struct{}
+
+	// deviceKey is the holder device key (EC P-256) used to bind mso_mdoc
+	// credentials (ISO/IEC 18013-5 clause 9.1.2 deviceKeyInfo.deviceKey). It is
+	// persisted (WALLET_DEVICE_KEY_PATH) so the binding of stored credentials
+	// survives restarts; regenerating it would silently invalidate every stored
+	// mdoc's device binding. deviceKeyID is the JWK thumbprint used as kid.
+	deviceKey   *ecdsa.PrivateKey
+	deviceKeyID string
+	// verifierX509Roots is the wallet's independent trust store for x509_san_dns
+	// and x509_hash request objects. Roots carried in an x5c header are never
+	// trusted merely because the sender included them.
+	verifierX509Roots *x509.CertPool
+	// mdocIssuerRoots anchors IssuerAuth document-signer chains when the wallet
+	// accepts an issued mso_mdoc credential.
+	mdocIssuerRoots *x509.CertPool
 
 	mu                sync.Mutex
 	wallets           map[string]*walletMaterial
@@ -119,6 +137,19 @@ type resolvedRequestContext struct {
 	ResponseURI            string
 	Trusted                bool
 	PresentationDefinition map[string]interface{}
+	// DCQLQuery is the raw DCQL query JSON carried by the request object
+	// (OID4VP 1.0 Section 6), when present. The mso_mdoc presentation path uses
+	// it to select which namespace/elements to disclose in the DeviceResponse.
+	DCQLQuery string
+	// ResponseEncryptionJWK is the verifier's ephemeral ECDH-ES response-encryption
+	// public key advertised in client_metadata.jwks (OID4VP 1.0 Section 8.3), when
+	// present. Its RFC 7638 thumbprint is bound into the mso_mdoc OpenID4VPHandover
+	// and it is the recipient key for the encrypted direct_post.jwt response.
+	ResponseEncryptionJWK *intcrypto.JWK
+	// ResponseEncValues is the verifier's advertised
+	// encrypted_response_enc_values_supported list (HAIP 1.0 Section 5 requires
+	// A128GCM and A256GCM), used to select the JWE content encryption algorithm.
+	ResponseEncValues []string
 }
 
 type resolvedRequestEnvelope struct {
@@ -240,6 +271,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid WALLET_DID_METHOD: %v", err)
 	}
+	walletDefaultCredentialFormat, err := resolveWalletDefaultCredentialFormat(envOrDefault("WALLET_DEFAULT_CREDENTIAL_FORMAT", "mso_mdoc"))
+	if err != nil {
+		log.Fatalf("invalid WALLET_DEFAULT_CREDENTIAL_FORMAT: %v", err)
+	}
 	oid4vciClientID := strings.TrimSpace(envOrDefault("WALLET_OID4VCI_CLIENT_ID", "public-app"))
 	oid4vciClientSecret := strings.TrimSpace(os.Getenv("WALLET_OID4VCI_CLIENT_SECRET"))
 	walletSessionTTL := 20 * time.Minute
@@ -283,6 +318,21 @@ func main() {
 		clientTimeout = timeout
 	}
 
+	deviceKeyPath := strings.TrimSpace(os.Getenv("WALLET_DEVICE_KEY_PATH"))
+	deviceKey, err := intcrypto.LoadOrCreateDeviceKey(deviceKeyPath)
+	if err != nil {
+		log.Fatalf("load wallet device key: %v", err)
+	}
+	deviceKeyID := intcrypto.JWKFromECPublicKey(&deviceKey.PublicKey, "").Thumbprint()
+	verifierX509Roots, err := systemRootsWithAdditionalPEM(os.Getenv("WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM"))
+	if err != nil {
+		log.Fatalf("load wallet verifier x509 trust anchors: %v", err)
+	}
+	mdocIssuerRoots, err := explicitRootsFromPEM(os.Getenv("WALLET_MDOC_IACA_ROOT_PEM"))
+	if err != nil {
+		log.Fatalf("load wallet mdoc IACA trust anchors: %v", err)
+	}
+
 	server := &walletHarnessServer{
 		httpClient: &http.Client{
 			Timeout: clientTimeout,
@@ -296,12 +346,17 @@ func main() {
 		appTitle:                          appTitle,
 		defaultWalletSubject:              defaultWalletSubject,
 		walletDIDMethod:                   walletDIDMethod,
+		walletDefaultCredentialFormat:     walletDefaultCredentialFormat,
 		trustedVerifierAttestationIssuers: trustedVerifierAttestationIssuers,
 		oid4vciClientID:                   oid4vciClientID,
 		oid4vciClientSecret:               oid4vciClientSecret,
 		walletSessionTTL:                  walletSessionTTL,
 		strictIsolation:                   strictIsolation,
 		allowedCORSOrigins:                allowedCORSOrigins,
+		deviceKey:                         deviceKey,
+		deviceKeyID:                       deviceKeyID,
+		verifierX509Roots:                 verifierX509Roots,
+		mdocIssuerRoots:                   mdocIssuerRoots,
 		wallets:                           make(map[string]*walletMaterial),
 		oid4vciAuthStates:                 make(map[string]*pendingOID4VCIAuthState),
 	}
@@ -332,9 +387,15 @@ func main() {
 	log.Printf("wallet harness external verifier support: %t", allowExternal)
 	log.Printf("wallet harness app title: %s", appTitle)
 	log.Printf("wallet harness did method: %s", walletDIDMethod)
+	log.Printf("wallet harness default credential format: %s", walletDefaultCredentialFormat)
 	log.Printf("wallet harness strict session isolation: %t", strictIsolation)
 	log.Printf("wallet harness wallet session ttl: %s", walletSessionTTL)
 	log.Printf("wallet harness CORS origins: %d configured", len(allowedCORSOrigins))
+	if deviceKeyPath == "" {
+		log.Printf("wallet harness mdoc device key: ephemeral (set WALLET_DEVICE_KEY_PATH to persist)")
+	} else {
+		log.Printf("wallet harness mdoc device key: persisted at %s", deviceKeyPath)
+	}
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("wallet harness server failed: %v", err)
 	}
@@ -1698,9 +1759,11 @@ func (s *walletHarnessServer) verifyRequestObjectSignature(
 		return "", nil
 	case "x509_san_dns":
 		return s.verifyX509SANDNSRequestObjectSignature(envelope, requestContext)
+	case "x509_hash":
+		return s.verifyX509HashRequestObjectSignature(envelope, requestContext)
 	case "verifier_attestation":
 		return s.verifyVerifierAttestationRequestObjectSignature(ctx, envelope, requestContext)
-	case "x509_hash", "openid_federation":
+	case "openid_federation":
 		return "", fmt.Errorf("client_id_scheme %q is not yet supported by the wallet", trust.ClientIDScheme)
 	case "decentralized_identifier":
 		// Proceed with DID-based verification below
@@ -1733,7 +1796,7 @@ func (s *walletHarnessServer) verifyX509SANDNSRequestObjectSignature(
 	if err != nil {
 		return "", fmt.Errorf("parse request object x5c header: %w", err)
 	}
-	leaf, err := intcrypto.ValidateCertificateChain(certificates, time.Now())
+	leaf, err := intcrypto.ValidateCertificateChainAgainstRoots(certificates, s.verifierX509Roots, time.Now())
 	if err != nil {
 		return "", fmt.Errorf("validate request object x5c chain: %w", err)
 	}
@@ -1756,6 +1819,41 @@ func (s *walletHarnessServer) verifyX509SANDNSRequestObjectSignature(
 	}
 	if !strings.EqualFold(strings.TrimSpace(parsedResponseURI.Hostname()), clientDNSName) {
 		return "", fmt.Errorf("response_uri host %q does not match x509_san_dns client_id %q", parsedResponseURI.Hostname(), clientDNSName)
+	}
+	if err := verifyCompactJWTSignature(envelope.RequestJWT, leaf.PublicKey); err != nil {
+		return "", fmt.Errorf("request object signature verification failed: %w", err)
+	}
+	return describePublicKeyType(leaf.PublicKey), nil
+}
+
+// verifyX509HashRequestObjectSignature validates a request object signed under
+// the x509_hash Client Identifier scheme (OID4VP 1.0 Section 5.9.3; HAIP 1.0
+// Section 5, which mandates x509_hash for encrypted mso_mdoc presentations). The
+// client_id is "x509_hash:" + base64url(SHA-256(DER(leaf))); unlike x509_san_dns
+// the binding is the leaf certificate's hash rather than a DNS SAN, so there is
+// no hostname/response_uri host check here (response_uri trust is enforced by
+// the trusted-callback / external-approval checks elsewhere). The x5c chain is
+// validated per RFC 5280 and the JWT signature verified against the leaf key.
+func (s *walletHarnessServer) verifyX509HashRequestObjectSignature(
+	envelope *resolvedRequestEnvelope,
+	requestContext *resolvedRequestContext,
+) (string, error) {
+	certificates, err := intcrypto.ParseX5CCertificateChain(envelope.DecodedHeader["x5c"])
+	if err != nil {
+		return "", fmt.Errorf("parse request object x5c header: %w", err)
+	}
+	leaf, err := intcrypto.ValidateCertificateChainAgainstRoots(certificates, s.verifierX509Roots, time.Now())
+	if err != nil {
+		return "", fmt.Errorf("validate request object x5c chain: %w", err)
+	}
+	expectedHash := strings.TrimSpace(stripClientIDSchemePrefix(requestContext.ClientID, "x509_hash"))
+	if expectedHash == "" {
+		return "", fmt.Errorf("x509_hash client_id is missing the certificate hash")
+	}
+	digest := sha256.Sum256(leaf.Raw)
+	computedHash := base64.RawURLEncoding.EncodeToString(digest[:])
+	if expectedHash != computedHash {
+		return "", fmt.Errorf("leaf certificate hash does not match x509_hash client_id")
 	}
 	if err := verifyCompactJWTSignature(envelope.RequestJWT, leaf.PublicKey); err != nil {
 		return "", fmt.Errorf("request object signature verification failed: %w", err)
@@ -1828,7 +1926,7 @@ func (s *walletHarnessServer) verifyVerifierAttestationJWT(
 	decodedAttestation *intcrypto.DecodedToken,
 	issuer string,
 ) error {
-	if leaf, hasX5C, err := x5CPublicKeyFromHeader(decodedAttestation.Header); err != nil {
+	if leaf, hasX5C, err := s.x5CPublicKeyFromHeader(decodedAttestation.Header); err != nil {
 		return fmt.Errorf("parse verifier attestation x5c header: %w", err)
 	} else if hasX5C {
 		if err := verifyCompactJWTSignature(attestationJWT, leaf); err != nil {
@@ -1940,7 +2038,7 @@ func (s *walletHarnessServer) isTrustedVerifierAttestationIssuer(issuer string) 
 	return false
 }
 
-func x5CPublicKeyFromHeader(jwtHeader map[string]interface{}) (interface{}, bool, error) {
+func (s *walletHarnessServer) x5CPublicKeyFromHeader(jwtHeader map[string]interface{}) (interface{}, bool, error) {
 	if _, ok := jwtHeader["x5c"]; !ok {
 		return nil, false, nil
 	}
@@ -1948,7 +2046,7 @@ func x5CPublicKeyFromHeader(jwtHeader map[string]interface{}) (interface{}, bool
 	if err != nil {
 		return nil, true, err
 	}
-	leaf, err := intcrypto.ValidateCertificateChain(certificates, time.Now())
+	leaf, err := intcrypto.ValidateCertificateChainAgainstRoots(certificates, s.verifierX509Roots, time.Now())
 	if err != nil {
 		return nil, true, err
 	}
@@ -2144,6 +2242,11 @@ func summarizeCredential(rawCredential string) *credentialSummary {
 	}
 	parsed, err := vc.DefaultCredentialFormatRegistry().ParseAnyCredential(normalized)
 	if err != nil {
+		// mso_mdoc credentials are base64url CBOR, not JWTs, so the registry parse
+		// fails; summarize them directly from the IssuerSigned structure.
+		if mdocSummary := mdocCredentialSummary(normalized); mdocSummary != nil {
+			return mdocSummary
+		}
 		summary := &credentialSummary{}
 		if envelope, parseErr := vc.ParseSDJWTEnvelope(normalized); parseErr == nil {
 			summary.IsSDJWT = true
@@ -2811,6 +2914,8 @@ func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope) (form
 
 func formatToDefaultConfigurationID(format string) string {
 	switch format {
+	case credentialFormatMsoMdoc:
+		return "MobileDrivingLicenceMsoMdoc"
 	case "dc+sd-jwt":
 		return "UniversityDegreeCredential"
 	case "jwt_vc_json":
@@ -2832,6 +2937,29 @@ func matchWalletCredentialsToDCQL(credentials map[string]walletCredentialMateria
 	var matched []walletCredentialMaterial
 	var reasons []string
 	for credID, cred := range credentials {
+		// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so they take
+		// the mdoc DCQL matcher (doctype + [namespace, elementIdentifier] paths)
+		// rather than vc.BuildCredentialEvidence, which would fail to parse them.
+		if strings.EqualFold(strings.TrimSpace(cred.Format), credentialFormatMsoMdoc) {
+			mdocEvidence, err := mdocMatchEvidence(cred)
+			if err != nil {
+				reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
+				continue
+			}
+			anyMatch := false
+			for _, req := range requirements {
+				ok, _, reason := vc.RequirementMatchesMdoc(req, mdocEvidence)
+				if ok {
+					anyMatch = true
+					break
+				}
+				reasons = append(reasons, fmt.Sprintf("credential %s: %s", credID, reason))
+			}
+			if anyMatch {
+				matched = append(matched, cred)
+			}
+			continue
+		}
 		evidence, err := vc.BuildCredentialEvidence(cred.CredentialJWT)
 		if err != nil {
 			reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
@@ -3010,15 +3138,28 @@ func (s *walletHarnessServer) submitToVerifier(
 		if !requestContext.Trusted {
 			return 0, nil, fmt.Errorf("direct_post.jwt is only supported for trusted verifier callbacks")
 		}
-		responseJWT, err := s.createDirectPostResponseJWT(wallet, requestContext, normalizedVPToken)
-		if err != nil {
-			return 0, nil, fmt.Errorf("create direct_post.jwt response: %w", err)
+		if requestContext.ResponseEncryptionJWK != nil {
+			// OID4VP 1.0 Section 8.3 / HAIP 1.0 Section 5: encrypt the
+			// Authorization Response (vp_token + state) to the verifier's
+			// ephemeral ECDH-ES key. mso_mdoc additionally binds this key's
+			// thumbprint into the SessionTranscript handover.
+			enc := selectMdocResponseEnc(requestContext.ResponseEncValues)
+			encryptedResponse, err := encryptMdocResponseForVerifier(*requestContext.ResponseEncryptionJWK, normalizedVPToken, requestContext.State, enc)
+			if err != nil {
+				return 0, nil, fmt.Errorf("encrypt direct_post.jwt response with ECDH-ES: %w", err)
+			}
+			form.Set("response", encryptedResponse)
+		} else {
+			responseJWT, err := s.createDirectPostResponseJWT(wallet, requestContext, normalizedVPToken)
+			if err != nil {
+				return 0, nil, fmt.Errorf("create direct_post.jwt response: %w", err)
+			}
+			encryptedResponse, err := s.encryptForVerifier(responseJWT)
+			if err != nil {
+				return 0, nil, fmt.Errorf("encrypt direct_post.jwt response: %w", err)
+			}
+			form.Set("response", encryptedResponse)
 		}
-		encryptedResponse, err := s.encryptForVerifier(responseJWT)
-		if err != nil {
-			return 0, nil, fmt.Errorf("encrypt direct_post.jwt response: %w", err)
-		}
-		form.Set("response", encryptedResponse)
 	} else {
 		form.Set("vp_token", normalizedVPToken)
 		ps, err := buildPresentationSubmission(requestContext.PresentationDefinition, normalizedVPToken)
@@ -3149,6 +3290,30 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		presDef = pd
 	}
 
+	dcqlQuery := ""
+	if rawDCQL, ok := decodedRequest.Payload["dcql_query"]; ok && rawDCQL != nil {
+		if encoded, merr := json.Marshal(rawDCQL); merr == nil {
+			dcqlQuery = string(encoded)
+		}
+	}
+
+	// OID4VP 1.0 Section 8.3: the verifier advertises its ephemeral response
+	// encryption key (and supported content encryption algorithms) in
+	// client_metadata. For mso_mdoc the EC key's thumbprint is bound into the
+	// SessionTranscript handover and the response is encrypted to it.
+	var responseEncryptionJWK *intcrypto.JWK
+	var responseEncValues []string
+	if clientMetadata, ok := decodedRequest.Payload["client_metadata"].(map[string]interface{}); ok {
+		responseEncryptionJWK = extractResponseEncryptionJWK(clientMetadata)
+		if rawEncValues, ok := clientMetadata["encrypted_response_enc_values_supported"].([]interface{}); ok {
+			for _, rawEncValue := range rawEncValues {
+				if encValue := strings.TrimSpace(asString(rawEncValue)); encValue != "" {
+					responseEncValues = append(responseEncValues, encValue)
+				}
+			}
+		}
+	}
+
 	return &resolvedRequestContext{
 		RequestID:              normalizedRequestID,
 		State:                  state,
@@ -3158,6 +3323,9 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		ResponseURI:            responseURI,
 		Trusted:                trusted,
 		PresentationDefinition: presDef,
+		DCQLQuery:              dcqlQuery,
+		ResponseEncryptionJWK:  responseEncryptionJWK,
+		ResponseEncValues:      responseEncValues,
 	}, nil
 }
 
@@ -3185,6 +3353,39 @@ func resolveWalletDIDMethod(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported did method %q", raw)
 	}
+}
+
+// resolveWalletDefaultCredentialFormat validates the wallet's default stored and
+// presented credential format. It sits alongside the DID-method and
+// signing-algorithm defaults; the default is the ISO/IEC 18013-5
+// mobile driving licence (mso_mdoc). SD-JWT VC and the W3C formats remain fully
+// selectable per-request.
+func resolveWalletDefaultCredentialFormat(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "mso_mdoc":
+		return "mso_mdoc", nil
+	case "dc+sd-jwt":
+		return "dc+sd-jwt", nil
+	case "jwt_vc_json":
+		return "jwt_vc_json", nil
+	case "jwt_vc_json-ld":
+		return "jwt_vc_json-ld", nil
+	case "ldp_vc":
+		return "ldp_vc", nil
+	default:
+		return "", fmt.Errorf("unsupported wallet default credential format %q", raw)
+	}
+}
+
+// defaultCredentialFormat returns the wallet's configured default stored and
+// presented credential format, falling back to mso_mdoc (the mDL) if unset.
+func (s *walletHarnessServer) defaultCredentialFormat() string {
+	if s != nil {
+		if format := strings.TrimSpace(s.walletDefaultCredentialFormat); format != "" {
+			return format
+		}
+	}
+	return credentialFormatMsoMdoc
 }
 
 func walletActiveKeyID(wallet *walletMaterial) (string, error) {
@@ -3303,6 +3504,20 @@ func walletSignBytes(wallet *walletMaterial, payload []byte) ([]byte, error) {
 }
 
 func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestContext *resolvedRequestContext, presentedCredentialJWT string) (string, string, error) {
+	presentedCredential := strings.TrimSpace(presentedCredentialJWT)
+	if presentedCredential == "" {
+		presentedCredential = strings.TrimSpace(wallet.CredentialJWT)
+	}
+	activeCredential := walletActiveCredential(wallet, presentedCredential)
+
+	// mso_mdoc (ISO/IEC 18013-5) presentations are CBOR DeviceResponses bound to
+	// the verifier-reconstructed OID4VP SessionTranscript, not JWT/SD-JWT VPs, so
+	// they build via the dedicated mdoc holder path rather than the credential
+	// format registry (which only handles the JOSE-based formats).
+	if strings.EqualFold(strings.TrimSpace(activeCredential.Format), credentialFormatMsoMdoc) {
+		return s.createMdocVPToken(wallet, requestContext, activeCredential)
+	}
+
 	pubJWK, thumbprint, err := walletActiveJWK(wallet)
 	if err != nil {
 		return "", "", err
@@ -3311,12 +3526,6 @@ func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestConte
 	if err != nil {
 		return "", "", err
 	}
-
-	presentedCredential := strings.TrimSpace(presentedCredentialJWT)
-	if presentedCredential == "" {
-		presentedCredential = strings.TrimSpace(wallet.CredentialJWT)
-	}
-	activeCredential := walletActiveCredential(wallet, presentedCredential)
 	registry := vc.DefaultCredentialFormatRegistry()
 	parsedCredential, _ := registry.ParseAnyCredential(presentedCredential)
 	credentialFormat := ""
@@ -3365,7 +3574,17 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	if wallet == nil || wallet.KeySet == nil {
 		return nil, fmt.Errorf("wallet key material is unavailable")
 	}
-	credentialConfigID, err := s.resolveCredentialConfigurationForIssue(ctx, strings.TrimSpace(options.CredentialConfigID), strings.TrimSpace(options.CredentialFormat), strings.TrimSpace(options.LookingGlassSessionID))
+	options.CredentialConfigID = strings.TrimSpace(options.CredentialConfigID)
+	options.CredentialFormat = strings.TrimSpace(options.CredentialFormat)
+	// No explicit selection: store the wallet's default credential format
+	// (default: mso_mdoc, the mDL). Setting the format here drives both
+	// the device-key proof branch below and the credential request format, so
+	// the default issuance is a complete mdoc flow. Explicit selection (a config
+	// id or format) is left untouched.
+	if options.CredentialConfigID == "" && options.CredentialFormat == "" {
+		options.CredentialFormat = s.defaultCredentialFormat()
+	}
+	credentialConfigID, err := s.resolveCredentialConfigurationForIssue(ctx, options.CredentialConfigID, options.CredentialFormat, strings.TrimSpace(options.LookingGlassSessionID))
 	if err != nil {
 		return nil, err
 	}
@@ -3473,7 +3692,15 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		return nil, fmt.Errorf("token response missing access_token or c_nonce")
 	}
 
-	proofJWT, err := s.createCredentialProofJWT(wallet, offerWalletSubject, cNonce, s.issuerBaseURL+"/oid4vci")
+	var proofJWT string
+	if strings.EqualFold(strings.TrimSpace(options.CredentialFormat), credentialFormatMsoMdoc) {
+		// mso_mdoc binds the persistent device key (ISO/IEC 18013-5 clause
+		// 9.1.2): the proof carries and is signed by the device key, so the
+		// issuer binds that exact key into the MSO deviceKeyInfo.deviceKey.
+		proofJWT, err = s.createMdocDeviceProofJWT(offerWalletSubject, cNonce, s.issuerBaseURL+"/oid4vci")
+	} else {
+		proofJWT, err = s.createCredentialProofJWT(wallet, offerWalletSubject, cNonce, s.issuerBaseURL+"/oid4vci")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -3616,7 +3843,10 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 		return normalizedCredentialConfigID, nil
 	}
 	if normalizedCredentialFormat == "" {
-		return "UniversityDegreeCredential", nil
+		// No explicit selection: resolve the configuration for the wallet's
+		// default credential format (mso_mdoc) from issuer
+		// metadata below, rather than assuming a fixed SD-JWT VC configuration.
+		normalizedCredentialFormat = s.defaultCredentialFormat()
 	}
 
 	metadataURL := s.issuerBaseURL + "/oid4vci/.well-known/openid-credential-issuer"
@@ -4110,6 +4340,12 @@ func (s *walletHarnessServer) bindCredential(wallet *walletMaterial, credentialJ
 		return fmt.Errorf("credential is required")
 	}
 
+	// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so they bypass
+	// the JWT-oriented credential registry and are stored with device binding.
+	if strings.EqualFold(strings.TrimSpace(credentialFormat), credentialFormatMsoMdoc) {
+		return s.bindMdocCredential(wallet, normalizedCredential, credentialConfigID)
+	}
+
 	parsedCredential, err := vc.DefaultCredentialFormatRegistry().ParseAnyCredential(normalizedCredential)
 	if err != nil {
 		return fmt.Errorf("credential parse failed: %w", err)
@@ -4178,6 +4414,20 @@ func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration)
 	if normalizedCredential == "" {
 		return true, fmt.Errorf("credential is required")
 	}
+	if issuerSigned, err := decodeMdocIssuerSignedB64(normalizedCredential); err == nil {
+		msoBytes, _, err := mdoc.ParseIssuerAuth(issuerSigned.IssuerAuth)
+		if err != nil {
+			return true, fmt.Errorf("parse mso_mdoc IssuerAuth: %w", err)
+		}
+		mso, err := mdoc.DecodeMSOBytes(msoBytes)
+		if err != nil {
+			return true, fmt.Errorf("decode mso_mdoc MSO: %w", err)
+		}
+		if mso.ValidityInfo.ValidUntil.IsZero() {
+			return false, nil
+		}
+		return time.Until(mso.ValidityInfo.ValidUntil) <= minRemaining, nil
+	}
 	parsedCredential, err := vc.DefaultCredentialFormatRegistry().ParseAnyCredential(normalizedCredential)
 	if err != nil {
 		return true, fmt.Errorf("parse credential: %w", err)
@@ -4191,7 +4441,7 @@ func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration)
 func walletUserIDFromSubject(subject string) string {
 	normalized := strings.TrimSpace(subject)
 	if normalized == "" {
-		return "alice"
+		return ""
 	}
 	const didPrefix = "did:example:wallet:"
 	lowered := strings.ToLower(normalized)
@@ -4301,9 +4551,43 @@ func parseURLAllowList(raw string) map[string]struct{} {
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
+	// Marshal before writing the status so a serialization failure surfaces as a
+	// clear 500 rather than an opaque empty 200: the previous streaming encoder
+	// wrote the 200 header first, then silently dropped the encode error, leaving
+	// the client with a successful-looking empty body.
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("wallet harness: response serialization failed: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"server_error","error_description":"response serialization failed"}`))
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
+	_, _ = w.Write(body)
+}
+
+func systemRootsWithAdditionalPEM(rawPEM string) (*x509.CertPool, error) {
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if strings.TrimSpace(rawPEM) != "" && !roots.AppendCertsFromPEM([]byte(rawPEM)) {
+		return nil, fmt.Errorf("WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM contains no valid certificates")
+	}
+	return roots, nil
+}
+
+func explicitRootsFromPEM(rawPEM string) (*x509.CertPool, error) {
+	if strings.TrimSpace(rawPEM) == "" {
+		return nil, nil
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM([]byte(rawPEM)) {
+		return nil, fmt.Errorf("WALLET_MDOC_IACA_ROOT_PEM contains no valid certificates")
+	}
+	return roots, nil
 }
 
 func envOrDefault(key string, fallback string) string {

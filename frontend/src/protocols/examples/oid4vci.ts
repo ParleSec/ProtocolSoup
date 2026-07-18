@@ -5,12 +5,15 @@ export const OID4VCI_EXAMPLES: Record<string, CodeExample> = {
     language: 'javascript',
     label: 'JavaScript (Wallet Flow)',
     code: `// OID4VCI Pre-Authorized Code Flow (OpenID4VCI 1.0)
-// 1) Create a credential offer (issuer-side helper endpoint)
+// 1) Create a credential offer (issuer-side helper endpoint).
+//    Omitting credential_configuration_ids selects the default and lead
+//    configuration: the ISO/IEC 18013-5 mobile driving licence (mso_mdoc).
+//    To request SD-JWT VC instead, pass ['UniversityDegreeCredential'].
 const offerResponse = await fetch('/oid4vci/offers/pre-authorized', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
-    credential_configuration_ids: ['UniversityDegreeCredential'],
+    credential_configuration_ids: ['MobileDrivingLicenceMsoMdoc'],
     tx_code_required: false,
   }),
 }).then(r => r.json());
@@ -35,13 +38,16 @@ const tokenResponse = await fetch('/oid4vci/token', {
   }),
 }).then(r => r.json());
 
-// 4) Build proof JWT bound to c_nonce and issuer audience
+// 4) Build proof JWT bound to c_nonce and issuer audience.
+//    mso_mdoc binds an EC P-256 device key via an ES256 proof; the issuer
+//    copies cnf.jwk into the MSO deviceKeyInfo.deviceKey. (SD-JWT VC and the
+//    JOSE formats accept any wallet-supported algorithm, e.g. RS256.)
 const proofJWT = await createOID4VCIProofJWT({
   issuer: offerResponse.wallet_subject,         // wallet subject
   audience: window.location.origin + '/oid4vci',
   nonce: tokenResponse.c_nonce,
   typ: 'openid4vci-proof+jwt',
-  alg: 'RS256',
+  alg: 'ES256',
 });
 
 // 5) Request credential
@@ -52,15 +58,15 @@ const credentialResponse = await fetch('/oid4vci/credential', {
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
-    credential_configuration_id: 'UniversityDegreeCredential',
+    credential_configuration_id: 'MobileDrivingLicenceMsoMdoc',
     proofs: [{ proof_type: 'jwt', jwt: proofJWT }],
   }),
 }).then(r => r.json());
 
-// Immediate issuance response:
+// Immediate issuance response (mso_mdoc is base64url-encoded CBOR IssuerSigned):
 // {
-//   "format": "dc+sd-jwt",
-//   "credential": "<issuer-signed-jwt~disclosure~...>",
+//   "format": "mso_mdoc",
+//   "credential": "<base64url-CBOR-IssuerSigned>",
 //   "c_nonce": "...",
 //   "c_nonce_expires_in": 300
 // }`,

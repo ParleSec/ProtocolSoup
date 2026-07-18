@@ -438,11 +438,7 @@ func ParseECPublicKeyFromJWK(jwk JWK) (*ecdsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to decode y coordinate: %w", err)
 	}
 
-	return &ecdsa.PublicKey{
-		Curve: curve,
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}, nil
+	return parseECPublicKeyCoordinates(curve, xBytes, yBytes)
 }
 
 // ParseEd25519PublicKeyFromJWK parses an Ed25519 public key from JWK.

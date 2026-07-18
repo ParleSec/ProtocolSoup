@@ -25,7 +25,7 @@ func newProvisioningIdP(t *testing.T) *mockidp.MockIdP {
 func TestRegisterConformanceClientsRegistersTwoConfidentialClients(t *testing.T) {
 	idp := newProvisioningIdP(t)
 	uris := []string{
-		"https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback",
+		"https://suite.example/test/a/protocolsoup-basic/callback",
 		"https://www.certification.openid.net/test/a/protocolsoup-basic/callback",
 	}
 	cfg := &Config{
@@ -71,7 +71,7 @@ func TestRegisterConformanceClientsRegistersTwoConfidentialClients(t *testing.T)
 func TestRegisterConformanceClientsHonoursDistinctSecondSecret(t *testing.T) {
 	idp := newProvisioningIdP(t)
 	cfg := &Config{
-		ConformanceRedirectURIs:  []string{"https://localhost.emobix.co.uk:8443/test/a/x/callback"},
+		ConformanceRedirectURIs:  []string{"https://suite.example/test/a/x/callback"},
 		ConformanceClientID:      "conformance-client",
 		ConformanceClientSecret:  "first-secret",
 		ConformanceClient2ID:     "conformance-client-2",
@@ -92,7 +92,7 @@ func TestRegisterConformanceClientsHonoursDistinctSecondSecret(t *testing.T) {
 func TestRegisterConformanceClientsSkippedWithoutSecret(t *testing.T) {
 	idp := newProvisioningIdP(t)
 	cfg := &Config{
-		ConformanceRedirectURIs: []string{"https://localhost.emobix.co.uk:8443/test/a/x/callback"},
+		ConformanceRedirectURIs: []string{"https://suite.example/test/a/x/callback"},
 		ConformanceClientID:     "conformance-client",
 		ConformanceClient2ID:    "conformance-client-2",
 		// No secret: registering would create a confidential client that accepts
@@ -129,7 +129,7 @@ func TestRegisterConformanceClientsTrimsBlankEntries(t *testing.T) {
 	idp := newProvisioningIdP(t)
 	cfg := &Config{
 		ConformanceRedirectURIs: []string{
-			" https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback ",
+			" https://suite.example/test/a/protocolsoup-basic/callback ",
 			"",
 			"   ",
 		},
@@ -147,7 +147,7 @@ func TestRegisterConformanceClientsTrimsBlankEntries(t *testing.T) {
 	if len(client.RedirectURIs) != 1 {
 		t.Fatalf("redirect URIs = %v, want exactly the one non-blank trimmed entry", client.RedirectURIs)
 	}
-	if !idp.ValidateRedirectURI("conformance-client", "https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback") {
+	if !idp.ValidateRedirectURI("conformance-client", "https://suite.example/test/a/protocolsoup-basic/callback") {
 		t.Fatalf("trimmed redirect URI was not registered for exact match")
 	}
 }
