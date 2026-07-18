@@ -3,13 +3,16 @@ package oid4vci
 import (
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +20,7 @@ import (
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
@@ -60,9 +64,11 @@ type walletIdentity struct {
 	Subject        string
 	GivenName      string
 	FamilyName     string
+	Birthdate      string
 	Department     string
 	Degree         string
 	GraduationYear int
+	Claims         map[string]string
 	CreatedAt      time.Time
 }
 
@@ -79,19 +85,31 @@ type Plugin struct {
 
 	mockIDP                  *mockidp.MockIdP
 	keySet                   *crypto.KeySet
+	mdocPKI                  *mdoc.IssuerPKI
 	lookingGlass             *lookingglass.Engine
 	baseURL                  string
 	walletStore              *vc.WalletCredentialStore
 	credentialConfigurations map[string]credentialConfiguration
 	issuerDrivers            map[string]credentialIssuerDriver
 
-	mu                   sync.RWMutex
-	offers               map[string]*offerRecord
-	offersByPreAuthCode  map[string]string
-	accessGrants         map[string]*accessGrant
-	issuanceTransactions map[string]*issuanceTransaction
-	wallets              map[string]*walletIdentity
-	walletsByUserID      map[string]string
+	// clientAttestationTrustAnchors anchors the x5c chain on incoming OAuth
+	// 2.0 Attestation-Based Client Authentication JWTs (OAuth-Client-Attestation
+	// header). Nil means the issuer accepts none -- HAIP client-attestation
+	// auth is refused rather than silently downgraded (client_attestation.go).
+	clientAttestationTrustAnchors *x509.CertPool
+	// keyAttestationTrustAnchors anchors the x5c chain on OID4VCI 1.0 Appendix
+	// D.1 Key Attestation JWTs carried in the jwt proof's key_attestation JOSE
+	// header (key_attestation.go). Nil means none are accepted.
+	keyAttestationTrustAnchors *x509.CertPool
+
+	mu                     sync.RWMutex
+	offers                 map[string]*offerRecord
+	offersByPreAuthCode    map[string]string
+	accessGrants           map[string]*accessGrant
+	issuanceTransactions   map[string]*issuanceTransaction
+	wallets                map[string]*walletIdentity
+	walletsByUserID        map[string]string
+	usedAttestationPoPJTIs map[string]time.Time
 
 	stopPruning chan struct{}
 }
@@ -114,6 +132,7 @@ func NewPlugin() *Plugin {
 		issuanceTransactions:     make(map[string]*issuanceTransaction),
 		wallets:                  make(map[string]*walletIdentity),
 		walletsByUserID:          make(map[string]string),
+		usedAttestationPoPJTIs:   make(map[string]time.Time),
 	}
 }
 
@@ -141,7 +160,23 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		credentialFormatJWTVCJSON:  &jwtVCCredentialIssuerDriver{plugin: p},
 		credentialFormatJWTVCJSONL: &jwtVCJSONLDCredentialIssuerDriver{plugin: p},
 		credentialFormatLDPVC:      &ldpVCCredentialIssuerDriver{plugin: p},
+		credentialFormatMsoMdoc:    &msoMdocCredentialIssuerDriver{plugin: p},
 	}
+
+	// Initialise the ISO/IEC 18013-5 issuer PKI (IACA root + document signer).
+	// Persist under SHOWCASE_MDOC_PKI_PATH if set, otherwise under
+	// {DataDir}/mdoc so the trust anchor and signing key survive restarts. An
+	// empty path yields an ephemeral PKI for development and tests.
+	if err := p.initIssuerPKI(config.DataDir); err != nil {
+		return fmt.Errorf("initialize mso_mdoc issuer pki: %w", err)
+	}
+	if err := p.initClientAttestationTrust(); err != nil {
+		return fmt.Errorf("initialize client attestation trust anchor: %w", err)
+	}
+	if err := p.initKeyAttestationTrust(); err != nil {
+		return fmt.Errorf("initialize key attestation trust anchor: %w", err)
+	}
+
 	p.walletStore = vc.DefaultWalletCredentialStore()
 	p.walletStore.SetEncryptionKey(strings.TrimSpace(os.Getenv("WALLET_PERSISTENCE_KEY")))
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
@@ -205,12 +240,22 @@ func (p *Plugin) evictExpiredIssuanceState() {
 			delete(p.issuanceTransactions, txID)
 		}
 	}
+	for jti, expiry := range p.usedAttestationPoPJTIs {
+		if now.After(expiry) {
+			delete(p.usedAttestationPoPJTIs, jti)
+		}
+	}
 }
 
 // RegisterRoutes registers OID4VCI endpoints.
 func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/.well-known/openid-credential-issuer", p.handleCredentialIssuerMetadata)
 	router.Get("/.well-known/openid-credential-issuer/*", p.handleCredentialIssuerMetadata)
+	// RFC 8414 Authorization Server metadata: makes the authorization_endpoint
+	// and token_endpoint the credential issuer metadata's authorization_servers
+	// entry (issuerID()) points to actually discoverable.
+	router.Get("/.well-known/oauth-authorization-server", p.handleAuthorizationServerMetadata)
+	router.Get("/.well-known/oauth-authorization-server/*", p.handleAuthorizationServerMetadata)
 	router.Get("/credential-offer/{offerID}", p.handleCredentialOfferByReference)
 	router.Post("/offers/pre-authorized", p.handleCreatePreAuthorizedOffer)
 	router.Post("/offers/pre-authorized/by-value", p.handleCreatePreAuthorizedOfferByValue)
@@ -655,6 +700,39 @@ func (p *Plugin) issuerID() string {
 	return p.baseURL + "/oid4vci"
 }
 
+// initIssuerPKI loads or creates the persistent ISO/IEC 18013-5 issuer PKI.
+// The store directory is SHOWCASE_MDOC_PKI_PATH when set, else {dataDir}/mdoc;
+// an empty result is ephemeral (development/tests only). Country and
+// organisation in the Annex B certificate subjects can be overridden via env.
+func (p *Plugin) initIssuerPKI(dataDir string) error {
+	storeDir := strings.TrimSpace(os.Getenv("SHOWCASE_MDOC_PKI_PATH"))
+	if storeDir == "" {
+		if dataDir = strings.TrimSpace(dataDir); dataDir != "" {
+			storeDir = filepath.Join(dataDir, "mdoc")
+		}
+	}
+
+	params := mdoc.DefaultPKIParams(p.issuerID())
+	if country := strings.TrimSpace(os.Getenv("MDOC_ISSUER_COUNTRY")); country != "" {
+		params.Country = strings.ToUpper(country)
+	}
+	if org := strings.TrimSpace(os.Getenv("MDOC_ISSUER_ORG")); org != "" {
+		params.Organization = org
+	}
+
+	pki, err := mdoc.LoadOrCreateIssuerPKI(storeDir, params)
+	if err != nil {
+		return err
+	}
+	p.mdocPKI = pki
+	if storeDir == "" {
+		log.Println("OID4VCI: mso_mdoc issuer PKI initialised (ephemeral, in-memory)")
+	} else {
+		log.Printf("OID4VCI: mso_mdoc issuer PKI initialised (persistent store at %s)", storeDir)
+	}
+	return nil
+}
+
 func (p *Plugin) metadataWellKnownPath() string {
 	parsed, err := url.Parse(p.issuerID())
 	if err != nil {
@@ -665,6 +743,23 @@ func (p *Plugin) metadataWellKnownPath() string {
 		return "/.well-known/openid-credential-issuer"
 	}
 	return "/.well-known/openid-credential-issuer/" + issuerPath
+}
+
+// authorizationServerMetadataWellKnownPath mirrors metadataWellKnownPath's
+// RFC 8414 Section 3.1 well-known URI insertion rule: for an issuer identifier
+// with a path component, the well-known suffix is inserted between the host
+// and the path (e.g. https://host/.well-known/oauth-authorization-server/oid4vci
+// for issuer https://host/oid4vci).
+func (p *Plugin) authorizationServerMetadataWellKnownPath() string {
+	parsed, err := url.Parse(p.issuerID())
+	if err != nil {
+		return "/.well-known/oauth-authorization-server"
+	}
+	issuerPath := strings.Trim(strings.TrimSpace(parsed.Path), "/")
+	if issuerPath == "" {
+		return "/.well-known/oauth-authorization-server"
+	}
+	return "/.well-known/oauth-authorization-server/" + issuerPath
 }
 
 func (p *Plugin) credentialConfigurationsSupported() map[string]map[string]interface{} {
@@ -696,7 +791,15 @@ func (p *Plugin) randomNumericCode(length int) string {
 func (p *Plugin) getOrCreateWallet(userID string) (*walletIdentity, error) {
 	normalizedUserID := strings.TrimSpace(userID)
 	if normalizedUserID == "" {
-		normalizedUserID = "holder-" + p.randomValue(10)
+		// The interactive demo defaults to the IdP's designated seeded identity.
+		// Do not manufacture a holder record when wallet_user_id is omitted.
+		if p.mockIDP == nil {
+			return nil, fmt.Errorf("identity provider is unavailable")
+		}
+		normalizedUserID = strings.TrimSpace(p.mockIDP.DefaultUserID())
+		if normalizedUserID == "" {
+			return nil, fmt.Errorf("identity provider has no default identity")
+		}
 	}
 
 	p.mu.RLock()
@@ -708,29 +811,30 @@ func (p *Plugin) getOrCreateWallet(userID string) (*walletIdentity, error) {
 	}
 	p.mu.RUnlock()
 
-	var givenName string
-	var familyName string
-	var department string
-	if p.mockIDP != nil {
-		if user, ok := p.mockIDP.GetUser(normalizedUserID); ok {
-			givenName, familyName = splitName(user.Name)
-			if givenName == "" {
-				givenName = "Credential"
-			}
-			if familyName == "" {
-				familyName = "Holder"
-			}
-			department = strings.TrimSpace(user.Claims["department"])
+	if p.mockIDP == nil {
+		return nil, fmt.Errorf("identity provider is unavailable")
+	}
+	user, ok := p.mockIDP.GetUser(normalizedUserID)
+	if !ok {
+		return nil, fmt.Errorf("identity record %q does not exist", normalizedUserID)
+	}
+	givenName := strings.TrimSpace(user.GivenName)
+	familyName := strings.TrimSpace(user.FamilyName)
+	if givenName == "" || familyName == "" {
+		fallbackGiven, fallbackFamily := splitName(user.Name)
+		if givenName == "" {
+			givenName = fallbackGiven
+		}
+		if familyName == "" {
+			familyName = fallbackFamily
 		}
 	}
-	if department == "" {
-		department = "General"
+	if givenName == "" || familyName == "" {
+		return nil, fmt.Errorf("identity record %q is missing given_name or family_name", normalizedUserID)
 	}
-	if givenName == "" {
-		givenName = "Credential"
-	}
-	if familyName == "" {
-		familyName = "Holder"
+	claims := make(map[string]string, len(user.Claims))
+	for name, value := range user.Claims {
+		claims[name] = value
 	}
 
 	now := time.Now().UTC()
@@ -742,9 +846,11 @@ func (p *Plugin) getOrCreateWallet(userID string) (*walletIdentity, error) {
 		Subject:        "did:example:wallet:" + subjectComponent,
 		GivenName:      givenName,
 		FamilyName:     familyName,
-		Department:     department,
-		Degree:         strings.TrimSpace(fmt.Sprintf("%s Credential", department)),
-		GraduationYear: now.Year() - 5,
+		Birthdate:      strings.TrimSpace(user.Birthdate),
+		Department:     strings.TrimSpace(claims["department"]),
+		Degree:         strings.TrimSpace(claims["degree"]),
+		GraduationYear: parsePositiveInt(claims["graduation_year"]),
+		Claims:         claims,
 		CreatedAt:      now,
 	}
 
@@ -771,6 +877,14 @@ func splitName(name string) (string, string) {
 		return parts[0], ""
 	}
 	return parts[0], strings.Join(parts[1:], " ")
+}
+
+func parsePositiveInt(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
 }
 
 func normalizeSubjectComponent(value string) string {

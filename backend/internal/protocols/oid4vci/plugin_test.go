@@ -26,7 +26,9 @@ func TestPreAuthorizedFlowWithTxCodeAndProof(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 
-	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{})
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
 	preAuthCode := asString(t, offerPayload["pre_authorized_code"])
@@ -273,7 +275,9 @@ func TestDeferredIssuanceFlow(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 
-	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{})
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
 	walletSubject := asString(t, offerPayload["wallet_subject"])
@@ -337,7 +341,9 @@ func TestDeferredIssuancePendingReturnsRetryHints(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 
-	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{})
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
 	walletSubject := asString(t, offerPayload["wallet_subject"])
@@ -411,7 +417,9 @@ func TestCredentialRequestRejectsNonceMismatchProof(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 
-	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{})
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
 	walletSubject := asString(t, offerPayload["wallet_subject"])
@@ -456,7 +464,9 @@ func TestCredentialRequestRejectsReplayOfPreviousProof(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 
-	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{})
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
 	walletSubject := asString(t, offerPayload["wallet_subject"])
@@ -521,7 +531,9 @@ func TestCredentialRequestRejectsMissingProof(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 
-	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{})
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
 
@@ -558,13 +570,15 @@ func TestCredentialRequestRejectsProofSignedByDifferentWallet(t *testing.T) {
 	defer server.Close()
 
 	aliceOfferResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
-		"wallet_user_id": "alice",
+		"wallet_user_id":               "alice",
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
 	})
 	assertStatus(t, aliceOfferResp, http.StatusCreated)
 	aliceOffer := decodeJSONMap(t, aliceOfferResp)
 
 	bobOfferResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
-		"wallet_user_id": "bob",
+		"wallet_user_id":               "bob",
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
 	})
 	assertStatus(t, bobOfferResp, http.StatusCreated)
 	bobOffer := decodeJSONMap(t, bobOfferResp)

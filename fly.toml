@@ -29,18 +29,14 @@ primary_region = 'syd'
   # public keys are retained in JWKS so previously issued tokens stay verifiable.
   SHOWCASE_KEY_STORE_PATH = '/data/keys'
 
-  # OIDF conformance suite callback URLs registered for the two static
-  # conformance clients (exact match, no wildcards). These cover the locally run
-  # suite used for CI drift monitoring (localhost.emobix.co.uk) and the hosted
-  # official certification suite (www.certification.openid.net), which is the
-  # source of certification evidence, for the aliases the harness uses. The
-  # alias is protocolsoup-<label> for each harness label (basic, basic-post,
-  # implicit, hybrid, formpost-basic, formpost-implicit, formpost-hybrid), so the
-  # hosted portal plan must use the matching alias. The clients are only created
-  # when OIDC_CONFORMANCE_CLIENT_SECRET is also set as a Fly secret, so listing
-  # these URLs alone changes nothing.
-  OIDC_CONFORMANCE_REDIRECT_URIS = 'https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic-post/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-implicit/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-hybrid/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-formpost-basic/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-formpost-implicit/callback,https://localhost.emobix.co.uk:8443/test/a/protocolsoup-formpost-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-hybrid/callback'
-  
+  # Persistent ISO/IEC 18013-5 mso_mdoc issuer PKI on the shared /data volume.
+
+  SHOWCASE_MDOC_PKI_PATH = '/data/mdoc'
+
+  # OIDF conformance suite callback URLs registered for the hosted profiles.
+
+  OIDC_CONFORMANCE_REDIRECT_URIS = 'https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-hybrid/callback'
+
   # SPIFFE/SPIRE Configuration
   # The agent will connect to SPIRE Server via Fly private network
   SPIRE_SERVER_ADDRESS = 'protocolsoup-spire.internal'

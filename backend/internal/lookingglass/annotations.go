@@ -205,6 +205,15 @@ func (l *AnnotationLibrary) OID4VCIAnnotations() map[string][]Annotation {
 				Severity:    "warning",
 			},
 		},
+		"client_attestation": {
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Attestation-Based Client Authentication",
+				Description: "OAuth-Client-Attestation and OAuth-Client-Attestation-PoP headers authenticate the client instance at the token endpoint. A failed or partially-presented attestation is refused outright, never downgraded to client_secret authentication.",
+				Reference:   "draft-ietf-oauth-attestation-based-client-auth",
+				Severity:    "warning",
+			},
+		},
 	}
 }
 
@@ -237,15 +246,15 @@ func (l *AnnotationLibrary) OID4VPAnnotations() map[string][]Annotation {
 				Severity:    "warning",
 			},
 		},
-	"client_id_scheme": {
-		{
-			Type:        AnnotationTypeBestPractice,
-			Title:       "Client ID Scheme Matrix",
-			Description: "Supports redirect_uri, decentralized_identifier, verifier_attestation, and x509_san_dns client_id schemes. x509_san_dns binds verifier identity to a DNS name via X.509 certificate SAN, with the leaf certificate and chain transmitted in the request object x5c JOSE header.",
-			Reference:   "OpenID4VP 1.0 Section 5.9",
-			Severity:    "info",
+		"client_id_scheme": {
+			{
+				Type:        AnnotationTypeBestPractice,
+				Title:       "Client ID Scheme Matrix",
+				Description: "Supports redirect_uri, decentralized_identifier, verifier_attestation, and x509_san_dns client_id schemes. x509_san_dns binds verifier identity to a DNS name via X.509 certificate SAN, with the leaf certificate and chain transmitted in the request object x5c JOSE header.",
+				Reference:   "OpenID4VP 1.0 Section 5.9",
+				Severity:    "info",
+			},
 		},
-	},
 		"nonce_binding": {
 			{
 				Type:        AnnotationTypeSecurityHint,
