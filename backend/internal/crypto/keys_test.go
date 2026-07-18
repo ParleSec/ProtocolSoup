@@ -3,10 +3,39 @@ package crypto
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/hex"
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// TestThumbprintBytesSpecVector pins ThumbprintBytes to the OID4VP 1.0 Appendix
+// B.2.6.1 example: the RFC 7638 SHA-256 thumbprint (raw bytes) of the example
+// verifier encryption JWK must equal the spec's published value. This is the
+// authoritative pin for the jwkThumbprint embedded in the mdoc handover.
+func TestThumbprintBytesSpecVector(t *testing.T) {
+	jwk := JWK{
+		Kty: "EC",
+		Crv: "P-256",
+		X:   "DxiH5Q4Yx3UrukE2lWCErq8N8bqC9CHLLrAwLz5BmE0",
+		Y:   "XtLM4-3h5o3HUH0MHVJV0kyq0iBlrBwlh8qEDMZ4-Pc",
+		Use: "enc",
+		Alg: "ECDH-ES",
+		Kid: "1",
+	}
+	const want = "4283ec927ae0f208daaa2d026a814f2b22dca52cf85ffa8f3f8626c6bd669047"
+
+	got, err := jwk.ThumbprintBytes()
+	if err != nil {
+		t.Fatalf("ThumbprintBytes: %v", err)
+	}
+	if hex.EncodeToString(got) != want {
+		t.Fatalf("thumbprint mismatch\n got: %s\nwant: %s", hex.EncodeToString(got), want)
+	}
+	if len(got) != 32 {
+		t.Fatalf("RFC 7638 SHA-256 thumbprint must be 32 bytes, got %d", len(got))
+	}
+}
 
 func TestKeySetExposesEd25519JWK(t *testing.T) {
 	keySet, err := NewKeySet()

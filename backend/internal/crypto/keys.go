@@ -333,3 +333,30 @@ func (jwk JWK) Thumbprint() string {
 	hash := sha256.Sum256(data)
 	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
+
+// ThumbprintBytes returns the raw 32-byte RFC 7638 JWK SHA-256 thumbprint (the
+// digest itself, not base64url-encoded). The OID4VP 1.0 OpenID4VPHandoverInfo
+// embeds this raw byte string as the jwkThumbprint element (Appendix B.2.6.1),
+// so callers building the mdoc handover need the bytes rather than the text form
+// returned by Thumbprint.
+func (jwk JWK) ThumbprintBytes() ([]byte, error) {
+	var canonical map[string]string
+	switch jwk.Kty {
+	case "RSA":
+		canonical = map[string]string{"e": jwk.E, "kty": jwk.Kty, "n": jwk.N}
+	case "EC":
+		canonical = map[string]string{"crv": jwk.Crv, "kty": jwk.Kty, "x": jwk.X, "y": jwk.Y}
+	case "OKP":
+		canonical = map[string]string{"crv": jwk.Crv, "kty": jwk.Kty, "x": jwk.X}
+	default:
+		return nil, fmt.Errorf("crypto: unsupported kty %q for JWK thumbprint", jwk.Kty)
+	}
+	// json.Marshal of a map emits keys in lexicographic order, which is the
+	// RFC 7638 required member ordering with no insignificant whitespace.
+	data, err := json.Marshal(canonical)
+	if err != nil {
+		return nil, fmt.Errorf("crypto: marshal JWK thumbprint input: %w", err)
+	}
+	hash := sha256.Sum256(data)
+	return hash[:], nil
+}

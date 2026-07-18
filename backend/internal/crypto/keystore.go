@@ -3,6 +3,8 @@ package crypto
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
@@ -11,11 +13,63 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 // keyStoreFile is the on-disk name for the persisted key set.
 const keyStoreFile = "keyset.json"
+
+// deviceKeyFilePerm is the restrictive mode for the persisted wallet device key.
+const deviceKeyFilePerm = 0o600
+
+// LoadOrCreateDeviceKey returns the holder device key (EC P-256) persisted at
+// path, generating and writing it on first use and loading the same key on
+// subsequent runs. The device key is the credential-binding key whose public
+// half is carried in the OID4VCI proof at issuance and bound into the MSO
+// deviceKeyInfo.deviceKey (ISO/IEC 18013-5 clause 9.1.2); it MUST be persistent,
+// because regenerating it silently invalidates the device binding of every
+// stored credential. An empty path returns an ephemeral key (development only).
+func LoadOrCreateDeviceKey(path string) (*ecdsa.PrivateKey, error) {
+	if strings.TrimSpace(path) == "" {
+		return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	}
+
+	if raw, err := os.ReadFile(path); err == nil {
+		key, parseErr := parseECPrivatePEM(string(raw))
+		if parseErr != nil {
+			return nil, fmt.Errorf("failed to load device key from %q: %w", path, parseErr)
+		}
+		if key.Curve != elliptic.P256() {
+			return nil, fmt.Errorf("device key at %q is not an EC P-256 key", path)
+		}
+		return key, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read device key %q: %w", path, err)
+	}
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate device key: %w", err)
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("failed to create device key dir %q: %w", dir, err)
+		}
+	}
+	pemString, err := encodeECPrivatePEM(key)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode device key: %w", err)
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(pemString), deviceKeyFilePerm); err != nil {
+		return nil, fmt.Errorf("failed to write device key: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return nil, fmt.Errorf("failed to persist device key %q: %w", path, err)
+	}
+	return key, nil
+}
 
 // persistedKeySet is the JSON serialisation of a KeySet's private material,
 // key IDs, and retired public keys. Private keys are PEM encoded.
