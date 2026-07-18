@@ -23,7 +23,7 @@
 |----------|----------|---------|-------------|
 | `WALLET_LISTEN_ADDR` | No | `:8080` | Listen address |
 | `WALLET_TARGET_BASE_URL` | Yes | `https://protocolsoup.com` | Trusted verifier/issuer base URL |
-| `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default wallet subject root |
+| `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default holder DID root; this is wallet key identity, not an issuer user-record ID |
 | `WALLET_SESSION_TTL` | No | `20m` | In-memory wallet material TTL |
 | `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Require request/session scoping key for wallet isolation |
 | `WALLET_ALLOWED_CORS_ORIGINS` | No | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | CORS allow-list |
@@ -35,6 +35,7 @@
 ### Storage And Volumes
 
 - Session wallet key material and credential cache are in-memory per scope key, expiring based on `WALLET_SESSION_TTL`.
+- Automatic OID4VCI bootstrap omits `wallet_user_id`, allowing the issuer to select its designated default identity record. The issuer-authorized subject returned in the offer is used in the credential proof while the wallet's own key signs that proof.
 - When `WALLET_DEVICE_KEY_PATH` is set, the `mso_mdoc` (ISO/IEC 18013-5) holder device key is persisted to that file so the device binding of issued mdoc credentials survives restarts; mount a durable volume for it. Otherwise the device key is ephemeral.
 - The wallet stores an issued `mso_mdoc` only after its document-signer chain,
   signature, digests, and validity verify against

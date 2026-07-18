@@ -3591,12 +3591,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 
 	offerPayload, err := func() (map[string]interface{}, error) {
 		offerURL := s.issuerBaseURL + "/oid4vci/offers/pre-authorized"
-		offerBody := map[string]interface{}{
-			"wallet_user_id": walletUserIDFromSubject(wallet.Subject),
-		}
-		if credentialConfigID != "" {
-			offerBody["credential_configuration_ids"] = []string{credentialConfigID}
-		}
+		offerBody := buildOID4VCIOfferRequest(credentialConfigID)
 		rawBody, err := json.Marshal(offerBody)
 		if err != nil {
 			return nil, fmt.Errorf("marshal offer request: %w", err)
@@ -3913,9 +3908,13 @@ func credentialPayloadToString(raw interface{}) (string, error) {
 }
 
 func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, walletSubject string, cNonce string, audience string) (string, error) {
-	subject := strings.TrimSpace(wallet.Subject)
+	// The issuer-authorized subject comes from the credential offer and is
+	// distinct from the wallet's cryptographic holder DID. The proof is signed
+	// by the wallet key and carries cnf.jwk, but its subject must remain bound to
+	// the identity record authorized by the issuer.
+	subject := strings.TrimSpace(walletSubject)
 	if subject == "" {
-		subject = strings.TrimSpace(walletSubject)
+		subject = strings.TrimSpace(wallet.Subject)
 	}
 	if subject == "" {
 		return "", fmt.Errorf("wallet subject is required for proof")
@@ -4438,20 +4437,15 @@ func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration)
 	return time.Until(parsedCredential.ExpiresAt) <= minRemaining, nil
 }
 
-func walletUserIDFromSubject(subject string) string {
-	normalized := strings.TrimSpace(subject)
-	if normalized == "" {
-		return ""
+func buildOID4VCIOfferRequest(credentialConfigID string) map[string]interface{} {
+	offerBody := make(map[string]interface{})
+	if normalizedConfigID := strings.TrimSpace(credentialConfigID); normalizedConfigID != "" {
+		offerBody["credential_configuration_ids"] = []string{normalizedConfigID}
 	}
-	const didPrefix = "did:example:wallet:"
-	lowered := strings.ToLower(normalized)
-	if strings.HasPrefix(lowered, didPrefix) && len(normalized) > len(didPrefix) {
-		return strings.TrimSpace(normalized[len(didPrefix):])
-	}
-	if idx := strings.LastIndex(normalized, ":"); idx >= 0 && idx+1 < len(normalized) {
-		return strings.TrimSpace(normalized[idx+1:])
-	}
-	return normalized
+	// wallet_user_id is intentionally omitted. A holder DID identifies wallet
+	// key material; it is not an identity-provider database key. The issuer
+	// selects its designated default identity when no explicit user is chosen.
+	return offerBody
 }
 
 func (s *walletHarnessServer) validateAllowedURL(raw string) (string, error) {

@@ -54,7 +54,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 |----------|---------|-------------|
 | `WALLET_TARGET_BASE_URL` | `https://protocolsoup.com` | URL of the VC verifier service for OID4VP submissions. |
 | `WALLET_ALLOWED_CORS_ORIGINS` | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins. |
-| `WALLET_DEFAULT_SUBJECT` | `did:example:wallet:alice` | Default DID subject for demo sessions. |
+| `WALLET_DEFAULT_SUBJECT` | `did:example:wallet:alice` | Default holder DID seed for demo sessions. It identifies wallet key material, not an issuer identity-record ID; automatic OID4VCI bootstrap uses the issuer's designated default identity. |
 | `WALLET_DEFAULT_CREDENTIAL_FORMAT` | `mso_mdoc` | Default stored and presented credential format when a request does not name a format or configuration. `mso_mdoc` is the default (the mDL); `dc+sd-jwt` and the W3C formats remain selectable. |
 | `WALLET_DID_METHOD` | `key` | DID method for the wallet holder identifier (e.g. `key`, `web`). |
 | `WALLET_DEFAULT_SIGNING_ALG` | `ES256` | Default holder-binding signing algorithm. `ES256` (EC P-256) matches the `mso_mdoc` default; other wallet-supported algorithms apply to the JOSE formats. |
