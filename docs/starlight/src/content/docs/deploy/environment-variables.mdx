@@ -55,9 +55,15 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `WALLET_TARGET_BASE_URL` | `https://protocolsoup.com` | URL of the VC verifier service for OID4VP submissions. |
 | `WALLET_ALLOWED_CORS_ORIGINS` | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins. |
 | `WALLET_DEFAULT_SUBJECT` | `did:example:wallet:alice` | Default DID subject for demo sessions. |
+| `WALLET_DEFAULT_CREDENTIAL_FORMAT` | `mso_mdoc` | Default stored and presented credential format when a request does not name a format or configuration. `mso_mdoc` is the default (the mDL); `dc+sd-jwt` and the W3C formats remain selectable. |
+| `WALLET_DID_METHOD` | `key` | DID method for the wallet holder identifier (e.g. `key`, `web`). |
+| `WALLET_DEFAULT_SIGNING_ALG` | `ES256` | Default holder-binding signing algorithm. `ES256` (EC P-256) matches the `mso_mdoc` default; other wallet-supported algorithms apply to the JOSE formats. |
 | `WALLET_SESSION_TTL` | Server default | Go duration (e.g. `30m`) for session lifetime. |
 | `WALLET_STRICT_SESSION_ISOLATION` | `true` | Enforce strict session boundaries between demo runs. |
 | `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` | `(empty)` | Comma-separated issuer URLs the wallet trusts for `verifier_attestation` request validation. |
+| `WALLET_DEVICE_KEY_PATH` | `(empty)` | File path for the persistent `mso_mdoc` holder device key (EC P-256). Empty uses an ephemeral key; set a durable path so stored mdoc device bindings survive restarts. |
+| `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` | System roots only | Additional PEM CA trust anchors used when the wallet validates `x509_san_dns` and `x509_hash` request-object chains. Certificates carried in `x5c` are untrusted chain material and are never promoted to roots. |
+| `WALLET_MDOC_IACA_ROOT_PEM` | `(unset)` | PEM IACA root certificate(s) the wallet trusts before storing an issued `mso_mdoc`. Without an explicit root the wallet rejects mdoc issuance rather than trusting the credential's own `x5chain`. |
 
 ## OID4VP Verifier (VC And Federation Services)
 
@@ -67,8 +73,20 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | `verifier_attestation:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=verifier_attestation`. |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS. Set this in production so attestation validation survives restarts and deploys. |
 | `OID4VP_X509_SANDNS_CLIENT_ID` | `x509_san_dns:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=x509_san_dns`. Must match a DNS SAN on the leaf certificate. |
-| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | Ephemeral self-signed chain | PEM-encoded certificate chain added to the request object's `x5c` JOSE header. When unset, an ephemeral CA + leaf chain is generated at startup using the deployment hostname as the leaf SAN. |
-| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | Ephemeral key | PEM-encoded private key matching the leaf certificate used for `x509_san_dns` request signing. When unset, generated alongside the ephemeral chain. Set both PEM variables in production for certificate continuity across restarts. |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | Ephemeral self-signed chain | PEM-encoded certificate chain added to the request object's `x5c` JOSE header (used for both `x509_san_dns` and the HAIP-mandated `x509_hash`). When unset, a CA + leaf chain is auto-generated using the deployment hostname as the leaf SAN; when a data dir is configured it is persisted under `{DataDir}/oid4vp` and reloaded across restarts, so the `x509_hash` `client_id` (the leaf hash) stays stable. |
+| `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | Ephemeral key | PEM-encoded private key matching the leaf certificate used for `x509_san_dns` / `x509_hash` request signing. When unset, generated alongside the auto-provisioned chain. Set both PEM variables to pin an externally issued certificate. |
+| `MDOC_IACA_ROOT_PEM` | `(unset)` | PEM-encoded ISO/IEC 18013-5 IACA root certificate(s) the verifier trusts for `mso_mdoc` presentations. The presented document-signer certificate (in the IssuerAuth `x5chain`) must chain to this root. |
+| `MDOC_IACA_ROOT_PEM_FILE` | `(unset)` | Path to a PEM file with the IACA root(s); used when `MDOC_IACA_ROOT_PEM` is not set. Falls back to the issuer-persisted `iaca_root.pem` under `SHOWCASE_MDOC_PKI_PATH` or `{DataDir}/mdoc`. |
+| `SHOWCASE_MDOC_PKI_PATH` | `{DataDir}/mdoc` (else ephemeral) | Persistent store directory for the OID4VCI issuer's ISO/IEC 18013-5 `mso_mdoc` PKI (IACA root + document-signer chain). The OID4VP verifier loads the same `iaca_root.pem` here as its `mso_mdoc` trust anchor. **Point this at a durable volume in any deployment that issues and verifies `mso_mdoc` in the same app.** When neither this nor a data dir is set, the issuer PKI is ephemeral (regenerated on each boot) and the verifier has no trust anchor, so every `mso_mdoc` presentation is denied with `mdoc_trust_anchor_unavailable`. |
+
+## OID4VCI Issuer (VC Service)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MDOC_ISSUER_COUNTRY` | `US` | Two-letter country code used in the ISO/IEC 18013-5 issuer PKI (IACA root and document-signer) certificate subjects. |
+| `MDOC_ISSUER_ORG` | `ProtocolSoup` | Organization name used in the ISO/IEC 18013-5 issuer PKI certificate subjects. |
+| `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` | `(unset)` | PEM-encoded CA certificate(s) the issuer trusts to anchor the `x5c` chain on incoming OAuth 2.0 Attestation-Based Client Authentication JWTs (`OAuth-Client-Attestation` header, draft-ietf-oauth-attestation-based-client-auth). Required to accept `client_attestation` client authentication at the token endpoint. When unset, the issuer refuses any request that presents attestation headers (`invalid_client`) rather than silently downgrading to a weaker method; credential issuer metadata's `token_endpoint_auth_methods_supported` also omits `attest_jwt_client_auth` in that case. |
+| `OID4VCI_KEY_ATTESTATION_TRUST_ANCHOR_PEM` | `(unset)` | PEM-encoded CA certificate(s) the issuer trusts to anchor the `x5c` chain on OID4VCI 1.0 Appendix D.1 Key Attestation JWTs carried in the proof JWT's `key_attestation` JOSE header. Required for credential configurations that set `key_attestations_required` (e.g. `MobileDrivingLicenceMsoMdocHAIP`). When unset, a credential request against a key-attestation-required configuration is rejected with `invalid_proof`. |
 
 ## Usage Notes
 
@@ -77,4 +95,5 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 - `SHOWCASE_CORS_ORIGINS` must include the origin of your frontend. If the UI is at `https://app.example.com`, add that origin.
 - For SCIM, set `SCIM_API_TOKEN` to any secret string. Clients must include `Authorization: Bearer <your-token>` on every request.
 - To enable real `verifier_attestation` OID4VP flows, publish the verifier issuer URL from the verifier service and add that issuer to the wallet's `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` allow-list.
-- `x509_san_dns` works out of the box. When the PEM env vars are unset, an ephemeral ECDSA P-256 CA + leaf certificate chain is generated at startup with the leaf SAN bound to the deployment hostname from `SHOWCASE_BASE_URL`. Provide your own PEM chain and key for production certificate continuity.
+- `x509_san_dns` and the HAIP `x509_hash` prefix work out of the box. When the PEM env vars are unset, an ECDSA P-256 CA + leaf certificate chain is auto-provisioned with the leaf SAN bound to the deployment hostname from `SHOWCASE_BASE_URL`; with a data dir it is persisted under `{DataDir}/oid4vp` and reloaded on restart so the `x509_hash` `client_id` stays stable (important during a certification window, where the wallet pins by the leaf hash). Provide your own PEM chain and key to pin an externally issued certificate.
+- To verify `mso_mdoc` (ISO/IEC 18013-5) presentations, point the verifier at the issuer's IACA root via `MDOC_IACA_ROOT_PEM` (or `MDOC_IACA_ROOT_PEM_FILE`). The trust anchor is the IACA root, never the document-signer certificate. When the issuer and verifier run in the same deployment, set `SHOWCASE_MDOC_PKI_PATH` (or `SHOWCASE_DATA_DIR`) to a durable volume so the issuer persists `iaca_root.pem` and the verifier loads it automatically as its trust anchor; without it the PKI is ephemeral and presentations are denied with `mdoc_trust_anchor_unavailable`.

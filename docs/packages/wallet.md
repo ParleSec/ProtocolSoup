@@ -28,11 +28,17 @@
 | `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Require request/session scoping key for wallet isolation |
 | `WALLET_ALLOWED_CORS_ORIGINS` | No | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | CORS allow-list |
 | `WALLET_HTTP_TIMEOUT` | No | `15s` | Upstream request timeout |
+| `WALLET_DEVICE_KEY_PATH` | No | `(empty)` | Persistent `mso_mdoc` holder device key (EC P-256) file path; empty uses an ephemeral key |
+| `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` | No | System roots only | Additional PEM CA roots trusted for `x509_san_dns` / `x509_hash` request objects; `x5c` certificates are never self-trusted |
+| `WALLET_MDOC_IACA_ROOT_PEM` | Required for mdoc storage | `(empty)` | PEM IACA roots trusted when verifying `IssuerAuth` before an issued `mso_mdoc` is stored |
 
 ### Storage And Volumes
 
-- No disk persistence; wallet key material and credential cache are in-memory per scope key.
-- Session-scoped wallet entries expire based on `WALLET_SESSION_TTL`.
+- Session wallet key material and credential cache are in-memory per scope key, expiring based on `WALLET_SESSION_TTL`.
+- When `WALLET_DEVICE_KEY_PATH` is set, the `mso_mdoc` (ISO/IEC 18013-5) holder device key is persisted to that file so the device binding of issued mdoc credentials survives restarts; mount a durable volume for it. Otherwise the device key is ephemeral.
+- The wallet stores an issued `mso_mdoc` only after its document-signer chain,
+  signature, digests, and validity verify against
+  `WALLET_MDOC_IACA_ROOT_PEM`.
 
 ### Health And Readiness
 
