@@ -5,7 +5,10 @@ export const OID4VP_EXAMPLES: Record<string, CodeExample> = {
     language: 'javascript',
     label: 'JavaScript (Verifier + Wallet Callback)',
     code: `// OID4VP DCQL + direct_post (OpenID4VP 1.0)
-// 1) Verifier creates authorization request with DCQL query
+// 1) Verifier creates authorization request with a DCQL query.
+//    The default/canonical request targets the ISO/IEC 18013-5 mDL (mso_mdoc);
+//    omitting dcql_query (and scope) selects it. SD-JWT VC and the W3C formats
+//    remain selectable by naming them in an explicit dcql_query.
 const createRequest = await fetch('/oid4vp/request/create', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -16,9 +19,13 @@ const createRequest = await fetch('/oid4vp/request/create', {
     dcql_query: {
       credentials: [
         {
-          id: 'university_degree',
-          meta: { vct_values: ['https://protocolsoup.com/credentials/university_degree'] },
-          claims: [{ path: ['degree'] }, { path: ['graduation_year'] }],
+          id: 'mdl',
+          format: 'mso_mdoc',
+          meta: { doctype_values: ['org.iso.18013.5.1.mDL'] },
+          claims: [
+            { path: ['org.iso.18013.5.1', 'family_name'] },
+            { path: ['org.iso.18013.5.1', 'document_number'] },
+          ],
         },
       ],
     },

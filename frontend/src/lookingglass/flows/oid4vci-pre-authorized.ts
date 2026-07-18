@@ -26,6 +26,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
 
   private flowConfig: OID4VCIPreAuthorizedConfig
   private walletKeyPairPromise?: Promise<CryptoKeyPair>
+  private walletDeviceKeyPairPromise?: Promise<CryptoKeyPair>
 
   constructor(config: OID4VCIPreAuthorizedConfig) {
     super(config)
@@ -295,28 +296,36 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     const audience = `${window.location.origin}${this.config.baseUrl}`
     const now = Math.floor(Date.now() / 1000)
     const expiration = now + 180
-    const { privateKey, publicJWK, kid } = await this.getWalletSigningMaterial()
 
-    const proofJWT = await this.signRS256JWT(
-      {
-        alg: 'RS256',
-        typ: 'openid4vci-proof+jwt',
-        kid,
+    // ISO/IEC 18013-5 mso_mdoc binds an EC P-256 device key via an ES256 proof
+    // (the issuer copies cnf.jwk into the MSO deviceKeyInfo.deviceKey), so the
+    // mDL default issues a genuine device-key proof. The JOSE formats keep the
+    // existing RS256 proof. The proof algorithm matches the credential format.
+    const isMdoc = this.selectedCredentialFormat() === 'mso_mdoc'
+    const { privateKey, publicJWK, kid, alg } = isMdoc
+      ? await this.getWalletDeviceSigningMaterial()
+      : await this.getWalletSigningMaterial()
+
+    const claims = {
+      iss: normalizedSubject,
+      sub: normalizedSubject,
+      aud: audience,
+      nonce: cNonce,
+      iat: now,
+      exp: expiration,
+      jti: this.randomValue(20),
+      cnf: {
+        jwk: publicJWK,
       },
-      {
-        iss: normalizedSubject,
-        sub: normalizedSubject,
-        aud: audience,
-        nonce: cNonce,
-        iat: now,
-        exp: expiration,
-        jti: this.randomValue(20),
-        cnf: {
-          jwk: publicJWK,
-        },
-      },
-      privateKey,
-    )
+    }
+    const header = {
+      alg,
+      typ: 'openid4vci-proof+jwt',
+      kid,
+    }
+    const proofJWT = isMdoc
+      ? await this.signES256JWT(header, claims, privateKey)
+      : await this.signRS256JWT(header, claims, privateKey)
     const decodedProofJWT = decodeJWTWithoutValidation(proofJWT)
 
     this.addVCArtifact({
@@ -476,19 +485,28 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
   }
 
   private captureCredential(rawCredential: string, additionalMetadata?: Record<string, unknown>): void {
-    const issuerJWT = this.extractIssuerJWT(rawCredential)
-    const decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
-    const credentialFormat = String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'dc+sd-jwt'
-    const decoded = this.decodeJwt(issuerJWT, 'access_token')
-    this.updateState({
-      decodedTokens: [...this.state.decodedTokens, decoded],
-    })
+    const credentialFormat = String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'mso_mdoc'
+    // mso_mdoc credentials are a base64url-encoded CBOR IssuerSigned structure
+    // (ISO/IEC 18013-5), not a JOSE JWT. They have no "~" disclosure tail and
+    // cannot be decoded as a JWT, so we record the raw credential as-is rather
+    // than misrepresenting it through the JWT decoder.
+    const isMdoc = credentialFormat === 'mso_mdoc'
+
+    let decodedCredentialJWT: ReturnType<typeof decodeJWTWithoutValidation> = null
+    if (!isMdoc) {
+      const issuerJWT = this.extractIssuerJWT(rawCredential)
+      const decoded = this.decodeJwt(issuerJWT, 'access_token')
+      this.updateState({
+        decodedTokens: [...this.state.decodedTokens, decoded],
+      })
+      decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
+    }
     const disclosureCount = rawCredential.split('~').filter(Boolean).length - 1
     this.addVCArtifact({
       type: 'credential',
       title: `Issued ${credentialFormat} Credential`,
       format: credentialFormat,
-      rfcReference: 'OpenID4VCI 1.0 Section 8',
+      rfcReference: isMdoc ? 'ISO/IEC 18013-5 IssuerSigned' : 'OpenID4VCI 1.0 Section 8',
       raw: rawCredential,
       json: decodedCredentialJWT
         ? { header: decodedCredentialJWT.header, payload: decodedCredentialJWT.payload }
@@ -515,7 +533,8 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     if (configured) {
       return configured
     }
-    return 'UniversityDegreeCredential'
+    // Default: the ISO/IEC 18013-5 mobile driving licence (mso_mdoc).
+    return 'MobileDrivingLicenceMsoMdoc'
   }
 
   private selectedCredentialFormat(responsePayload?: Record<string, unknown>): string {
@@ -527,7 +546,8 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     if (configured) {
       return configured
     }
-    return 'dc+sd-jwt'
+    // Default credential format: mso_mdoc (the mDL).
+    return 'mso_mdoc'
   }
 
   private extractIssuerJWT(rawCredential: string): string {
@@ -535,7 +555,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return segments[0] || rawCredential
   }
 
-  private async getWalletSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string }> {
+  private async getWalletSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string; alg: string }> {
     if (!this.walletKeyPairPromise) {
       this.walletKeyPairPromise = window.crypto.subtle.generateKey(
         {
@@ -566,7 +586,66 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       privateKey: keyPair.privateKey,
       publicJWK,
       kid,
+      alg: 'RS256',
     }
+  }
+
+  // getWalletDeviceSigningMaterial returns an EC P-256 device key for the
+  // mso_mdoc proof (ISO/IEC 18013-5 deviceKeyInfo.deviceKey). The public JWK is
+  // an EC2/P-256 key, signed with ES256, so the issuer binds this exact device
+  // key into the MSO.
+  private async getWalletDeviceSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string; alg: string }> {
+    if (!this.walletDeviceKeyPairPromise) {
+      this.walletDeviceKeyPairPromise = window.crypto.subtle.generateKey(
+        {
+          name: 'ECDSA',
+          namedCurve: 'P-256',
+        },
+        true,
+        ['sign', 'verify'],
+      ) as Promise<CryptoKeyPair>
+    }
+    const keyPair = await this.walletDeviceKeyPairPromise
+    const exported = await window.crypto.subtle.exportKey('jwk', keyPair.publicKey)
+    const publicJWK: Record<string, unknown> = {
+      kty: exported.kty,
+      crv: exported.crv,
+      x: exported.x,
+      y: exported.y,
+      alg: 'ES256',
+      use: 'sig',
+    }
+    const exportedKid = (exported as Record<string, unknown>).kid
+    const kid = typeof exportedKid === 'string' && exportedKid.length > 0
+      ? exportedKid
+      : `wallet-device-${(exported.x || '').slice(0, 12)}`
+    publicJWK.kid = kid
+    return {
+      privateKey: keyPair.privateKey,
+      publicJWK,
+      kid,
+      alg: 'ES256',
+    }
+  }
+
+  // signES256JWT signs a JWS with ECDSA P-256 + SHA-256. Web Crypto returns the
+  // signature as the raw r||s concatenation, which is exactly the JWS ES256
+  // signature encoding (RFC 7515 Appendix A.3).
+  private async signES256JWT(
+    header: Record<string, unknown>,
+    payload: Record<string, unknown>,
+    privateKey: CryptoKey,
+  ): Promise<string> {
+    const encodedHeader = this.base64UrlEncodeString(JSON.stringify(header))
+    const encodedPayload = this.base64UrlEncodeString(JSON.stringify(payload))
+    const signingInput = `${encodedHeader}.${encodedPayload}`
+    const signature = await window.crypto.subtle.sign(
+      { name: 'ECDSA', hash: { name: 'SHA-256' } },
+      privateKey,
+      new TextEncoder().encode(signingInput),
+    )
+    const encodedSignature = this.base64UrlEncodeBytes(new Uint8Array(signature))
+    return `${signingInput}.${encodedSignature}`
   }
 
   private async signRS256JWT(
