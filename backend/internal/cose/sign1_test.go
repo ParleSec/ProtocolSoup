@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"math/big"
 	"testing"
 )
 
@@ -41,11 +40,30 @@ func mustHex(t *testing.T, value string) []byte {
 }
 
 func p256PublicFromXY(x, y []byte) *ecdsa.PublicKey {
-	return &ecdsa.PublicKey{Curve: elliptic.P256(), X: new(big.Int).SetBytes(x), Y: new(big.Int).SetBytes(y)}
+	if len(x) != p256CoordLen || len(y) != p256CoordLen {
+		panic("P-256 coordinates must be 32 bytes")
+	}
+	encoded := make([]byte, 1+2*p256CoordLen)
+	encoded[0] = 0x04
+	copy(encoded[1:1+p256CoordLen], x)
+	copy(encoded[1+p256CoordLen:], y)
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	if err != nil {
+		panic(err)
+	}
+	return pub
 }
 
 func p256PrivateFromXYD(x, y, d []byte) *ecdsa.PrivateKey {
-	return &ecdsa.PrivateKey{PublicKey: *p256PublicFromXY(x, y), D: new(big.Int).SetBytes(d)}
+	expectedPublic := p256PublicFromXY(x, y)
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), d)
+	if err != nil {
+		panic(err)
+	}
+	if !priv.PublicKey.Equal(expectedPublic) {
+		panic("P-256 private scalar does not match public coordinates")
+	}
+	return priv
 }
 
 // TestVerifySign1ExternalVector verifies the published COSE_Sign1 signature

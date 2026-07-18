@@ -80,7 +80,15 @@ func TestCOSEKeyPrivateRoundTrip(t *testing.T) {
 		t.Fatalf("COSEKeyToECPrivateKey: %v", err)
 	}
 
-	if back.D.Cmp(priv.D) != 0 {
+	backD, err := back.Bytes()
+	if err != nil {
+		t.Fatalf("encode reconstructed private key: %v", err)
+	}
+	originalD, err := priv.Bytes()
+	if err != nil {
+		t.Fatalf("encode original private key: %v", err)
+	}
+	if !bytes.Equal(backD, originalD) {
 		t.Fatal("private scalar d not preserved")
 	}
 	if !back.PublicKey.Equal(&priv.PublicKey) {

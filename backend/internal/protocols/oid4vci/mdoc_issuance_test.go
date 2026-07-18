@@ -168,7 +168,7 @@ func TestMsoMdocPreAuthorizedIssuance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode bound device key: %v", err)
 	}
-	if boundKey.X.Cmp(deviceKey.X) != 0 || boundKey.Y.Cmp(deviceKey.Y) != 0 {
+	if !boundKey.Equal(&deviceKey.PublicKey) {
 		t.Fatal("MSO deviceKey does not match the proof device key")
 	}
 
@@ -285,7 +285,7 @@ func TestMsoMdocAuthorizationCodeIssuance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode bound device key: %v", err)
 	}
-	if boundKey.X.Cmp(deviceKey.X) != 0 || boundKey.Y.Cmp(deviceKey.Y) != 0 {
+	if !boundKey.Equal(&deviceKey.PublicKey) {
 		t.Fatal("MSO deviceKey does not match the proof device key (authorization code flow)")
 	}
 }

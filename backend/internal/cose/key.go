@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"fmt"
-	"math/big"
 )
 
 // COSE_Key parameter labels and values for EC2/P-256 keys. The labels are
@@ -12,14 +11,14 @@ import (
 // "COSE Key Type Parameters" registries. ISO/IEC 18013-5 references these
 // structures (for the MSO deviceKey) but does not define the labels itself.
 const (
-	keyLabelKty   = 1  // Common: key type
+	keyLabelKty    = 1  // Common: key type
 	keyLabelEC2Crv = -1 // EC2: curve
 	keyLabelEC2X   = -2 // EC2: x-coordinate
 	keyLabelEC2Y   = -3 // EC2: y-coordinate
 	keyLabelEC2D   = -4 // EC2: private key (d)
 
-	keyTypeEC2  = 2 // kty value: EC2
-	curveP256   = 1 // crv value: P-256 (secp256r1)
+	keyTypeEC2   = 2 // kty value: EC2
+	curveP256    = 1 // crv value: P-256 (secp256r1)
 	p256CoordLen = 32
 )
 
@@ -76,11 +75,18 @@ func ECPublicKeyToCOSEKey(key *ecdsa.PublicKey) (COSEKey, error) {
 	if key.Curve != elliptic.P256() {
 		return nil, fmt.Errorf("cose: unsupported curve %v, only P-256 is supported in phase 1", key.Curve)
 	}
+	encoded, err := key.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("cose: encode P-256 public key: %w", err)
+	}
+	if len(encoded) != 1+2*p256CoordLen || encoded[0] != 0x04 {
+		return nil, fmt.Errorf("cose: unexpected P-256 public key encoding length %d", len(encoded))
+	}
 	return COSEKey{
 		keyLabelKty:    int64(keyTypeEC2),
 		keyLabelEC2Crv: int64(curveP256),
-		keyLabelEC2X:   padCoordinate(key.X, p256CoordLen),
-		keyLabelEC2Y:   padCoordinate(key.Y, p256CoordLen),
+		keyLabelEC2X:   append([]byte(nil), encoded[1:1+p256CoordLen]...),
+		keyLabelEC2Y:   append([]byte(nil), encoded[1+p256CoordLen:]...),
 	}, nil
 }
 
@@ -94,7 +100,11 @@ func ECPrivateKeyToCOSEKey(key *ecdsa.PrivateKey) (COSEKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	pub[keyLabelEC2D] = padCoordinate(key.D, p256CoordLen)
+	d, err := key.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("cose: encode P-256 private key: %w", err)
+	}
+	pub[keyLabelEC2D] = append([]byte(nil), d...)
 	return pub, nil
 }
 
@@ -112,14 +122,19 @@ func COSEKeyToECPublicKey(k COSEKey) (*ecdsa.PublicKey, error) {
 	if !ok {
 		return nil, fmt.Errorf("cose: COSE_Key missing y-coordinate (label -3)")
 	}
-	pub := &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     new(big.Int).SetBytes(x),
-		Y:     new(big.Int).SetBytes(y),
+	if len(x) != p256CoordLen || len(y) != p256CoordLen {
+		return nil, fmt.Errorf(
+			"cose: invalid P-256 coordinate lengths x=%d y=%d",
+			len(x),
+			len(y),
+		)
 	}
-	// ECDH() validates the point lies on the curve and is not the identity,
-	// which is the non-deprecated way to reject invalid public points.
-	if _, err := pub.ECDH(); err != nil {
+	encoded := make([]byte, 1+2*p256CoordLen)
+	encoded[0] = 0x04
+	copy(encoded[1:1+p256CoordLen], x)
+	copy(encoded[1+p256CoordLen:], y)
+	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), encoded)
+	if err != nil {
 		return nil, fmt.Errorf("cose: invalid P-256 public point: %w", err)
 	}
 	return pub, nil
@@ -136,12 +151,12 @@ func COSEKeyToECPrivateKey(k COSEKey) (*ecdsa.PrivateKey, error) {
 	if !ok {
 		return nil, fmt.Errorf("cose: COSE_Key missing private scalar (label -4)")
 	}
-	priv := &ecdsa.PrivateKey{
-		PublicKey: *pub,
-		D:         new(big.Int).SetBytes(d),
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), d)
+	if err != nil {
+		return nil, fmt.Errorf("cose: invalid P-256 private scalar: %w", err)
 	}
-	if priv.D.Sign() <= 0 || priv.D.Cmp(elliptic.P256().Params().N) >= 0 {
-		return nil, fmt.Errorf("cose: P-256 private scalar out of range [1, n-1]")
+	if !priv.PublicKey.Equal(pub) {
+		return nil, fmt.Errorf("cose: private scalar does not match public coordinates")
 	}
 	return priv, nil
 }
@@ -177,19 +192,6 @@ func requireEC2P256(k COSEKey) error {
 		return fmt.Errorf("cose: unsupported crv %d, only P-256 (1) is supported in phase 1", crv)
 	}
 	return nil
-}
-
-// padCoordinate returns the big-endian bytes of n left-padded with zeros to
-// size. RFC 9052 Section 7 requires EC coordinates to be a fixed length with
-// leading zero octets preserved; Go's big.Int.Bytes trims them.
-func padCoordinate(n *big.Int, size int) []byte {
-	b := n.Bytes()
-	if len(b) >= size {
-		return b
-	}
-	out := make([]byte, size)
-	copy(out[size-len(b):], b)
-	return out
 }
 
 func asInt64(v any) (int64, bool) {

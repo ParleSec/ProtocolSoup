@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"strings"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -57,7 +56,11 @@ func newMdocResponseEncryptionKey(kid string) (private crypto.JWK, public crypto
 	public.Use = "enc"
 	public.Alg = mdocResponseEncAlg
 	private = public
-	private.D = base64.RawURLEncoding.EncodeToString(priv.D.Bytes())
+	d, err := priv.Bytes()
+	if err != nil {
+		return crypto.JWK{}, crypto.JWK{}, fmt.Errorf("encode mdoc response encryption key: %w", err)
+	}
+	private.D = base64.RawURLEncoding.EncodeToString(d)
 	return private, public, nil
 }
 
@@ -75,7 +78,14 @@ func ecPrivateKeyFromJWK(jwk crypto.JWK) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode EC private d: %w", err)
 	}
-	return &ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(dBytes)}, nil
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), dBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse EC private d: %w", err)
+	}
+	if !priv.PublicKey.Equal(pub) {
+		return nil, fmt.Errorf("EC private d does not match the JWK public coordinates")
+	}
+	return priv, nil
 }
 
 // encodeMdocVPToken builds the OID4VP 1.0 DCQL vp_token for an mdoc

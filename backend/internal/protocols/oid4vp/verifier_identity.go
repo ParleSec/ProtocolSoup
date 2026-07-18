@@ -657,7 +657,7 @@ func verifyPrivateKeyMatchesCertificate(certificate *x509.Certificate, privateKe
 		if !ok {
 			return fmt.Errorf("certificate public key is not EC")
 		}
-		if publicKey.X.Cmp(typed.X) != 0 || publicKey.Y.Cmp(typed.Y) != 0 || publicKey.Curve != typed.Curve {
+		if !publicKey.Equal(&typed.PublicKey) {
 			return fmt.Errorf("ecdsa public key mismatch")
 		}
 	case ed25519.PrivateKey:

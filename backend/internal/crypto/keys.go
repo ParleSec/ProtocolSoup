@@ -198,16 +198,7 @@ func (ks *KeySet) rsaPublicJWK() JWK {
 
 // ecPublicJWK creates a JWK from the EC public key
 func (ks *KeySet) ecPublicJWK() JWK {
-	pub := &ks.ecKey.PublicKey
-	return JWK{
-		Kty: "EC",
-		Use: "sig",
-		Kid: ks.ecKeyID,
-		Alg: "ES256",
-		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(pub.X.Bytes()),
-		Y:   base64.RawURLEncoding.EncodeToString(pub.Y.Bytes()),
-	}
+	return JWKFromECPublicKey(&ks.ecKey.PublicKey, ks.ecKeyID)
 }
 
 // ed25519PublicJWK creates a JWK from the Ed25519 public key. Like its RSA and

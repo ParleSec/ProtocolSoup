@@ -148,7 +148,15 @@ func TestLoadOrCreateIssuerPKIPersists(t *testing.T) {
 	if !reflect.DeepEqual(first.DocumentSignerCertificate().Raw, second.DocumentSignerCertificate().Raw) {
 		t.Error("DS certificate must be stable across reloads")
 	}
-	if first.DocumentSignerKey().D.Cmp(second.DocumentSignerKey().D) != 0 {
+	firstDSKey, err := first.DocumentSignerKey().Bytes()
+	if err != nil {
+		t.Fatalf("encode first DS private key: %v", err)
+	}
+	secondDSKey, err := second.DocumentSignerKey().Bytes()
+	if err != nil {
+		t.Fatalf("encode second DS private key: %v", err)
+	}
+	if !reflect.DeepEqual(firstDSKey, secondDSKey) {
 		t.Error("DS private key must be stable across reloads")
 	}
 }

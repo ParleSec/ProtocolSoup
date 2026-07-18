@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"path/filepath"
 	"testing"
@@ -26,7 +27,15 @@ func TestLoadOrCreateDeviceKeyPersistsAcrossReload(t *testing.T) {
 	if !first.PublicKey.Equal(&second.PublicKey) {
 		t.Fatal("device key changed across reload; persistence is broken")
 	}
-	if first.D.Cmp(second.D) != 0 {
+	firstD, err := first.Bytes()
+	if err != nil {
+		t.Fatalf("encode first private key: %v", err)
+	}
+	secondD, err := second.Bytes()
+	if err != nil {
+		t.Fatalf("encode second private key: %v", err)
+	}
+	if !bytes.Equal(firstD, secondD) {
 		t.Fatal("device private scalar changed across reload")
 	}
 }
