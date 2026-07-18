@@ -335,7 +335,7 @@ const (
 	confClientA = "conformance-client"
 	confClientB = "conformance-client-2"
 	confSecret  = "conformance-secret-value"
-	suiteURI    = "https://localhost.emobix.co.uk:8443/test/a/protocolsoup-basic/callback"
+	suiteURI    = "https://suite.example/test/a/protocolsoup-basic/callback"
 )
 
 func registerConfClients(t *testing.T, p *Plugin) {
