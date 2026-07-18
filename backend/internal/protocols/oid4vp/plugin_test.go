@@ -363,7 +363,9 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSRequestObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseX5CCertificateChain: %v", err)
 	}
-	leaf, err := crypto.ValidateCertificateChain(certificates, time.Now().UTC())
+	roots := x509.NewCertPool()
+	roots.AddCert(certificates[len(certificates)-1])
+	leaf, err := crypto.ValidateCertificateChainAgainstRoots(certificates, roots, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("ValidateCertificateChain: %v", err)
 	}
@@ -406,7 +408,9 @@ func TestGenerateEphemeralX509Chain(t *testing.T) {
 		t.Fatalf("expected self-signed CA certificate")
 	}
 
-	validatedLeaf, err := crypto.ValidateCertificateChain(certificates, time.Now().UTC())
+	roots := x509.NewCertPool()
+	roots.AddCert(certificates[len(certificates)-1])
+	validatedLeaf, err := crypto.ValidateCertificateChainAgainstRoots(certificates, roots, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("ValidateCertificateChain: %v", err)
 	}
@@ -416,6 +420,52 @@ func TestGenerateEphemeralX509Chain(t *testing.T) {
 
 	if err := verifyPrivateKeyMatchesCertificate(leaf, leafKey); err != nil {
 		t.Fatalf("private key does not match leaf: %v", err)
+	}
+}
+
+// TestPersistedX509SignerStableAcrossRestart proves that, with a persistence
+// root, the auto-generated x509_hash request signer is reloaded on the next
+// construction so the x509_hash Client Identifier (HAIP 1.0 Section 5; OID4VP
+// 1.0 Section 5.9.3) stays stable across restarts, while a different data dir
+// yields a different leaf. The wallet trusts the request signature by the leaf
+// hash, so a churning client_id would break trust mid-certification.
+func TestPersistedX509SignerStableAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+
+	first, err := newEphemeralX509RequestSigner("https://verifier.example", dir)
+	if err != nil {
+		t.Fatalf("first signer: %v", err)
+	}
+	if first == nil {
+		t.Fatal("expected a signer for a DNS-name host")
+	}
+	id1, err := first.x509HashClientID()
+	if err != nil {
+		t.Fatalf("x509HashClientID: %v", err)
+	}
+
+	second, err := newEphemeralX509RequestSigner("https://verifier.example", dir)
+	if err != nil {
+		t.Fatalf("second signer: %v", err)
+	}
+	id2, err := second.x509HashClientID()
+	if err != nil {
+		t.Fatalf("x509HashClientID: %v", err)
+	}
+	if id1 != id2 {
+		t.Fatalf("x509_hash client_id must be stable across restarts: %q vs %q", id1, id2)
+	}
+
+	other, err := newEphemeralX509RequestSigner("https://verifier.example", t.TempDir())
+	if err != nil {
+		t.Fatalf("third signer: %v", err)
+	}
+	if id3, _ := other.x509HashClientID(); id3 == id1 {
+		t.Fatal("a different data dir must produce a different leaf and client_id")
+	}
+
+	if time.Until(first.certificates[0].NotAfter) < 48*time.Hour {
+		t.Fatalf("persisted leaf must outlive the 24h ephemeral default, expires %s", first.certificates[0].NotAfter)
 	}
 }
 
@@ -455,7 +505,9 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSEphemeralChain(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ParseX5CCertificateChain: %v", err)
 	}
-	leaf, err := crypto.ValidateCertificateChain(parsedCerts, time.Now().UTC())
+	roots := x509.NewCertPool()
+	roots.AddCert(parsedCerts[len(parsedCerts)-1])
+	leaf, err := crypto.ValidateCertificateChainAgainstRoots(parsedCerts, roots, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("ValidateCertificateChain: %v", err)
 	}
@@ -738,7 +790,7 @@ func TestDirectPostPolicyAllowsDCQLAcrossSupportedFormats(t *testing.T) {
 			wallet := issueCredentialForWalletWithSelection(
 				t,
 				env.Server.URL,
-				"alice-"+strings.ReplaceAll(testCase.name, "_", "-"),
+				"alice",
 				testCase.credentialConfigurationID,
 				testCase.format,
 			)
@@ -863,9 +915,23 @@ func TestExternalInteropConformance(t *testing.T) {
 
 func createVPRequest(t *testing.T, serverURL string, responseMode string) map[string]interface{} {
 	t.Helper()
-	return createVPRequestPayload(t, serverURL, map[string]interface{}{
-		"response_mode": responseMode,
-		"response_uri":  serverURL + "/oid4vp/response",
+	// SD-JWT VC regression coverage: select the university-degree SD-JWT VC query
+	// explicitly. The verifier's implicit default DCQL targets the
+	// mDL mso_mdoc, so these SD-JWT tests state their format explicitly (the
+	// behaviour an SD-JWT verifier always had under the old implicit default).
+	return createVPRequestWithDCQL(t, serverURL, responseMode, map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id": "university_degree",
+				"meta": map[string]interface{}{
+					"vct_values": []string{"https://protocolsoup.com/credentials/university_degree"},
+				},
+				"claims": []map[string]interface{}{
+					{"path": []string{"degree"}},
+					{"path": []string{"graduation_year"}},
+				},
+			},
+		},
 	})
 }
 
@@ -909,7 +975,8 @@ func issueCredentialForExternalWallet(t *testing.T, baseURL string, walletUserID
 	}
 
 	offerResp := postVPJSON(t, baseURL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
-		"wallet_user_id": walletUserID,
+		"wallet_user_id":               walletUserID,
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
 	})
 	assertVPStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeVPJSONMap(t, offerResp)

@@ -3,6 +3,7 @@ package oid4vp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -27,16 +28,22 @@ const (
 	requestObjectTTL = 5 * time.Minute
 )
 
+// defaultDCQLQuery is the canonical presentation request used when a verifier
+// creates an authorization request without an explicit dcql_query or scope. As
+// The default targets the ISO/IEC 18013-5 mobile driving licence
+// (mso_mdoc). SD-JWT VC and the W3C formats remain fully selectable by sending
+// an explicit dcql_query (or scope) that names them.
 var defaultDCQLQuery = map[string]interface{}{
 	"credentials": []map[string]interface{}{
 		{
-			"id": "university_degree",
+			"id":     "mdl",
+			"format": "mso_mdoc",
 			"meta": map[string]interface{}{
-				"vct_values": []string{"https://protocolsoup.com/credentials/university_degree"},
+				"doctype_values": []string{"org.iso.18013.5.1.mDL"},
 			},
 			"claims": []map[string]interface{}{
-				{"path": []string{"degree"}},
-				{"path": []string{"graduation_year"}},
+				{"path": []string{"org.iso.18013.5.1", "family_name"}},
+				{"path": []string{"org.iso.18013.5.1", "document_number"}},
 			},
 		},
 	},
@@ -54,9 +61,61 @@ type requestSession struct {
 	ScopeAlias     string
 	DCQLQuery      string
 	RequestJWT     string
+	// MdocHandover is an optional pre-encoded CBOR Handover override for the
+	// shared mdoc SessionTranscript ([null, null, Handover]). The
+	// production path reconstructs the real OID4VP 1.0 OpenID4VPHandover from the
+	// session parameters (client_id, nonce, response_uri) plus the response
+	// encryption key thumbprint via reconstructSessionHandover, so this field is
+	// normally empty and is retained only so tests can pin an exact handover.
+	MdocHandover []byte
+	// ResponseEncryptionJWK is the verifier's ephemeral EC response-encryption
+	// key for the mso_mdoc OID4VP online profile (direct_post.jwt). It carries
+	// the private d so the verifier can decrypt the JWE response, and its RFC
+	// 7638 thumbprint is bound into the OpenID4VPHandover. Presence of this key
+	// marks an mdoc online-profile session and routes the encrypted response to
+	// the ECDH-ES path rather than the SD-JWT RSA-OAEP path. It is persisted with
+	// the short-lived (requestObjectTTL) request session under 0600 and never
+	// leaves the verifier.
+	ResponseEncryptionJWK *crypto.JWK `json:",omitempty"`
+	// Profile narrows the allowed option set when set to "haip". In
+	// HAIP mode the verifier requires DCQL, an encrypted response mode, ES256,
+	// and (for signed requests) the x509_hash Client Identifier Prefix, and
+	// rejects out-of-profile choices. Empty means the general (non-HAIP) profile,
+	// which keeps every existing option available and unchanged.
+	Profile string `json:",omitempty"`
+	// Origin is the Verifier's Web Origin for the W3C Digital Credentials API
+	// path (response_mode dc_api / dc_api.jwt). It is the value bound into the
+	// OpenID4VPDCAPIHandover (OID4VP 1.0 Appendix B.2.6.2, NOT prefixed with
+	// "origin:") and, with the "origin:" prefix, is the response audience
+	// (Appendix A.4). Empty for the redirect path.
+	Origin string `json:",omitempty"`
+	// ExpectedOrigins is the expected_origins request parameter for signed DC API
+	// requests (OID4VP 1.0 Appendix A.2); retained for evidence/inspection.
+	ExpectedOrigins []string `json:",omitempty"`
+	// ResponseEncEnc records the JWE content-encryption algorithm advertised for
+	// this session (A128GCM or, under HAIP, A256GCM). Empty defaults to A128GCM.
+	ResponseEncEnc string `json:",omitempty"`
 	CreatedAt      time.Time
 	ExpiresAt      time.Time
 	Result         *models.OID4VPVerificationResult
+}
+
+// isDCAPI reports whether this session uses the W3C Digital Credentials API
+// invocation path (response_mode dc_api or dc_api.jwt), which selects the
+// OpenID4VPDCAPIHandover transcript variant and the origin-bound response
+// audience instead of the redirect handover and client_id audience.
+func (s *requestSession) isDCAPI() bool {
+	return isDCAPIResponseMode(s.ResponseMode)
+}
+
+// expectedResponseAudience returns the audience the wallet must bind the
+// response to: for the DC API path it is the Origin prefixed with "origin:"
+// (OID4VP 1.0 Appendix A.4); otherwise it is the Verifier's client_id.
+func (s *requestSession) expectedResponseAudience() string {
+	if s.isDCAPI() && strings.TrimSpace(s.Origin) != "" {
+		return dcAPIAudience(s.Origin)
+	}
+	return s.ClientID
 }
 
 // Plugin implements OpenID for Verifiable Presentations with DCQL-first semantics.
@@ -73,6 +132,21 @@ type Plugin struct {
 	didWebAllowedHosts       []string
 	verifierAttestation      *verifierAttestationIssuer
 	x509SANDNSSigner         *x509RequestSigner
+
+	// mdocTrustAnchors is the ISO/IEC 18013-5 IACA root pool the verifier chains
+	// presented mso_mdoc document-signer certificates to (issuer PKI).
+	// The trust anchor is the IACA root, never the DS certificate.
+	mdocTrustAnchors *x509.CertPool
+	// mdocTrustAnchorCerts retains the same IACA root(s) in parsed form so the
+	// verifier can read each root's SubjectKeyIdentifier for the HAIP mso_mdoc
+	// Authority Key Identifier Trusted Authorities Query (HAIP 1.0 Section 5).
+	mdocTrustAnchorCerts []*x509.Certificate
+
+	// dataDir is the configured persistence root. When set, the auto-generated
+	// x509_hash request-signing certificate is persisted under it so the
+	// HAIP-mandated x509_hash Client Identifier (the SHA-256 of the leaf) stays
+	// stable across restarts rather than churning every process start.
+	dataDir string
 
 	mu              sync.RWMutex
 	requests        map[string]*requestSession
@@ -108,6 +182,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if p.baseURL == "" {
 		p.baseURL = "http://localhost:8080"
 	}
+	p.dataDir = strings.TrimSpace(config.DataDir)
 	if ks, ok := config.KeySet.(*crypto.KeySet); ok {
 		p.keySet = ks
 	}
@@ -126,6 +201,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	p.trustResolver = NewDIDWebResolver(p.didWebAllowedHosts)
 	if err := p.configureVerifierIdentities(); err != nil {
 		return fmt.Errorf("configure verifier identities: %w", err)
+	}
+	if err := p.initMdocTrustAnchors(strings.TrimSpace(config.DataDir)); err != nil {
+		return fmt.Errorf("configure mso_mdoc trust anchors: %w", err)
 	}
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
 		requestPath := filepath.Join(dataDir, "vc", "oid4vp_request_sessions.json")

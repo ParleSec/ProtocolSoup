@@ -646,7 +646,9 @@ func TestVerifyRequestObjectSignatureX509SANDNS(t *testing.T) {
 		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
 	}
 
-	server := &walletHarnessServer{}
+	server := &walletHarnessServer{
+		verifierX509Roots: certificateRootsFromDERChain(t, certificateChain),
+	}
 	keyType, err := server.verifyRequestObjectSignature(
 		context.Background(),
 		&resolvedRequestEnvelope{
@@ -704,6 +706,7 @@ func TestVerifyRequestObjectSignatureVerifierAttestation(t *testing.T) {
 		trustedVerifierAttestationIssuers: map[string]struct{}{
 			"https://attestation.example": {},
 		},
+		verifierX509Roots: certificateRootsFromDERChain(t, attestationCertificateChain),
 	}
 	keyType, err := server.verifyRequestObjectSignature(
 		context.Background(),
@@ -765,6 +768,20 @@ func createECDSACertificateChain(t *testing.T, dnsNames []string, commonName str
 		t.Fatalf("x509.CreateCertificate(leaf): %v", err)
 	}
 	return leafKey, [][]byte{leafCertificateDER, caCertificateDER}
+}
+
+func certificateRootsFromDERChain(t *testing.T, chain [][]byte) *x509.CertPool {
+	t.Helper()
+	if len(chain) == 0 {
+		t.Fatal("certificate chain is empty")
+	}
+	root, err := x509.ParseCertificate(chain[len(chain)-1])
+	if err != nil {
+		t.Fatalf("parse certificate root: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	return roots
 }
 
 func generateECDSAKey(t *testing.T) *ecdsa.PrivateKey {

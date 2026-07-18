@@ -178,6 +178,7 @@ const CLAIM_DESCRIPTIONS: Record<string, string> = {
 }
 
 const ISSUE_FORMAT_OPTIONS: Array<{ format: string; configurationID: string; label: string }> = [
+  { format: 'mso_mdoc', configurationID: 'MobileDrivingLicenceMsoMdoc', label: 'mso_mdoc (mDL)' },
   { format: 'dc+sd-jwt', configurationID: 'UniversityDegreeCredential', label: 'dc+sd-jwt' },
   { format: 'jwt_vc_json', configurationID: 'UniversityDegreeCredentialJWT', label: 'jwt_vc_json' },
   { format: 'jwt_vc_json-ld', configurationID: 'UniversityDegreeCredentialJWTLD', label: 'jwt_vc_json-ld' },
