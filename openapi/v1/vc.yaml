@@ -80,6 +80,45 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /.well-known/oauth-authorization-server/oid4vci:
+    get:
+      tags: [OID4VCI]
+      summary: Canonical Authorization Server metadata path
+      description: >
+        RFC 8414 Authorization Server Metadata for the OID4VCI issuer,
+        advertising authorization_endpoint and token_endpoint so a wallet can
+        discover and drive the authorization_code grant.
+        token_endpoint_auth_methods_supported includes attest_jwt_client_auth
+        only when a client attestation trust anchor is configured on the
+        deployment.
+      operationId: getVcAuthorizationServerMetadataCanonical
+      responses:
+        "200":
+          description: Authorization Server metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Metadata path not available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/.well-known/oauth-authorization-server:
+    get:
+      tags: [OID4VCI]
+      summary: OID4VCI Authorization Server metadata (plugin-local alias)
+      operationId: getVcAuthorizationServerMetadata
+      responses:
+        "200":
+          description: Authorization Server metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /oid4vci/credential-offer/{offerID}:
     get:
       tags: [OID4VCI]
@@ -109,6 +148,14 @@ paths:
     post:
       tags: [OID4VCI]
       summary: Create pre-authorized offer (by-reference)
+      description: >
+        Creates a by-reference pre-authorized credential offer. When
+        `credential_configuration_ids` is omitted, the offer defaults to the
+        issuer's default and lead configuration, the ISO/IEC 18013-5 mobile
+        driving licence (`MobileDrivingLicenceMsoMdoc`, `mso_mdoc`). To receive
+        SD-JWT VC or a W3C format, name the configuration explicitly (for
+        example `["UniversityDegreeCredential"]`). This implicit default changed
+        from SD-JWT VC to mDL `mso_mdoc`; explicit selection is unchanged.
       operationId: createVcPreAuthorizedOffer
       requestBody:
         required: true
@@ -187,7 +234,29 @@ paths:
     post:
       tags: [OID4VCI]
       summary: Exchange grant for access token and nonce
+      description: >
+        Accepts grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code
+        and grant_type=authorization_code (discoverable via
+        /.well-known/oauth-authorization-server/oid4vci). Optionally accepts
+        an OAuth-Client-Attestation + OAuth-Client-Attestation-PoP header pair
+        (draft-ietf-oauth-attestation-based-client-auth) as an alternative to
+        client_secret/Basic authentication; when either header is present it
+        is the authentication verdict and a failure is never downgraded to a
+        weaker method.
       operationId: vcToken
+      parameters:
+        - in: header
+          name: OAuth-Client-Attestation
+          required: false
+          schema:
+            type: string
+          description: Client Attestation JWT (typ=oauth-client-attestation+jwt). Requires the other attestation header when present.
+        - in: header
+          name: OAuth-Client-Attestation-PoP
+          required: false
+          schema:
+            type: string
+          description: Client Attestation Proof-of-Possession JWT (typ=oauth-client-attestation-pop+jwt), signed by the Client Instance Key in the attestation's cnf.jwk.
       requestBody:
         required: true
         content:
@@ -221,6 +290,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Invalid, untrusted, or replayed client attestation, or unknown/mismatched client.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oid4vci/nonce:
     post:
       tags: [OID4VCI]
@@ -246,6 +321,13 @@ paths:
     post:
       tags: [OID4VCI]
       summary: Submit proof and request credential
+      description: >
+        Optional request field credential_response_encryption ({jwk, enc})
+        requests a JWE-encrypted response (ECDH-ES; A128GCM or A256GCM); the
+        response is then returned as Content-Type application/jwt instead of
+        application/json. Credential configurations that declare
+        key_attestations_required additionally require a key_attestation JOSE
+        header on the proof JWT.
       operationId: vcIssueCredential
       security:
         - bearerAuth: []
@@ -258,14 +340,18 @@ paths:
               additionalProperties: true
       responses:
         "200":
-          description: Credential issued or deferred transaction created.
+          description: Credential issued or deferred transaction created, as JSON or (when credential_response_encryption was requested) a compact JWE.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+            application/jwt:
+              schema:
+                type: string
+                description: Compact JWE-encrypted credential response.
         "400":
-          description: Invalid proof, nonce, or request contract.
+          description: Invalid proof, nonce, key attestation, encryption parameters, or request contract.
           content:
             application/json:
               schema:
@@ -280,6 +366,10 @@ paths:
     post:
       tags: [OID4VCI]
       summary: Poll deferred credential transaction
+      description: >
+        Optional request field credential_response_encryption ({jwk, enc})
+        requests a JWE-encrypted response for this poll, independent of what
+        (if anything) was requested on the original Credential Request.
       operationId: vcDeferredCredential
       security:
         - bearerAuth: []
@@ -292,12 +382,16 @@ paths:
               additionalProperties: true
       responses:
         "200":
-          description: Deferred credential response.
+          description: Deferred credential response, as JSON or (when credential_response_encryption was requested) a compact JWE.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+            application/jwt:
+              schema:
+                type: string
+                description: Compact JWE-encrypted credential response.
         "400":
           description: Invalid transaction request.
           content:
@@ -392,6 +486,13 @@ paths:
                   client_id_scheme: x509_san_dns
                   response_mode: direct_post.jwt
                   response_uri: https://protocolsoup.com/oid4vp/response
+              haipDcApiJwt:
+                summary: HAIP dc_api.jwt backend request processing (defaults to x509_hash; no browser executor included)
+                value:
+                  profile: haip
+                  response_mode: dc_api.jwt
+                  origin: https://protocolsoup.com
+                  expected_origins: [https://protocolsoup.com]
       responses:
         "200":
           description: Request object creation response with request_uri and signed request JWT.
@@ -457,11 +558,14 @@ paths:
   /oid4vp/response:
     post:
       tags: [OID4VP]
-      summary: Wallet response endpoint (direct_post / direct_post.jwt)
+      summary: Wallet response endpoint (direct_post / direct_post.jwt / dc_api.jwt)
       operationId: vcHandleWalletResponse
       description: |
         Accepts wallet VP submissions. For `direct_post`, the wallet sends `vp_token` and `state`.
-        For `direct_post.jwt`, the wallet sends an encrypted `response` JWE containing a signed inner JWT.
+        For legacy `direct_post.jwt`, the wallet sends an encrypted `response` JWE containing a signed inner JWT.
+        ECDH-ES mso_mdoc and HAIP responses carry the Authorization Response directly in the JWE payload.
+        Both variants are correlated by `state`. For `dc_api.jwt` backend processing, the wallet sends an
+        encrypted `response` JWE correlated by `request_id` (there is no `state`).
         Accepts both `application/json` and `application/x-www-form-urlencoded`.
       requestBody:
         required: true
@@ -550,34 +654,58 @@ components:
             type: string
     CreateAuthorizationRequest:
       type: object
-      required: [response_mode, response_uri]
+      required: [response_mode]
       properties:
         client_id:
           type: string
-          description: Verifier client identifier. When omitted, derived from the chosen scheme and server configuration.
+          description: Verifier client identifier. When omitted, derived from the chosen scheme and server configuration. HAIP and DC API requests default to the x509_hash scheme.
         client_id_scheme:
           type: string
-          enum: [redirect_uri, decentralized_identifier, verifier_attestation, x509_san_dns]
-          description: Client identification scheme per OpenID4VP Section 5. Determines how the request object is signed and how the wallet validates verifier identity.
+          enum: [redirect_uri, decentralized_identifier, verifier_attestation, x509_san_dns, x509_hash]
+          description: Client identification scheme per OpenID4VP Section 5. Determines how the request object is signed and how the wallet validates verifier identity. HAIP 1.0 mandates x509_hash for signed requests.
         response_mode:
           type: string
-          enum: [direct_post, direct_post.jwt]
-          description: VP token delivery mode.
+          enum: [direct_post, direct_post.jwt, dc_api, dc_api.jwt]
+          description: VP token delivery mode. dc_api / dc_api.jwt select the W3C Digital Credentials API path.
         response_uri:
           type: string
           format: uri
-          description: URI where the wallet submits the VP response.
+          description: URI where the wallet submits the VP response. Required for direct_post / direct_post.jwt; not used for dc_api / dc_api.jwt.
         redirect_uri:
           type: string
           format: uri
           description: Must be absent when response_mode is direct_post or direct_post.jwt.
+        profile:
+          type: string
+          enum: [haip]
+          description: When set to "haip", enforces the HAIP 1.0 profile and rejects out-of-profile choices (non-DCQL, unencrypted response modes, or schemes other than x509_hash).
+        origin:
+          type: string
+          format: uri
+          description: Verifier Web Origin for the W3C Digital Credentials API path (dc_api / dc_api.jwt). Defaults to the server base URL when omitted.
+        expected_origins:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Expected origins included in signed DC API requests so the wallet can detect verifier request replay.
         scope:
           type: string
-          description: Scope alias (mutually exclusive with dcql_query).
+          description: Scope alias (mutually exclusive with dcql_query; rejected in HAIP mode).
         dcql_query:
           type: object
           additionalProperties: true
-          description: Digital Credentials Query Language object specifying required credentials and claim paths.
+          description: >
+            Digital Credentials Query Language object specifying required
+            credentials and claim paths. When neither dcql_query nor scope is
+            supplied, the request defaults to the canonical mDL query
+            (`mso_mdoc`, doctype `org.iso.18013.5.1.mDL`). SD-JWT VC and the W3C
+            formats remain selectable by naming them in an explicit query. This
+            implicit default changed from SD-JWT VC to mDL `mso_mdoc`. In HAIP
+            mode (`profile: haip`), each `mso_mdoc` credential that does not
+            already declare `trusted_authorities` gains an `aki` Trusted
+            Authorities Query (OpenID4VP 1.0 Section 6.1.1) whose value is the
+            base64url SubjectKeyIdentifier of the configured IACA root.
     CreateAuthorizationResponse:
       type: object
       properties:
@@ -609,19 +737,35 @@ components:
           type: boolean
         trust_mode:
           type: string
+        profile:
+          type: string
+          description: Active profile for this request ("haip" or "general").
+        origin:
+          type: string
+          description: Verifier Web Origin bound to a dc_api / dc_api.jwt request.
+        response_audience:
+          type: string
+          description: Origin-prefixed (origin:&lt;origin&gt;) response audience for the DC API path.
+        encrypted_response_enc_values_supported:
+          type: array
+          items:
+            type: string
+          description: Advertised JWE content-encryption algorithms (HAIP / DC API advertise A128GCM and A256GCM).
     WalletResponsePayload:
       type: object
-      required: [state]
       properties:
         state:
           type: string
-          description: Opaque state value matching the authorization request.
+          description: Opaque state value matching the authorization request (direct_post / direct_post.jwt). Not used on the DC API path.
+        request_id:
+          type: string
+          description: Request identifier correlating a dc_api.jwt response to its session (the DC API has no state).
         vp_token:
           type: string
           description: Compact JWS VP token (for direct_post response mode).
         response:
           type: string
-          description: Compact JWE containing signed inner JWT (for direct_post.jwt response mode).
+          description: Compact JWE containing the wallet response (for direct_post.jwt and dc_api.jwt response modes).
     ApiIndexResponse:
       type: object
       required: [service, version, protocols, endpoints]
