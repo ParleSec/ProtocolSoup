@@ -49,6 +49,7 @@ docker run -p 8081:8080 \
 
 - `WALLET_TARGET_BASE_URL` must point to the VC service or federation service running OID4VP.
 - During automatic OID4VCI bootstrap, the wallet leaves identity selection to the issuer's designated default record. The issuer-authorized subject returned in the credential offer remains separate from the wallet's holder DID.
+- The wallet must independently trust the issuer's mdoc IACA root through `WALLET_MDOC_IACA_ROOT_PEM`. The production workflow validates the main issuer's persisted `/data/mdoc/iaca_root.pem` and installs that public certificate as a wallet Fly secret before deployment.
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
 - Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.

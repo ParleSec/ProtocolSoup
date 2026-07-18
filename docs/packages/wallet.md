@@ -36,6 +36,7 @@
 
 - Session wallet key material and credential cache are in-memory per scope key, expiring based on `WALLET_SESSION_TTL`.
 - Automatic OID4VCI bootstrap omits `wallet_user_id`, allowing the issuer to select its designated default identity record. The issuer-authorized subject returned in the offer is used in the credential proof while the wallet's own key signs that proof.
+- `WALLET_MDOC_IACA_ROOT_PEM` must contain the public IACA root for the configured issuer. Production CI reads the main app's persisted `/data/mdoc/iaca_root.pem`, validates it as a self-anchored certificate, and installs it as a Fly secret on `protocolsoup-wallet` before deploying the wallet.
 - When `WALLET_DEVICE_KEY_PATH` is set, the `mso_mdoc` (ISO/IEC 18013-5) holder device key is persisted to that file so the device binding of issued mdoc credentials survives restarts; mount a durable volume for it. Otherwise the device key is ephemeral.
 - The wallet stores an issued `mso_mdoc` only after its document-signer chain,
   signature, digests, and validity verify against
