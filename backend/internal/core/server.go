@@ -66,7 +66,6 @@ func (s *Server) setupRouter() {
 	r.Use(Recovery)
 	r.Use(RequestLogger)
 	r.Use(SecurityHeaders)
-	r.Use(middleware.RealIP)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Timeout(60 * time.Second))
 
@@ -138,6 +137,17 @@ func (s *Server) setupRouter() {
 				http.NotFound(w, r)
 			})
 			r.Method(http.MethodGet, "/.well-known/openid-credential-issuer/*", protocolRouter)
+
+			// RFC 8414 Section 3.1: the Authorization Server metadata document
+			// for issuer https://{host}/oid4vci lives at the root well-known
+			// path with the issuer's path component appended, not under
+			// /oid4vci itself. A wallet resolving authorization_servers from
+			// the credential issuer metadata needs this to find
+			// authorization_endpoint.
+			r.Get("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
+				http.NotFound(w, r)
+			})
+			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server/*", protocolRouter)
 		}
 
 		// OpenID Connect Discovery 1.0 Section 4: a Relying Party derives the
