@@ -132,6 +132,17 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         ],
       },
       {
+        id: 'interaction-code',
+        name: 'Interaction Code Flow',
+        rfc: 'OIDC Core §3.1 + RFC 7636',
+        references: [
+          { category: 'core', label: 'OIDC Core §3.1 — Authentication using the Authorization Code Flow', href: 'https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth' },
+          { category: 'core', label: 'OpenID Connect Discovery 1.0', href: 'https://openid.net/specs/openid-connect-discovery-1_0.html' },
+          { category: 'core', label: 'RFC 7636 — Proof Key for Code Exchange', href: 'https://datatracker.ietf.org/doc/html/rfc7636' },
+          { category: 'security', label: 'RFC 9700 §2.1.1 — PKCE for All Clients', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.1.1' },
+        ],
+      },
+      {
         id: 'oidc-implicit',
         backendId: 'oidc_implicit',
         name: 'Implicit Flow (Legacy)',

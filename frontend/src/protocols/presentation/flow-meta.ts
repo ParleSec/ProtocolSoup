@@ -50,6 +50,11 @@ export const FLOW_PRESENTATION_META: Record<string, FlowPresentationMeta> = {
     features: ['ID Token (JWT)', 'UserInfo Endpoint', 'Verified Identity'],
     recommended: true,
   },
+  'interaction-code': {
+    icon: Fingerprint,
+    color: 'from-violet-500 to-fuchsia-600',
+    features: ['Discovery + JWKS', 'PKCE + Nonce', 'ID Token + UserInfo'],
+  },
   oidc_implicit: {
     icon: Unlock,
     color: 'from-amber-500 to-orange-600',

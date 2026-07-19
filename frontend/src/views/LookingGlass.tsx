@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
 import { parseFlowDeepLink, buildLookingGlassPath } from '@/components/palette/runDispatch'
@@ -13,7 +14,7 @@ import {
   Eye, Play, RotateCcw, Key, Square,
   Fingerprint, Shield, Lock, Sparkles,
   RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink,
-  Share2, XCircle
+  Share2, XCircle, BookOpen, ChevronRight
 } from 'lucide-react'
 
 import {
@@ -38,6 +39,11 @@ import {
   parseSDJWTDisclosureClaimNames,
   humanizeOID4VPTrustMode,
 } from '../protocols/config/oid4vp'
+import {
+  getCatalogFlow,
+  getCatalogProtocol,
+  getFlowRouteId,
+} from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
@@ -193,6 +199,33 @@ export function LookingGlass() {
     selectedFlow?.id?.toLowerCase().replace(/_/g, '-'),
     [selectedFlow?.id]
   )
+
+  const referenceNavigation = useMemo(() => {
+    if (!selectedProtocol || !selectedFlow) {
+      return null
+    }
+
+    const protocol = getCatalogProtocol(selectedProtocol.id)
+    if (!protocol) {
+      return null
+    }
+
+    const flowRouteId = getFlowRouteId(selectedProtocol.id, selectedFlow.id)
+    const flow = getCatalogFlow(selectedProtocol.id, flowRouteId)
+
+    return {
+      protocol: {
+        name: protocol.name,
+        href: `/protocol/${protocol.id}`,
+      },
+      flow: flow
+        ? {
+            name: flow.name,
+            href: `/protocol/${protocol.id}/flow/${flow.id}`,
+          }
+        : null,
+    }
+  }, [selectedProtocol, selectedFlow])
 
   const showTLSContext = useMemo(() => {
     const normalizedFlowId = flowId || ''
@@ -1640,6 +1673,71 @@ export function LookingGlass() {
                       </span>
                     )}
                   </div>
+                  {referenceNavigation && (
+                    <nav
+                      aria-label={`Protocol reference breadcrumb for ${selectedFlow.name}`}
+                      className="mt-1.5 text-[10px] sm:text-xs text-surface-500"
+                    >
+                      <ol className="flex flex-wrap items-center gap-1">
+                        <li className="hidden sm:flex items-center gap-1">
+                          <BookOpen aria-hidden="true" className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                          <Link
+                            href="/protocols"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Open Protocol Reference in a new tab"
+                            className="hover:text-purple-300 transition-colors"
+                          >
+                            Protocol Reference
+                          </Link>
+                        </li>
+                        <li className="hidden sm:flex items-center gap-1">
+                          <ChevronRight aria-hidden="true" className="w-3 h-3 text-surface-600 flex-shrink-0" />
+                          <Link
+                            href={referenceNavigation.protocol.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${referenceNavigation.protocol.name} overview in a new tab`}
+                            aria-current={referenceNavigation.flow ? undefined : 'true'}
+                            className="hover:text-purple-300 transition-colors"
+                          >
+                            {referenceNavigation.protocol.name}
+                          </Link>
+                        </li>
+                        {referenceNavigation.flow ? (
+                          <li className="flex items-center gap-1">
+                            <ChevronRight aria-hidden="true" className="hidden sm:block w-3 h-3 text-surface-600 flex-shrink-0" />
+                            <Link
+                              href={referenceNavigation.flow.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${referenceNavigation.flow.name} flow guide in a new tab`}
+                              aria-current="true"
+                              className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors"
+                            >
+                              <span className="hidden sm:inline">{referenceNavigation.flow.name}</span>
+                              <span className="sm:hidden">{referenceNavigation.flow.name} guide</span>
+                              <ExternalLink aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" />
+                            </Link>
+                          </li>
+                        ) : (
+                          <li className="sm:hidden">
+                            <Link
+                              href={referenceNavigation.protocol.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${referenceNavigation.protocol.name} overview in a new tab`}
+                              aria-current="true"
+                              className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors"
+                            >
+                              {referenceNavigation.protocol.name} overview
+                              <ExternalLink aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" />
+                            </Link>
+                          </li>
+                        )}
+                      </ol>
+                    </nav>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
