@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
 import { parseFlowDeepLink, buildLookingGlassPath } from '@/components/palette/runDispatch'
@@ -13,7 +14,7 @@ import {
   Eye, Play, RotateCcw, Key, Square,
   Fingerprint, Shield, Lock, Sparkles,
   RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink,
-  Share2, XCircle
+  Share2, XCircle, BookOpen, ChevronRight
 } from 'lucide-react'
 
 import {
@@ -38,6 +39,11 @@ import {
   parseSDJWTDisclosureClaimNames,
   humanizeOID4VPTrustMode,
 } from '../protocols/config/oid4vp'
+import {
+  getCatalogFlow,
+  getCatalogProtocol,
+  getFlowRouteId,
+} from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
@@ -193,6 +199,33 @@ export function LookingGlass() {
     selectedFlow?.id?.toLowerCase().replace(/_/g, '-'),
     [selectedFlow?.id]
   )
+
+  const referenceNavigation = useMemo(() => {
+    if (!selectedProtocol || !selectedFlow) {
+      return null
+    }
+
+    const protocol = getCatalogProtocol(selectedProtocol.id)
+    if (!protocol) {
+      return null
+    }
+
+    const flowRouteId = getFlowRouteId(selectedProtocol.id, selectedFlow.id)
+    const flow = getCatalogFlow(selectedProtocol.id, flowRouteId)
+
+    return {
+      protocol: {
+        name: protocol.name,
+        href: `/protocol/${protocol.id}`,
+      },
+      flow: flow
+        ? {
+            name: flow.name,
+            href: `/protocol/${protocol.id}/flow/${flow.id}`,
+          }
+        : null,
+    }
+  }, [selectedProtocol, selectedFlow])
 
   const showTLSContext = useMemo(() => {
     const normalizedFlowId = flowId || ''
@@ -1640,6 +1673,31 @@ export function LookingGlass() {
                       </span>
                     )}
                   </div>
+                  {referenceNavigation && (
+                    <nav
+                      aria-label="Reference pages for selected flow"
+                      className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] sm:text-xs text-surface-500"
+                    >
+                      <BookOpen className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                      <Link
+                        href={referenceNavigation.protocol.href}
+                        className="hover:text-purple-300 transition-colors"
+                      >
+                        {referenceNavigation.protocol.name} overview
+                      </Link>
+                      {referenceNavigation.flow && (
+                        <>
+                          <ChevronRight className="w-3 h-3 text-surface-600 flex-shrink-0" />
+                          <Link
+                            href={referenceNavigation.flow.href}
+                            className="hover:text-purple-300 transition-colors"
+                          >
+                            {referenceNavigation.flow.name} guide
+                          </Link>
+                        </>
+                      )}
+                    </nav>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
