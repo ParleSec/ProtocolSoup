@@ -1675,27 +1675,67 @@ export function LookingGlass() {
                   </div>
                   {referenceNavigation && (
                     <nav
-                      aria-label="Reference pages for selected flow"
-                      className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] sm:text-xs text-surface-500"
+                      aria-label={`Protocol reference breadcrumb for ${selectedFlow.name}`}
+                      className="mt-1.5 text-[10px] sm:text-xs text-surface-500"
                     >
-                      <BookOpen className="w-3 h-3 text-purple-400 flex-shrink-0" />
-                      <Link
-                        href={referenceNavigation.protocol.href}
-                        className="hover:text-purple-300 transition-colors"
-                      >
-                        {referenceNavigation.protocol.name} overview
-                      </Link>
-                      {referenceNavigation.flow && (
-                        <>
-                          <ChevronRight className="w-3 h-3 text-surface-600 flex-shrink-0" />
+                      <ol className="flex flex-wrap items-center gap-1">
+                        <li className="hidden sm:flex items-center gap-1">
+                          <BookOpen aria-hidden="true" className="w-3 h-3 text-purple-400 flex-shrink-0" />
                           <Link
-                            href={referenceNavigation.flow.href}
+                            href="/protocols"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Open Protocol Reference in a new tab"
                             className="hover:text-purple-300 transition-colors"
                           >
-                            {referenceNavigation.flow.name} guide
+                            Protocol Reference
                           </Link>
-                        </>
-                      )}
+                        </li>
+                        <li className="hidden sm:flex items-center gap-1">
+                          <ChevronRight aria-hidden="true" className="w-3 h-3 text-surface-600 flex-shrink-0" />
+                          <Link
+                            href={referenceNavigation.protocol.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${referenceNavigation.protocol.name} overview in a new tab`}
+                            aria-current={referenceNavigation.flow ? undefined : 'true'}
+                            className="hover:text-purple-300 transition-colors"
+                          >
+                            {referenceNavigation.protocol.name}
+                          </Link>
+                        </li>
+                        {referenceNavigation.flow ? (
+                          <li className="flex items-center gap-1">
+                            <ChevronRight aria-hidden="true" className="hidden sm:block w-3 h-3 text-surface-600 flex-shrink-0" />
+                            <Link
+                              href={referenceNavigation.flow.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${referenceNavigation.flow.name} flow guide in a new tab`}
+                              aria-current="true"
+                              className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors"
+                            >
+                              <span className="hidden sm:inline">{referenceNavigation.flow.name}</span>
+                              <span className="sm:hidden">{referenceNavigation.flow.name} guide</span>
+                              <ExternalLink aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" />
+                            </Link>
+                          </li>
+                        ) : (
+                          <li className="sm:hidden">
+                            <Link
+                              href={referenceNavigation.protocol.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${referenceNavigation.protocol.name} overview in a new tab`}
+                              aria-current="true"
+                              className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors"
+                            >
+                              {referenceNavigation.protocol.name} overview
+                              <ExternalLink aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" />
+                            </Link>
+                          </li>
+                        )}
+                      </ol>
                     </nav>
                   )}
                 </div>
