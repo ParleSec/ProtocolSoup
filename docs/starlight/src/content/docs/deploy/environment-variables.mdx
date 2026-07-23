@@ -11,13 +11,19 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public URL used in metadata, redirect URIs, and token issuer claims. Set this to your externally reachable URL. |
+| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public URL used in endpoint URLs, redirect URIs, and token issuer claims. In production this must be a pathless HTTPS origin with no trailing slash, query, or fragment. |
 | `SHOWCASE_LISTEN_ADDR` | `:8080` | Address and port the service binds to. |
 | `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated list of allowed CORS origins for browser clients. |
 | `SHOWCASE_ENV` | `demo` | Runtime environment. |
 | `SHOWCASE_MOCK_IDP` | `true` | Enable built-in mock identity provider with demo users and clients. |
 | `SHOWCASE_DEBUG` | `false` | Enable debug logging. |
 | `SHOWCASE_PALETTE_DB` | *(empty — palette disabled)* | Path to the prebuilt palette SQLite index. Required in `SHOWCASE_ENV=production` when palette search is enabled. Docker images built from `Dockerfile.backend` and `Dockerfile.fly` default to `/app/palette.db`. See [Palette content index](/deploy/palette-index/). |
+
+## OAuth 2.0 Federation Service
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OAUTH2_REPLAY_REDIS_URL` | *(in-memory in development/tests)* | Redis URL for atomic `private_key_jwt` `(client_id, jti)` replay reservations through `exp + 60s`. Demo deployments require Redis; production requires a reachable `rediss://` URL and fails startup without it or when it cannot be reached. Runtime Redis errors fail the token request closed with `server_error`. Local Compose supplies an isolated Redis instance. Store production credentials as a platform secret. |
 
 ## Gateway
 
@@ -90,7 +96,8 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 
 ## Usage Notes
 
-- **`SHOWCASE_BASE_URL` is the most important variable.** It determines the issuer, entity ID, redirect URIs, and metadata URLs across all protocols. Always set it to the URL your clients will actually use.
+- **`SHOWCASE_BASE_URL` is the most important variable.** It determines the issuer, entity ID, redirect URIs, and metadata URLs across all protocols. Always set it to the origin your clients actually use. Production startup fails unless it is a pathless HTTPS origin such as `https://protocolsoup.example.com` (no trailing slash or subpath). In development, the OAuth RFC 8414 metadata endpoint returns `503` for an HTTP or pathful base URL rather than publishing a non-conformant issuer.
+- Production OAuth deployments must set `OAUTH2_REPLAY_REDIS_URL` as a secret using `rediss://`. Do not place Redis credentials in Compose files, `fly.toml`, or source control.
 - When running behind a reverse proxy or load balancer, set `SHOWCASE_BASE_URL` to the external URL (e.g. `https://protocolsoup.example.com`) rather than the internal address.
 - `SHOWCASE_CORS_ORIGINS` must include the origin of your frontend. If the UI is at `https://app.example.com`, add that origin.
 - For SCIM, set `SCIM_API_TOKEN` to any secret string. Clients must include `Authorization: Bearer <your-token>` on every request.
