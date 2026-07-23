@@ -38,11 +38,13 @@ type PluginInfo struct {
 
 // PluginConfig provides configuration to plugins during initialization
 type PluginConfig struct {
-	BaseURL      string      // Base URL of the server
-	DataDir      string      // Optional durable state directory shared across plugins
-	KeySet       interface{} // Crypto key set
-	MockIdP      interface{} // Mock identity provider
-	LookingGlass interface{} // Looking glass engine
+	Environment          string      // Runtime environment (development, demo, production)
+	BaseURL              string      // Base URL of the server
+	DataDir              string      // Optional durable state directory shared across plugins
+	OAuth2ReplayRedisURL string      // Shared private_key_jwt replay store
+	KeySet               interface{} // Crypto key set
+	MockIdP              interface{} // Mock identity provider
+	LookingGlass         interface{} // Looking glass engine
 }
 
 // Inspector defines a protocol-specific inspection capability
@@ -59,8 +61,8 @@ type FlowDefinition struct {
 	Name        string     `json:"name"`
 	Description string     `json:"description"`
 	Steps       []FlowStep `json:"steps"`
-	Executable  bool       `json:"executable"`            // Whether this flow can be executed in Looking Glass
-	Category    string     `json:"category,omitempty"`    // "workload-api", "admin", "infrastructure"
+	Executable  bool       `json:"executable"`         // Whether this flow can be executed in Looking Glass
+	Category    string     `json:"category,omitempty"` // "workload-api", "admin", "infrastructure"
 }
 
 // FlowStep represents a single step in a protocol flow
@@ -68,9 +70,9 @@ type FlowStep struct {
 	Order       int               `json:"order"`
 	Name        string            `json:"name"`
 	Description string            `json:"description"`
-	From        string            `json:"from"`  // Actor/component sending
-	To          string            `json:"to"`    // Actor/component receiving
-	Type        string            `json:"type"`  // "request", "response", "internal"
+	From        string            `json:"from"` // Actor/component sending
+	To          string            `json:"to"`   // Actor/component receiving
+	Type        string            `json:"type"` // "request", "response", "internal"
 	Parameters  map[string]string `json:"parameters,omitempty"`
 	Security    []string          `json:"security,omitempty"` // Security considerations
 }
@@ -119,4 +121,3 @@ func (p *BasePlugin) SetConfig(config PluginConfig) {
 func (p *BasePlugin) Config() PluginConfig {
 	return p.config
 }
-

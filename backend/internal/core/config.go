@@ -31,6 +31,10 @@ type Config struct {
 	// Data directory for durable protocol state (wallet lineage, verifier sessions)
 	DataDir string
 
+	// OAuth2ReplayRedisURL is the shared Redis endpoint used to reserve
+	// private_key_jwt assertion IDs atomically across processes.
+	OAuth2ReplayRedisURL string
+
 	// PaletteDBPath points at the prebuilt palette SQLite index. Empty
 	// disables the palette query service (and the /api/palette/query route).
 	PaletteDBPath string
@@ -57,16 +61,17 @@ type Config struct {
 // LoadConfig loads configuration from environment variables with sensible defaults
 func LoadConfig() *Config {
 	cfg := &Config{
-		Environment:    getEnv("SHOWCASE_ENV", "development"),
-		ListenAddr:     getEnv("SHOWCASE_LISTEN_ADDR", ":8080"),
-		BaseURL:        getEnv("SHOWCASE_BASE_URL", "http://localhost:8080"),
-		MockIdPEnabled: getEnvBool("SHOWCASE_MOCK_IDP", true),
-		CORSOrigins:    getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
-		Debug:          getEnvBool("SHOWCASE_DEBUG", false),
-		FrontendOrigin: getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
-		DataDir:        getEnv("SHOWCASE_DATA_DIR", ""),
-		PaletteDBPath: getEnv("SHOWCASE_PALETTE_DB", ""),
-		KeyStorePath:  getEnv("SHOWCASE_KEY_STORE_PATH", ""),
+		Environment:          getEnv("SHOWCASE_ENV", "development"),
+		ListenAddr:           getEnv("SHOWCASE_LISTEN_ADDR", ":8080"),
+		BaseURL:              getEnv("SHOWCASE_BASE_URL", "http://localhost:8080"),
+		MockIdPEnabled:       getEnvBool("SHOWCASE_MOCK_IDP", true),
+		CORSOrigins:          getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
+		Debug:                getEnvBool("SHOWCASE_DEBUG", false),
+		FrontendOrigin:       getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
+		DataDir:              getEnv("SHOWCASE_DATA_DIR", ""),
+		OAuth2ReplayRedisURL: getEnv("OAUTH2_REPLAY_REDIS_URL", ""),
+		PaletteDBPath:        getEnv("SHOWCASE_PALETTE_DB", ""),
+		KeyStorePath:         getEnv("SHOWCASE_KEY_STORE_PATH", ""),
 
 		ConformanceRedirectURIs:  getEnvList("OIDC_CONFORMANCE_REDIRECT_URIS", nil),
 		ConformanceClientID:      getEnv("OIDC_CONFORMANCE_CLIENT_ID", "conformance-client"),
@@ -115,4 +120,3 @@ func getEnvList(key string, defaultValue []string) []string {
 	}
 	return strings.Split(value, ",")
 }
-

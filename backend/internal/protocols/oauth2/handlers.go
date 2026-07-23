@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"html"
 	"net/http"
 	"net/url"
@@ -365,6 +366,22 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	code := r.FormValue("code")
 	refreshToken := r.FormValue("refresh_token")
 	tokenTypeHint := r.FormValue("token_type_hint")
+	assertionTypePresent := r.Form.Has("client_assertion_type")
+	assertionPresent := r.Form.Has("client_assertion")
+	if assertionTypePresent != assertionPresent {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Incomplete Client Assertion Authentication", map[string]interface{}{
+			"reason":                        "client_assertion_parameter_pair_required",
+			"client_assertion_type_present": assertionTypePresent,
+			"client_assertion_present":      assertionPresent,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeRFCReference,
+			Title:       "JWT Client Authentication Parameters",
+			Description: "client_assertion_type and client_assertion are used together for JWT client authentication.",
+			Reference:   "RFC 7523 Section 2.2",
+		})
+		writeOAuth2Error(w, "invalid_request", "client_assertion_type and client_assertion must be provided together", "")
+		return
+	}
 	if clientID == "" {
 		if basicClientID, _, ok := r.BasicAuth(); ok {
 			clientID = basicClientID
@@ -373,6 +390,8 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	clientAuthMethod := "none"
 	if _, _, ok := r.BasicAuth(); ok {
 		clientAuthMethod = "basic"
+	} else if assertionTypePresent {
+		clientAuthMethod = "private_key_jwt"
 	} else if clientID != "" {
 		clientAuthMethod = "post"
 	}
@@ -399,8 +418,16 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	switch grantType {
 	case "authorization_code":
+		if assertionPresent {
+			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			return
+		}
 		p.handleAuthorizationCodeGrant(w, r, sessionID)
 	case "refresh_token":
+		if assertionPresent {
+			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			return
+		}
 		p.handleRefreshTokenGrant(w, r, sessionID)
 	case "client_credentials":
 		p.handleClientCredentialsGrant(w, r, sessionID)
@@ -541,6 +568,24 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, tokenResponse)
 }
 
+func (p *Plugin) rejectClientAssertionForUnsupportedGrant(
+	w http.ResponseWriter,
+	sessionID string,
+	grantType string,
+) {
+	p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Assertion Authentication Rejected", map[string]interface{}{
+		"error":      "invalid_client",
+		"reason":     "private_key_jwt_not_enabled_for_grant",
+		"grant_type": grantType,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeSecurityHint,
+		Title:       "Scoped Client Authentication Method",
+		Description: "This ProtocolSoup profile enables private_key_jwt only for the client_credentials grant.",
+		Reference:   "RFC 7523 Section 2.2",
+	})
+	writeOAuth2Error(w, "invalid_client", "Client authentication method is not supported for this grant type", "")
+}
+
 func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
 	refreshToken := r.FormValue("refresh_token")
 	clientID := r.FormValue("client_id")
@@ -644,26 +689,38 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 	scope := r.FormValue("scope")
 
 	// Determine client authentication method
-	// RFC 6749 Section 2.3.1: "The client MUST NOT use more than one authentication method
+	// RFC 6749 Section 2.3: "The client MUST NOT use more than one authentication method
 	// in each request."
 	postClientID := r.FormValue("client_id")
 	postClientSecret := r.FormValue("client_secret")
 	basicClientID, basicClientSecret, hasBasicAuth := r.BasicAuth()
-	hasPostAuth := postClientSecret != ""
+	hasPostAuth := r.Form.Has("client_secret")
+	hasAssertionAuth := r.Form.Has("client_assertion_type") && r.Form.Has("client_assertion")
+	assertionType := r.FormValue("client_assertion_type")
+	assertion := r.FormValue("client_assertion")
 
-	// Reject requests using multiple authentication methods (RFC 6749 Section 2.3.1)
-	if hasBasicAuth && hasPostAuth {
+	// Reject requests using multiple authentication methods (RFC 6749 Section 2.3).
+	authMethodCount := 0
+	for _, present := range []bool{hasBasicAuth, hasPostAuth, hasAssertionAuth} {
+		if present {
+			authMethodCount++
+		}
+	}
+	if authMethodCount > 1 {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Dual Authentication Methods Rejected", map[string]interface{}{
-			"error":  "invalid_request",
-			"detail": "Client sent both Authorization header and POST body credentials",
+			"error":                    "invalid_request",
+			"detail":                   "Client sent more than one authentication method",
+			"basic_present":            hasBasicAuth,
+			"client_secret_present":    hasPostAuth,
+			"client_assertion_present": hasAssertionAuth,
 		}, lookingglass.Annotation{
 			Type:        lookingglass.AnnotationTypeSecurityHint,
 			Title:       "Multiple Auth Methods Rejected",
 			Description: "A client MUST NOT use more than one authentication method in each request.",
-			Reference:   "RFC 6749 Section 2.3.1",
+			Reference:   "RFC 6749 Section 2.3",
 		})
 		writeOAuth2Error(w, "invalid_request",
-			"A client MUST NOT use more than one authentication method in each request (RFC 6749 Section 2.3.1)", "")
+			"A client MUST NOT use more than one authentication method in each request (RFC 6749 Section 2.3)", "")
 		return
 	}
 
@@ -678,6 +735,9 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		clientID = postClientID
 		clientSecret = postClientSecret
 		clientAuthMethod = "post"
+	} else if hasAssertionAuth {
+		clientID = postClientID
+		clientAuthMethod = "private_key_jwt"
 	} else {
 		clientID = postClientID
 	}
@@ -692,20 +752,68 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		"client_auth_method": clientAuthMethod,
 		"requested_scope":    scope,
 		"requested_scopes":   strings.Fields(scope),
-	}, lookingglass.Annotation{
-		Type:        lookingglass.AnnotationTypeExplanation,
-		Title:       "Client Credentials Flow",
-		Description: "Machine-to-machine authentication without a user context. The client authenticates using its own credentials.",
-		Reference:   "RFC 6749 Section 4.4",
-	})
+		"client_assertion":   assertion,
+	}, []lookingglass.Annotation{
+		{
+			Type:        lookingglass.AnnotationTypeExplanation,
+			Title:       "Client Credentials Flow",
+			Description: "Machine-to-machine authentication without a user context. The client authenticates using its own credentials.",
+			Reference:   "RFC 6749 Section 4.4",
+		},
+		{
+			Type:        lookingglass.AnnotationTypeRFCReference,
+			Title:       "JWT Client Authentication",
+			Description: "A registered public key verifies the client-signed assertion at the token endpoint.",
+			Reference:   "RFC 7523 Section 2.2",
+		},
+	}...)
 
 	// Validate client
-	client, err := p.mockIdP.ValidateClient(clientID, clientSecret)
+	var client *models.Client
+	var assertionDetails *validatedClientAssertion
+	var err error
+	if hasAssertionAuth {
+		if assertionType != clientAssertionType {
+			err = assertionError("unsupported_client_assertion_type")
+		} else {
+			client, assertionDetails, err = p.authenticatePrivateKeyJWTContext(r.Context(), clientID, assertion)
+		}
+	} else {
+		client, err = p.mockIdP.ValidateClient(clientID, clientSecret)
+	}
 	if err != nil {
+		var infrastructureErr *clientAssertionInfrastructureError
+		if errors.As(err, &infrastructureErr) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Authentication Infrastructure Failed", map[string]interface{}{
+				"client_id":          clientID,
+				"error":              "server_error",
+				"reason":             "replay_store_unavailable",
+				"client_auth_method": clientAuthMethod,
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "Replay Protection Unavailable",
+				Description: "The authorization server failed closed because it could not reserve the assertion identifier atomically.",
+				Reference:   "OpenID Connect Core 1.0 Section 9",
+			})
+			writeOAuth2ErrorStatus(w, http.StatusInternalServerError, "server_error", "Client authentication is temporarily unavailable", "")
+			return
+		}
+		internalReason := "invalid_credentials"
+		externalDescription := "Client authentication failed"
+		if hasAssertionAuth {
+			internalReason = clientAssertionFailureReason(err)
+			externalDescription = "client assertion validation failed"
+		}
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Authentication Failed", map[string]interface{}{
 			"client_id":          clientID,
-			"error":              "invalid_credentials",
+			"error":              "invalid_client",
+			"reason":             internalReason,
 			"client_auth_method": clientAuthMethod,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Client Authentication Rejected",
+			Description: "Detailed validation reasons remain internal; the OAuth response is deliberately generic.",
+			Reference:   "RFC 7523 Section 3.2",
 		})
 		// RFC 6749 Section 5.2: "If the client attempted to authenticate via the
 		// 'Authorization' request header field, the authorization server MUST respond
@@ -713,17 +821,32 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		// 'WWW-Authenticate' response header field."
 		if hasBasicAuth {
 			w.Header().Set("WWW-Authenticate", `Basic realm="oauth2"`)
-			writeOAuth2ErrorStatus(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", "")
+			writeOAuth2ErrorStatus(w, http.StatusUnauthorized, "invalid_client", externalDescription, "")
 		} else {
-			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
+			writeOAuth2Error(w, "invalid_client", externalDescription, "")
 		}
 		return
 	}
 
+	if assertionDetails != nil {
+		p.emitEvent(sessionID, lookingglass.EventTypeCryptoOperation, "Client Assertion Signature Verified", map[string]interface{}{
+			"client_id": clientID,
+			"alg":       assertionDetails.algorithm,
+			"kid":       assertionDetails.keyID,
+			"jti":       assertionDetails.jti,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeRFCReference,
+			Title:       "JWT Signature Validation",
+			Description: "The authorization server verified the assertion with the client's registered public key.",
+			Reference:   "RFC 7523 Section 3",
+		})
+	}
+
 	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Client Authenticated", map[string]interface{}{
-		"client_id":          clientID,
-		"client_name":        client.Name,
-		"client_auth_method": clientAuthMethod,
+		"client_id":                     clientID,
+		"client_name":                   client.Name,
+		"client_auth_method":            clientAuthMethod,
+		"client_authentication_methods": []string{clientAuthMethod},
 	})
 
 	// Check if client is authorized for this grant type
@@ -1473,7 +1596,8 @@ func (p *Plugin) cleanupLoginRequests() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		cutoff := time.Now().Add(-p.loginRequestTTL)
+		now := p.now()
+		cutoff := now.Add(-p.loginRequestTTL)
 		p.loginRequestsMu.Lock()
 		for id, info := range p.loginRequests {
 			if info.CreatedAt.Before(cutoff) {

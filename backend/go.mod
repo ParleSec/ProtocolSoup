@@ -3,6 +3,7 @@ module github.com/ParleSec/ProtocolSoup
 go 1.26.5
 
 require (
+	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-chi/cors v1.2.2
@@ -12,6 +13,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/mattn/go-sqlite3 v1.14.44
 	github.com/piprate/json-gold v0.8.0
+	github.com/redis/go-redis/v9 v9.21.0
 	github.com/spiffe/go-spiffe/v2 v2.6.0
 	github.com/veraison/go-cose v1.3.0
 	golang.org/x/crypto v0.52.0
@@ -22,6 +24,7 @@ require (
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/cayleygraph/quad v1.3.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
@@ -29,6 +32,8 @@ require (
 	github.com/pquerna/cachecontrol v0.2.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
