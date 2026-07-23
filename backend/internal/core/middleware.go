@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -372,12 +374,16 @@ func buildCapturedExchange(
 	end time.Time,
 ) lookingglass.CapturedExchange {
 	requestHeaders := cloneHeader(r.Header)
+	if _, present := requestHeaders[lookingglass.OwnerTokenHeader]; present {
+		requestHeaders[lookingglass.OwnerTokenHeader] = []string{"[REDACTED]"}
+	}
 	if r.Host != "" && len(requestHeaders["Host"]) == 0 {
 		requestHeaders["Host"] = []string{r.Host}
 	}
 
-	requestBody := payloadFromCapture(requestCapture, r.Header.Get("Content-Type"))
-	requestRaw := rawPayload(buildRawRequest(r, requestHeaders, requestCapture), captureRawLimitBytes, r.Header.Get("Content-Type"))
+	persistedRequestCapture := redactPrivateJWKRegistrationCapture(r, requestCapture)
+	requestBody := payloadFromCapture(persistedRequestCapture, r.Header.Get("Content-Type"))
+	requestRaw := rawPayload(buildRawRequest(r, requestHeaders, persistedRequestCapture), captureRawLimitBytes, r.Header.Get("Content-Type"))
 
 	responseHeaders := cloneHeader(w.Header())
 	status := w.Status()
@@ -429,6 +435,45 @@ func buildCapturedExchange(
 			RawReconstructed:         true,
 		},
 	}
+}
+
+func redactPrivateJWKRegistrationCapture(r *http.Request, capture *bodyCapture) *bodyCapture {
+	if r == nil || capture == nil ||
+		!strings.HasSuffix(r.URL.Path, "/demo/clients/machine-client-pkjwt/jwks") {
+		return capture
+	}
+	raw, _, truncated := capture.snapshot()
+	privateMembers, err := internalcrypto.PrivateJWKMembers(raw)
+	if err == nil && len(privateMembers) == 0 {
+		return capture
+	}
+
+	redacted := []byte(`{"redacted":"invalid or private JWKS registration body"}`)
+	if err == nil {
+		var document map[string]interface{}
+		if json.Unmarshal(raw, &document) == nil {
+			if keys, ok := document["keys"].([]interface{}); ok {
+				for _, item := range keys {
+					key, ok := item.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					for _, member := range privateMembers {
+						if _, present := key[member]; present {
+							key[member] = "[REDACTED]"
+						}
+					}
+				}
+				if encoded, marshalErr := json.Marshal(document); marshalErr == nil {
+					redacted = encoded
+				}
+			}
+		}
+	}
+	sanitized := newBodyCapture(capture.limit)
+	sanitized.add(redacted)
+	sanitized.truncated = truncated
+	return sanitized
 }
 
 func requestURL(r *http.Request) string {

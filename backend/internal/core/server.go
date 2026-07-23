@@ -73,7 +73,7 @@ func (s *Server) setupRouter() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.config.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "If-Match", "If-None-Match"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-Looking-Glass-Session", lookingglass.OwnerTokenHeader, "If-Match", "If-None-Match"},
 		ExposedHeaders:   []string{"Link", "X-Request-ID", "ETag", "Location"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -148,6 +148,12 @@ func (s *Server) setupRouter() {
 				http.NotFound(w, r)
 			})
 			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server/*", protocolRouter)
+		}
+
+		if info.ID == "oauth2" {
+			// RFC 8414 Section 3.1 inserts the well-known suffix before the
+			// path component of the OAuth issuer identifier.
+			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server/oauth2", protocolRouter)
 		}
 
 		// OpenID Connect Discovery 1.0 Section 4: a Relying Party derives the
@@ -378,14 +384,19 @@ func (s *Server) handleStartDemo(w http.ResponseWriter, r *http.Request) {
 	for _, scenario := range scenarios {
 		if scenario.ID == flowID {
 			// Create a new looking glass session for this demo
-			session := s.lookingGlass.CreateSession(protocolID, flowID)
+			session, ownerToken, err := s.lookingGlass.CreateSession(protocolID, flowID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "Unable to create Looking Glass session")
+				return
+			}
 
 			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"session_id":  session.ID,
-				"protocol":    protocolID,
-				"flow":        flowID,
-				"ws_endpoint": "/ws/lookingglass/" + session.ID,
-				"scenario":    scenario,
+				"session_id":    session.ID,
+				"session_token": ownerToken,
+				"protocol":      protocolID,
+				"flow":          flowID,
+				"ws_endpoint":   "/ws/lookingglass/" + session.ID,
+				"scenario":      scenario,
 			})
 			return
 		}
@@ -404,13 +415,18 @@ func (s *Server) handleStartDemo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := s.lookingGlass.CreateSession(protocolID, flowID)
+	session, ownerToken, err := s.lookingGlass.CreateSession(protocolID, flowID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Unable to create Looking Glass session")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"session_id":  session.ID,
-		"protocol":    protocolID,
-		"flow":        flowID,
-		"ws_endpoint": "/ws/lookingglass/" + session.ID,
-		"scenario":    nil,
+		"session_id":    session.ID,
+		"session_token": ownerToken,
+		"protocol":      protocolID,
+		"flow":          flowID,
+		"ws_endpoint":   "/ws/lookingglass/" + session.ID,
+		"scenario":      nil,
 	})
 }
 
@@ -449,7 +465,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessions := s.lookingGlass.ListSessions()
+	sessions := s.lookingGlass.ListSessionSummaries()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessions": sessions,
 	})
@@ -462,9 +478,16 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
-	session, exists := s.lookingGlass.GetSession(id)
-	if !exists {
+	if _, exists := s.lookingGlass.GetSession(id); !exists {
 		writeError(w, http.StatusNotFound, "Session not found")
+		return
+	}
+	session, authorized := s.lookingGlass.AuthorizedSessionSnapshot(
+		id,
+		r.Header.Get(lookingglass.OwnerTokenHeader),
+	)
+	if !authorized {
+		writeError(w, http.StatusUnauthorized, "Looking Glass session owner capability required")
 		return
 	}
 	writeJSON(w, http.StatusOK, session)

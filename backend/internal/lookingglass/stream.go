@@ -4,17 +4,24 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
+const (
+	WebSocketProtocol            = "protocolsoup-lookingglass-v1"
+	WebSocketOwnerProtocolPrefix = "protocolsoup-lookingglass-owner."
+)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
+	Subprotocols:    []string{WebSocketProtocol},
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, implement proper origin checking
+		// The unguessable owner capability is validated before upgrade.
 		return true
 	},
 }
@@ -34,9 +41,10 @@ type Message struct {
 
 // HandleWebSocket handles WebSocket connections for looking glass
 func (e *Engine) HandleWebSocket(w http.ResponseWriter, r *http.Request, sessionID string) {
-	session, exists := e.GetSession(sessionID)
-	if !exists {
-		http.Error(w, "Session not found", http.StatusNotFound)
+	ownerToken, protocolValid := webSocketOwnerToken(r)
+	session, authorized := e.AuthorizeOwner(sessionID, ownerToken)
+	if !protocolValid || !authorized {
+		http.Error(w, "Looking Glass session owner capability required", http.StatusUnauthorized)
 		return
 	}
 
@@ -61,6 +69,23 @@ func (e *Engine) HandleWebSocket(w http.ResponseWriter, r *http.Request, session
 
 	// Send existing events to the new client
 	client.sendHistory()
+}
+
+func webSocketOwnerToken(r *http.Request) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	hasBaseProtocol := false
+	ownerToken := ""
+	for _, protocol := range websocket.Subprotocols(r) {
+		if protocol == WebSocketProtocol {
+			hasBaseProtocol = true
+		}
+		if strings.HasPrefix(protocol, WebSocketOwnerProtocolPrefix) {
+			ownerToken = strings.TrimPrefix(protocol, WebSocketOwnerProtocolPrefix)
+		}
+	}
+	return ownerToken, hasBaseProtocol && ownerToken != ""
 }
 
 func (s *Session) registerClient(client *Client) {

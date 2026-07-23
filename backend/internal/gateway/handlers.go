@@ -312,7 +312,11 @@ func (g *Gateway) handleGetSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream := g.resolveSession(r.Context(), sessionID)
+	upstream := g.resolveSession(
+		r.Context(),
+		sessionID,
+		r.Header.Get("X-Looking-Glass-Session-Token"),
+	)
 	if upstream == nil {
 		g.writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
 		return
@@ -327,7 +331,7 @@ func (g *Gateway) handleLookingGlassWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream := g.resolveSession(r.Context(), sessionID)
+	upstream := g.resolveSession(r.Context(), sessionID, lookingGlassWebSocketOwnerToken(r))
 	if upstream == nil {
 		g.writeJSON(w, http.StatusNotFound, map[string]string{"error": "Session not found"})
 		return
@@ -363,7 +367,7 @@ func (g *Gateway) findProtocolUpstream(ctx context.Context, protocolID string) *
 	return nil
 }
 
-func (g *Gateway) resolveSession(ctx context.Context, sessionID string) *Upstream {
+func (g *Gateway) resolveSession(ctx context.Context, sessionID, ownerToken string) *Upstream {
 	if sessionID == "" {
 		return nil
 	}
@@ -371,6 +375,9 @@ func (g *Gateway) resolveSession(ctx context.Context, sessionID string) *Upstrea
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream.BaseURL+"/api/lookingglass/sessions/"+sessionID, nil)
 		if err != nil {
 			continue
+		}
+		if ownerToken != "" {
+			req.Header.Set("X-Looking-Glass-Session-Token", ownerToken)
 		}
 		resp, err := g.client.Do(req)
 		if err != nil {
@@ -392,6 +399,20 @@ func (g *Gateway) resolveSession(ctx context.Context, sessionID string) *Upstrea
 		return upstream
 	}
 	return nil
+}
+
+func lookingGlassWebSocketOwnerToken(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	const ownerPrefix = "protocolsoup-lookingglass-owner."
+	for _, protocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		protocol = strings.TrimSpace(protocol)
+		if strings.HasPrefix(protocol, ownerPrefix) {
+			return strings.TrimPrefix(protocol, ownerPrefix)
+		}
+	}
+	return ""
 }
 
 func (g *Gateway) orderedUpstreams() []*Upstream {
