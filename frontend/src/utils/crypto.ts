@@ -153,6 +153,66 @@ export async function generatePKCE(): Promise<PKCEParams> {
   }
 }
 
+export interface RS256SigningMaterial {
+  privateKey: CryptoKey
+  publicJWK: JsonWebKey & { alg: 'RS256'; use: 'sig'; kid: string }
+  kid: string
+  alg: 'RS256'
+}
+
+/**
+ * Generate client-held RS256 signing material. The private CryptoKey is
+ * non-extractable; only the public JWK can leave the browser.
+ */
+export async function generateRS256SigningMaterial(kidPrefix: string): Promise<RS256SigningMaterial> {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
+    false,
+    ['sign', 'verify'],
+  ) as CryptoKeyPair
+  const exported = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+  const exportedKid = (exported as JsonWebKey & { kid?: string }).kid
+  const kid = typeof exportedKid === 'string' && exportedKid.length > 0
+    ? exportedKid
+    : `${kidPrefix}-${(exported.n || '').slice(0, 12)}`
+  return {
+    privateKey: keyPair.privateKey,
+    publicJWK: {
+      kty: exported.kty,
+      n: exported.n,
+      e: exported.e,
+      alg: 'RS256',
+      use: 'sig',
+      key_ops: ['verify'],
+      kid,
+    },
+    kid,
+    alg: 'RS256',
+  }
+}
+
+/** Sign a compact JWT with RSASSA-PKCS1-v1_5 and SHA-256 (RS256). */
+export async function signRS256JWT(
+  header: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  privateKey: CryptoKey,
+): Promise<string> {
+  const encodedHeader = base64URLEncode(new TextEncoder().encode(JSON.stringify(header)))
+  const encodedPayload = base64URLEncode(new TextEncoder().encode(JSON.stringify(payload)))
+  const signingInput = `${encodedHeader}.${encodedPayload}`
+  const signature = await crypto.subtle.sign(
+    { name: 'RSASSA-PKCS1-v1_5' },
+    privateKey,
+    new TextEncoder().encode(signingInput),
+  )
+  return `${signingInput}.${base64URLEncode(new Uint8Array(signature))}`
+}
+
 /**
  * OAuth state storage helpers
  * Store and retrieve OAuth parameters in sessionStorage
