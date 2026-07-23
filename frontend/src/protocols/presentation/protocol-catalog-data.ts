@@ -62,6 +62,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: '§4.4',
         references: [
           { category: 'core', label: 'RFC 6749 §4.4 — Client Credentials Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.4' },
+          { category: 'core', label: 'RFC 7523 §2.2 — JWT Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-2.2' },
           { category: 'security', label: 'RFC 9700 §2.5 — Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.5' },
         ],
       },
