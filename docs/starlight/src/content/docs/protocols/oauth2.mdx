@@ -1,6 +1,6 @@
 ---
 title: "OAuth 2.0"
-description: "Delegated authorization flows with PKCE, introspection, revocation, and device code."
+description: "Delegated authorization flows with PKCE, private_key_jwt, introspection, revocation, and device code."
 ---
 
 # OAuth 2.0
@@ -12,6 +12,9 @@ description: "Delegated authorization flows with PKCE, introspection, revocation
 - RFC 7662 -- Token Introspection
 - RFC 7009 -- Token Revocation
 - RFC 8628 -- Device Authorization Grant
+- RFC 7523 §2.2 -- JWT Profile for OAuth 2.0 Client Authentication
+- RFC 7517 -- JSON Web Key Sets
+- RFC 8414 -- Authorization Server Metadata
 
 ## Available Flows
 
@@ -31,7 +34,7 @@ description: "Delegated authorization flows with PKCE, introspection, revocation
 
 - **Authorization Code Flow Demo** -- Complete redirect flow with consent
 - **PKCE Flow Demo** -- PKCE challenge/verifier exchange
-- **Client Credentials Demo** -- Direct client authentication
+- **Client Credentials Demo** -- Toggle between a shared secret and browser-held `private_key_jwt`
 - **Token Refresh Demo** -- Refresh grant with token rotation
 
 ## Endpoints
@@ -44,6 +47,75 @@ description: "Delegated authorization flows with PKCE, introspection, revocation
 | `/oauth2/revoke` | POST | Token revocation |
 | `/oauth2/demo/users` | GET | List demo users |
 | `/oauth2/demo/clients` | GET | List demo clients |
+| `/.well-known/oauth-authorization-server/oauth2` | GET | RFC 8414 authorization server metadata |
+| `/oauth2/demo/clients/machine-client-pkjwt/jwks` | POST | Register the demo client's public JWKS |
+
+## `private_key_jwt` client authentication
+
+The Client Credentials Looking Glass flow can authenticate with a signed JWT
+instead of a shared client secret. Select **private_key_jwt** in the flow
+configuration, run the flow, then choose **client assertion** in the token
+inspector to inspect the real JWT sent to the token endpoint. [Open the Client
+Credentials flow](https://protocolsoup.com/looking-glass?protocol=oauth2&flow=client_credentials).
+
+The browser generates an RS256 key with WebCrypto. Its private `CryptoKey` is
+non-extractable and never leaves the client; only the public JWK is registered
+with the demo authorization server. The start-demo response returns a 256-bit
+owner capability; full session access, WebSocket streaming, and public-key
+registration require it. Registration is active-session-only and atomically
+one-shot. It creates the real session-isolated `client_id` (there is no seeded
+`private_key_jwt` client), expires that registration after 10 minutes, and
+returns the authorization server's exact token endpoint. Split deployments
+therefore use the same `aud` value the server validates, and concurrent
+demonstrations cannot replace each other's keys. The server also supports
+registered ES256 (P-256) and EdDSA (Ed25519) client keys.
+
+ProtocolSoup applies this deterministic RFC 7523 profile:
+
+- `client_id` is required in the request body and must exactly equal both
+  `iss` and `sub`.
+- `aud` must contain the exact configured token endpoint URL. A trailing slash
+  changes the value and fails validation.
+- `iat`, `exp`, and `jti` are required; optional `nbf` is enforced. RFC 7519
+  fractional NumericDate values retain nanosecond precision. The assertion
+  lifetime is at most 300 seconds, with 60 seconds of clock-skew tolerance.
+- `jti` is single-use through the complete acceptance window, including the
+  60-second expiration-skew allowance. Development and tests use an in-memory
+  reservation store. Demo and production deployments require shared Redis and
+  perform one atomic `SET NX` reservation keyed by a hash of `(client_id, jti)`;
+  production Redis connections must use `rediss://`.
+  Replay-store failures fail closed with `server_error`; assertion validation
+  failures continue to use generic `invalid_client` responses.
+- Allowed algorithms are RS256, ES256, and EdDSA. The registered key type must
+  be RSA, EC P-256, or Ed25519 respectively. If `key_ops` is present it must
+  permit `verify`, and the client registration must select `private_key_jwt`.
+  RSA moduli must be odd and at least 2048 bits; exponents must be odd, at
+  least 3, and safely representable by the verifier.
+- Static JWKS keys are checked before an optional HTTPS `jwks_uri`. Remote
+  retrieval bypasses environment proxies, rejects IANA special-use IPv4 and
+  IPv6 addresses during both DNS validation and dialing, applies one 3-second
+  deadline to DNS, connection, TLS, and response reading, rejects redirects,
+  caps responses at 64KB, caches for 10 minutes, coalesces concurrent initial
+  and forced fetches, and rate-limits refreshes caused by unknown `kid` values.
+  Unsupported or malformed unrelated remote keys are ignored when at least one
+  usable verification key remains.
+- Static, remote, and demo JWKS registrations reject every private JWK member:
+  `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, and `k`. Rejected registration
+  captures redact those values before Looking Glass persistence.
+- Assertion validation failures return the same `invalid_client` description.
+  Specific reasons appear only in owner-visible Looking Glass history.
+
+This method is intentionally scoped to `client_credentials`. JWT Bearer
+authorization grants (RFC 7523 §2.1), `client_secret_jwt`, mTLS, and
+certificate-in-header key delivery are separate mechanisms and are not enabled
+by this flow.
+
+RFC 8414 requires an HTTPS issuer. Because protocol routes are mounted at the
+origin root, `SHOWCASE_BASE_URL` must be a pathless HTTPS origin in production
+(for example `https://as.example`, not `https://as.example/base` or a trailing
+slash). The metadata endpoint returns `503` when it cannot derive that issuer.
+Loopback HTTP remains available for the executable local demo, but it is not
+published as RFC 8414 metadata.
 
 ## What To Validate
 
@@ -52,3 +124,5 @@ description: "Delegated authorization flows with PKCE, introspection, revocation
 - Introspection response: `active`, `token_type`, `scope`
 - Revocation: subsequent introspection returns `active: false`
 - Device code: polling interval, `authorization_pending` vs `slow_down`
+- private_key_jwt: assertion claims, signature algorithm/key binding, and the
+  replay-protection event
