@@ -24,6 +24,8 @@ export interface FlowExecutorConfig {
   extraParams?: Record<string, string>
   /** Looking Glass session ID for wire capture */
   captureSessionId?: string
+  /** Owner capability for owner-only Looking Glass actions */
+  captureSessionToken?: string
 }
 
 export interface FlowExecutorState {
@@ -44,6 +46,7 @@ export interface FlowExecutorState {
     accessToken?: string
     idToken?: string
     refreshToken?: string
+    clientAssertion?: string
     tokenType?: string
     expiresIn?: number
     scope?: string
@@ -107,7 +110,7 @@ export interface FlowEvent {
 }
 
 export interface DecodedToken {
-  type: 'access_token' | 'id_token' | 'refresh_token'
+  type: 'access_token' | 'id_token' | 'refresh_token' | 'client_assertion'
   raw: string
   header?: Record<string, unknown>
   payload?: Record<string, unknown>
@@ -401,8 +404,8 @@ export abstract class FlowExecutorBase {
 
   /** Process token response from token endpoint */
   protected processTokenResponse(data: Record<string, unknown>): void {
-    const tokens: FlowExecutorState['tokens'] = {}
-    const decodedTokens: DecodedToken[] = []
+    const tokens: FlowExecutorState['tokens'] = { ...this.state.tokens }
+    const decodedTokens: DecodedToken[] = [...this.state.decodedTokens]
 
     if (typeof data.access_token === 'string') {
       tokens.accessToken = data.access_token

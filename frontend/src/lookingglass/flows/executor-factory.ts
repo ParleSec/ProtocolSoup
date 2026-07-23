@@ -7,7 +7,11 @@
 
 import type { FlowExecutorBase, FlowExecutorConfig } from './base'
 import { AuthorizationCodeExecutor } from './authorization-code'
-import { ClientCredentialsExecutor, type ClientCredentialsConfig } from './client-credentials'
+import {
+  ClientCredentialsExecutor,
+  type ClientCredentialsAuthMethod,
+  type ClientCredentialsConfig,
+} from './client-credentials'
 import { ImplicitExecutor } from './implicit'
 import { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 import { DeviceCodeExecutor } from './device-code'
@@ -363,6 +367,8 @@ export interface ExecutorFactoryConfig {
   clientId: string
   /** Client secret (for confidential clients) */
   clientSecret?: string
+  /** Client authentication method for the client_credentials flow */
+  clientCredentialsAuthMethod?: ClientCredentialsAuthMethod
   /** Redirect URI */
   redirectUri?: string
   /** Scopes to request */
@@ -383,6 +389,8 @@ export interface ExecutorFactoryConfig {
   tokenTypeHint?: 'access_token' | 'refresh_token'
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
+  /** Owner capability for owner-only Looking Glass actions */
+  lookingGlassSessionToken?: string
   /** OID4VCI credential configuration override */
   oid4vciCredentialConfigurationID?: string
   /** OID4VCI credential format override */
@@ -423,6 +431,7 @@ export function createFlowExecutor(
     redirectUri: config.redirectUri,
     scopes: config.scopes,
     captureSessionId: config.lookingGlassSessionId,
+    captureSessionToken: config.lookingGlassSessionToken,
   }
   const extraParams: Record<string, string> = {}
   if (typeof config.oid4vpDCQLQueryJSON === 'string' && config.oid4vpDCQLQueryJSON.trim().length > 0) {
@@ -457,8 +466,10 @@ export function createFlowExecutor(
     (fullConfig as ResourceOwnerConfig).password = config.password
   }
 
-  if (flowId === 'client-credentials' && config.clientSecret) {
+  if (flowId === 'client-credentials') {
     (fullConfig as ClientCredentialsConfig).clientSecret = config.clientSecret
+    ;(fullConfig as ClientCredentialsConfig).clientAuthMethod =
+      config.clientCredentialsAuthMethod || 'client_secret_basic'
   }
 
   // Handle Interaction Code flow
@@ -616,7 +627,7 @@ export function getFlowRequirements(flowId: string): {
 } {
   switch (flowId) {
     case 'client-credentials':
-      return { requiresClientSecret: true, requiresRefreshToken: false, requiresCredentials: false }
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false }
     case 'refresh-token':
     case 'refresh_token':
     case 'token_refresh':

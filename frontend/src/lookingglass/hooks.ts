@@ -123,6 +123,7 @@ export function useFlow(protocolId: string | null, flowId: string | null) {
  */
 export function useLookingGlassSession(
   sessionId: string | null,
+  ownerToken: string | null,
   config: Partial<LookingGlassConfig> = {}
 ) {
   const mergedConfig = useMemo(() => ({ ...DEFAULT_CONFIG, ...config }), [config])
@@ -137,6 +138,12 @@ export function useLookingGlassSession(
 
   // WebSocket URL for the session
   const wsUrl = sessionId ? `/ws/lookingglass/${sessionId}` : null
+  const wsProtocols = useMemo(
+    () => ownerToken
+      ? ['protocolsoup-lookingglass-v1', `protocolsoup-lookingglass-owner.${ownerToken}`]
+      : undefined,
+    [ownerToken],
+  )
 
   useEffect(() => {
     setEvents([])
@@ -224,6 +231,7 @@ export function useLookingGlassSession(
     reconnect: true,
     reconnectInterval: 3000,
     maxReconnectAttempts: 10,
+    protocols: wsProtocols,
   })
 
   // Clear events
@@ -452,6 +460,7 @@ import {
   type FlowExecutorBase,
   type FlowExecutorState,
   type ExecutorFactoryConfig,
+  type ClientCredentialsAuthMethod,
   type VCArtifact,
 } from './flows'
 
@@ -464,6 +473,8 @@ export interface UseRealFlowExecutorOptions {
   clientId: string
   /** Client secret (for confidential client flows) */
   clientSecret?: string
+  /** Authentication method for the client_credentials flow */
+  clientCredentialsAuthMethod?: ClientCredentialsAuthMethod
   /** Redirect URI */
   redirectUri: string
   /** Scopes */
@@ -494,6 +505,8 @@ export interface UseRealFlowExecutorOptions {
   oid4vpClientIDScheme?: string
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
+  /** Owner capability for owner-only Looking Glass actions */
+  lookingGlassSessionToken?: string
 }
 
 export interface RealFlowExecutorResult {
@@ -742,6 +755,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       protocolBaseUrl,
       clientId: options.clientId,
       clientSecret: options.clientSecret,
+      clientCredentialsAuthMethod: options.clientCredentialsAuthMethod,
       redirectUri: options.redirectUri,
       scopes: options.scopes,
       refreshToken: options.refreshToken,
@@ -757,9 +771,10 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       oid4vpClientID: options.oid4vpClientID,
       oid4vpClientIDScheme: options.oid4vpClientIDScheme,
       lookingGlassSessionId: options.lookingGlassSessionId,
+      lookingGlassSessionToken: options.lookingGlassSessionToken,
     }
 
-    console.log('[useRealFlowExecutor] Creating executor for:', executorFlowId, 'with config:', config)
+    console.log('[useRealFlowExecutor] Creating executor for:', executorFlowId)
 
     // Create the executor
     const executor = createFlowExecutor(executorFlowId, config)
@@ -790,6 +805,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.protocolId,
     options.clientId,
     options.clientSecret,
+    options.clientCredentialsAuthMethod,
     options.redirectUri,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(options.scopes),
@@ -807,6 +823,7 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.oid4vpClientID,
     options.oid4vpClientIDScheme,
     options.lookingGlassSessionId,
+    options.lookingGlassSessionToken,
   ])
 
   const execute = useCallback(async () => {
