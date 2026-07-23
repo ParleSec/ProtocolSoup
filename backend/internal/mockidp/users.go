@@ -355,21 +355,21 @@ func (idp *MockIdP) GetDemoUserPresets() []DemoUserPreset {
 			Name:        "Alice (Standard User)",
 			Description: "A standard user with basic permissions",
 			Credentials: alice,
-			Scopes: []string{"openid", "profile", "email"},
+			Scopes:      []string{"openid", "profile", "email"},
 		},
 		{
 			ID:          "bob",
 			Name:        "Bob (Standard User)",
 			Description: "Another standard user for testing multi-user scenarios",
 			Credentials: bob,
-			Scopes: []string{"openid", "profile", "email"},
+			Scopes:      []string{"openid", "profile", "email"},
 		},
 		{
 			ID:          "admin",
 			Name:        "Admin (Elevated Permissions)",
 			Description: "An administrator with elevated permissions and roles",
 			Credentials: admin,
-			Scopes: []string{"openid", "profile", "email", "roles"},
+			Scopes:      []string{"openid", "profile", "email", "roles"},
 		},
 	}
 }

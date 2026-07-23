@@ -255,6 +255,7 @@ func (idp *MockIdP) initDemoData() {
 		Public:       false,
 		CreatedAt:    time.Now(),
 	}
+
 }
 
 // GetUser retrieves a user by ID
@@ -300,9 +301,25 @@ func (idp *MockIdP) ValidateCredentials(email, password string) (*models.User, e
 // GetClient retrieves a client by ID
 func (idp *MockIdP) GetClient(id string) (*models.Client, bool) {
 	idp.mu.RLock()
-	defer idp.mu.RUnlock()
 	client, exists := idp.clients[id]
+	if !exists || !clientRegistrationExpired(client, time.Now()) {
+		idp.mu.RUnlock()
+		return client, exists
+	}
+	idp.mu.RUnlock()
+
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	client, exists = idp.clients[id]
+	if exists && clientRegistrationExpired(client, time.Now()) {
+		delete(idp.clients, id)
+		return nil, false
+	}
 	return client, exists
+}
+
+func clientRegistrationExpired(client *models.Client, now time.Time) bool {
+	return client != nil && client.ExpiresAt != nil && !client.ExpiresAt.After(now)
 }
 
 // RegisterClient adds or replaces a client registration. It is used to
@@ -327,7 +344,7 @@ func (idp *MockIdP) ValidateClient(clientID, clientSecret string) (*models.Clien
 	if !exists {
 		return nil, errors.New("client not found")
 	}
-	if !client.Public && client.Secret != clientSecret {
+	if !client.Public && (client.Secret == "" || client.Secret != clientSecret) {
 		return nil, errors.New("invalid client secret")
 	}
 	return client, nil
@@ -703,10 +720,15 @@ func (idp *MockIdP) ListUsers() []*models.User {
 
 // ListClients returns all registered clients (for the UI)
 func (idp *MockIdP) ListClients() []*models.Client {
-	idp.mu.RLock()
-	defer idp.mu.RUnlock()
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	now := time.Now()
 	clients := make([]*models.Client, 0, len(idp.clients))
-	for _, c := range idp.clients {
+	for id, c := range idp.clients {
+		if clientRegistrationExpired(c, now) {
+			delete(idp.clients, id)
+			continue
+		}
 		clients = append(clients, c)
 	}
 	return clients

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+)
 
 // User represents a user in the system
 type User struct {
@@ -13,15 +17,15 @@ type User struct {
 	// They are populated for the demo users so the profile scope returns the full
 	// claim set; any left empty are simply omitted (Section 5.4 permits absent
 	// values).
-	MiddleName string            `json:"middle_name,omitempty"`
-	Nickname   string            `json:"nickname,omitempty"`
-	Profile    string            `json:"profile,omitempty"`
-	Picture    string            `json:"picture,omitempty"`
-	Website    string            `json:"website,omitempty"`
-	Gender     string            `json:"gender,omitempty"`
-	Birthdate  string            `json:"birthdate,omitempty"`
-	Zoneinfo   string            `json:"zoneinfo,omitempty"`
-	Locale     string            `json:"locale,omitempty"`
+	MiddleName string `json:"middle_name,omitempty"`
+	Nickname   string `json:"nickname,omitempty"`
+	Profile    string `json:"profile,omitempty"`
+	Picture    string `json:"picture,omitempty"`
+	Website    string `json:"website,omitempty"`
+	Gender     string `json:"gender,omitempty"`
+	Birthdate  string `json:"birthdate,omitempty"`
+	Zoneinfo   string `json:"zoneinfo,omitempty"`
+	Locale     string `json:"locale,omitempty"`
 	// phone-scope claims (OIDC Core 1.0 Section 5.1). PhoneNumber is RECOMMENDED
 	// in E.164 format; PhoneNumberVerified states whether it has been verified.
 	PhoneNumber         string `json:"phone_number,omitempty"`
@@ -49,14 +53,21 @@ type Address struct {
 
 // Client represents an OAuth client application
 type Client struct {
-	ID           string    `json:"client_id"`
-	Secret       string    `json:"-"` // Never serialized in responses
-	Name         string    `json:"name"`
-	RedirectURIs []string  `json:"redirect_uris"`
-	GrantTypes   []string  `json:"grant_types"`
-	Scopes       []string  `json:"scopes"`
-	Public       bool      `json:"public"` // Public clients (no secret)
-	CreatedAt    time.Time `json:"created_at"`
+	ID                      string   `json:"client_id"`
+	Secret                  string   `json:"-"` // Never serialized in responses
+	Name                    string   `json:"name"`
+	RedirectURIs            []string `json:"redirect_uris"`
+	GrantTypes              []string `json:"grant_types"`
+	Scopes                  []string `json:"scopes"`
+	Public                  bool     `json:"public"` // Public clients (no secret)
+	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"`
+	// JWKS and JWKSURI are the client's registered public verification keys.
+	// When both are present, RFC 7523 client authentication resolves the static
+	// set first and uses the URI only when the requested kid is absent.
+	JWKS      *crypto.JWKS `json:"jwks,omitempty"`
+	JWKSURI   string       `json:"jwks_uri,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	ExpiresAt *time.Time   `json:"expires_at,omitempty"`
 }
 
 // AuthorizationCode represents an OAuth authorization code
