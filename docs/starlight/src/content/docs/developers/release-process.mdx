@@ -1,0 +1,111 @@
+---
+title: Release Process
+description: How ProtocolSoup schedules, versions, and publishes releases, and how to follow them.
+---
+
+ProtocolSoup releases monthly from `master`. Each release is an immutable version you can pin a deployment to, published as a GitHub Release with notes and as signed multi-architecture container images on GHCR. A month with no user-facing change is skipped rather than padded out.
+
+This page explains how that works, whether you deploy ProtocolSoup, contribute to it, or just want to follow along.
+
+## Deployment And Release Are Different
+
+Changes reach the hosted site long before they appear in a release. The two events are separate and do different jobs.
+
+| When | What happens |
+|------|--------------|
+| A change merges to `master` | The hosted site redeploys and the `latest` container images are rebuilt |
+| A release is cut | A version tag is published with notes, a changelog entry, and immutable `vX.Y.Z` images |
+
+So a release is not how work ships. It is how a point in the project's history gets a stable name, so that a self-hosted deployment can pin something that will never move underneath it.
+
+## Release Cadence
+
+Releases are cut monthly, from whatever is on `master` at that point.
+
+Nothing is held back waiting for in-flight work. If a feature is not finished, it is simply not in that release and appears in the next one. Large migrations are published as pre-releases cut from `master` rather than parked on a long-lived branch, so the work stays integrated and reviewable while it lands.
+
+## What A Version Number Tells You
+
+| Bump | What changed | What it means for you |
+|------|--------------|-----------------------|
+| Patch | Fixes, dependency updates, documentation, internal refactors | Safe to take without reading anything |
+| Minor | A new protocol, flow, endpoint, or Looking Glass capability | New things to try, nothing removed |
+| Major | A breaking change to the deployment or API contract | Read the notes before upgrading |
+
+The deployment contract means environment variables, service topology, image names, compose files, and required infrastructure. Removing a required variable, splitting a service, or adding a new backing store are all major changes, because each one breaks a working self-hosted deployment.
+
+The version is chosen deliberately by a maintainer rather than inferred from commit messages. See the [release and tag policy](/deploy/release-and-tag-policy/) for exactly what each published image tag promises.
+
+## Following Releases
+
+- **[Releases page](https://github.com/ParleSec/ProtocolSoup/releases)** — every release with its full notes.
+- **[CHANGELOG.md](https://github.com/ParleSec/ProtocolSoup/blob/master/CHANGELOG.md)** — the whole history in one file, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+- **Notifications** — on the repository, choose Watch, then Custom, then Releases. This notifies you on releases without the noise of every issue and pull request.
+- **Feed** — `https://github.com/ParleSec/ProtocolSoup/releases.atom` works in any RSS reader.
+
+## Reading The Release Notes
+
+Every release has the same three sections, so you can skim to the depth you need.
+
+1. **Highlights** — a short summary written by a maintainer, aimed at someone deciding whether to upgrade. Start here.
+2. **Changelog** — every commit since the previous release, grouped into Added, Changed, Fixed, Removed, and Dependencies. This is the complete picture, including work that was pushed straight to `master` without a pull request.
+3. **Pull Requests** — the merged pull requests, grouped by area and protocol, with credit to their authors and a list of first-time contributors.
+
+Both the changelog and `CHANGELOG.md` are generated from commit history by [git-cliff](https://git-cliff.org), and the pull request section is generated from labels applied automatically when a pull request is opened. Nothing in the notes is assembled by hand except the highlights.
+
+## If You Deploy ProtocolSoup
+
+Pick a tag that matches how much movement you can tolerate: `latest` tracks `master` and changes constantly, `vX.Y.Z` never moves, and `vX.Y` or `vX` follow a release line. The [release and tag policy](/deploy/release-and-tag-policy/) has the full matrix and the recommended tag per environment.
+
+Pre-releases are published with a hyphen suffix, such as `v3.0.0-rc.1`. They only ever publish that exact tag: `vX.Y`, `vX`, and `latest` are left where they were, so tracking a stable tag will never move you onto a candidate build. Trying a release candidate is always opt-in.
+
+Every published image ships with an SBOM, a Cosign signature, a build provenance attestation, and a Trivy vulnerability scan, for `linux/amd64` and `linux/arm64`.
+
+## If You Contribute
+
+Once your pull request is merged it is live on the hosted site straight away, and it appears in the next monthly release.
+
+You do not need to do anything at release time, and you never edit `CHANGELOG.md` — it is generated, and a hand-written entry would be overwritten. Two habits do make the notes better:
+
+- **Write the pull request title as the changelog line it will become.** It is what readers see.
+- **Leave the automatic labels alone unless they are wrong.** They decide which section your change lands under.
+
+Maintainer commits use `CREATE`, `UPDATE`, `PATCH`, and `DELETE` prefixes, which map to the Added, Changed, Fixed, and Removed sections. Contributions are squash-merged and do not need a prefix; they are grouped from their pull request labels instead.
+
+## If You Maintain The Project
+
+Confirm the checks on `master` are green, then push an annotated tag:
+
+```bash
+git checkout master
+git pull
+git tag -a v2.1.0 -m "Short paragraph describing what this release is about."
+git push origin v2.1.0
+```
+
+The tag annotation body becomes the Highlights section, so write it for someone deciding whether to upgrade.
+
+Pushing the tag triggers two workflows:
+
+- `release.yml` verifies the tag is on `master`, verifies no checks failed on the tagged commit, assembles the notes, publishes the GitHub Release, and commits the regenerated `CHANGELOG.md` back to `master`.
+- `ghcr-publish.yml` builds every service image for both architectures and pushes the `vX.Y.Z`, `vX.Y`, and `vX` tags with an SBOM, Cosign signature, provenance attestation, and Trivy scan.
+
+The tag push is the trigger for both, rather than release publication, because a release created by a workflow using `GITHUB_TOKEN` does not itself trigger workflows.
+
+### When The Check Gate Blocks A Release
+
+The release workflow refuses to publish if any check on the tagged commit failed, and names them. The Lighthouse performance audit is excluded because it is advisory.
+
+To release anyway, include `[force-release]` in the tag annotation body. To redo the tag instead, delete both the release and the tag before re-tagging:
+
+```bash
+gh release delete v2.1.0 --yes
+git push origin :refs/tags/v2.1.0
+git tag -d v2.1.0
+```
+
+### Repository Settings This Depends On
+
+- **Allow auto-merge** must be enabled for `dependabot-auto-merge.yml` to queue dependency updates. Without required status checks on `master`, auto-merge lands them immediately rather than waiting for CI.
+- **Branch protection on `master`** must permit the release workflow to push the regenerated `CHANGELOG.md`.
+- Merges performed with `GITHUB_TOKEN` do not trigger workflows, so a Dependabot auto-merge may not rebuild `latest`. Run `ghcr-publish.yml` manually from the Actions tab if a rebuild is needed before the next commit to `master`.

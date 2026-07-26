@@ -87,6 +87,7 @@ export default defineConfig({
             { slug: 'deploy/overview' },
             { slug: 'deploy/deployment-models' },
             { slug: 'deploy/release-and-tag-policy' },
+            { label: 'Release Process', link: '/developers/release-process/' },
             { slug: 'deploy/environment-variables' },
             { slug: 'deploy/palette-index' },
             {
