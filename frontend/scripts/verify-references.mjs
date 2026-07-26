@@ -167,7 +167,7 @@ async function verifyRef(ref, cache) {
 
   if (!page.ok) {
     problems.push({
-      level: 'error',
+      level: isTransientHTTPStatus(page.status) ? 'warn' : 'error',
       ref,
       message: `URL returned HTTP ${page.status}`,
     })
@@ -253,6 +253,20 @@ function isRetryableFetchFailure(err) {
   return msg.includes('fetch failed') || msg.includes('network')
 }
 
+// These responses do not establish that a reference is dead. Third-party
+// hosts commonly return 403 to automated clients, 429 while rate limiting,
+// and 5xx while temporarily unavailable. Keep definitive client failures such
+// as 404 and 410 as errors.
+function isTransientHTTPStatus(status) {
+  return (
+    status === 403 ||
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    (status >= 500 && status <= 599)
+  )
+}
+
 async function fetchOnce(url, attemptIndex = 0) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -264,6 +278,14 @@ async function fetchOnce(url, attemptIndex = 0) {
     })
     const contentType = res.headers.get('content-type') || ''
     if (!res.ok) {
+      if (
+        attemptIndex + 1 < FETCH_MAX_ATTEMPTS &&
+        isTransientHTTPStatus(res.status)
+      ) {
+        await res.body?.cancel()
+        await sleep(500 * (attemptIndex + 1))
+        return fetchOnce(url, attemptIndex + 1)
+      }
       return { ok: false, status: res.status, contentType, body: '' }
     }
     if (contentType.includes('pdf')) {

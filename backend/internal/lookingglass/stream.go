@@ -30,6 +30,7 @@ var upgrader = websocket.Upgrader{
 type Client struct {
 	conn    *websocket.Conn
 	send    chan []byte
+	done    chan struct{}
 	session *Session
 }
 
@@ -57,6 +58,7 @@ func (e *Engine) HandleWebSocket(w http.ResponseWriter, r *http.Request, session
 	client := &Client{
 		conn:    conn,
 		send:    make(chan []byte, 256),
+		done:    make(chan struct{}),
 		session: session,
 	}
 
@@ -99,7 +101,7 @@ func (s *Session) unregisterClient(client *Client) {
 	defer s.mu.Unlock()
 	if _, ok := s.clients[client]; ok {
 		delete(s.clients, client)
-		close(client.send)
+		close(client.done)
 	}
 }
 
@@ -128,21 +130,28 @@ func (c *Client) sendHistory() {
 	c.session.mu.RLock()
 	events := make([]Event, len(c.session.Events))
 	copy(events, c.session.Events)
+	sessionID := c.session.ID
+	protocolID := c.session.ProtocolID
+	flowID := c.session.FlowID
+	state := c.session.State
+	createdAt := c.session.CreatedAt
 	c.session.mu.RUnlock()
 
 	// Send session info first
 	sessionInfo := Message{
 		Type: "session.info",
 		Payload: map[string]interface{}{
-			"id":          c.session.ID,
-			"protocol_id": c.session.ProtocolID,
-			"flow_id":     c.session.FlowID,
-			"state":       c.session.State,
-			"created_at":  c.session.CreatedAt,
+			"id":          sessionID,
+			"protocol_id": protocolID,
+			"flow_id":     flowID,
+			"state":       state,
+			"created_at":  createdAt,
 		},
 	}
 	data, _ := json.Marshal(sessionInfo)
-	c.send <- data
+	if !c.enqueue(data) {
+		return
+	}
 
 	// Send historical events
 	for _, event := range events {
@@ -154,14 +163,25 @@ func (c *Client) sendHistory() {
 		if err != nil {
 			continue
 		}
-		c.send <- data
+		if !c.enqueue(data) {
+			return
+		}
+	}
+}
+
+func (c *Client) enqueue(message []byte) bool {
+	select {
+	case c.send <- message:
+		return true
+	case <-c.done:
+		return false
 	}
 }
 
 func (c *Client) readPump() {
 	defer func() {
 		c.session.unregisterClient(c)
-		c.conn.Close()
+		_ = c.conn.Close()
 	}()
 
 	c.conn.SetReadLimit(512)
@@ -189,17 +209,16 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		c.session.unregisterClient(c)
+		_ = c.conn.Close()
 	}()
 
 	for {
 		select {
-		case message, ok := <-c.send:
+		case <-c.done:
+			return
+		case message := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
 
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
