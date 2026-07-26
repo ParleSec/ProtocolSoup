@@ -3,8 +3,15 @@ name: Publish to GHCR
 on:
   push:
     branches: [master]
-  release:
-    types: [published]
+    # Version tags produce the immutable vX.Y.Z / vX.Y / vX image tags. The
+    # tag push is the trigger rather than release publication, because a
+    # release created by GITHUB_TOKEN does not trigger workflows.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  # Manual rebuild of latest, for when a push to master did not trigger a
+  # build (for example an auto-merge performed with GITHUB_TOKEN).
+  workflow_dispatch:
 
 # Prevent duplicate builds for the same ref
 concurrency:
@@ -170,7 +177,7 @@ jobs:
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ steps.image.outputs.name }}:latest
+          image-ref: ${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
           format: 'sarif'
           output: 'trivy-results-${{ matrix.name }}.sarif'
           severity: 'CRITICAL,HIGH'
