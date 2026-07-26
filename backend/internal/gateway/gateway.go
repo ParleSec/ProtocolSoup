@@ -146,7 +146,7 @@ func (g *Gateway) Router() http.Handler {
 		r.Use(cors.Handler(cors.Options{
 			AllowedOrigins:   g.cfg.CORSOrigins,
 			AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "If-Match", "If-None-Match"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-Looking-Glass-Session", "X-Looking-Glass-Session-Token", "If-Match", "If-None-Match"},
 			ExposedHeaders:   []string{"Link", "X-Request-ID", "ETag", "Location"},
 			AllowCredentials: true,
 			MaxAge:           300,

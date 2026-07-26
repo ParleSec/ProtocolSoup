@@ -10,7 +10,12 @@
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
-import { decodeJWTWithoutValidation } from '../../utils/crypto'
+import {
+  decodeJWTWithoutValidation,
+  generateRS256SigningMaterial,
+  signRS256JWT,
+  type RS256SigningMaterial,
+} from '../../utils/crypto'
 
 export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
@@ -25,7 +30,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
   readonly rfcReference = 'OpenID4VCI 1.0'
 
   private flowConfig: OID4VCIPreAuthorizedConfig
-  private walletKeyPairPromise?: Promise<CryptoKeyPair>
+  private walletSigningMaterialPromise?: Promise<RS256SigningMaterial>
   private walletDeviceKeyPairPromise?: Promise<CryptoKeyPair>
 
   constructor(config: OID4VCIPreAuthorizedConfig) {
@@ -325,7 +330,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     }
     const proofJWT = isMdoc
       ? await this.signES256JWT(header, claims, privateKey)
-      : await this.signRS256JWT(header, claims, privateKey)
+      : await signRS256JWT(header, claims, privateKey)
     const decodedProofJWT = decodeJWTWithoutValidation(proofJWT)
 
     this.addVCArtifact({
@@ -555,39 +560,11 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return segments[0] || rawCredential
   }
 
-  private async getWalletSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string; alg: string }> {
-    if (!this.walletKeyPairPromise) {
-      this.walletKeyPairPromise = window.crypto.subtle.generateKey(
-        {
-          name: 'RSASSA-PKCS1-v1_5',
-          modulusLength: 2048,
-          publicExponent: new Uint8Array([1, 0, 1]),
-          hash: 'SHA-256',
-        },
-        true,
-        ['sign', 'verify'],
-      ) as Promise<CryptoKeyPair>
+  private async getWalletSigningMaterial(): Promise<RS256SigningMaterial> {
+    if (!this.walletSigningMaterialPromise) {
+      this.walletSigningMaterialPromise = generateRS256SigningMaterial('wallet')
     }
-    const keyPair = await this.walletKeyPairPromise
-    const exported = await window.crypto.subtle.exportKey('jwk', keyPair.publicKey)
-    const publicJWK: Record<string, unknown> = {
-      kty: exported.kty,
-      n: exported.n,
-      e: exported.e,
-      alg: 'RS256',
-      use: 'sig',
-    }
-    const exportedKid = (exported as Record<string, unknown>).kid
-    const kid = typeof exportedKid === 'string' && exportedKid.length > 0
-      ? exportedKid
-      : `wallet-${(exported.n || '').slice(0, 12)}`
-    publicJWK.kid = kid
-    return {
-      privateKey: keyPair.privateKey,
-      publicJWK,
-      kid,
-      alg: 'RS256',
-    }
+    return this.walletSigningMaterialPromise
   }
 
   // getWalletDeviceSigningMaterial returns an EC P-256 device key for the
@@ -641,23 +618,6 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     const signingInput = `${encodedHeader}.${encodedPayload}`
     const signature = await window.crypto.subtle.sign(
       { name: 'ECDSA', hash: { name: 'SHA-256' } },
-      privateKey,
-      new TextEncoder().encode(signingInput),
-    )
-    const encodedSignature = this.base64UrlEncodeBytes(new Uint8Array(signature))
-    return `${signingInput}.${encodedSignature}`
-  }
-
-  private async signRS256JWT(
-    header: Record<string, unknown>,
-    payload: Record<string, unknown>,
-    privateKey: CryptoKey,
-  ): Promise<string> {
-    const encodedHeader = this.base64UrlEncodeString(JSON.stringify(header))
-    const encodedPayload = this.base64UrlEncodeString(JSON.stringify(payload))
-    const signingInput = `${encodedHeader}.${encodedPayload}`
-    const signature = await window.crypto.subtle.sign(
-      { name: 'RSASSA-PKCS1-v1_5' },
       privateKey,
       new TextEncoder().encode(signingInput),
     )

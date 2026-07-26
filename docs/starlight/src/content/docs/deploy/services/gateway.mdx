@@ -31,6 +31,13 @@ Use gateway when you run multiple protocol services and need a single API entryp
 - `GET /api/lookingglass/sessions` -- list Looking Glass sessions
 - `GET /.well-known/jwks.json` -- JSON Web Key Set
 
+The start-demo response returns a 256-bit `session_token` owner capability
+once. Session lists remain metadata-only. Full session GETs require
+`X-Looking-Glass-Session-Token`; WebSocket subscriptions carry the capability
+in `protocolsoup-lookingglass-owner.<session_token>` alongside the
+`protocolsoup-lookingglass-v1` subprotocol. Reverse proxies must preserve
+`Sec-WebSocket-Protocol` in both directions.
+
 ## Configuration
 
 | Variable | Required | Default | Description |

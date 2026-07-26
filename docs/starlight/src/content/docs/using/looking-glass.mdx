@@ -59,7 +59,24 @@ Each flow execution creates a Looking Glass session. Sessions are linked to back
 - The `X-Looking-Glass-Session` HTTP header
 - The `lg_session` query parameter (used for redirects where headers cannot be set)
 
-You can list active sessions at `GET /api/lookingglass/sessions` and retrieve a specific session at `GET /api/lookingglass/sessions/{id}`.
+The start-demo response also returns a 256-bit `session_token` owner
+capability exactly once. The backend stores only its SHA-256 hash. Keep the
+token in memory and do not put it in URLs, logs, or shared links.
+
+- `GET /api/lookingglass/sessions` returns metadata only; it never exposes
+  captured events.
+- `GET /api/lookingglass/sessions/{id}` returns the complete owner-visible
+  session only when `X-Looking-Glass-Session-Token` contains the capability.
+- WebSocket subscriptions offer
+  `protocolsoup-lookingglass-v1` and
+  `protocolsoup-lookingglass-owner.<session_token>` as dedicated
+  `Sec-WebSocket-Protocol` values. Query-parameter ownership is not supported.
+- Owner-only action headers are redacted from captured traffic before session
+  persistence.
+
+The OAuth `private_key_jwt` demo also requires the owner capability to register
+its public JWK Set. Registration is accepted only while the matching
+`client_credentials` session is active and can succeed only once.
 
 ## Token Inspector
 

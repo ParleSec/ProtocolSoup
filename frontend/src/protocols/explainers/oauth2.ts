@@ -479,9 +479,9 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         action:
-          'For confidential clients, prefer `private_key_jwt` or mTLS ' +
-          'client authentication (per-request assertion, no long-term ' +
-          'shared secret) where the AS supports it.',
+          'ProtocolSoup supports `private_key_jwt` for confidential ' +
+          '`client_credentials` clients: each request carries a signed, ' +
+          'short-lived assertion instead of a long-term shared secret.',
         mitigates: ['native-app-secret-extraction'],
       },
     ],
@@ -493,6 +493,63 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
       {
         label: 'OAuth 2.0 for Native Apps §8.5 (No client_secret in apps)',
         href: 'https://datatracker.ietf.org/doc/html/rfc8252#section-8.5',
+      },
+      {
+        label: 'RFC 7523 §2.2 (JWT Client Authentication)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-2.2',
+      },
+    ],
+  },
+
+  client_assertion: {
+    purpose:
+      'A short-lived JWT signed by a confidential client with its registered ' +
+      'private key. ProtocolSoup accepts it as `private_key_jwt` authentication ' +
+      'for the `client_credentials` grant.',
+    attacks: [
+      {
+        id: 'client-assertion-replay',
+        name: 'Client assertion replay',
+        scenario:
+          'Mallory captures a valid client_assertion and submits the same JWT ' +
+          'again before it expires. Signature verification alone would still ' +
+          'succeed because the replay is byte-for-byte authentic.',
+        impact:
+          'Repeated access-token issuance during the assertion validity window.',
+      },
+    ],
+    mitigations: [
+      {
+        action:
+          'Require a unique `jti`, retain it through the assertion validity ' +
+          'window plus accepted clock skew, and reject every second use.',
+        rationale:
+          'After signature verification, ProtocolSoup atomically reserves a hash ' +
+          'of `(client_id, jti)` in shared production Redis through `exp + skew`. ' +
+          'A store outage fails closed instead of issuing a token without replay protection.',
+        mitigates: ['client-assertion-replay'],
+      },
+      {
+        action:
+          'Limit assertions to 300 seconds and require `iat`, `exp`, exact token-' +
+          'endpoint `aud`, and algorithm-to-key-type binding.',
+        mitigates: ['client-assertion-replay'],
+      },
+      {
+        action:
+          'Register only public verification keys. RSA keys use an odd modulus ' +
+          'of at least 2048 bits; every private JWK member is rejected and redacted.',
+        mitigates: ['client-assertion-replay'],
+      },
+    ],
+    references: [
+      {
+        label: 'RFC 7523 §3 (JWT Processing Requirements)',
+        href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-3',
+      },
+      {
+        label: 'OpenID Connect Core §9 (Client Authentication)',
+        href: 'https://openid.net/specs/openid-connect-core-1_0.html#ClientAuthentication',
       },
     ],
   },

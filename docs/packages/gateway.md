@@ -67,6 +67,13 @@
 - `GET /api/lookingglass/sessions/{id}`
 - `GET /ws/lookingglass/{session}`
 
+Starting a demo returns a 256-bit `session_token` owner capability once. Session
+lists contain metadata only. Full session GETs require
+`X-Looking-Glass-Session-Token`, while WebSocket clients carry ownership in the
+dedicated `protocolsoup-lookingglass-owner.<session_token>` subprotocol
+alongside `protocolsoup-lookingglass-v1`. The gateway preserves these headers
+and subprotocols when routing to the owning service.
+
 ## Quick Start
 
 ### docker run
@@ -105,6 +112,7 @@ services:
 - **`/api/protocols` returns `503`**: upstreams are unreachable or not configured.
 - **`/health/upstreams` reports `no_upstreams`**: no upstream environment URLs were supplied.
 - **`/api/protocols/{id}` returns `404`**: protocol not discovered from any upstream.
+- **Looking Glass websocket returns `401`**: the owner subprotocol capability is missing or invalid.
 - **Looking Glass websocket returns `404`**: session ID does not exist on discovered upstreams.
 
 ## Versioning And Tags

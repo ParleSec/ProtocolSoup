@@ -47,6 +47,7 @@ services:
       - SHOWCASE_CORS_ORIGINS=https://protocolsoup.com,https://www.protocolsoup.com
       - SHOWCASE_DEBUG=false
       - SHOWCASE_PALETTE_DB=/app/palette.db
+      - OAUTH2_REPLAY_REDIS_URL=${OAUTH2_REPLAY_REDIS_URL:?set a rediss:// replay store URL}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s

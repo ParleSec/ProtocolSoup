@@ -8,6 +8,7 @@ interface UseWebSocketOptions {
   reconnect?: boolean
   reconnectInterval?: number
   maxReconnectAttempts?: number
+  protocols?: string[]
 }
 
 interface UseWebSocketReturn {
@@ -53,6 +54,7 @@ export function useWebSocket(
     reconnect = true,
     reconnectInterval = 3000,
     maxReconnectAttempts = 5,
+    protocols,
   } = options
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -70,7 +72,7 @@ export function useWebSocket(
 
     try {
       const fullUrl = buildWebSocketURL(url)
-      wsRef.current = new WebSocket(fullUrl)
+      wsRef.current = new WebSocket(fullUrl, protocols)
 
       wsRef.current.onopen = () => {
         setConnected(true)
@@ -102,7 +104,7 @@ export function useWebSocket(
     } catch (error) {
       console.error('WebSocket connection error:', error)
     }
-  }, [url, onOpen, onClose, onError, onMessage, reconnect, reconnectInterval, maxReconnectAttempts])
+  }, [url, onOpen, onClose, onError, onMessage, reconnect, reconnectInterval, maxReconnectAttempts, protocols])
 
   const disconnect = useCallback(() => {
     shouldReconnectRef.current = false

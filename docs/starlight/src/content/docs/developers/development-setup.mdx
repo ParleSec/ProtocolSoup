@@ -81,6 +81,8 @@ Run the smallest set that covers your change before requesting review.
 | Palette content (`content/**`) | `cd backend && go run ./cmd/content-validate -content ../content && go test ./internal/palette/...` |
 | Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db` |
 
+The protocol-reference verifier retries temporary upstream failures. Responses that do not prove a link is dead—such as bot-blocking `403`, rate-limiting `429`, and temporary `5xx` responses—are reported as warnings; definitive failures such as `404` or `410`, missing anchors, and section mismatches remain errors. Pass `--strict` to make warnings fail the command.
+
 The canonical contract for palette artefacts lives in [`content/SCHEMA.md`](https://github.com/ParleSec/ProtocolSoup/blob/master/content/SCHEMA.md). New axis values must be added to `content/taxonomy.yaml`, and synonyms to `content/aliases.yaml`. Both files are validated in CI by `cmd/content-validate`.
 
 Security scans may be limited on forked pull requests because repository secrets are not available to untrusted code. Maintainers can rerun or review those checks after triage.

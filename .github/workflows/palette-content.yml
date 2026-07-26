@@ -96,7 +96,7 @@ jobs:
       - name: Run palette API smoke checks
         run: |
           docker run -d --name ps \
-            -e SHOWCASE_ENV=production \
+            -e SHOWCASE_ENV=development \
             -e SHOWCASE_BASE_URL=http://localhost:8080 \
             -e SHOWCASE_PALETTE_DB=/app/palette.db \
             -p 8080:8080 ps-backend:smoke

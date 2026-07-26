@@ -19,7 +19,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | Health | `GET /health` |
 | API index | `GET /api` |
 | Storage | File-based (optional persistent volume) |
-| Database | None required |
+| Database | Redis is required in production for OAuth client-assertion replay protection |
 
 ## Protocol Endpoints
 
@@ -28,6 +28,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 - `GET|POST /oauth2/authorize`, `POST /oauth2/token`
 - `POST /oauth2/introspect`, `POST /oauth2/revoke`
 - `GET /oauth2/demo/users`, `GET /oauth2/demo/clients`
+- `POST /oauth2/demo/clients/machine-client-pkjwt/jwks` (owned, active-session, one-shot public-key registration)
 
 ### OIDC
 
@@ -55,11 +56,12 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer metadata, redirect URIs |
+| `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer metadata and redirect URIs; production requires a pathless HTTPS origin |
 | `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in identity provider |
 | `SHOWCASE_DATA_DIR` | No | - | Persistent storage for VC/session state |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
+| `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared replay store. Production requires a reachable `rediss://` secret; demo may use `redis://` on a private local network. |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |
@@ -88,6 +90,7 @@ docker run -p 8080:8080 \
 ## Operational Notes
 
 - `SHOWCASE_BASE_URL` must match your external URL. OIDC discovery, SAML metadata, and OID4VCI issuer metadata all derive from this value.
+- In production, keep `SHOWCASE_BASE_URL` pathless with no trailing slash and configure `OAUTH2_REPLAY_REDIS_URL` as a TLS-protected secret. OAuth token requests fail closed if replay storage is unavailable.
 - Mock IdP is enabled by default. It provides demo users and clients for flow execution.
 - Mount persistent storage if you need VC credential and session continuity across restarts.
 - Pair with gateway for unified routing in multi-service deployments.

@@ -78,6 +78,23 @@ curl -H "Authorization: Bearer <your-token>" \
 - If using the default frontend image, WebSocket proxying is built into the nginx config (`/ws` path).
 - If using a custom reverse proxy, ensure it supports `Connection: upgrade` and `Upgrade: websocket` headers on the `/ws` path.
 - Check that the WebSocket path matches: `/ws/lookingglass/{session_id}`.
+- Preserve the `Sec-WebSocket-Protocol` header in both directions. Looking Glass
+  offers `protocolsoup-lookingglass-v1` plus
+  `protocolsoup-lookingglass-owner.<session_token>` and the backend selects the
+  first value after validating the owner capability.
+
+## Production federation service fails during startup
+
+**Symptom:** Startup reports that `OAUTH2_REPLAY_REDIS_URL` is required, must use
+`rediss://`, or cannot connect.
+
+**Cause:** Production `private_key_jwt` replay protection requires one shared,
+TLS-protected Redis store so every service instance reserves `jti` values
+atomically.
+
+**Fix:** Provision reachable Redis with TLS, set its `rediss://` URL as a
+platform secret, and verify network and certificate trust from the federation
+service. Do not downgrade production to `redis://` or an in-memory store.
 
 ## Containers exit with OOM
 

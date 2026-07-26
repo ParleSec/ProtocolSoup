@@ -2,6 +2,8 @@ package oauth2
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,13 +17,16 @@ import (
 // Plugin implements the OAuth 2.0 protocol plugin
 type Plugin struct {
 	*plugin.BasePlugin
-	mockIdP      *mockidp.MockIdP
-	keySet       *crypto.KeySet
-	lookingGlass *lookingglass.Engine
-	baseURL      string
-	loginRequests   map[string]loginRequestInfo
-	loginRequestsMu sync.RWMutex
-	loginRequestTTL time.Duration
+	mockIdP               *mockidp.MockIdP
+	keySet                *crypto.KeySet
+	lookingGlass          *lookingglass.Engine
+	baseURL               string
+	loginRequests         map[string]loginRequestInfo
+	loginRequestsMu       sync.RWMutex
+	loginRequestTTL       time.Duration
+	clientKeyResolver     *clientJWKSResolver
+	clientAssertionReplay clientAssertionReplayStore
+	now                   func() time.Time
 }
 
 // NewPlugin creates a new OAuth 2.0 plugin
@@ -33,10 +38,13 @@ func NewPlugin() *Plugin {
 			Version:     "1.0.0",
 			Description: "OAuth 2.0 Authorization Framework implementation with PKCE support",
 			Tags:        []string{"authorization", "tokens", "pkce"},
-			RFCs:        []string{"RFC 6749", "RFC 7636", "RFC 7009", "RFC 7662"},
+			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414"},
 		}),
-		loginRequests:   make(map[string]loginRequestInfo),
-		loginRequestTTL: 10 * time.Minute,
+		loginRequests:         make(map[string]loginRequestInfo),
+		loginRequestTTL:       10 * time.Minute,
+		clientKeyResolver:     newClientJWKSResolver(),
+		clientAssertionReplay: newMemoryClientAssertionReplayStore(),
+		now:                   time.Now,
 	}
 }
 
@@ -57,6 +65,26 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.lookingGlass = lg
 	}
 
+	if config.OAuth2ReplayRedisURL != "" {
+		store, err := newRedisClientAssertionReplayStore(
+			ctx,
+			config.OAuth2ReplayRedisURL,
+			config.Environment == "production",
+		)
+		if err != nil {
+			return err
+		}
+		if p.clientAssertionReplay != nil {
+			_ = p.clientAssertionReplay.Close()
+		}
+		p.clientAssertionReplay = store
+	} else {
+		environment := strings.ToLower(strings.TrimSpace(config.Environment))
+		if environment != "" && environment != "development" && environment != "test" {
+			return errors.New("OAUTH2_REPLAY_REDIS_URL is required outside development and tests")
+		}
+	}
+
 	go p.cleanupLoginRequests()
 
 	return nil
@@ -64,6 +92,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 
 // Shutdown shuts down the plugin
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	if p.clientAssertionReplay != nil {
+		return p.clientAssertionReplay.Close()
+	}
 	return nil
 }
 
@@ -75,6 +106,8 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 
 	// Token endpoint
 	router.Post("/token", p.handleToken)
+	router.Get("/.well-known/oauth-authorization-server", p.handleAuthorizationServerMetadata)
+	router.Get("/.well-known/oauth-authorization-server/*", p.handleAuthorizationServerMetadata)
 
 	// Token introspection (RFC 7662)
 	router.Post("/introspect", p.handleIntrospect)
@@ -85,6 +118,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// Demo/utility endpoints
 	router.Get("/demo/users", p.handleListUsers)
 	router.Get("/demo/clients", p.handleListClients)
+	router.Post("/demo/clients/machine-client-pkjwt/jwks", p.handleRegisterPrivateKeyJWTClientJWKS)
 }
 
 // GetInspectors returns the protocol's inspectors
@@ -93,7 +127,7 @@ func (p *Plugin) GetInspectors() []plugin.Inspector {
 		{
 			ID:          "oauth2-token",
 			Name:        "OAuth 2.0 Token Inspector",
-			Description: "Decode and analyze OAuth 2.0 access and refresh tokens",
+			Description: "Decode and analyze OAuth 2.0 access, refresh, and client assertion tokens",
 			Type:        "token",
 		},
 		{
@@ -380,27 +414,30 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "client_credentials",
 			Name:        "Client Credentials Grant",
-			Description: "Machine-to-machine (M2M) authentication for server-side applications (RFC 6749 §4.4). The client authenticates using its own credentials (not user credentials) to access resources it owns or has been granted permission to access. No user interaction required.",
+			Description: "Machine-to-machine (M2M) authentication for server-side applications (RFC 6749 §4.4). The client authenticates with a secret or an RFC 7523 private_key_jwt assertion to access resources it owns. No user interaction required.",
 			Executable:  true,
 			Category:    "authorization",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
 					Name:        "Token Request",
-					Description: "Client authenticates directly to the token endpoint using its client_id and client_secret. This is a confidential client flow - credentials must never be exposed to browsers or end users.",
+					Description: "Client authenticates directly to the token endpoint using client_secret_basic or a private_key_jwt assertion. This is a confidential client flow.",
 					From:        "Client",
 					To:          "Authorization Server",
 					Type:        "request",
 					Parameters: map[string]string{
-						"grant_type":    "client_credentials (REQUIRED)",
-						"client_id":     "Client identifier (REQUIRED)",
-						"client_secret": "Client secret (REQUIRED for confidential clients)",
-						"scope":         "Requested permissions (OPTIONAL)",
+						"grant_type":            "client_credentials (REQUIRED)",
+						"client_id":             "Client identifier (REQUIRED)",
+						"client_secret":         "Client secret when client_secret_basic is selected",
+						"client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer when private_key_jwt is selected",
+						"client_assertion":      "Signed JWT when private_key_jwt is selected (RFC 7523 §2.2)",
+						"scope":                 "Requested permissions (OPTIONAL)",
 					},
 					Security: []string{
 						"ONLY for confidential clients (server-side) - never SPAs/mobile",
-						"Client credentials must be stored securely (environment variables, vault)",
-						"Use TLS/HTTPS - credentials are transmitted in request body",
+						"Shared secrets belong in environment variables or a vault",
+						"private_key_jwt private keys remain client-held; only signed assertions cross the boundary",
+						"Assertions are single-use and expire within 300 seconds",
 						"Content-Type MUST be application/x-www-form-urlencoded",
 					},
 				},
