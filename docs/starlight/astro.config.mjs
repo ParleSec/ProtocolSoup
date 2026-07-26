@@ -124,6 +124,7 @@ export default defineConfig({
             { slug: 'developers/overview' },
             { slug: 'developers/development-setup' },
             { slug: 'developers/pull-request-workflow' },
+            { slug: 'developers/release-process' },
             {
               label: 'Extending ProtocolSoup',
               items: [
