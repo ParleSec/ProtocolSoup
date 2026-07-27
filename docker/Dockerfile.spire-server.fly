@@ -6,7 +6,7 @@
 # - Extended CA TTL (90 days) for demo stability
 # - x509pop attestation support for agent resilience
 
-FROM ghcr.io/spiffe/spire-server:1.15.0 AS spire-base
+FROM ghcr.io/spiffe/spire-server:1.15.2 AS spire-base
 
 # Build health check server
 FROM golang:1.26.5-alpine AS health-builder
@@ -15,7 +15,7 @@ COPY docker/spire/server-fly/health-server.go .
 RUN CGO_ENABLED=0 go build -o health-server health-server.go
 
 # Final production image
-FROM alpine:3.23
+FROM alpine:3.24
 LABEL authors="ProtocolSoup"
 LABEL description="SPIRE Server for Fly.io production with extended CA TTL"
 
