@@ -8,6 +8,7 @@ Thank you for your interest in contributing to ProtocolSoup! This project aims t
 - [Development Setup](#development-setup)
 - [Making Contributions](#making-contributions)
 - [Pull Request Process](#pull-request-process)
+- [Releases](#releases)
 - [Local Validation Matrix](#local-validation-matrix)
 - [Coding Standards](#coding-standards)
 - [Adding New Protocols](#adding-new-protocols)
@@ -181,6 +182,14 @@ Before submitting, verify:
 - CI checks must pass before merge
 - At least one maintainer approval is required
 - Squash-merge is used for most contributions
+
+## Releases
+
+Merging is not the same as releasing. Once your pull request lands on `master` it is deployed to the hosted site and published to the `latest` container images immediately. It appears in a versioned release at the next monthly tag.
+
+Release notes are assembled automatically. The pull request labels applied by the labeler workflow decide which section your change appears under, and `CHANGELOG.md` is generated from commit history by `git-cliff` — do not edit it by hand.
+
+Maintainers cut releases by pushing an annotated tag from `master`. The full process, versioning rules, and pre-release conventions are documented at [docs.protocolsoup.com/developers/release-process](https://docs.protocolsoup.com/developers/release-process/).
 
 ## Local Validation Matrix
 

@@ -23,7 +23,11 @@ export {
 
 // Individual executors
 export { AuthorizationCodeExecutor, type AuthorizationCodeConfig } from './authorization-code'
-export { ClientCredentialsExecutor, type ClientCredentialsConfig } from './client-credentials'
+export {
+  ClientCredentialsExecutor,
+  type ClientCredentialsAuthMethod,
+  type ClientCredentialsConfig,
+} from './client-credentials'
 export { ImplicitExecutor, type ImplicitConfig } from './implicit'
 export { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 export { DeviceCodeExecutor, type DeviceCodeConfig } from './device-code'

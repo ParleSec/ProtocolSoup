@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -119,27 +121,43 @@ func (jwk *JWK) ToPublicKey() (interface{}, error) {
 }
 
 func (jwk *JWK) toRSAPublicKey() (*rsa.PublicKey, error) {
-	if jwk.N == "" || jwk.E == "" {
+	return parseRSAPublicKeyParameters(jwk.N, jwk.E)
+}
+
+func parseRSAPublicKeyParameters(encodedModulus, encodedExponent string) (*rsa.PublicKey, error) {
+	if encodedModulus == "" || encodedExponent == "" {
 		return nil, errors.New("missing RSA key parameters")
 	}
-
-	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
+	modulusBytes, err := base64.RawURLEncoding.DecodeString(encodedModulus)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode modulus: %w", err)
 	}
+	if len(modulusBytes) == 0 || modulusBytes[0] == 0 {
+		return nil, errors.New("RSA modulus must be a minimally encoded positive integer")
+	}
+	modulus := new(big.Int).SetBytes(modulusBytes)
+	if modulus.BitLen() < 2048 {
+		return nil, fmt.Errorf("RSA modulus is %d bits; at least 2048 bits are required", modulus.BitLen())
+	}
+	if modulus.Bit(0) == 0 {
+		return nil, errors.New("RSA modulus must be odd")
+	}
 
-	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
+	exponentBytes, err := base64.RawURLEncoding.DecodeString(encodedExponent)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode exponent: %w", err)
 	}
-
-	n := new(big.Int).SetBytes(nBytes)
-	e := 0
-	for _, b := range eBytes {
-		e = e*256 + int(b)
+	if len(exponentBytes) == 0 || exponentBytes[0] == 0 {
+		return nil, errors.New("RSA exponent must be a minimally encoded positive integer")
 	}
-
-	return &rsa.PublicKey{N: n, E: e}, nil
+	exponent := new(big.Int).SetBytes(exponentBytes)
+	if !exponent.IsInt64() ||
+		exponent.Int64() > int64(math.MaxInt) ||
+		exponent.Int64() < 3 ||
+		exponent.Bit(0) == 0 {
+		return nil, errors.New("RSA exponent must be an odd integer of at least 3 that fits in an int")
+	}
+	return &rsa.PublicKey{N: modulus, E: int(exponent.Int64())}, nil
 }
 
 func (jwk *JWK) toECPublicKey() (*ecdsa.PublicKey, error) {
@@ -294,7 +312,7 @@ func JWKFromEd25519PublicKey(pub ed25519.PublicKey, kid string) JWK {
 	}
 }
 
-// ValidateJWK performs basic validation on a JWK
+// ValidateJWK validates supported public-key parameters.
 func ValidateJWK(jwk JWK) error {
 	if jwk.Kty == "" {
 		return errors.New("missing key type (kty)")
@@ -302,25 +320,56 @@ func ValidateJWK(jwk JWK) error {
 
 	switch jwk.Kty {
 	case "RSA":
-		if jwk.N == "" || jwk.E == "" {
-			return errors.New("RSA key missing n or e parameter")
-		}
+		_, err := jwk.toRSAPublicKey()
+		return err
 	case "EC":
-		if jwk.Crv == "" || jwk.X == "" || jwk.Y == "" {
-			return errors.New("EC key missing crv, x, or y parameter")
-		}
+		_, err := jwk.toECPublicKey()
+		return err
 	case "OKP":
-		if jwk.Crv == "" || jwk.X == "" {
-			return errors.New("OKP key missing crv or x parameter")
-		}
-		if jwk.Crv != "Ed25519" {
-			return fmt.Errorf("unsupported OKP curve: %s", jwk.Crv)
-		}
+		_, err := jwk.toOKPPublicKey()
+		return err
 	default:
 		return fmt.Errorf("unsupported key type: %s", jwk.Kty)
 	}
+}
 
-	return nil
+var privateJWKMemberNames = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
+
+// PrivateJWKMembers returns every private-key member present in raw JWKS JSON,
+// including members with empty, null, or structurally invalid values.
+func PrivateJWKMembers(raw []byte) ([]string, error) {
+	var document struct {
+		Keys []map[string]json.RawMessage `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	found := make(map[string]struct{})
+	for _, key := range document.Keys {
+		for _, member := range privateJWKMemberNames {
+			if _, present := key[member]; present {
+				found[member] = struct{}{}
+			}
+		}
+	}
+	result := make([]string, 0, len(found))
+	for member := range found {
+		result = append(result, member)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+// JWKContainsPrivateMaterial detects private members retained in a typed JWK.
+func JWKContainsPrivateMaterial(jwk JWK) bool {
+	return jwk.D != "" ||
+		jwk.P != "" ||
+		jwk.Q != "" ||
+		jwk.DP != "" ||
+		jwk.DQ != "" ||
+		jwk.QI != "" ||
+		len(jwk.Oth) != 0 ||
+		jwk.K != ""
 }
 
 // JWKInfo provides human-readable information about a JWK

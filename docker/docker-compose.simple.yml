@@ -20,6 +20,7 @@ services:
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - SHOWCASE_DEBUG=false
       - SHOWCASE_PALETTE_DB=/app/palette.db
+      - OAUTH2_REPLAY_REDIS_URL=redis://redis:6379/0
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
@@ -27,6 +28,22 @@ services:
       retries: 5
     networks:
       - showcase-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: protocol-showcase-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - showcase-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   frontend:

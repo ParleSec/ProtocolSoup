@@ -1,6 +1,6 @@
 # OAuth 2.0 Protocol Implementation
 
-A standards-compliant implementation of the [OAuth 2.0 Authorization Framework](https://datatracker.ietf.org/doc/html/rfc6749) with PKCE support (RFC 7636), Token Introspection (RFC 7662), and Token Revocation (RFC 7009).
+A standards-compliant implementation of the [OAuth 2.0 Authorization Framework](https://datatracker.ietf.org/doc/html/rfc6749) with PKCE (RFC 7636), `private_key_jwt` client authentication (RFC 7523 §2.2), Token Introspection (RFC 7662), and Token Revocation (RFC 7009).
 
 ## Overview
 
@@ -8,6 +8,7 @@ This implementation provides:
 
 - **Authorization Code Grant**: Standard flow for web applications with PKCE support
 - **Client Credentials Grant**: Machine-to-machine authentication
+- **private_key_jwt**: RSA, P-256, or Ed25519 client assertions with registered JWKS/JWKS URI keys
 - **Implicit Grant**: Legacy browser-based flow (deprecated, for reference)
 - **Refresh Token Grant**: Token renewal without user interaction
 - **Token Introspection**: RFC 7662 compliant active token validation
@@ -101,6 +102,7 @@ The OAuth 2.0 plugin serves as the foundation for the OIDC plugin. See the [OIDC
 |------|---------|
 | `plugin.go` | Main plugin implementing `ProtocolPlugin` interface, route registration, flow definitions |
 | `handlers.go` | HTTP handlers for authorization, token, introspection, revocation, login request management |
+| `clientauth_jwt.go` | RFC 7523 assertion validation, replay protection, and client JWKS resolution |
 
 ## API Endpoints
 
@@ -116,6 +118,7 @@ The OAuth 2.0 plugin serves as the foundation for the OIDC plugin. See the [OIDC
 | Method | Endpoint | Description | RFC Reference |
 |--------|----------|-------------|---------------|
 | POST | `/oauth2/token` | Exchange code/credentials for tokens | RFC 6749 §3.2 |
+| GET | `/.well-known/oauth-authorization-server/oauth2` | OAuth authorization server metadata | RFC 8414 |
 
 **Supported Grant Types:**
 - `authorization_code` - Exchange authorization code for tokens
@@ -135,6 +138,7 @@ The OAuth 2.0 plugin serves as the foundation for the OIDC plugin. See the [OIDC
 |--------|----------|-------------|
 | GET | `/oauth2/demo/users` | List demo users with credentials |
 | GET | `/oauth2/demo/clients` | List registered OAuth clients |
+| POST | `/oauth2/demo/clients/machine-client-pkjwt/jwks` | Register the browser demo's public JWK Set |
 
 ## Grant Types
 
@@ -193,7 +197,7 @@ For machine-to-machine authentication:
 └────┬─────┘                    └──────────┬──────────┘
      │                                     │
      │──Token Request (grant_type=client_credentials)──>│
-     │  + client_id + client_secret                     │
+     │  + client_secret_basic OR private_key_jwt        │
      │                                     │
      │<──Access Token (no refresh token)───│
 ```
@@ -204,8 +208,47 @@ For machine-to-machine authentication:
 |-----------|----------|-------------|
 | `grant_type` | Yes | `client_credentials` |
 | `client_id` | Yes | Client identifier |
-| `client_secret` | Yes | Client secret |
+| `client_secret` | Basic/POST | Client secret |
+| `client_assertion_type` | private_key_jwt | `urn:ietf:params:oauth:client-assertion-type:jwt-bearer` |
+| `client_assertion` | private_key_jwt | Single signed JWT (maximum 8KB) |
 | `scope` | No | Requested scopes |
+
+`private_key_jwt` is enabled only for `client_credentials`. ProtocolSoup
+requires `iss` and `sub` to equal the request-body `client_id`, an exact
+`aud` match to the configured token endpoint URL, fractional RFC 7519
+NumericDate support for `iat`, `exp`, and optional `nbf`, and a single-use
+`jti`. Assertions have a maximum 300-second lifetime and a 60-second
+clock-skew tolerance. An atomic replay reservation remains through `exp` plus
+that skew, covering the complete interval in which an assertion could be
+accepted. Production uses shared Redis (`SET NX`) and fails closed with
+`server_error` if the store is unavailable.
+Supported algorithms are RS256, ES256 with P-256, and EdDSA with Ed25519; the
+algorithm must match the registered key type and the client registration must
+select `private_key_jwt`. RSA verification keys require an odd modulus of at
+least 2048 bits and an odd exponent of at least 3.
+
+Clients may register a static JWKS, a HTTPS `jwks_uri`, or both. Static keys
+are checked first. The private JWK members `d`, `p`, `q`, `dp`, `dq`, `qi`,
+`oth`, and `k` are rejected. Remote retrieval disables environment proxies,
+blocks IPv4/IPv6 special-use addresses at resolution and dial time, uses one
+3-second DNS-to-body deadline, rejects redirects, caps responses at 64KB,
+coalesces concurrent fetches, caches for 10 minutes, and rate-limits refreshes
+on `kid` miss. Unusable unrelated remote keys are ignored if a usable
+verification key remains.
+
+The browser demo uses the Looking Glass session owner capability to perform one
+active-session-only public-key registration. That registration creates the
+real distinct client ID (no `private_key_jwt` client is pre-seeded) and returns
+the token endpoint used as the assertion audience. This preserves real
+authorization-server state, prevents concurrent sessions from replacing one
+shared key, and works when frontend and backend origins differ. Demo
+registrations expire after 10 minutes and are pruned from the in-memory client
+registry.
+
+RFC 8414 metadata is emitted only when `SHOWCASE_BASE_URL` is a pathless HTTPS
+origin. Production startup rejects HTTP, subpath, trailing-slash, query, and
+fragment values. Local loopback HTTP remains usable for development flows but
+is not published as standards-conformant authorization server metadata.
 
 ### Refresh Token Grant (RFC 6749 §6)
 
@@ -401,6 +444,7 @@ The following events are emitted for real-time visualization:
 |----------|-------------|---------|
 | `SHOWCASE_BASE_URL` | Public base URL | `http://localhost:8080` |
 | `SHOWCASE_CORS_ORIGINS` | CORS allowed origins | `http://localhost:3000,http://localhost:5173` |
+| `OAUTH2_REPLAY_REDIS_URL` | Shared replay Redis URL; required in demo and reachable `rediss://` is required in production | in-memory in development/tests |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | demo-app client secret | (auto-generated) |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | machine-client secret | (auto-generated) |
 
@@ -454,6 +498,8 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 | RFC 7636 | PKCE | ✅ Compliant |
 | RFC 7662 | Token Introspection | ✅ Compliant |
 | RFC 7009 | Token Revocation | ✅ Compliant |
+| RFC 7523 §2.2 | JWT client authentication | ✅ Implemented profile |
+| RFC 8414 | Authorization Server Metadata | ✅ Implemented |
 
 ### Implemented Features
 
@@ -465,14 +511,16 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 - ✅ Token Introspection
 - ✅ Token Revocation
 - ✅ State parameter CSRF protection
-- ✅ Client authentication (Basic, POST)
+- ✅ Client authentication (Basic, POST, private_key_jwt for client_credentials)
+- ✅ `private_key_jwt` client authentication (RFC 7523 §2.2 / OIDC Core §9)
+- ✅ Client assertion replay protection (`jti`)
 - ✅ Refresh token rotation
 
 ### Not Implemented
 
 - ❌ Resource Owner Password Credentials (deprecated)
 - ❌ Device Authorization Grant (RFC 8628)
-- ❌ JWT Bearer Grant (RFC 7523)
+- ❌ JWT Bearer Grant / assertion as authorization grant (RFC 7523 §2.1)
 - ❌ SAML 2.0 Bearer Grant (RFC 7522)
 
 ## License

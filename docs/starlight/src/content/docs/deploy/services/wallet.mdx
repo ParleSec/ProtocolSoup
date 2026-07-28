@@ -25,7 +25,7 @@ Use wallet service to simulate wallet-side OID4VP presentation submission agains
 |----------|----------|---------|-------------|
 | `WALLET_TARGET_BASE_URL` | No | `https://protocolsoup.com` | VC verifier service URL for OID4VP submissions |
 | `WALLET_ALLOWED_CORS_ORIGINS` | No | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins |
-| `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default DID subject for demo sessions |
+| `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default holder DID seed for demo sessions. This identifies wallet key material and is not an issuer identity-record ID |
 | `WALLET_DEFAULT_CREDENTIAL_FORMAT` | No | `mso_mdoc` | Default stored and presented credential format when a request omits a format/configuration. `mso_mdoc` (mDL) is the default; `dc+sd-jwt` and the W3C formats remain selectable |
 | `WALLET_DID_METHOD` | No | `key` | DID method for the wallet holder identifier (e.g. `key`, `web`) |
 | `WALLET_DEFAULT_SIGNING_ALG` | No | `ES256` | Default holder-binding signing algorithm; `ES256` (EC P-256) matches the `mso_mdoc` default |
@@ -48,6 +48,8 @@ docker run -p 8081:8080 \
 ## Operational Notes
 
 - `WALLET_TARGET_BASE_URL` must point to the VC service or federation service running OID4VP.
+- During automatic OID4VCI bootstrap, the wallet leaves identity selection to the issuer's designated default record. The issuer-authorized subject returned in the credential offer remains separate from the wallet's holder DID.
+- The wallet must independently trust the issuer's mdoc IACA root through `WALLET_MDOC_IACA_ROOT_PEM`. The production workflow validates the main issuer's persisted `/data/mdoc/iaca_root.pem` and installs that public certificate as a wallet Fly secret before deployment.
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
 - Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.

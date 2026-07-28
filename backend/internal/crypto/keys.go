@@ -145,20 +145,30 @@ func (ks *KeySet) Ed25519KeyID() string {
 
 // JWK represents a JSON Web Key
 type JWK struct {
-	Kty string `json:"kty"`           // Key Type
-	Use string `json:"use,omitempty"` // Public Key Use
-	Kid string `json:"kid,omitempty"` // Key ID
-	Alg string `json:"alg,omitempty"` // Algorithm
+	Kty    string   `json:"kty"`               // Key Type
+	Use    string   `json:"use,omitempty"`     // Public Key Use
+	Kid    string   `json:"kid,omitempty"`     // Key ID
+	Alg    string   `json:"alg,omitempty"`     // Algorithm
+	KeyOps []string `json:"key_ops,omitempty"` // Permitted operations
 
 	// RSA specific
-	N string `json:"n,omitempty"` // Modulus
-	E string `json:"e,omitempty"` // Exponent
+	N   string          `json:"n,omitempty"`   // Modulus
+	E   string          `json:"e,omitempty"`   // Exponent
+	P   string          `json:"p,omitempty"`   // First prime factor
+	Q   string          `json:"q,omitempty"`   // Second prime factor
+	DP  string          `json:"dp,omitempty"`  // First factor CRT exponent
+	DQ  string          `json:"dq,omitempty"`  // Second factor CRT exponent
+	QI  string          `json:"qi,omitempty"`  // First CRT coefficient
+	Oth json.RawMessage `json:"oth,omitempty"` // Additional prime information
 
 	// EC / OKP specific
 	Crv string `json:"crv,omitempty"` // Curve
 	X   string `json:"x,omitempty"`   // Public key value / X coordinate
 	Y   string `json:"y,omitempty"`   // Y Coordinate for EC keys
 	D   string `json:"d,omitempty"`   // Private key value for private JWKs
+
+	// Symmetric specific
+	K string `json:"k,omitempty"` // Symmetric key value
 }
 
 // JWKS represents a JSON Web Key Set

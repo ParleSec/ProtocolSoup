@@ -712,6 +712,7 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
     access_token: { label: 'Access Token', shortLabel: 'Access', color: 'text-green-400', icon: Key },
     id_token: { label: 'ID Token (OIDC)', shortLabel: 'ID Token', color: 'text-orange-400', icon: Fingerprint },
     refresh_token: { label: 'Refresh Token', shortLabel: 'Refresh', color: 'text-blue-400', icon: RotateCcw },
+    client_assertion: { label: 'Client Assertion', shortLabel: 'Assertion', color: 'text-cyan-400', icon: FileText },
   }
 
   return (

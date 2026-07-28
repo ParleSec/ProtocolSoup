@@ -14,6 +14,7 @@ services:
       - SHOWCASE_MOCK_IDP=true
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - SHOWCASE_DEBUG=true
+      - OAUTH2_REPLAY_REDIS_URL=redis://redis:6379/0
     volumes:
       # Mount source for hot reload (requires air or similar)
       - ../backend:/app/src:ro
@@ -22,5 +23,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
+  redis:
+    image: redis:8-alpine
+    container_name: protocol-showcase-redis-dev
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped

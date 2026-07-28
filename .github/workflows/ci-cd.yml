@@ -26,10 +26,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -103,10 +103,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
@@ -172,7 +172,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Run Snyk Code Analysis
         uses: snyk/actions/node@v1.0.0
@@ -230,10 +230,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -264,10 +264,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
@@ -296,10 +296,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
@@ -329,10 +329,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -374,10 +374,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
@@ -408,7 +408,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -437,7 +437,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@1.6
@@ -465,7 +465,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@1.6
@@ -479,6 +479,27 @@ jobs:
           flyctl auth whoami
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
+
+      - name: Sync issuer mdoc trust anchor to wallet
+        env:
+          MAIN_FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          WALLET_FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          trust_anchor="${RUNNER_TEMP}/protocolsoup-mdoc-iaca.pem"
+          FLY_API_TOKEN="${MAIN_FLY_API_TOKEN}" flyctl ssh console \
+            --app protocolsoup \
+            --quiet \
+            --command "cat /data/mdoc/iaca_root.pem" > "${trust_anchor}"
+
+          openssl x509 -in "${trust_anchor}" -noout -subject -issuer
+          openssl verify -CAfile "${trust_anchor}" "${trust_anchor}"
+
+          FLY_API_TOKEN="${WALLET_FLY_API_TOKEN}" flyctl secrets set \
+            --app protocolsoup-wallet \
+            --stage \
+            "WALLET_MDOC_IACA_ROOT_PEM=$(cat "${trust_anchor}")"
       
       - name: Deploy wallet harness to Fly.io
         run: flyctl deploy --config fly.wallet.toml --app protocolsoup-wallet --remote-only
@@ -489,15 +510,10 @@ jobs:
         run: |
           curl -fsS "https://protocolsoup-wallet.fly.dev/health" | jq -e '.status == "ok"' > /dev/null
 
-      - name: Check wallet subdomain health (non-blocking)
-        continue-on-error: true
+      - name: Check wallet subdomain health
         run: |
-          code="$(curl -sS -o /tmp/wallet-health.json -w '%{http_code}' "https://wallet.protocolsoup.com/health" || true)"
-          if [ "$code" != "200" ]; then
-            echo "wallet.protocolsoup.com returned HTTP $code (continuing; direct Fly smoke test already passed)"
-          else
-            jq -e '.status == "ok"' /tmp/wallet-health.json > /dev/null
-          fi
+          curl -fsS "https://wallet.protocolsoup.com/health" \
+            | jq -e '.status == "ok"' > /dev/null
       
       - name: Smoke test OID4VP wallet bootstrap
         run: |
@@ -543,11 +559,19 @@ jobs:
           wallet_payload="$(jq -n \
             --arg rid "$request_id" \
             --arg req "$request_jwt" \
-            '{request_id:$rid, request:$req, response_mode:"direct_post"}')"
+            '{
+              request_id:$rid,
+              request:$req,
+              response_mode:"direct_post",
+              credential_format:"mso_mdoc",
+              credential_configuration_id:"MobileDrivingLicenceMsoMdoc"
+            }')"
 
-          submit_response="$(curl -sS -w '\n%{http_code}' -X POST "https://protocolsoup-wallet.fly.dev/submit" \
+          submit_headers="${RUNNER_TEMP}/wallet-submit-headers.txt"
+          submit_response="$(curl -sS -D "$submit_headers" -w '\n%{http_code}' -X POST "https://wallet.protocolsoup.com/submit" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
+            -H "Origin: https://protocolsoup.com" \
             -d "$wallet_payload")"
           submit_body="$(echo "$submit_response" | sed '$d')"
           submit_status="$(echo "$submit_response" | tail -n1)"
@@ -555,6 +579,13 @@ jobs:
           if [ "${submit_status}" -lt 200 ] || [ "${submit_status}" -ge 300 ]; then
             echo "Wallet submit failed with HTTP ${submit_status}"
             echo "$submit_body"
+            exit 1
+          fi
+
+          allowed_origin="$(tr -d '\r' < "$submit_headers" \
+            | awk -F': ' 'tolower($1) == "access-control-allow-origin" { print $2; exit }')"
+          if [ "$allowed_origin" != "https://protocolsoup.com" ]; then
+            echo "Wallet submit returned unexpected Access-Control-Allow-Origin: '$allowed_origin'"
             exit 1
           fi
 
@@ -587,7 +618,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       
       - name: Wait for deployment to be ready
         run: sleep 30

@@ -118,6 +118,11 @@ paths:
     post:
       tags: [OAuth2]
       summary: OAuth2 token endpoint
+      description: >-
+        Issues tokens for the supported OAuth grants. The client_credentials
+        grant accepts client_secret_basic, client_secret_post, or
+        private_key_jwt (RFC 7523 Section 2.2). private_key_jwt is deliberately
+        not enabled for authorization_code or refresh_token in this profile.
       operationId: oauth2Token
       requestBody:
         required: true
@@ -137,6 +142,20 @@ paths:
                   type: string
                 client_secret:
                   type: string
+                client_assertion_type:
+                  type: string
+                  enum:
+                    - urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+                  description: Required with client_assertion for private_key_jwt authentication.
+                client_assertion:
+                  type: string
+                  maxLength: 8192
+                  description: >-
+                    A single signed JWT for private_key_jwt authentication.
+                    ProtocolSoup requires iss/sub/client_id equality, exact
+                    token-endpoint audience, fractional NumericDate support for
+                    iat/exp/nbf, jti, a maximum 300-second lifetime, and RS256,
+                    ES256, or EdDSA.
                 redirect_uri:
                   type: string
                 code_verifier:
@@ -164,6 +183,135 @@ paths:
                 $ref: "#/components/schemas/OAuthError"
         "401":
           description: Client authentication failure.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared assertion replay
+            store. The request fails closed and no token is issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /.well-known/oauth-authorization-server/oauth2:
+    get:
+      tags: [OAuth2]
+      summary: OAuth2 authorization server metadata
+      operationId: oauth2AuthorizationServerMetadata
+      responses:
+        "200":
+          description: >-
+            RFC 8414 metadata advertising private_key_jwt and its supported
+            signing algorithms.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "503":
+          description: Metadata is unavailable because the configured base URL is not a pathless HTTPS origin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oauth2/demo/clients/machine-client-pkjwt/jwks:
+    post:
+      tags: [OAuth2]
+      summary: Register the Looking Glass client's public JWK Set
+      description: >-
+        Demo-only registration endpoint used by the browser-held
+        private_key_jwt flow. It accepts public signing keys only; private JWK
+        material is rejected. A 2048-bit or stronger odd RSA modulus and a
+        valid odd exponent of at least 3 are required for RSA keys. An active,
+        owned OAuth2 client_credentials Looking Glass session is required, and
+        registration is atomically one-shot. Each session receives an isolated
+        registered client_id so concurrent browser flows cannot replace each
+        other's keys.
+      operationId: oauth2RegisterPrivateKeyJWTClientJWKS
+      parameters:
+        - name: X-Looking-Glass-Session
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: X-Looking-Glass-Session-Token
+          in: header
+          required: true
+          description: Owner capability returned once by the start-demo response.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keys]
+              properties:
+                keys:
+                  type: array
+                  minItems: 1
+                  maxItems: 10
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        "200":
+          description: Public JWK Set registered for a session-isolated client.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [client_id, token_endpoint, expires_at, jwks]
+                properties:
+                  client_id:
+                    type: string
+                    pattern: "^machine-client-pkjwt-[0-9a-f]{64}$"
+                  token_endpoint:
+                    type: string
+                    format: uri
+                    description: Exact audience value to use in the client assertion.
+                  expires_at:
+                    type: string
+                    format: date-time
+                    description: Expiration time of the ephemeral demo client registration.
+                  jwks:
+                    type: object
+                    additionalProperties: true
+        "400":
+          description: Invalid or private key material.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Missing or invalid Looking Glass owner capability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "403":
+          description: Session is inactive or is not an OAuth2 client_credentials session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "409":
+          description: The session has already registered its one permitted client JWK Set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: Client registration could not be stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "503":
+          description: Looking Glass is unavailable.
           content:
             application/json:
               schema:

@@ -1,0 +1,46 @@
+name: Dependabot Auto-merge
+
+# Keeps dependency updates flowing to master continuously so they do not pile
+# up into a large manual triage batch before each release.
+#
+# Requires "Allow auto-merge" in repository settings and required status checks
+# on master. Without required checks, auto-merge lands the pull request
+# immediately instead of waiting for CI.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      # pull_request_target grants write access to the base repository, so this
+      # job must never check out or execute pull request code.
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for patch and minor updates
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+      - name: Flag major updates for manual review
+        if: steps.metadata.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr comment "$PR_URL" \
+            --body "Major version update: auto-merge is not enabled. A maintainer needs to review the upgrade notes before merge."

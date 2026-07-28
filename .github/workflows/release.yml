@@ -1,0 +1,161 @@
+name: Release
+
+# Releases are cut by pushing an annotated tag from master:
+#
+#   git tag -a v2.1.0 -m "Short highlight paragraph"
+#   git push origin v2.1.0
+#
+# The tag push is a real user action, so it also triggers ghcr-publish.yml.
+# A release created here with GITHUB_TOKEN would not trigger any workflow,
+# which is why the tag rather than the release is the entry point.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GIT_CLIFF_VERSION: '2.13.1'
+
+jobs:
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout at tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+          # A hyphen marks a pre-release, e.g. v3.0.0-rc.1.
+          if [[ "$TAG" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          PREVIOUS=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)
+          echo "previous=${PREVIOUS}" >> "$GITHUB_OUTPUT"
+
+          # Only annotated tags carry a body; a lightweight tag would return
+          # the commit message instead.
+          if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
+            git for-each-ref "refs/tags/${TAG}" --format='%(contents:body)' > highlights.md
+          else
+            : > highlights.md
+          fi
+
+      - name: Verify tag is on master
+        run: |
+          git fetch --quiet origin +refs/heads/master:refs/remotes/origin/master
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::${GITHUB_REF_NAME} points at a commit that is not on master. Releases must be cut from master."
+            exit 1
+          fi
+
+      - name: Verify CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if grep -qF '[force-release]' highlights.md; then
+            echo "::warning::Check gate bypassed by [force-release] in the tag annotation."
+            exit 0
+          fi
+
+          FAILED=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
+            --jq '[.check_runs[]
+                   | select(.conclusion == "failure" or .conclusion == "timed_out")
+                   | select(.name | test("Lighthouse") | not)
+                   | .name] | unique | join(", ")')
+
+          if [ -n "$FAILED" ]; then
+            echo "::error::Failing checks on ${GITHUB_SHA}: ${FAILED}. Fix master, re-tag, or add [force-release] to the tag annotation."
+            exit 1
+          fi
+
+      - name: Build release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PREVIOUS: ${{ steps.meta.outputs.previous }}
+        run: |
+          : > notes.md
+
+          if [ -s highlights.md ]; then
+            {
+              echo "## Highlights"
+              echo
+              cat highlights.md
+              echo
+            } >> notes.md
+          fi
+
+          # Commit-derived changelog: covers work pushed straight to master,
+          # which the pull-request-derived notes below cannot see.
+          # --strip all drops the changelog header and the link-reference
+          # footer, which belong in CHANGELOG.md rather than a release body.
+          if [ -n "$PREVIOUS" ]; then
+            npx --yes "git-cliff@${GIT_CLIFF_VERSION}" --config cliff.toml --strip all "${PREVIOUS}..${TAG}" >> notes.md
+          else
+            npx --yes "git-cliff@${GIT_CLIFF_VERSION}" --config cliff.toml --strip all "$TAG" >> notes.md
+          fi
+
+          {
+            echo
+            echo "## Pull Requests"
+            echo
+          } >> notes.md
+
+          if [ -n "$PREVIOUS" ]; then
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" -f target_commitish=master -f previous_tag_name="$PREVIOUS" \
+              --jq .body >> notes.md
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" -f target_commitish=master --jq .body >> notes.md
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+        run: |
+          FLAGS=(--title "ProtocolSoup $TAG" --notes-file notes.md --verify-tag)
+          if [ "$PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease)
+          fi
+          gh release create "$TAG" "${FLAGS[@]}"
+
+      - name: Update CHANGELOG.md on master
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          git fetch --quiet origin +refs/heads/master:refs/remotes/origin/master
+          git checkout -B master origin/master
+          npx --yes "git-cliff@${GIT_CLIFF_VERSION}" --config cliff.toml --output CHANGELOG.md
+
+          if [ -z "$(git status --porcelain -- CHANGELOG.md)" ]; then
+            echo "CHANGELOG.md already current."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md
+          git commit -m "UPDATE CHANGELOG for ${TAG} [skip ci]"
+          git push origin master

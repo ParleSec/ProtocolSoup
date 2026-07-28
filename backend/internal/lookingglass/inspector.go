@@ -1,6 +1,11 @@
 package lookingglass
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"errors"
 	"sync"
 	"time"
 
@@ -32,18 +37,39 @@ type Session struct {
 	UpdatedAt  time.Time    `json:"updated_at"`
 
 	// WebSocket connections for this session
-	clients map[*Client]bool
-	mu      sync.RWMutex
+	clients                   map[*Client]bool
+	ownerTokenHash            [sha256.Size]byte
+	privateKeyJWTRegistration bool
+	mu                        sync.RWMutex
 }
 
 // SessionState represents the state of a looking glass session
 type SessionState string
+
+const OwnerTokenHeader = "X-Looking-Glass-Session-Token"
 
 const (
 	SessionStateActive   SessionState = "active"
 	SessionStatePaused   SessionState = "paused"
 	SessionStateComplete SessionState = "complete"
 )
+
+var (
+	ErrSessionNotFound                = errors.New("looking glass session not found")
+	ErrSessionOwnerUnauthorized       = errors.New("looking glass session owner capability is invalid")
+	ErrSessionNotActive               = errors.New("looking glass session is not active")
+	ErrPrivateKeyJWTAlreadyRegistered = errors.New("private_key_jwt client is already registered for this session")
+)
+
+// SessionSummary is the non-sensitive session metadata returned by list APIs.
+type SessionSummary struct {
+	ID         string       `json:"id"`
+	ProtocolID string       `json:"protocol_id"`
+	FlowID     string       `json:"flow_id"`
+	State      SessionState `json:"state"`
+	CreatedAt  time.Time    `json:"created_at"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+}
 
 // Event represents a protocol event captured by looking glass
 type Event struct {
@@ -168,24 +194,32 @@ const (
 	AnnotationTypeExplanation   AnnotationType = "explanation"
 )
 
-// CreateSession creates a new looking glass session
-func (e *Engine) CreateSession(protocolID, flowID string) *Session {
+// CreateSession creates a session and returns its owner capability exactly once.
+func (e *Engine) CreateSession(protocolID, flowID string) (*Session, string, error) {
+	ownerTokenBytes := make([]byte, 32)
+	if _, err := rand.Read(ownerTokenBytes); err != nil {
+		return nil, "", err
+	}
+	ownerToken := base64.RawURLEncoding.EncodeToString(ownerTokenBytes)
+	ownerTokenHash := sha256.Sum256([]byte(ownerToken))
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	session := &Session{
-		ID:         uuid.New().String(),
-		ProtocolID: protocolID,
-		FlowID:     flowID,
-		Events:     make([]Event, 0),
-		State:      SessionStateActive,
-		CreatedAt:  time.Now(),
-		UpdatedAt:  time.Now(),
-		clients:    make(map[*Client]bool),
+		ID:             uuid.New().String(),
+		ProtocolID:     protocolID,
+		FlowID:         flowID,
+		Events:         make([]Event, 0),
+		State:          SessionStateActive,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		clients:        make(map[*Client]bool),
+		ownerTokenHash: ownerTokenHash,
 	}
 
 	e.sessions[session.ID] = session
-	return session
+	return session, ownerToken, nil
 }
 
 // GetSession retrieves a session by ID
@@ -206,6 +240,90 @@ func (e *Engine) ListSessions() []*Session {
 		sessions = append(sessions, s)
 	}
 	return sessions
+}
+
+// ListSessionSummaries returns session metadata without captured events.
+func (e *Engine) ListSessionSummaries() []SessionSummary {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	summaries := make([]SessionSummary, 0, len(e.sessions))
+	for _, session := range e.sessions {
+		session.mu.RLock()
+		summaries = append(summaries, SessionSummary{
+			ID:         session.ID,
+			ProtocolID: session.ProtocolID,
+			FlowID:     session.FlowID,
+			State:      session.State,
+			CreatedAt:  session.CreatedAt,
+			UpdatedAt:  session.UpdatedAt,
+		})
+		session.mu.RUnlock()
+	}
+	return summaries
+}
+
+// AuthorizeOwner verifies an owner capability without exposing its stored hash.
+func (e *Engine) AuthorizeOwner(sessionID, ownerToken string) (*Session, bool) {
+	session, exists := e.GetSession(sessionID)
+	if !exists || ownerToken == "" {
+		return nil, false
+	}
+	providedHash := sha256.Sum256([]byte(ownerToken))
+	session.mu.RLock()
+	authorized := subtle.ConstantTimeCompare(
+		providedHash[:],
+		session.ownerTokenHash[:],
+	) == 1
+	session.mu.RUnlock()
+	return session, authorized
+}
+
+// AuthorizedSessionSnapshot returns a race-safe copy for owner-only APIs.
+func (e *Engine) AuthorizedSessionSnapshot(sessionID, ownerToken string) (*Session, bool) {
+	session, authorized := e.AuthorizeOwner(sessionID, ownerToken)
+	if !authorized {
+		return nil, false
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	events := append([]Event(nil), session.Events...)
+	return &Session{
+		ID:         session.ID,
+		ProtocolID: session.ProtocolID,
+		FlowID:     session.FlowID,
+		Events:     events,
+		State:      session.State,
+		CreatedAt:  session.CreatedAt,
+		UpdatedAt:  session.UpdatedAt,
+	}, true
+}
+
+// ClaimPrivateKeyJWTRegistration atomically authorizes the one registration
+// permitted for an active OAuth2 client_credentials session.
+func (e *Engine) ClaimPrivateKeyJWTRegistration(sessionID, ownerToken string) error {
+	session, exists := e.GetSession(sessionID)
+	if !exists {
+		return ErrSessionNotFound
+	}
+	providedHash := sha256.Sum256([]byte(ownerToken))
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if ownerToken == "" || subtle.ConstantTimeCompare(providedHash[:], session.ownerTokenHash[:]) != 1 {
+		return ErrSessionOwnerUnauthorized
+	}
+	if session.State != SessionStateActive {
+		return ErrSessionNotActive
+	}
+	if session.ProtocolID != "oauth2" ||
+		(session.FlowID != "client_credentials" && session.FlowID != "client-credentials") {
+		return ErrSessionNotActive
+	}
+	if session.privateKeyJWTRegistration {
+		return ErrPrivateKeyJWTAlreadyRegistered
+	}
+	session.privateKeyJWTRegistration = true
+	return nil
 }
 
 // DeleteSession removes a session

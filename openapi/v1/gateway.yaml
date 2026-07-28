@@ -172,6 +172,7 @@ paths:
                 demo:
                   value:
                     session_id: "session-abc123"
+                    session_token: "JmRf8mW0gMmT_5kXc4mBAc0f7Zt5F8yQ4xVvYxjv8Eg"
                     protocol: "scim"
                     flow: "user-lifecycle"
                     ws_endpoint: "/ws/lookingglass/session-abc123"
@@ -215,6 +216,7 @@ paths:
     get:
       tags: [LookingGlass]
       summary: List Looking Glass sessions
+      description: Returns metadata only; captured events are never included in this response.
       operationId: listGatewayLookingGlassSessions
       responses:
         "200":
@@ -227,8 +229,7 @@ paths:
                   sessions:
                     type: array
                     items:
-                      type: object
-                      additionalProperties: true
+                      $ref: "#/components/schemas/LookingGlassSessionSummary"
         "503":
           description: Looking Glass unavailable.
           content:
@@ -246,6 +247,12 @@ paths:
           required: true
           schema:
             type: string
+        - in: header
+          name: X-Looking-Glass-Session-Token
+          required: true
+          description: Owner capability returned once by the start-demo response.
+          schema:
+            type: string
       responses:
         "200":
           description: Session details.
@@ -260,6 +267,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid session owner capability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /ws/lookingglass/{session}:
+    get:
+      tags: [LookingGlass]
+      summary: Subscribe to the owner-visible Looking Glass event stream
+      description: >-
+        Upgrades to WebSocket. Clients must offer both
+        `protocolsoup-lookingglass-v1` and
+        `protocolsoup-lookingglass-owner.<session_token>` in
+        `Sec-WebSocket-Protocol`; the owner capability is not accepted in the
+        URL query string. The server selects `protocolsoup-lookingglass-v1`.
+      operationId: subscribeGatewayLookingGlassSession
+      parameters:
+        - in: path
+          name: session
+          required: true
+          schema:
+            type: string
+        - in: header
+          name: Sec-WebSocket-Protocol
+          required: true
+          schema:
+            type: string
+          example: "protocolsoup-lookingglass-v1, protocolsoup-lookingglass-owner.JmRf8mW0gMmT_5kXc4mBAc0f7Zt5F8yQ4xVvYxjv8Eg"
+      responses:
+        "101":
+          description: WebSocket upgrade accepted.
+        "401":
+          description: Missing or invalid owner subprotocol capability.
 components:
   schemas:
     ErrorResponse:
@@ -368,10 +409,18 @@ components:
             additionalProperties: true
     StartDemoResponse:
       type: object
-      required: [session_id, protocol, flow, ws_endpoint]
+      required: [session_id, session_token, protocol, flow, ws_endpoint]
       properties:
         session_id:
           type: string
+        session_token:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: >-
+            256-bit owner capability returned only when the session is created.
+            Keep it confidential and use it for owner-only session APIs.
+          x-sensitive: true
         protocol:
           type: string
         flow:
@@ -383,6 +432,25 @@ components:
             - type: object
               additionalProperties: true
             - type: "null"
+    LookingGlassSessionSummary:
+      type: object
+      required: [id, protocol_id, flow_id, state, created_at, updated_at]
+      properties:
+        id:
+          type: string
+        protocol_id:
+          type: string
+        flow_id:
+          type: string
+        state:
+          type: string
+          enum: [active, paused, complete]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     DecodeRequest:
       type: object
       required: [token]

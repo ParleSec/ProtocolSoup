@@ -75,6 +75,55 @@ func TestScopedWalletSubjectUsesScopeFingerprint(t *testing.T) {
 	}
 }
 
+func TestBuildOID4VCIOfferRequestDoesNotDeriveUserIDFromHolderDID(t *testing.T) {
+	body := buildOID4VCIOfferRequest(" UniversityDegreeCredential ")
+	if _, exists := body["wallet_user_id"]; exists {
+		t.Fatal("offer request must not treat the holder DID as an identity-provider user ID")
+	}
+	configurationIDs, ok := body["credential_configuration_ids"].([]string)
+	if !ok || len(configurationIDs) != 1 || configurationIDs[0] != "UniversityDegreeCredential" {
+		t.Fatalf("credential_configuration_ids = %#v", body["credential_configuration_ids"])
+	}
+}
+
+func TestCreateCredentialProofJWTUsesIssuerAuthorizedSubject(t *testing.T) {
+	keySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("create wallet keyset: %v", err)
+	}
+	wallet := &walletMaterial{
+		Subject:          "did:key:z6MkrandomHolderKey",
+		KeySet:           keySet,
+		SigningAlgorithm: "ES256",
+	}
+	server := &walletHarnessServer{issuerBaseURL: "https://issuer.example"}
+	const authorizedSubject = "did:example:wallet:alice"
+
+	proof, err := server.createCredentialProofJWT(
+		wallet,
+		authorizedSubject,
+		"test-c-nonce",
+		"https://issuer.example/oid4vci",
+	)
+	if err != nil {
+		t.Fatalf("createCredentialProofJWT: %v", err)
+	}
+	parsed, _, err := jwt.NewParser().ParseUnverified(proof, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse proof JWT: %v", err)
+	}
+	claims, ok := parsed.Claims.(jwt.MapClaims)
+	if !ok {
+		t.Fatalf("proof claims type = %T", parsed.Claims)
+	}
+	if got := strings.TrimSpace(asString(claims["iss"])); got != authorizedSubject {
+		t.Fatalf("proof iss = %q, want %q", got, authorizedSubject)
+	}
+	if got := strings.TrimSpace(asString(claims["sub"])); got != authorizedSubject {
+		t.Fatalf("proof sub = %q, want %q", got, authorizedSubject)
+	}
+}
+
 func TestGetOrCreateWalletIsolatesByScope(t *testing.T) {
 	server := &walletHarnessServer{
 		strictIsolation:  true,

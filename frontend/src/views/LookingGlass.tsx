@@ -5,6 +5,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
 import { parseFlowDeepLink, buildLookingGlassPath } from '@/components/palette/runDispatch'
@@ -13,7 +14,7 @@ import {
   Eye, Play, RotateCcw, Key, Square,
   Fingerprint, Shield, Lock, Sparkles,
   RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink,
-  Share2, XCircle
+  Share2, XCircle, BookOpen, ChevronRight
 } from 'lucide-react'
 
 import {
@@ -38,6 +39,11 @@ import {
   parseSDJWTDisclosureClaimNames,
   humanizeOID4VPTrustMode,
 } from '../protocols/config/oid4vp'
+import {
+  getCatalogFlow,
+  getCatalogProtocol,
+  getFlowRouteId,
+} from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
 const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
@@ -117,6 +123,7 @@ export function LookingGlass() {
   const [refreshTokenInput, setRefreshTokenInput] = useState('')
   const [storedRefreshToken, setStoredRefreshToken] = useState<string | null>(null)
   const [storedAccessToken, setStoredAccessToken] = useState<string | null>(null)
+  const [clientCredentialsAuthMethod, setClientCredentialsAuthMethod] = useState<'client_secret_basic' | 'private_key_jwt'>('client_secret_basic')
   // Token input for introspection/revocation/userinfo flows
   const [tokenInput, setTokenInput] = useState('')
   const [scimBearerToken, setScimBearerToken] = useState('')
@@ -124,6 +131,7 @@ export function LookingGlass() {
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
   const [oid4vciCredentialConfigurationID, setOID4VCICredentialConfigurationID] = useState('MobileDrivingLicenceMsoMdoc')
   const [wireSessionId, setWireSessionId] = useState<string | null>(null)
+  const [wireSessionToken, setWireSessionToken] = useState<string | null>(null)
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
   const [pendingExecute, setPendingExecute] = useState(false)
   const [handoffCopied, setHandoffCopied] = useState(false)
@@ -156,7 +164,7 @@ export function LookingGlass() {
     wireExchanges,
     connected: wireConnected,
     clearEvents: clearWireEvents,
-  } = useLookingGlassSession(wireSessionId)
+  } = useLookingGlassSession(wireSessionId, wireSessionToken)
 
   // Fetch SCIM token when SCIM protocol is selected
   useEffect(() => {
@@ -194,6 +202,33 @@ export function LookingGlass() {
     [selectedFlow?.id]
   )
 
+  const referenceNavigation = useMemo(() => {
+    if (!selectedProtocol || !selectedFlow) {
+      return null
+    }
+
+    const protocol = getCatalogProtocol(selectedProtocol.id)
+    if (!protocol) {
+      return null
+    }
+
+    const flowRouteId = getFlowRouteId(selectedProtocol.id, selectedFlow.id)
+    const flow = getCatalogFlow(selectedProtocol.id, flowRouteId)
+
+    return {
+      protocol: {
+        name: protocol.name,
+        href: `/protocol/${protocol.id}`,
+      },
+      flow: flow
+        ? {
+            name: flow.name,
+            href: `/protocol/${protocol.id}/flow/${flow.id}`,
+          }
+        : null,
+    }
+  }, [selectedProtocol, selectedFlow])
+
   const showTLSContext = useMemo(() => {
     const normalizedFlowId = flowId || ''
     const protocolId = selectedProtocol?.id || ''
@@ -204,6 +239,7 @@ export function LookingGlass() {
   }, [flowId, selectedProtocol?.id])
 
   const isRefreshTokenFlow = flowId === 'refresh-token'
+  const isClientCredentialsFlow = flowId === 'client-credentials'
   const isTokenIntrospectionFlow = flowId === 'token-introspection'
   const isTokenRevocationFlow = flowId === 'token-revocation'
   const isUserInfoFlow = flowId === 'oidc-userinfo'
@@ -212,7 +248,7 @@ export function LookingGlass() {
   const isOID4VCIFlow = selectedProtocol?.id === 'oid4vci'
 
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
-  const hasFlowConfigurationInputs = isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow
+  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
 
   // Use stored token or user input for flows that need a token
@@ -221,7 +257,7 @@ export function LookingGlass() {
   const [machineClientSecret, setMachineClientSecret] = useState<string | null>(null)
 
   useEffect(() => {
-    if (flowId !== 'client-credentials') {
+    if (!isClientCredentialsFlow || clientCredentialsAuthMethod !== 'client_secret_basic') {
       setMachineClientSecret(null)
       return
     }
@@ -249,16 +285,19 @@ export function LookingGlass() {
     return () => {
       cancelled = true
     }
-  }, [flowId])
+  }, [isClientCredentialsFlow, clientCredentialsAuthMethod])
 
   const clientConfig = useMemo(() => {
-    if (flowId === 'client-credentials') {
+    if (isClientCredentialsFlow) {
+      if (clientCredentialsAuthMethod === 'private_key_jwt') {
+        return { clientId: '', clientSecret: undefined }
+      }
       return { clientId: 'machine-client', clientSecret: machineClientSecret || undefined }
     }
     // All other flows (including refresh-token) use public-app
     // The refresh token must be used with the same client that obtained it
     return { clientId: 'public-app', clientSecret: undefined }
-  }, [flowId, machineClientSecret])
+  }, [isClientCredentialsFlow, clientCredentialsAuthMethod, machineClientSecret])
 
   // Use stored token, input, or empty
   const activeRefreshToken = refreshTokenInput || storedRefreshToken || ''
@@ -316,6 +355,7 @@ export function LookingGlass() {
     flowId: selectedFlow?.id || null,
     clientId: clientConfig.clientId,
     clientSecret: clientConfig.clientSecret,
+    clientCredentialsAuthMethod: isClientCredentialsFlow ? clientCredentialsAuthMethod : undefined,
     redirectUri: `${window.location.origin}/callback`,
     scopes,
     refreshToken: isRefreshTokenFlow ? activeRefreshToken : undefined,
@@ -329,6 +369,7 @@ export function LookingGlass() {
     oid4vpClientID: oid4vpClientIDForExecutor,
     oid4vpClientIDScheme: oid4vpClientIDSchemeForExecutor,
     lookingGlassSessionId: wireSessionId || undefined,
+    lookingGlassSessionToken: wireSessionToken || undefined,
   })
   const status = realExecutor.state?.status || 'idle'
   const isOID4VPAwaitingResult =
@@ -861,6 +902,7 @@ export function LookingGlass() {
     setSelectedFlow(null)
     resetFlow()
     setWireSessionId(null)
+    setWireSessionToken(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
@@ -901,6 +943,7 @@ export function LookingGlass() {
     setSelectedFlow(null)
     resetFlow()
     setWireSessionId(null)
+    setWireSessionToken(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
@@ -932,6 +975,7 @@ export function LookingGlass() {
     setSelectedFlow(flow)
     resetFlow()
     setWireSessionId(null)
+    setWireSessionToken(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
@@ -951,6 +995,7 @@ export function LookingGlass() {
   const handleReset = useCallback(() => {
     resetFlow()
     setWireSessionId(null)
+    setWireSessionToken(null)
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
@@ -991,10 +1036,11 @@ export function LookingGlass() {
         const errorData = await response.json().catch(() => null) as { error?: string } | null
         throw new Error(errorData?.error || 'Failed to start wire capture session')
       }
-      const data = await response.json() as { session_id?: string }
-      if (!data.session_id) {
-        throw new Error('No session ID returned for wire capture')
+      const data = await response.json() as { session_id?: string; session_token?: string }
+      if (!data.session_id || !data.session_token) {
+        throw new Error('No owned session returned for wire capture')
       }
+      setWireSessionToken(data.session_token)
       setWireSessionId(data.session_id)
       return data.session_id
     } catch (error) {
@@ -1053,6 +1099,7 @@ export function LookingGlass() {
         setSelectedFlow(flow)
         resetFlow()
         setWireSessionId(null)
+        setWireSessionToken(null)
         clearWireEvents()
         setWireSessionError(null)
         setPendingExecute(false)
@@ -1279,6 +1326,51 @@ export function LookingGlass() {
 
       {hasFlowConfigurationInputs && (
         <section className="rounded-xl border border-white/10 bg-surface-900/20 p-3 sm:p-4">
+        {isClientCredentialsFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
+              <span className="text-xs sm:text-sm font-medium text-surface-300">Client authentication</span>
+            </div>
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+              Compare a shared client secret with RFC 7523 public/private-key authentication.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setClientCredentialsAuthMethod('client_secret_basic')}
+                className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
+                  clientCredentialsAuthMethod === 'client_secret_basic'
+                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                    : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
+                }`}
+              >
+                client_secret
+              </button>
+              <button
+                type="button"
+                onClick={() => setClientCredentialsAuthMethod('private_key_jwt')}
+                className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
+                  clientCredentialsAuthMethod === 'private_key_jwt'
+                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                    : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
+                }`}
+              >
+                private_key_jwt
+              </button>
+            </div>
+            <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+              {clientCredentialsAuthMethod === 'private_key_jwt'
+                ? 'A non-extractable WebCrypto private key signs the assertion in this browser. An owned session registration assigns the real client ID after its public JWK is accepted.'
+                : 'The demo client authenticates with an HTTP Basic client secret.'}
+            </p>
+          </motion.div>
+        )}
+
         {/* Refresh Token Input - shown when refresh token flow is selected */}
         {isRefreshTokenFlow && (
           <motion.div
@@ -1640,6 +1732,71 @@ export function LookingGlass() {
                       </span>
                     )}
                   </div>
+                  {referenceNavigation && (
+                    <nav
+                      aria-label={`Protocol reference breadcrumb for ${selectedFlow.name}`}
+                      className="mt-1.5 text-[10px] sm:text-xs text-surface-500"
+                    >
+                      <ol className="flex flex-wrap items-center gap-1">
+                        <li className="hidden sm:flex items-center gap-1">
+                          <BookOpen aria-hidden="true" className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                          <Link
+                            href="/protocols"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label="Open Protocol Reference in a new tab"
+                            className="hover:text-purple-300 transition-colors"
+                          >
+                            Protocol Reference
+                          </Link>
+                        </li>
+                        <li className="hidden sm:flex items-center gap-1">
+                          <ChevronRight aria-hidden="true" className="w-3 h-3 text-surface-600 flex-shrink-0" />
+                          <Link
+                            href={referenceNavigation.protocol.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${referenceNavigation.protocol.name} overview in a new tab`}
+                            aria-current={referenceNavigation.flow ? undefined : 'true'}
+                            className="hover:text-purple-300 transition-colors"
+                          >
+                            {referenceNavigation.protocol.name}
+                          </Link>
+                        </li>
+                        {referenceNavigation.flow ? (
+                          <li className="flex items-center gap-1">
+                            <ChevronRight aria-hidden="true" className="hidden sm:block w-3 h-3 text-surface-600 flex-shrink-0" />
+                            <Link
+                              href={referenceNavigation.flow.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${referenceNavigation.flow.name} flow guide in a new tab`}
+                              aria-current="true"
+                              className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors"
+                            >
+                              <span className="hidden sm:inline">{referenceNavigation.flow.name}</span>
+                              <span className="sm:hidden">{referenceNavigation.flow.name} guide</span>
+                              <ExternalLink aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" />
+                            </Link>
+                          </li>
+                        ) : (
+                          <li className="sm:hidden">
+                            <Link
+                              href={referenceNavigation.protocol.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Open ${referenceNavigation.protocol.name} overview in a new tab`}
+                              aria-current="true"
+                              className="inline-flex items-center gap-1 hover:text-purple-300 transition-colors"
+                            >
+                              {referenceNavigation.protocol.name} overview
+                              <ExternalLink aria-hidden="true" className="w-2.5 h-2.5 flex-shrink-0" />
+                            </Link>
+                          </li>
+                        )}
+                      </ol>
+                    </nav>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
@@ -1871,6 +2028,14 @@ export function LookingGlass() {
               {hasCapturedTokens && (
                 <div className="overflow-x-auto scrollbar-hide -mx-3 px-3 sm:mx-0 sm:px-0">
                   <div className="flex items-center gap-1.5 sm:gap-2 pb-1 min-w-max">
+                    {realExecutor.state?.tokens.clientAssertion && (
+                      <TokenButton
+                        label="client assertion"
+                        color="cyan"
+                        active={inspectedToken === realExecutor.state?.tokens.clientAssertion}
+                        onClick={() => setInspectedToken(realExecutor.state?.tokens.clientAssertion || '')}
+                      />
+                    )}
                     {realExecutor.state?.tokens.accessToken && (
                       <TokenButton
                         label="access"

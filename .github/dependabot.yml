@@ -80,3 +80,7 @@ updates:
     labels:
       - "dependencies"
       - "area: docker"
+    groups:
+      docker-images:
+        patterns:
+          - "*"

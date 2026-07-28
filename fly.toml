@@ -49,6 +49,7 @@ primary_region = 'syd'
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
 # - SCIM_API_TOKEN: Bearer token for SCIM authentication
+# - OAUTH2_REPLAY_REDIS_URL: rediss:// URL for shared private_key_jwt replay protection
 #
 # OIDF conformance secrets (set only when running certification; without them the
 # conformance clients are never registered, so production is unaffected):

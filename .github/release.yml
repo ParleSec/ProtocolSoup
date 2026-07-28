@@ -1,0 +1,46 @@
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+      - question
+  categories:
+    - title: Protocol Behavior
+      labels:
+        - "protocol: oauth2-oidc"
+        - "protocol: saml"
+        - "protocol: scim"
+        - "protocol: spiffe"
+        - "protocol: ssf"
+        - "protocol: verifiable-credentials"
+    - title: Fixes
+      labels:
+        - bug
+    - title: Features And Improvements
+      labels:
+        - enhancement
+    # Dependabot pull requests also carry an "area:" label, so this category has
+    # to be matched before any category keyed on "area:".
+    - title: Dependencies
+      labels:
+        - dependencies
+    - title: API Contracts
+      labels:
+        - "area: openapi"
+    - title: Documentation
+      labels:
+        - documentation
+        - "area: docs"
+    - title: Platform And UI
+      labels:
+        - "area: backend"
+        - "area: frontend"
+        - "area: wallet"
+    - title: Build And CI
+      labels:
+        - "area: docker"
+        - "area: github-actions"
+    - title: Other Changes
+      labels:
+        - "*"

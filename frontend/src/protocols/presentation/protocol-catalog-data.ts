@@ -62,6 +62,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         rfc: '§4.4',
         references: [
           { category: 'core', label: 'RFC 6749 §4.4 — Client Credentials Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.4' },
+          { category: 'core', label: 'RFC 7523 §2.2 — JWT Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-2.2' },
           { category: 'security', label: 'RFC 9700 §2.5 — Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.5' },
         ],
       },
@@ -129,6 +130,17 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
           { category: 'core', label: 'OIDC Core §3.1 — Authentication using the Authorization Code Flow', href: 'https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth' },
           { category: 'security', label: 'OIDC Core §16 — Security Considerations', href: 'https://openid.net/specs/openid-connect-core-1_0.html#Security' },
           { category: 'security', label: 'OIDC Core §15.5.2 — Nonce Implementation Notes', href: 'https://openid.net/specs/openid-connect-core-1_0.html#NonceNotes' },
+        ],
+      },
+      {
+        id: 'interaction-code',
+        name: 'Interaction Code Flow',
+        rfc: 'OIDC Core §3.1 + RFC 7636',
+        references: [
+          { category: 'core', label: 'OIDC Core §3.1 — Authentication using the Authorization Code Flow', href: 'https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowAuth' },
+          { category: 'core', label: 'OpenID Connect Discovery 1.0', href: 'https://openid.net/specs/openid-connect-discovery-1_0.html' },
+          { category: 'core', label: 'RFC 7636 — Proof Key for Code Exchange', href: 'https://datatracker.ietf.org/doc/html/rfc7636' },
+          { category: 'security', label: 'RFC 9700 §2.1.1 — PKCE for All Clients', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.1.1' },
         ],
       },
       {

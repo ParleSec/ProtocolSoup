@@ -58,7 +58,7 @@ For source development, see [CONTRIBUTING.md](CONTRIBUTING.md). For the full pub
 | Flow | RFC | Description |
 |------|-----|-------------|
 | Authorization Code | RFC 6749 | Standard web app flow with PKCE support |
-| Client Credentials | RFC 6749 | Machine-to-machine authentication |
+| Client Credentials | RFC 6749 / RFC 7523 | Machine-to-machine authentication with `client_secret` or session-registered `private_key_jwt` |
 | Refresh Token | RFC 6749 | Token renewal flow |
 | Token Introspection | RFC 7662 | Active token metadata inspection |
 | Token Revocation | RFC 7009 | Token invalidation |
@@ -360,7 +360,8 @@ npm run dev
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SHOWCASE_LISTEN_ADDR` | `:8080` | Server listen address |
-| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public base URL |
+| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public base URL; production requires a pathless HTTPS origin with no trailing slash |
+| `OAUTH2_REPLAY_REDIS_URL` | in-memory in development/tests | Shared replay store for `private_key_jwt`; demo requires Redis and production requires a reachable secret `rediss://` URL |
 | `SHOWCASE_FRONTEND_ORIGIN` | (empty) | Optional Next.js runtime origin for backend web-route proxying |
 | `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `SHOWCASE_SPIFFE_ENABLED` | `false` | Enable SPIFFE integration |
@@ -405,6 +406,7 @@ This starts:
 - **Federation** - OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP
 - **SCIM** - User and group provisioning
 - **SSF** - Shared Signals Framework
+- **Redis** - Shared atomic `private_key_jwt` replay reservations for the federation service
 - **Frontend** - Next.js App Router UI at `http://localhost:3000`
 - **Gateway API** - Available at `http://localhost:8080`
 

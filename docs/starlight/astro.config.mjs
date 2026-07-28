@@ -87,6 +87,7 @@ export default defineConfig({
             { slug: 'deploy/overview' },
             { slug: 'deploy/deployment-models' },
             { slug: 'deploy/release-and-tag-policy' },
+            { label: 'Release Process', link: '/developers/release-process/' },
             { slug: 'deploy/environment-variables' },
             { slug: 'deploy/palette-index' },
             {
@@ -124,6 +125,7 @@ export default defineConfig({
             { slug: 'developers/overview' },
             { slug: 'developers/development-setup' },
             { slug: 'developers/pull-request-workflow' },
+            { slug: 'developers/release-process' },
             {
               label: 'Extending ProtocolSoup',
               items: [

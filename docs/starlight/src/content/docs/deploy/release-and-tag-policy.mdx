@@ -5,6 +5,14 @@ description: "Choose image tags based on stability, traceability, and environmen
 
 # Release And Tag Policy
 
+## Release Cadence
+
+Versioned releases are cut monthly from `master`. A month with no user-facing change is skipped rather than padded with a release.
+
+`latest` is rebuilt on every push to `master` and therefore moves continuously between releases. Pin a version tag if you need a stable target.
+
+Pre-releases use a hyphen suffix such as `v3.0.0-rc.1`. They publish only that exact tag: `vX.Y`, `vX`, and `latest` are never moved onto a pre-release build.
+
 ## Available Tags
 
 | Tag Pattern | Description | Mutability |
@@ -43,3 +51,4 @@ Each published image includes:
 
 - [GHCR Overview](/deploy/overview/)
 - [Deployment Models](/deploy/deployment-models/)
+- [Release Process](/developers/release-process/) — how maintainers cut these tags

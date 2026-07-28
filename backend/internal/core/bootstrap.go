@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strings"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -34,6 +35,9 @@ type BootstrapResult struct {
 // Bootstrap initializes shared dependencies based on options.
 func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 	cfg := LoadConfig()
+	if err := validateProductionBaseURL(cfg); err != nil {
+		return nil, err
+	}
 
 	var keySet *crypto.KeySet
 	if opts.EnableKeySet {
@@ -96,11 +100,13 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 	}
 
 	pluginConfig := plugin.PluginConfig{
-		BaseURL:      cfg.BaseURL,
-		DataDir:      cfg.DataDir,
-		KeySet:       keySet,
-		MockIdP:      idp,
-		LookingGlass: lg,
+		Environment:          cfg.Environment,
+		BaseURL:              cfg.BaseURL,
+		DataDir:              cfg.DataDir,
+		OAuth2ReplayRedisURL: cfg.OAuth2ReplayRedisURL,
+		KeySet:               keySet,
+		MockIdP:              idp,
+		LookingGlass:         lg,
 	}
 
 	return &BootstrapResult{
@@ -111,6 +117,22 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		Palette:      paletteSvc,
 		PluginConfig: pluginConfig,
 	}, nil
+}
+
+func validateProductionBaseURL(cfg *Config) error {
+	if cfg == nil || !cfg.IsProduction() {
+		return nil
+	}
+	parsed, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return fmt.Errorf("invalid SHOWCASE_BASE_URL: %w", err)
+	}
+	if parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+		parsed.Path != "" || parsed.RawPath != "" ||
+		parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("SHOWCASE_BASE_URL must be a pathless HTTPS origin in production")
+	}
+	return nil
 }
 
 // registerConformanceClients provisions the static confidential clients the
