@@ -41,7 +41,8 @@ The version is chosen deliberately by a maintainer rather than inferred from com
 - **[Releases page](https://github.com/ParleSec/ProtocolSoup/releases)** — every release with its full notes.
 - **[CHANGELOG.md](https://github.com/ParleSec/ProtocolSoup/blob/master/CHANGELOG.md)** — the whole history in one file, in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 - **Notifications** — on the repository, choose Watch, then Custom, then Releases. This notifies you on releases without the noise of every issue and pull request.
-- **Feed** — `https://github.com/ParleSec/ProtocolSoup/releases.atom` works in any RSS reader.
+- **Feed** — `
+` works in any RSS reader.
 
 ## Reading The Release Notes
 
@@ -74,20 +75,25 @@ Maintainer commits use `CREATE`, `UPDATE`, `PATCH`, and `DELETE` prefixes, which
 
 ## If You Maintain The Project
 
-Confirm the checks on `master` are green, then push an annotated tag:
+Confirm the checks on `master` are green, then regenerate the changelog, commit it, and tag that commit:
 
 ```bash
 git checkout master
 git pull
+npx --yes git-cliff@2.13.1 --config cliff.toml --tag v2.1.0 --output CHANGELOG.md
+git commit -s -am "UPDATE CHANGELOG for v2.1.0"
+git push origin master
 git tag -a v2.1.0 -m "Short paragraph describing what this release is about."
 git push origin v2.1.0
 ```
 
-The tag annotation body becomes the Highlights section, so write it for someone deciding whether to upgrade.
+The changelog is committed by hand rather than pushed by the release workflow, for two reasons. It keeps `master` free of automated pushes, so the review and signature rules on the branch apply to everything without exception. It also means the tagged commit contains its own changelog entry, which is not true when a bot appends it after the tag.
+
+The tag annotation body becomes the Highlights section, so write it for someone deciding whether to upgrade. For anything longer than a sentence, write the text to a file and use `git tag -a v2.1.0 -F highlights.md`.
 
 Pushing the tag triggers two workflows:
 
-- `release.yml` verifies the tag is on `master`, verifies no checks failed on the tagged commit, assembles the notes, publishes the GitHub Release, and commits the regenerated `CHANGELOG.md` back to `master`.
+- `release.yml` verifies the tag is on `master`, verifies no checks failed on the tagged commit, assembles the notes, and publishes the GitHub Release. It also regenerates `CHANGELOG.md` in the runner and warns if the committed copy does not match, but never pushes to `master`.
 - `ghcr-publish.yml` builds every service image for both architectures and pushes the `vX.Y.Z`, `vX.Y`, and `vX` tags with an SBOM, Cosign signature, provenance attestation, and Trivy scan.
 
 The tag push is the trigger for both, rather than release publication, because a release created by a workflow using `GITHUB_TOKEN` does not itself trigger workflows.
@@ -107,5 +113,5 @@ git tag -d v2.1.0
 ### Repository Settings This Depends On
 
 - **Allow auto-merge** must be enabled for `dependabot-auto-merge.yml` to queue dependency updates. Without required status checks on `master`, auto-merge lands them immediately rather than waiting for CI.
-- **Branch protection on `master`** must permit the release workflow to push the regenerated `CHANGELOG.md`.
+- **No workflow writes to `master`.** The ruleset on `master` requires signed commits and a reviewed pull request, and ruleset bypass cannot be granted per rule. Granting it to GitHub Actions would let any workflow with `contents: write` push unreviewed, so nothing in this pipeline pushes to the branch.
 - Merges performed with `GITHUB_TOKEN` do not trigger workflows, so a Dependabot auto-merge may not rebuild `latest`. Run `ghcr-publish.yml` manually from the Actions tab if a rebuild is needed before the next commit to `master`.

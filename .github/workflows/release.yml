@@ -141,21 +141,18 @@ jobs:
           fi
           gh release create "$TAG" "${FLAGS[@]}"
 
-      - name: Update CHANGELOG.md on master
+      # CHANGELOG.md is committed by the maintainer before tagging rather than
+      # pushed from here, so that the tagged tree contains its own changelog
+      # entry and master keeps its review and signature requirements.
+      - name: Verify CHANGELOG.md is current
         env:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
-          git fetch --quiet origin +refs/heads/master:refs/remotes/origin/master
-          git checkout -B master origin/master
-          npx --yes "git-cliff@${GIT_CLIFF_VERSION}" --config cliff.toml --output CHANGELOG.md
+          npx --yes "git-cliff@${GIT_CLIFF_VERSION}" --config cliff.toml --tag "$TAG" --output CHANGELOG.md
 
-          if [ -z "$(git status --porcelain -- CHANGELOG.md)" ]; then
-            echo "CHANGELOG.md already current."
-            exit 0
+          if [ -n "$(git status --porcelain -- CHANGELOG.md)" ]; then
+            echo "::warning::CHANGELOG.md at ${TAG} is not what cliff.toml generates. Regenerate it and include it in the next release."
+            git --no-pager diff --stat -- CHANGELOG.md
+          else
+            echo "CHANGELOG.md is current."
           fi
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add CHANGELOG.md
-          git commit -m "UPDATE CHANGELOG for ${TAG} [skip ci]"
-          git push origin master
