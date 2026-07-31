@@ -72,7 +72,9 @@ updates:
           - "*"
 
   - package-ecosystem: "docker"
-    directory: "/docker"
+    directories:
+      - "/docker"
+      - "/docker/spire/*"
     schedule:
       interval: "weekly"
       day: "monday"
