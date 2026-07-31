@@ -40,8 +40,15 @@ type DCQLTrustedAuthority struct {
 // MdocCredentialEvidence is the mdoc view of a presented credential for DCQL
 // matching: the issuer-verified doctype plus the disclosed element identifiers
 // per namespace. It is format-specific to mso_mdoc (ISO/IEC 18013-5) and is
-// supplied by the verifier after CollectDisclosedElements, keeping this matcher
-// free of any CBOR/COSE dependency.
+// supplied by the verifier after CollectDisclosedElements.
+//
+// This keeps the DCQL *matcher* free of any CBOR/COSE dependency -- it
+// consumes this already-decoded shape rather than raw IssuerSigned bytes --
+// which is narrower than saying the vc package itself has no CBOR
+// dependency. MSOMdocFormat in format.go imports internal/mdoc (and
+// therefore internal/cose) to register mso_mdoc as a CredentialFormat, so
+// that package-wide boundary no longer holds; what still holds is that this
+// matcher's own logic never decodes CBOR itself.
 type MdocCredentialEvidence struct {
 	Format string
 	// Doctype is the credential docType (the DCQL meta for mdoc), e.g.

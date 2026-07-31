@@ -70,6 +70,7 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - Authorization-code and HAIP-related issuance controls are covered by backend
   HTTP tests; the Looking Glass flow list below exposes only pre-authorized
   issuance variants.
+- Issued credentials of any registered format, including `mso_mdoc`, are inspectable via the gateway's `POST /lookingglass/decode/credential` (see [Credential Inspection](../starlight/src/content/docs/protocols/oid4vci.mdx#credential-inspection-looking-glass)). It decodes through the same shared `CredentialFormat` registry and evidence shape issuance and OID4VP verification already use, and reports issuer trust plus (`mso_mdoc` only) MSO digest consistency in an assurance envelope kept structurally separate from the decoded evidence — never a blanket validity flag.
 
 ## Failure Semantics
 

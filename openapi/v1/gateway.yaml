@@ -212,6 +212,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/lookingglass/decode/credential:
+    post:
+      tags: [LookingGlass]
+      summary: Decode a verifiable credential for Looking Glass inspection
+      description: >-
+        Decodes a pasted credential of any registered format -- including
+        mso_mdoc -- into the same shared evidence shape issuance and
+        verification already produce, wrapped in an assurance envelope. The
+        response keeps decoded-but-unverified evidence and checked assurance
+        as separate top-level objects: this endpoint supplies no issuer keys
+        or trust anchors, so `assurance.issuer_trust` reads `not_evaluated`
+        for every format, never a blanket validity flag. The request body is
+        capped at 64 KiB, and CBOR-based formats (mso_mdoc) are decoded under
+        hardened depth and collection limits because the input is
+        externally-supplied and untrusted.
+      operationId: decodeGatewayCredential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecodeCredentialRequest"
+            examples:
+              mso_mdoc:
+                value:
+                  credential: "omRkb2NUeXBldW9yZy5pc28uMTgwMTMuNS4xLm1ETA..."
+      responses:
+        "200":
+          description: Decoded credential evidence and assurance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DecodeCredentialResponse"
+              examples:
+                mso_mdoc:
+                  value:
+                    evidence:
+                      format: mso_mdoc
+                      doctype: "org.iso.18013.5.1.mDL"
+                      full_claims:
+                        "org.iso.18013.5.1":
+                          document_number: "D1234567"
+                          driving_privileges: []
+                      selective_disclosure:
+                        mechanism: mso_valuedigests
+                        committed_count: 11
+                        committed_count_is_exact: true
+                        present_count: 11
+                        lifecycle_stage: issued
+                        digest_algorithm: "SHA-256"
+                        has_unrepresented_disclosure_forms: false
+                    assurance:
+                      issuer_trust: not_evaluated
+                      digests_consistent_with_mso: true
+        "400":
+          description: Invalid, oversized, or unparseable credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Looking Glass is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/lookingglass/sessions:
     get:
       tags: [LookingGlass]
@@ -456,4 +522,174 @@ components:
       required: [token]
       properties:
         token:
+          type: string
+    DecodeCredentialRequest:
+      type: object
+      required: [credential]
+      properties:
+        credential:
+          type: string
+          description: >-
+            A raw credential artifact: a compact SD-JWT VC, a JWT/JSON-LD VC,
+            or a base64url-encoded ISO/IEC 18013-5 mso_mdoc IssuerSigned
+            structure. The request body is capped at 64 KiB.
+    DecodeCredentialResponse:
+      type: object
+      required: [evidence, assurance]
+      description: >-
+        Evidence and assurance are separate top-level objects so a client
+        cannot merge "what this artifact contains" and "what has been
+        checked about it" into one register by accident.
+      properties:
+        evidence:
+          $ref: "#/components/schemas/CredentialEvidence"
+        assurance:
+          $ref: "#/components/schemas/CredentialAssurance"
+    CredentialEvidence:
+      type: object
+      description: >-
+        Format-agnostic view of the credential's own claims, shared verbatim
+        with the evidence shape issuance and OID4VP verification produce.
+        This is decoded content, not a trust statement -- see
+        CredentialAssurance for what has actually been checked.
+      properties:
+        format:
+          type: string
+          example: mso_mdoc
+        vct:
+          type: string
+          description: SD-JWT VC type (`vct` claim). Absent for other formats.
+        doctype:
+          type: string
+          description: >-
+            mdoc doctype, e.g. `org.iso.18013.5.1.mDL`, from the
+            MobileSecurityObject. Absent for other formats.
+        credential_types:
+          type: array
+          items:
+            type: string
+        full_claims:
+          type: object
+          additionalProperties: true
+          description: >-
+            Every claim the credential carries, namespace-nested for mdoc.
+        disclosed_claims:
+          type: object
+          additionalProperties: true
+          description: The subset of full_claims actually disclosed by this artifact.
+        selective_disclosure:
+          $ref: "#/components/schemas/SelectiveDisclosureSummary"
+        issued_at:
+          type: string
+          format: date-time
+          description: >-
+            Present only when the source credential itself carries this
+            claim (mdoc MSO validityInfo.signed; ldp_vc issuanceDate/
+            validFrom); never back-filled with wall-clock time.
+        expires_at:
+          type: string
+          format: date-time
+          description: >-
+            Present only when the source credential itself carries this
+            claim; never back-filled.
+    SelectiveDisclosureSummary:
+      type: object
+      description: >-
+        Present only for the two formats with a selective-disclosure
+        mechanism (mso_mdoc, dc+sd-jwt). Absent entirely -- not zeroed -- for
+        formats that always reveal every claim (jwt_vc_json, jwt_vc_json-ld,
+        ldp_vc).
+      required:
+        - mechanism
+        - committed_count
+        - committed_count_is_exact
+        - present_count
+        - lifecycle_stage
+        - has_unrepresented_disclosure_forms
+      properties:
+        mechanism:
+          type: string
+          enum: [mso_valuedigests, sd_jwt_disclosures]
+          description: Names what committed_count actually counts.
+        committed_count:
+          type: integer
+          description: >-
+            Exact element count for mso_valuedigests (ISO/IEC 18013-5 has no
+            decoy-digest mechanism). An upper bound for sd_jwt_disclosures,
+            since SD-JWT deliberately permits decoy digests so a verifier
+            cannot infer the true claim count from the digest count alone --
+            see committed_count_is_exact.
+        committed_count_is_exact:
+          type: boolean
+          description: >-
+            True only for mso_valuedigests. Always false for
+            sd_jwt_disclosures, even when a specific credential happens to
+            carry no decoys -- the point is that the format permits them.
+        present_count:
+          type: integer
+          description: >-
+            Element/disclosure count actually carried by this artifact. Its
+            meaning depends on lifecycle_stage: at "issued" this is a
+            property of the format (every element/disclosure the issuer
+            sent), not a holder decision, and must not be worded as a
+            disclosure ratio. Only "presented" may use "N of M disclosed"
+            phrasing.
+        lifecycle_stage:
+          type: string
+          enum: [issued, presented]
+        digest_algorithm:
+          type: string
+          example: "SHA-256"
+          description: mso.DigestAlgorithm for mdoc, or the SD-JWT _sd_alg claim.
+        per_namespace:
+          type: object
+          description: mdoc only. Absent for SD-JWT, which has no namespace concept.
+          additionalProperties:
+            $ref: "#/components/schemas/NamespaceDisclosureCounts"
+        has_unrepresented_disclosure_forms:
+          type: boolean
+          description: >-
+            True when an SD-JWT structure contains a disclosure form
+            committed_count's flat count does not represent -- a nested
+            disclosure or an array-element redaction marker. Always false
+            for mdoc. When true, present_count/committed_count must not be
+            presented as a complete picture.
+    NamespaceDisclosureCounts:
+      type: object
+      required: [committed_count, present_count]
+      properties:
+        committed_count:
+          type: integer
+        present_count:
+          type: integer
+    CredentialAssurance:
+      type: object
+      description: >-
+        What has actually been checked about the artifact. Kept structurally
+        separate from CredentialEvidence's decoded-but-unverified claims, and
+        never collapsed to a single validity flag.
+      required: [issuer_trust]
+      properties:
+        issuer_trust:
+          type: string
+          enum: [verified, failed, not_evaluated]
+          description: >-
+            Tri-state, computed by actually invoking issuer-signature
+            validation rather than hardcoded. This endpoint supplies no
+            issuer keys or trust anchors, so this reads "not_evaluated" for
+            every format today -- distinct from "failed", which means a
+            check ran against real trust material and did not succeed.
+        issuer_trust_detail:
+          type: string
+        digests_consistent_with_mso:
+          type: boolean
+          description: >-
+            mso_mdoc only; absent entirely (not false) for every other
+            format. True means each presented IssuerSignedItem's digest
+            matches the credential's own MSO valueDigests -- internal
+            self-consistency between the items and the MSO, NOT authenticity
+            of the MSO itself. An unauthenticated MSO with matching digests
+            is trivially forgeable. Must never be read or labelled as
+            "verified" or "ok".
+        digest_consistency_detail:
           type: string
