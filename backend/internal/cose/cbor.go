@@ -43,6 +43,14 @@ const (
 	tagFullDate uint64 = 1004
 )
 
+// TagEncodedCBOR exports tagEncodedCBOR (CBOR tag 24) for callers that need to
+// recognise a tag-24 wrapper surviving a generic (interface{}) decode as a
+// cbor.Tag, rather than through the typed DecodeTagged24 path. mdoc's
+// untrusted-CBOR depth gate is the current caller: it decodes into `any` to
+// enforce limits and must recurse into tag-24 content, so it needs the tag
+// number without hardcoding the RFC 8949 Section 3.4.5.1 value itself.
+const TagEncodedCBOR = tagEncodedCBOR
+
 // RawCBOR is pre-encoded CBOR that is embedded verbatim during marshaling
 // rather than re-encoded. It is an alias of fxamacker's RawMessage. mdoc needs
 // this to carry already-encoded items (the tag-24 IssuerSignedItemBytes and the
@@ -68,8 +76,28 @@ var (
 
 	// decMode decodes CBOR with the conservative options COSE expects:
 	// duplicate map keys rejected, indefinite-length items rejected, and
-	// integers decoded to int64 so COSE labels compare cleanly.
+	// integers decoded to int64 so COSE labels compare cleanly. It has no
+	// explicit MaxNestedLevels/MaxArrayElements/MaxMapPairs, so fxamacker's
+	// generous defaults apply (131072 elements). That is fine here: decMode is
+	// reserved for CBOR the platform itself produced or received over an
+	// already-verified wire path (mdoc.DecodeDeviceResponse and
+	// mdoc.DecodeIssuerSigned called directly, not through the vc registry),
+	// where tightening the limits risks rejecting a legitimate credential for
+	// no security benefit.
 	decMode cbor.DecMode
+
+	// decModeUntrusted decodes CBOR from externally-supplied credentials --
+	// pasted into the Looking Glass inspector or imported from a third-party
+	// issuer -- which is an attacker-controlled parse surface that decMode's
+	// generous defaults were never meant to withstand. Same base options as
+	// decMode, plus explicit MaxNestedLevels (16), MaxArrayElements (1024),
+	// and MaxMapPairs (1024) ceilings, each roughly two orders of magnitude
+	// above what a real ISO/IEC 18013-5 mDL uses. See mdoc.CheckUntrustedCBOR
+	// for the tag-24 recursion this mode alone cannot provide: fxamacker
+	// enforces MaxNestedLevels per Unmarshal call, so a nesting bomb hidden
+	// inside a tag-24-wrapped byte string (mdoc's IssuerSignedItemBytes and
+	// MobileSecurityObjectBytes) is invisible to a single outer decode.
+	decModeUntrusted cbor.DecMode
 )
 
 func init() {
@@ -106,6 +134,15 @@ func init() {
 	if err != nil {
 		panic(fmt.Sprintf("cose: build CBOR decoder: %v", err))
 	}
+
+	untrustedOpts := decOpts
+	untrustedOpts.MaxNestedLevels = 16
+	untrustedOpts.MaxArrayElements = 1024
+	untrustedOpts.MaxMapPairs = 1024
+	decModeUntrusted, err = untrustedOpts.DecMode()
+	if err != nil {
+		panic(fmt.Sprintf("cose: build untrusted CBOR decoder: %v", err))
+	}
 }
 
 // MarshalDeterministic encodes v as canonical CBOR for the mdoc data model
@@ -117,8 +154,21 @@ func MarshalDeterministic(v any) ([]byte, error) {
 }
 
 // Unmarshal decodes CBOR data into v using the conservative COSE decode mode.
+// Reserved for CBOR the platform itself produced or received over an
+// already-verified wire path; see UnmarshalUntrusted for externally-supplied
+// credentials.
 func Unmarshal(data []byte, v any) error {
 	return decMode.Unmarshal(data, v)
+}
+
+// UnmarshalUntrusted decodes CBOR data into v using decModeUntrusted: the same
+// conservative COSE options as Unmarshal, plus explicit nesting depth (16),
+// array element (1024), and map pair (1024) ceilings. Use this only for CBOR
+// from an externally-supplied credential (pasted into an inspector, or
+// imported from a third-party issuer) rather than CBOR the platform itself
+// produced or received over an already-verified wire path.
+func UnmarshalUntrusted(data []byte, v any) error {
+	return decModeUntrusted.Unmarshal(data, v)
 }
 
 // TagEncode encodes v as canonical CBOR and wraps the resulting bytes in a CBOR

@@ -1,6 +1,54 @@
 package mdoc
 
-import "fmt"
+import (
+	"encoding/base64"
+	"fmt"
+	"time"
+
+	"github.com/fxamacker/cbor/v2"
+)
+
+// JSONSafeValue converts a CBOR-decoded mdoc element value (as returned by
+// CollectDisclosedElements) into a value encoding/json can marshal. Generic
+// CBOR decoding yields map[any]any for maps, cbor.Tag for tagged values such
+// as full-date (tag 1004, used by mDL birth_date/issue_date/expiry_date), and
+// []byte for byte strings. encoding/json cannot marshal map[any]any (a
+// non-string map key) and renders cbor.Tag as an opaque struct, so an
+// un-normalized mDL element (e.g. the nested driving_privileges array) would
+// fail to encode. Normalizing here keeps a disclosed element
+// JSON-serializable while preserving the real disclosed value.
+func JSONSafeValue(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case cbor.Tag:
+		return JSONSafeValue(typed.Content)
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, val := range typed {
+			out[fmt.Sprintf("%v", key)] = JSONSafeValue(val)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, val := range typed {
+			out[key] = JSONSafeValue(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, val := range typed {
+			out[i] = JSONSafeValue(val)
+		}
+		return out
+	case []byte:
+		return base64.RawURLEncoding.EncodeToString(typed)
+	case time.Time:
+		return typed.UTC().Format(time.RFC3339)
+	default:
+		return typed
+	}
+}
 
 // Disclose returns an IssuerSigned carrying only the requested
 // elementIdentifiers per namespace, with issuerAuth unchanged. Selective
