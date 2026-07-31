@@ -117,6 +117,57 @@ export async function generateCodeChallenge(verifier: string): Promise<string> {
 }
 
 /**
+ * Compute the RFC 7638 JWK SHA-256 thumbprint ("jkt") for the three key
+ * types this codebase actually mints: RSA, EC, and OKP -- Ed25519 holder
+ * keys reach this on the wallet's did:key path, so omitting OKP would
+ * either throw or silently compute a wrong digest and render a false
+ * mismatch against a correct jkt in the panel this exists to keep honest.
+ *
+ * Mirrors crypto.JWK.Thumbprint() in backend/internal/crypto/keys.go
+ * exactly: same three kty branches, same canonical member ordering per
+ * RFC 7638 Section 3.2 (crv,kty,x,y for EC; e,kty,n for RSA; crv,kty,x for
+ * OKP -- each already alphabetical, which is what makes plain object
+ * literal key order equivalent to Go's alphabetically-sorted map-key JSON
+ * marshalling), and the same refusal for anything else: the Go function
+ * returns "" for an unsupported kty rather than guessing, so this returns
+ * null for the same case. "Cannot compute for this key type" must be
+ * rendered as its own state wherever this is used, never as a mismatch --
+ * an unknown future kty must not produce a false verdict.
+ */
+export async function jwkThumbprint(jwk: Record<string, unknown>): Promise<string | null> {
+  const kty = typeof jwk.kty === 'string' ? jwk.kty : ''
+  let canonical: Record<string, string>
+
+  switch (kty) {
+    case 'RSA': {
+      const { e, n } = jwk
+      if (typeof e !== 'string' || typeof n !== 'string') return null
+      canonical = { e, kty, n }
+      break
+    }
+    case 'EC': {
+      const { crv, x, y } = jwk
+      if (typeof crv !== 'string' || typeof x !== 'string' || typeof y !== 'string') return null
+      canonical = { crv, kty, x, y }
+      break
+    }
+    case 'OKP': {
+      const { crv, x } = jwk
+      if (typeof crv !== 'string' || typeof x !== 'string') return null
+      canonical = { crv, kty, x }
+      break
+    }
+    default:
+      return null
+  }
+
+  const encoder = new TextEncoder()
+  const data = encoder.encode(JSON.stringify(canonical))
+  const digest = await crypto.subtle.digest('SHA-256', data)
+  return base64URLEncode(new Uint8Array(digest))
+}
+
+/**
  * Generate a state parameter for CSRF protection
  */
 export function generateState(): string {

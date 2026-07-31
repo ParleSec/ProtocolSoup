@@ -2067,7 +2067,19 @@ export function LookingGlass() {
 
             <div className="p-4 sm:p-5">
               {inspectedToken ? (
-                <TokenInspector token={inspectedToken} />
+                <TokenInspector
+                  token={inspectedToken}
+                  tokenType={
+                    // token_type (RFC 6749 Section 5.1) describes the access
+                    // token specifically, so it is only passed when the
+                    // token currently being inspected is that access token --
+                    // not for id_token/refresh_token/client_assertion or a
+                    // manually-pasted token, none of which have a token_type.
+                    inspectedToken === realExecutor.state?.tokens.accessToken
+                      ? realExecutor.state?.tokens.tokenType
+                      : undefined
+                  }
+                />
               ) : (
                 <div className="text-center py-6 text-surface-400 text-sm">
                   Select a token above to decode

@@ -770,7 +770,7 @@ function TokenBlock({ event, decoded }: { event: FlowEvent; decoded: DecodedToke
   )
 }
 
-const KEY_CLAIMS = ['sub', 'iss', 'aud', 'exp', 'iat', 'scope', 'nonce', 'azp', 'client_id'] as const
+const KEY_CLAIMS = ['sub', 'iss', 'aud', 'exp', 'iat', 'scope', 'nonce', 'azp', 'client_id', 'cnf'] as const
 
 function TokenClaimsSummary({
   header,
