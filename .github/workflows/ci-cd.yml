@@ -255,6 +255,10 @@ jobs:
         working-directory: frontend
         run: npm run verify-refs
 
+      - name: Verify JWK thumbprint helper (RFC 7638)
+        working-directory: frontend
+        run: npm run verify-jwk-thumbprint
+
   # Job 5: Backend Linting and Vet
   backend-lint:
     name: Backend Lint & Vet

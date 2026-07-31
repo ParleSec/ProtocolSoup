@@ -14,6 +14,7 @@
     "start": "next start",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
     "verify-refs": "node scripts/verify-references.mjs",
+    "verify-jwk-thumbprint": "node --experimental-strip-types scripts/verify-jwk-thumbprint.mjs",
     "generate-og-image": "node scripts/generate-og-image.mjs"
   },
   "dependencies": {
