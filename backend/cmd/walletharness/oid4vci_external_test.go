@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -74,6 +77,39 @@ func TestIssueFromExternalIssuerRequiresTxCode(t *testing.T) {
 	}
 	if apiErr.Fields["tx_code_required"] != true {
 		t.Fatalf("expected tx_code_required field in error")
+	}
+}
+
+// TestValidateImportedCredentialRefusesNotEvaluatedMdoc pins the A3c item 4
+// trust boundary: validateImportedCredential accepts arbitrary pasted or
+// externally-fetched credentials, and before mso_mdoc registration an mdoc
+// import failed at parse. After registration it parses successfully, and
+// this wallet supplies no IssuerTrustAnchors for an arbitrary external
+// issuer's mdoc -- so ValidateIssuerSignature reports IssuerTrustNotEvaluated.
+// That must refuse the import exactly like a checked failure, never fall
+// through as an accepted-but-unverified credential.
+func TestValidateImportedCredentialRefusesNotEvaluatedMdoc(t *testing.T) {
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	server := &walletHarnessServer{deviceKey: deviceKey, httpClient: http.DefaultClient}
+	credential := issueMdocBoundTo(t, server, &deviceKey.PublicKey)
+
+	// issuerMetadata and authorizationServerMetadata are both nil, and the
+	// parsed mdoc carries no Issuer claim (mdoc has no JWT-style iss), so
+	// this exercises exactly the "arbitrary external issuer, no trust
+	// anchor available" path A3c item 4 describes -- not a resolvable-but-
+	// unresolved JWKS lookup.
+	parsed, err := server.validateImportedCredential(context.Background(), credential, "mso_mdoc", nil, nil, "")
+	if err == nil {
+		t.Fatalf("validateImportedCredential accepted an mdoc credential with no issuer trust anchor; parsed=%+v", parsed)
+	}
+	if parsed != nil {
+		t.Fatalf("validateImportedCredential returned a non-nil parsed credential alongside a refusal error")
+	}
+	if !strings.Contains(err.Error(), "issuer_trust=not_evaluated") {
+		t.Fatalf("expected refusal to name issuer_trust=not_evaluated, got: %v", err)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -73,6 +74,177 @@ func TestParseAnyCredentialDetectsFormats(t *testing.T) {
 	}
 	if parsedLDPVC.Format != "ldp_vc" {
 		t.Fatalf("unexpected ldp_vc format %q", parsedLDPVC.Format)
+	}
+
+	// jwt_vc_json is the same vc+jwt envelope as jwt_vc_json-ld above, minus
+	// @context on the vc object -- that absence is the sole discriminant
+	// parseJWTCredential uses to tell the two apart (see format.go), so this
+	// must be its own case rather than assumed to follow from the -ld one.
+	jwtVCJSON := signedTestJWT(t, jwt.SigningMethodHS256, []byte("jwt-secret"), "vc+jwt", jwt.MapClaims{
+		"sub": "did:example:holder",
+		"vc": map[string]interface{}{
+			"type": []string{"VerifiableCredential", "UniversityDegreeCredential"},
+			"credentialSubject": map[string]interface{}{
+				"id": "did:example:holder",
+			},
+		},
+	})
+	parsedJWTVCJSON, err := registry.ParseAnyCredential(jwtVCJSON)
+	if err != nil {
+		t.Fatalf("ParseAnyCredential(jwt_vc_json): %v", err)
+	}
+	if parsedJWTVCJSON.Format != "jwt_vc_json" {
+		t.Fatalf("unexpected jwt_vc_json format %q", parsedJWTVCJSON.Format)
+	}
+
+	// mso_mdoc is the default and lead credential profile, so it must parse
+	// through the same registry dispatch as the four JWT/JSON-LD formats
+	// above -- not through a special-cased path outside ParseAnyCredential.
+	mdocFixture := buildTestMdocCredential(t)
+	parsedMdoc, err := registry.ParseAnyCredential(mdocFixture.credential)
+	if err != nil {
+		t.Fatalf("ParseAnyCredential(mso_mdoc): %v", err)
+	}
+	if parsedMdoc.Format != "mso_mdoc" {
+		t.Fatalf("unexpected mso_mdoc format %q", parsedMdoc.Format)
+	}
+	if parsedMdoc.Doctype != mdoc.DocTypeMDL {
+		t.Fatalf("unexpected mso_mdoc doctype %q, want %q", parsedMdoc.Doctype, mdoc.DocTypeMDL)
+	}
+	nsClaims, ok := parsedMdoc.Claims["org.iso.18013.5.1"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected org.iso.18013.5.1 namespace claims, got %#v", parsedMdoc.Claims)
+	}
+	if len(nsClaims) != 2 {
+		t.Fatalf("expected 2 disclosed elements (family_name, age_over_18), got %d: %#v", len(nsClaims), nsClaims)
+	}
+}
+
+// TestCredentialFormatHandlersRejectForeignInput pins the claim in
+// MSOMdocFormat's doc comment that mdoc "can never shadow an earlier
+// format's input by accident, and does not need to run before one that
+// would otherwise mis-accept it": the mdoc handler must reject every other
+// format's credential, and every other format's handler must reject an
+// mdoc credential. Without this, mdoc's registration could silently swallow
+// another format's credential (or vice versa), and ParseAnyCredential's
+// first-match iteration would hide the collision as long as the true owner
+// still happened to run first.
+//
+// This deliberately checks only the mdoc-vs-others pairing, not a full
+// cross product of all five formats: jwt_vc_json and jwt_vc_json-ld share
+// JWTVCFormat.ParseCredential and are disambiguated only by the presence of
+// @context, which is a pre-existing, mdoc-unrelated discrimination detail
+// -- not the regression surface mso_mdoc registration introduces.
+func TestCredentialFormatHandlersRejectForeignInput(t *testing.T) {
+	registry := DefaultCredentialFormatRegistry()
+	samples := buildCredentialFormatSamples(t)
+
+	mdocHandler, ok := registry.Lookup("mso_mdoc")
+	if !ok {
+		t.Fatalf("registry.Lookup(%q) missing", "mso_mdoc")
+	}
+	if _, err := mdocHandler.ParseCredential(samples["mso_mdoc"]); err != nil {
+		t.Fatalf("mso_mdoc.ParseCredential rejected its own sample: %v", err)
+	}
+
+	for _, otherFormatID := range []string{"dc+sd-jwt", "jwt_vc_json-ld", "jwt_vc_json", "ldp_vc"} {
+		otherHandler, ok := registry.Lookup(otherFormatID)
+		if !ok {
+			t.Fatalf("registry.Lookup(%q) missing", otherFormatID)
+		}
+		if _, err := otherHandler.ParseCredential(samples[otherFormatID]); err != nil {
+			t.Fatalf("%s.ParseCredential rejected its own sample: %v", otherFormatID, err)
+		}
+
+		if _, err := mdocHandler.ParseCredential(samples[otherFormatID]); err == nil {
+			t.Fatalf("mso_mdoc.ParseCredential accepted a %s credential; mdoc must reject foreign input", otherFormatID)
+		}
+		if _, err := otherHandler.ParseCredential(samples["mso_mdoc"]); err == nil {
+			t.Fatalf("%s.ParseCredential accepted an mso_mdoc credential; every format must reject mdoc input", otherFormatID)
+		}
+	}
+}
+
+// TestDefaultCredentialFormatRegistryLookupCoversAllFormats pins that all
+// five formats -- including mso_mdoc -- are reachable via Lookup with the
+// exact ID each FormatID() reports, so a caller resolving a format handler
+// by string (as walletharness's PE/DCQL guards and validateImportedCredential
+// do) never silently misses one.
+func TestDefaultCredentialFormatRegistryLookupCoversAllFormats(t *testing.T) {
+	registry := DefaultCredentialFormatRegistry()
+	for _, formatID := range credentialFormatSampleIDs {
+		handler, ok := registry.Lookup(formatID)
+		if !ok {
+			t.Fatalf("registry.Lookup(%q) = not found", formatID)
+		}
+		if handler.FormatID() != formatID {
+			t.Fatalf("registry.Lookup(%q).FormatID() = %q", formatID, handler.FormatID())
+		}
+	}
+}
+
+// credentialFormatSampleIDs enumerates every registered format for the
+// cross-format tests above. mso_mdoc is included alongside the four
+// JWT/JSON-LD formats deliberately: this list is what makes "all five
+// formats" a checked fact rather than a comment.
+var credentialFormatSampleIDs = []string{"dc+sd-jwt", "jwt_vc_json-ld", "jwt_vc_json", "ldp_vc", "mso_mdoc"}
+
+// buildCredentialFormatSamples builds one valid raw credential per
+// registered format, keyed by FormatID, for the cross-format rejection and
+// registry coverage tests.
+func buildCredentialFormatSamples(t *testing.T) map[string]string {
+	t.Helper()
+	disclosure, err := CreateSDJWTDisclosure("family_name", "Doe", "fixed-salt")
+	if err != nil {
+		t.Fatalf("CreateSDJWTDisclosure: %v", err)
+	}
+	sdJWT := BuildSDJWTSerialization(
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "vc+sd-jwt", jwt.MapClaims{
+			"sub": "did:example:holder",
+			"vct": "https://example.org/credential",
+			"exp": time.Now().Add(5 * time.Minute).Unix(),
+			"vc": map[string]interface{}{
+				"type": []string{"VerifiableCredential", "UniversityDegreeCredential"},
+				"credentialSubject": map[string]interface{}{
+					"id": "did:example:holder",
+				},
+			},
+		}),
+		[]string{disclosure.Encoded},
+		"",
+	)
+
+	jwtVCLD := signedTestJWT(t, jwt.SigningMethodHS256, []byte("jwt-secret"), "vc+jwt", jwt.MapClaims{
+		"sub": "did:example:holder",
+		"vc": map[string]interface{}{
+			"@context": []string{"https://www.w3.org/2018/credentials/v1"},
+			"type":     []string{"VerifiableCredential", "UniversityDegreeCredential"},
+			"credentialSubject": map[string]interface{}{
+				"id": "did:example:holder",
+			},
+		},
+	})
+
+	jwtVCJSON := signedTestJWT(t, jwt.SigningMethodHS256, []byte("jwt-secret"), "vc+jwt", jwt.MapClaims{
+		"sub": "did:example:holder",
+		"vc": map[string]interface{}{
+			"type": []string{"VerifiableCredential", "UniversityDegreeCredential"},
+			"credentialSubject": map[string]interface{}{
+				"id": "did:example:holder",
+			},
+		},
+	})
+
+	ldpVC := `{"@context":["https://www.w3.org/2018/credentials/v1"],"type":["VerifiableCredential","UniversityDegreeCredential"],"credentialSubject":{"id":"did:example:holder"},"proof":{"type":"Ed25519Signature2020"}}`
+
+	mdocFixture := buildTestMdocCredential(t)
+
+	return map[string]string{
+		"dc+sd-jwt":      sdJWT,
+		"jwt_vc_json-ld": jwtVCLD,
+		"jwt_vc_json":    jwtVCJSON,
+		"ldp_vc":         ldpVC,
+		"mso_mdoc":       mdocFixture.credential,
 	}
 }
 
@@ -199,12 +371,80 @@ func TestJWTVCFormatValidateIssuerSignatureWithEdDSA(t *testing.T) {
 		},
 	})
 
-	if err := format.ValidateIssuerSignature(CredentialValidationInput{
+	trustStatus, err := format.ValidateIssuerSignature(CredentialValidationInput{
 		Credential: credential,
 		IssuerKeys: []intcrypto.JWK{issuerJWK},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("ValidateIssuerSignature(EdDSA): %v", err)
 	}
+	if trustStatus != IssuerTrustVerified {
+		t.Fatalf("ValidateIssuerSignature(EdDSA) trust status = %v, want IssuerTrustVerified", trustStatus)
+	}
+}
+
+// TestMSOMdocFormatValidateIssuerSignatureTriState pins the three distinct
+// outcomes ValidateIssuerSignature must be able to report for mdoc: a real
+// signature check that passed, a real signature check that failed against
+// non-matching trust material, and no check having run at all because no
+// trust anchor was supplied. Collapsing the second and third into one
+// binary result is exactly what would make an endpoint report "verified"
+// or a blanket failure where the honest answer is "not evaluated".
+func TestMSOMdocFormatValidateIssuerSignatureTriState(t *testing.T) {
+	registry := DefaultCredentialFormatRegistry()
+	format, ok := registry.Lookup("mso_mdoc")
+	if !ok {
+		t.Fatalf("mso_mdoc format handler not found")
+	}
+	fixture := buildTestMdocCredential(t)
+
+	t.Run("verified", func(t *testing.T) {
+		trustStatus, err := format.ValidateIssuerSignature(CredentialValidationInput{
+			Credential:         fixture.credential,
+			IssuerTrustAnchors: fixture.trustAnchors,
+		})
+		if err != nil {
+			t.Fatalf("ValidateIssuerSignature(matching IACA root): %v", err)
+		}
+		if trustStatus != IssuerTrustVerified {
+			t.Fatalf("trust status = %v, want IssuerTrustVerified", trustStatus)
+		}
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		// A second, unrelated fixture's IACA root never signed the first
+		// fixture's document-signer certificate, so chain validation must
+		// fail -- this is a real check that ran against real trust
+		// material and did not succeed, which is IssuerTrustFailed, not
+		// IssuerTrustNotEvaluated.
+		unrelatedFixture := buildTestMdocCredential(t)
+		trustStatus, err := format.ValidateIssuerSignature(CredentialValidationInput{
+			Credential:         fixture.credential,
+			IssuerTrustAnchors: unrelatedFixture.trustAnchors,
+		})
+		if err == nil {
+			t.Fatalf("ValidateIssuerSignature(non-matching IACA root) unexpectedly succeeded")
+		}
+		if trustStatus != IssuerTrustFailed {
+			t.Fatalf("trust status = %v, want IssuerTrustFailed", trustStatus)
+		}
+	})
+
+	t.Run("not_evaluated_when_no_trust_anchor_supplied", func(t *testing.T) {
+		trustStatus, err := format.ValidateIssuerSignature(CredentialValidationInput{
+			Credential: fixture.credential,
+			// IssuerTrustAnchors intentionally omitted. A nil pool must
+			// read as "nothing was checked", never fall back to the host
+			// OS root store (which would misreport this as a chain
+			// failure for an unrelated reason).
+		})
+		if err == nil {
+			t.Fatalf("ValidateIssuerSignature(nil trust anchors) unexpectedly succeeded")
+		}
+		if trustStatus != IssuerTrustNotEvaluated {
+			t.Fatalf("trust status = %v, want IssuerTrustNotEvaluated", trustStatus)
+		}
+	})
 }
 
 func TestParseAnyCredentialFallsBackToCredentialSubjectID(t *testing.T) {

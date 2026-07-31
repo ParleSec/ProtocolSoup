@@ -1402,7 +1402,7 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 			return nil, newVerifierPolicyError("credential_subject_mismatch", "presented credential subject mismatch", nil)
 		}
 
-		credentialEvidence, err := vc.BuildCredentialEvidence(rawCredential)
+		credentialEvidence, err := vc.BuildCredentialEvidence(rawCredential, vc.LifecycleStagePresented)
 		if err != nil {
 			return nil, newVerifierPolicyError("credential_malformed", "presented credential evidence could not be derived", err)
 		}

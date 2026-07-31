@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,63 @@ func TestHarnessMatchWalletCredentialsToDCQLMdoc(t *testing.T) {
 	missingElementDCQL := `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_values":["org.iso.18013.5.1.mDL"]},"claims":[{"path":["org.iso.18013.5.1","portrait"]}]}]}`
 	if matched, _ := matchWalletCredentialsToDCQL(wallet.Credentials, missingElementDCQL); len(matched) != 0 {
 		t.Fatalf("expected no match when a required element is absent, got %d", len(matched))
+	}
+}
+
+// TestHarnessMatchWalletCredentialsToPresentationDefinitionRefusesMdoc pins
+// the A3c PE format guard: before mso_mdoc registration, an mdoc credential
+// failed at vc.BuildCredentialEvidence's parse step and was refused with a
+// parse-error reason. After registration it parses successfully, so without
+// the guard in matchWalletCredentialsToPresentationDefinition it would
+// proceed into PE field-path matching against a claim shape (namespace-
+// nested, not JWT/SD-JWT flat) that Presentation Exchange constraints were
+// never meant to address. This asserts the refusal is the explicit format
+// guard, not a parse failure wearing a different message.
+func TestHarnessMatchWalletCredentialsToPresentationDefinitionRefusesMdoc(t *testing.T) {
+	s := newMdocTestHarness(t)
+	wallet := &walletMaterial{
+		Subject:     "did:example:wallet:alice",
+		Credentials: make(map[string]walletCredentialMaterial),
+	}
+	credential := issueMdocBoundTo(t, s, &s.deviceKey.PublicKey)
+	if err := s.bindCredential(wallet, credential, "MobileDrivingLicenceMsoMdoc", credentialFormatMsoMdoc); err != nil {
+		t.Fatalf("bindCredential: %v", err)
+	}
+
+	presentationDefinition := map[string]interface{}{
+		"id": "pd-mdoc-guard",
+		"input_descriptors": []interface{}{
+			map[string]interface{}{
+				"id": "descriptor-1",
+				"constraints": map[string]interface{}{
+					"fields": []interface{}{
+						map[string]interface{}{"path": []interface{}{"$.vc.type"}},
+					},
+				},
+			},
+		},
+	}
+
+	matched, reasons := matchWalletCredentialsToPresentationDefinition(wallet.Credentials, presentationDefinition)
+	if len(matched) != 0 {
+		t.Fatalf("expected 0 matched credentials for mso_mdoc under presentation_exchange, got %d", len(matched))
+	}
+
+	foundGuardReason := false
+	for _, reason := range reasons {
+		if strings.Contains(reason, "matched via DCQL, not presentation_exchange") {
+			foundGuardReason = true
+		}
+		// Before the guard existed, refusal came from
+		// vc.BuildCredentialEvidence/ParseAnyCredential failing at parse.
+		// A reason that still looks like a parse failure would mean the
+		// guard regressed back to relying on the parse erroring out.
+		if strings.Contains(reason, "unsupported credential format") || strings.Contains(reason, "decode base64url") {
+			t.Fatalf("refusal reason %q looks like a parse failure, not the explicit format guard", reason)
+		}
+	}
+	if !foundGuardReason {
+		t.Fatalf("expected a refusal reason citing the DCQL-not-PE format guard, got reasons: %v", reasons)
 	}
 }
 

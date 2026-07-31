@@ -2240,13 +2240,26 @@ func summarizeCredential(rawCredential string) *credentialSummary {
 	if normalized == "" {
 		return nil
 	}
+	// mso_mdoc credentials are base64url CBOR, not JWTs. vc.MSOMdocFormat
+	// registers mdoc with the shared registry and ParseAnyCredential now
+	// parses it successfully, but mdocCredentialSummary remains the richer,
+	// wallet-native summary -- it is also what mdocMatchEvidence and
+	// mdocAvailableElements are built against elsewhere in this package -- so
+	// mdoc is summarized directly from the IssuerSigned structure rather than
+	// through the generic parsed.Claims path below. Trying this first, ahead
+	// of the registry parse, is deliberate: gating on a successful registry
+	// parse instead would silently fall through to the generic path (and its
+	// SD-JWT-shaped DisclosureCount/KeyBindingJWT zero values) for any input
+	// mdocCredentialSummary can summarize but the registry's hardened decode
+	// rejects, which is exactly the fabrication this function exists to
+	// avoid. decodeMdocIssuerSignedB64 fails fast on a non-mdoc input (a
+	// compact JWT's '.' is not valid base64url), so this costs nothing for
+	// the other four formats.
+	if mdocSummary := mdocCredentialSummary(normalized); mdocSummary != nil {
+		return mdocSummary
+	}
 	parsed, err := vc.DefaultCredentialFormatRegistry().ParseAnyCredential(normalized)
 	if err != nil {
-		// mso_mdoc credentials are base64url CBOR, not JWTs, so the registry parse
-		// fails; summarize them directly from the IssuerSigned structure.
-		if mdocSummary := mdocCredentialSummary(normalized); mdocSummary != nil {
-			return mdocSummary
-		}
 		summary := &credentialSummary{}
 		if envelope, parseErr := vc.ParseSDJWTEnvelope(normalized); parseErr == nil {
 			summary.IsSDJWT = true
@@ -2258,7 +2271,10 @@ func summarizeCredential(rawCredential string) *credentialSummary {
 	}
 
 	claims := parsed.Claims
-	if evidence, evidenceErr := vc.BuildCredentialEvidence(normalized); evidenceErr == nil && evidence != nil && evidence.FullClaims != nil {
+	// summarizeCredential is only ever called with a wallet's own stored
+	// CredentialJWT (see call sites), never a vp_token, so this is always
+	// the issued artifact rather than something the holder presented.
+	if evidence, evidenceErr := vc.BuildCredentialEvidence(normalized, vc.LifecycleStageIssued); evidenceErr == nil && evidence != nil && evidence.FullClaims != nil {
 		claims = evidence.FullClaims
 	}
 
@@ -2939,7 +2955,12 @@ func matchWalletCredentialsToDCQL(credentials map[string]walletCredentialMateria
 	for credID, cred := range credentials {
 		// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so they take
 		// the mdoc DCQL matcher (doctype + [namespace, elementIdentifier] paths)
-		// rather than vc.BuildCredentialEvidence, which would fail to parse them.
+		// rather than vc.BuildCredentialEvidence. vc.MSOMdocFormat means
+		// BuildCredentialEvidence now parses mdoc successfully rather than
+		// failing, but its CredentialEvidence.FullClaims is still the flat
+		// JWT/SD-JWT claim shape, not [namespace, elementIdentifier] paths --
+		// the wrong shape for vc.RequirementMatchesMdoc below, so mdoc still
+		// needs this separate branch even though the parse no longer fails.
 		if strings.EqualFold(strings.TrimSpace(cred.Format), credentialFormatMsoMdoc) {
 			mdocEvidence, err := mdocMatchEvidence(cred)
 			if err != nil {
@@ -2960,7 +2981,10 @@ func matchWalletCredentialsToDCQL(credentials map[string]walletCredentialMateria
 			}
 			continue
 		}
-		evidence, err := vc.BuildCredentialEvidence(cred.CredentialJWT)
+		// The wallet's own stored copy of an issued credential is being
+		// checked for eligibility here, not something the holder has
+		// presented, so this is LifecycleStageIssued.
+		evidence, err := vc.BuildCredentialEvidence(cred.CredentialJWT, vc.LifecycleStageIssued)
 		if err != nil {
 			reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
 			continue
@@ -3011,7 +3035,23 @@ func matchWalletCredentialsToPresentationDefinition(credentials map[string]walle
 	var matched []walletCredentialMaterial
 	var reasons []string
 	for credentialID, credential := range credentials {
-		evidence, err := vc.BuildCredentialEvidence(credential.CredentialJWT)
+		// mso_mdoc credentials are matched via DCQL (ISO/IEC 18013-5 claims are
+		// addressed by [namespace, elementIdentifier] pairs), never
+		// Presentation Exchange, mirroring the format guard in
+		// matchWalletCredentialsToDCQL above. vc.MSOMdocFormat means
+		// BuildCredentialEvidence below now parses mdoc successfully rather
+		// than failing at parse, so without this guard an mdoc credential
+		// would proceed into PE field-path matching against
+		// CredentialEvidence.FullClaims, a shape PE constraints were never
+		// meant to address for this format.
+		if strings.EqualFold(strings.TrimSpace(credential.Format), credentialFormatMsoMdoc) {
+			reasons = append(reasons, fmt.Sprintf("credential %s: mso_mdoc credentials are matched via DCQL, not presentation_exchange", credentialID))
+			continue
+		}
+		// Same reasoning as matchWalletCredentialsToDCQL above: this checks
+		// wallet-held issued credentials for PE eligibility, not a
+		// presentation artifact.
+		evidence, err := vc.BuildCredentialEvidence(credential.CredentialJWT, vc.LifecycleStageIssued)
 		if err != nil {
 			reasons = append(reasons, fmt.Sprintf("credential %s: %v", credentialID, err))
 			continue
@@ -4339,8 +4379,14 @@ func (s *walletHarnessServer) bindCredential(wallet *walletMaterial, credentialJ
 		return fmt.Errorf("credential is required")
 	}
 
-	// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so they bypass
-	// the JWT-oriented credential registry and are stored with device binding.
+	// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so binding
+	// them needs mso_mdoc-specific handling rather than the generic path
+	// below. vc.MSOMdocFormat means vc.DefaultCredentialFormatRegistry() can
+	// parse mso_mdoc now, so this is no longer a parse-capability gap, but
+	// bindMdocCredential still does two things the generic path has no
+	// concept of: verifying the credential is bound to this wallet's
+	// persistent device key (s.deviceKey), and storing it with that device
+	// binding rather than a bearer JWT's holder-key binding.
 	if strings.EqualFold(strings.TrimSpace(credentialFormat), credentialFormatMsoMdoc) {
 		return s.bindMdocCredential(wallet, normalizedCredential, credentialConfigID)
 	}
@@ -4413,6 +4459,12 @@ func credentialRefreshRequired(credentialJWT string, minRemaining time.Duration)
 	if normalizedCredential == "" {
 		return true, fmt.Errorf("credential is required")
 	}
+	// Tried directly, ahead of the registry, rather than gated on
+	// parsedCredential.Format: mso_mdoc has no expectedUpdate-driven refresh
+	// signal analogous to a JWT exp claim beyond ValidityInfo.ValidUntil
+	// read here, and decodeMdocIssuerSignedB64 fails fast on non-mdoc input,
+	// so trying it first costs nothing for the other four formats and needs
+	// no separate format check.
 	if issuerSigned, err := decodeMdocIssuerSignedB64(normalizedCredential); err == nil {
 		msoBytes, _, err := mdoc.ParseIssuerAuth(issuerSigned.IssuerAuth)
 		if err != nil {
