@@ -84,7 +84,7 @@ jobs:
         shell: bash
       
       - name: Upload Frontend Snyk results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.3
         if: steps.validate_frontend_sarif.outputs.sarif_valid == 'true'
         continue-on-error: false
         with:
@@ -153,7 +153,7 @@ jobs:
         shell: bash
       
       - name: Upload Backend Snyk results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.3
         if: steps.validate_backend_sarif.outputs.sarif_valid == 'true'
         continue-on-error: false
         with:
@@ -213,7 +213,7 @@ jobs:
         shell: bash
       
       - name: Upload Snyk Code results to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.3
         if: steps.validate_code_sarif.outputs.sarif_valid == 'true'
         continue-on-error: false
         with:
