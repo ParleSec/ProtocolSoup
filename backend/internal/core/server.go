@@ -13,6 +13,7 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -99,6 +100,7 @@ func (s *Server) setupRouter() {
 		if s.lookingGlass != nil {
 			r.Route("/lookingglass", func(r chi.Router) {
 				r.Post("/decode", s.handleDecodeToken)
+				r.Post("/decode/credential", s.handleDecodeCredential)
 				r.Get("/sessions", s.handleListSessions)
 				r.Get("/sessions/{id}", s.handleGetSession)
 			})
@@ -457,6 +459,178 @@ func (s *Server) handleDecodeToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, decoded)
+}
+
+// maxCredentialDecodeBodyBytes caps the request body for
+// POST /lookingglass/decode/credential, mirroring the external-import cap in
+// cmd/walletharness/oid4vci_external.go. This is one of the two HTTP entry
+// points the A2 hardening rule names: every path that accepts an
+// externally-supplied credential gets a body cap enforced before the
+// request is buffered, in addition to the CBOR-specific decode limits
+// vc.MSOMdocFormat.ParseCredential applies unconditionally further down the
+// call chain.
+const maxCredentialDecodeBodyBytes = 64 * 1024
+
+// DecodeCredentialRequest is the request body for
+// POST /lookingglass/decode/credential.
+type DecodeCredentialRequest struct {
+	Credential string `json:"credential"`
+}
+
+// namespaceDisclosureCountsResponse is the wire form of
+// vc.NamespaceDisclosureCounts.
+type namespaceDisclosureCountsResponse struct {
+	CommittedCount int `json:"committed_count"`
+	PresentCount   int `json:"present_count"`
+}
+
+// selectiveDisclosureResponse is the wire form of vc.SelectiveDisclosureSummary.
+type selectiveDisclosureResponse struct {
+	Mechanism                       string                                       `json:"mechanism"`
+	CommittedCount                  int                                          `json:"committed_count"`
+	CommittedCountIsExact           bool                                         `json:"committed_count_is_exact"`
+	PresentCount                    int                                          `json:"present_count"`
+	LifecycleStage                  string                                       `json:"lifecycle_stage"`
+	DigestAlgorithm                 string                                       `json:"digest_algorithm,omitempty"`
+	PerNamespace                    map[string]namespaceDisclosureCountsResponse `json:"per_namespace,omitempty"`
+	HasUnrepresentedDisclosureForms bool                                         `json:"has_unrepresented_disclosure_forms"`
+}
+
+// credentialAssuranceResponse is the wire form of vc.CredentialAssurance. It
+// never collapses to a single validity flag: IssuerTrust is the tri-state
+// string ("verified" / "failed" / "not_evaluated") from
+// vc.IssuerTrustStatus.String(), and DigestsConsistentWithMSO is absent
+// entirely (omitted, not false) for every format except mso_mdoc. Per
+// vc.MdocDigestsConsistentWithMSO's doc comment, that field proves internal
+// consistency between the presented items and the credential's own MSO, not
+// authenticity of the MSO -- callers must not rename or relabel it as
+// "verified" or "ok".
+type credentialAssuranceResponse struct {
+	IssuerTrust              string `json:"issuer_trust"`
+	IssuerTrustDetail        string `json:"issuer_trust_detail,omitempty"`
+	DigestsConsistentWithMSO *bool  `json:"digests_consistent_with_mso,omitempty"`
+	DigestConsistencyDetail  string `json:"digest_consistency_detail,omitempty"`
+}
+
+// credentialEvidenceResponse is the wire form of vc.CredentialEvidence.
+// IssuedAt/ExpiresAt are omitted entirely (not sent as a zero-value
+// timestamp) when the source credential carried no corresponding claim --
+// see vc.CredentialEvidence's doc comment on why this must never be
+// back-filled.
+type credentialEvidenceResponse struct {
+	Format              string                       `json:"format,omitempty"`
+	VCT                 string                       `json:"vct,omitempty"`
+	Doctype             string                       `json:"doctype,omitempty"`
+	CredentialTypes     []string                     `json:"credential_types,omitempty"`
+	FullClaims          map[string]interface{}       `json:"full_claims,omitempty"`
+	DisclosedClaims     map[string]interface{}       `json:"disclosed_claims,omitempty"`
+	SelectiveDisclosure *selectiveDisclosureResponse `json:"selective_disclosure,omitempty"`
+	IssuedAt            string                       `json:"issued_at,omitempty"`
+	ExpiresAt           string                       `json:"expires_at,omitempty"`
+}
+
+// decodeCredentialResponse is the full response body for
+// POST /lookingglass/decode/credential: the shared evidence plus the
+// assurance envelope, kept as distinct top-level objects so a client cannot
+// merge "what this artifact contains" and "what has been checked about it"
+// into one register by accident.
+type decodeCredentialResponse struct {
+	Evidence  credentialEvidenceResponse  `json:"evidence"`
+	Assurance credentialAssuranceResponse `json:"assurance"`
+}
+
+func newSelectiveDisclosureResponse(summary *vc.SelectiveDisclosureSummary) *selectiveDisclosureResponse {
+	if summary == nil {
+		return nil
+	}
+	var perNamespace map[string]namespaceDisclosureCountsResponse
+	if len(summary.PerNamespace) > 0 {
+		perNamespace = make(map[string]namespaceDisclosureCountsResponse, len(summary.PerNamespace))
+		for ns, counts := range summary.PerNamespace {
+			perNamespace[ns] = namespaceDisclosureCountsResponse{
+				CommittedCount: counts.CommittedCount,
+				PresentCount:   counts.PresentCount,
+			}
+		}
+	}
+	return &selectiveDisclosureResponse{
+		Mechanism:                       summary.Mechanism,
+		CommittedCount:                  summary.CommittedCount,
+		CommittedCountIsExact:           summary.CommittedCountIsExact,
+		PresentCount:                    summary.PresentCount,
+		LifecycleStage:                  string(summary.LifecycleStage),
+		DigestAlgorithm:                 summary.DigestAlgorithm,
+		PerNamespace:                    perNamespace,
+		HasUnrepresentedDisclosureForms: summary.HasUnrepresentedDisclosureForms,
+	}
+}
+
+func formatCredentialTimestamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+func newDecodeCredentialResponse(result *vc.CredentialInspectionResult) decodeCredentialResponse {
+	return decodeCredentialResponse{
+		Evidence: credentialEvidenceResponse{
+			Format:              result.Evidence.Format,
+			VCT:                 result.Evidence.VCT,
+			Doctype:             result.Evidence.Doctype,
+			CredentialTypes:     result.Evidence.CredentialTypes,
+			FullClaims:          result.Evidence.FullClaims,
+			DisclosedClaims:     result.Evidence.DisclosedClaims,
+			SelectiveDisclosure: newSelectiveDisclosureResponse(result.Evidence.SelectiveDisclosure),
+			IssuedAt:            formatCredentialTimestamp(result.Evidence.IssuedAt),
+			ExpiresAt:           formatCredentialTimestamp(result.Evidence.ExpiresAt),
+		},
+		Assurance: credentialAssuranceResponse{
+			IssuerTrust:              result.Assurance.IssuerTrust.String(),
+			IssuerTrustDetail:        result.Assurance.IssuerTrustDetail,
+			DigestsConsistentWithMSO: result.Assurance.DigestsConsistentWithMSO,
+			DigestConsistencyDetail:  result.Assurance.DigestConsistencyDetail,
+		},
+	}
+}
+
+// handleDecodeCredential is the sibling of handleDecodeToken for credentials
+// rather than bearer/DPoP JWTs: it decodes a pasted credential of any
+// registered vc.CredentialFormat (including mso_mdoc) into the same shared
+// evidence shape BuildCredentialEvidence produces for issuance and
+// verification, wrapped in an assurance envelope that reports issuer trust
+// and (mdoc only) digest consistency honestly rather than as a blanket
+// validity flag. See vc.InspectCredential.
+func (s *Server) handleDecodeCredential(w http.ResponseWriter, r *http.Request) {
+	if s.lookingGlass == nil {
+		writeError(w, http.StatusServiceUnavailable, "Looking Glass is disabled")
+		return
+	}
+
+	// This endpoint accepts a pasted credential from any issuer, so it is
+	// one of the two externally-supplied-credential HTTP entry points the
+	// A2 hardening rule covers (the other is walletharness's external
+	// import). Cap the body before it is buffered at all.
+	r.Body = http.MaxBytesReader(w, r.Body, maxCredentialDecodeBodyBytes)
+
+	var req DecodeCredentialRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	credential := strings.TrimSpace(req.Credential)
+	if credential == "" {
+		writeError(w, http.StatusBadRequest, "credential is required")
+		return
+	}
+
+	result, err := vc.InspectCredential(credential)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newDecodeCredentialResponse(result))
 }
 
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {

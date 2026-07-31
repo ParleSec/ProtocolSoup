@@ -166,6 +166,11 @@ func (g *Gateway) Router() http.Handler {
 		r.Post("/protocols/{id}/demo/{flow}", g.handleStartDemo)
 
 		r.Post("/lookingglass/decode", g.handleDecodeToken)
+		// handleDecodeToken is a generic byte-forwarding proxy (it forwards
+		// r.URL.Path verbatim to whichever upstream responds), so the same
+		// handler is correct for this sibling route with no new code: the
+		// path-specific decode logic lives entirely upstream in internal/core.
+		r.Post("/lookingglass/decode/credential", g.handleDecodeToken)
 		r.Get("/lookingglass/sessions", g.handleListSessions)
 		r.Get("/lookingglass/sessions/{id}", g.handleGetSession)
 
