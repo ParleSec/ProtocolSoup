@@ -1,14 +1,23 @@
-import { useMemo, useState, type ElementType, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ElementType, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Shield, AlertTriangle, CheckCircle, XCircle, Clock,
   User, Key, Lock, Globe, Info, ChevronDown, Copy, Check,
-  FileText, Fingerprint, Calendar
+  FileText, Fingerprint, Calendar, ShieldQuestion
 } from 'lucide-react'
-import { decodeJWTWithoutValidation } from '../../../utils/crypto'
+import { decodeJWTWithoutValidation, jwkThumbprint } from '../../../utils/crypto'
+import { FieldRow } from '../shared'
 
 interface TokenInspectorProps {
   token: string
+  /**
+   * OAuth 2.0 token_type (RFC 6749 Section 5.1), e.g. "Bearer" or "DPoP".
+   * Only meaningful for an access token, so callers pass this only when
+   * `token` is the currently-held access token -- id_token, refresh_token,
+   * client_assertion, and manually-pasted tokens have no token_type and
+   * must leave this undefined rather than guessing "Bearer".
+   */
+  tokenType?: string
 }
 
 interface DecodedToken {
@@ -18,6 +27,24 @@ interface DecodedToken {
   isValid: boolean
   error?: string
 }
+
+// KeyBindingInfo mirrors TLSInspector's TokenBindingInfo pattern (compute a
+// real thumbprint, compare, report match/mismatch/missing) but as its own
+// type rather than a shared one, because RFC 7800 cnf.jwk/cnf.jkt has more
+// partial-data shapes than RFC 8705's cnf.x5t#S256 (which only ever
+// compares against a TLS-layer certificate thumbprint that either exists
+// or doesn't): a token can carry jwk without jkt, jkt without jwk, or a
+// jwk whose kty this codebase's thumbprint helper cannot compute for.
+// 'unsupported_kty' is deliberately its own state, never folded into
+// 'mismatch': an unknown future kty must never render as a failed
+// comparison when no comparison was actually possible.
+type KeyBindingInfo =
+  | { status: 'not_bound' }
+  | { status: 'jwk_only'; jwk: Record<string, unknown> }
+  | { status: 'jkt_only'; jkt: string }
+  | { status: 'unsupported_kty'; jwk: Record<string, unknown>; jkt: string; kty: string }
+  | { status: 'match'; jwk: Record<string, unknown>; jkt: string; computedThumbprint: string }
+  | { status: 'mismatch'; jwk: Record<string, unknown>; jkt: string; computedThumbprint: string }
 
 // Standard JWT claim explanations
 const claimInfo: Record<string, { label: string; description: string; icon: ElementType }> = {
@@ -35,9 +62,10 @@ const claimInfo: Record<string, { label: string; description: string; icon: Elem
   name: { label: 'Name', description: "User's full name", icon: User },
   preferred_username: { label: 'Username', description: "User's preferred username", icon: User },
   email_verified: { label: 'Email Verified', description: 'Whether email has been verified', icon: CheckCircle },
+  cnf: { label: 'Confirmation Key', description: 'Proof-of-possession key binding (RFC 7800)', icon: Fingerprint },
 }
 
-export function TokenInspector({ token }: TokenInspectorProps) {
+export function TokenInspector({ token, tokenType }: TokenInspectorProps) {
   const [expandedSection, setExpandedSection] = useState<'header' | 'payload' | 'signature' | null>('payload')
   const [copiedClaim, setCopiedClaim] = useState<string | null>(null)
 
@@ -87,6 +115,72 @@ export function TokenInspector({ token }: TokenInspectorProps) {
       }
     }
   }, [token])
+
+  const [keyBinding, setKeyBinding] = useState<KeyBindingInfo | null>(null)
+
+  // jwkThumbprint is async (crypto.subtle.digest), so the RFC 7638 compare
+  // cannot live in the useMemo above. `cancelled` guards against a stale
+  // computation from a previous token resolving after a newer one has
+  // already started, which would otherwise render the wrong verdict for a
+  // moment.
+  useEffect(() => {
+    let cancelled = false
+    const cnf = decoded?.payload.cnf as Record<string, unknown> | undefined
+    const jwk = cnf?.jwk && typeof cnf.jwk === 'object' ? (cnf.jwk as Record<string, unknown>) : undefined
+    const jkt = typeof cnf?.jkt === 'string' ? cnf.jkt : undefined
+
+    if (!cnf) {
+      setKeyBinding(null)
+      return
+    }
+    if (!jwk && !jkt) {
+      setKeyBinding({ status: 'not_bound' })
+      return
+    }
+    if (!jwk || !jkt) {
+      // Exactly one of the two is present: "both absent" already
+      // returned above, so this is jwk-only or jkt-only. TypeScript can
+      // narrow a single `!a || !b` condition; it cannot deduce "both
+      // present" from three separate prior if-statements the way a human
+      // reader can, which is why this is one combined check rather than
+      // a third `if (jwk && !jkt) ... if (jkt && !jwk) ...` pair.
+      if (jwk) {
+        setKeyBinding({ status: 'jwk_only', jwk })
+      } else if (jkt) {
+        setKeyBinding({ status: 'jkt_only', jkt })
+      }
+      return
+    }
+
+    // Both present here. Rebinding to new consts (rather than relying on
+    // jwk/jkt directly) keeps them narrowed to defined inside the .then()
+    // closure below without a non-null assertion at each use.
+    const boundJwk = jwk
+    const boundJkt = jkt
+
+    jwkThumbprint(boundJwk).then((computed) => {
+      if (cancelled) return
+      if (computed === null) {
+        setKeyBinding({
+          status: 'unsupported_kty',
+          jwk: boundJwk,
+          jkt: boundJkt,
+          kty: typeof boundJwk.kty === 'string' ? boundJwk.kty : 'unknown',
+        })
+      } else {
+        setKeyBinding({
+          status: computed === boundJkt ? 'match' : 'mismatch',
+          jwk: boundJwk,
+          jkt: boundJkt,
+          computedThumbprint: computed,
+        })
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [decoded])
 
   const copyToClipboard = (text: string, claim: string) => {
     navigator.clipboard.writeText(text)
@@ -167,12 +261,22 @@ export function TokenInspector({ token }: TokenInspectorProps) {
             </p>
           )}
         </div>
-        {decoded.header.alg !== undefined && (
-          <span className="px-2 sm:px-3 py-1 rounded-full bg-white/10 text-xs font-medium text-white flex-shrink-0">
-            {String(decoded.header.alg)}
-          </span>
-        )}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {tokenType && (
+            <span className="px-2 sm:px-3 py-1 rounded-full bg-indigo-500/20 text-xs font-medium text-indigo-300">
+              {tokenType}
+            </span>
+          )}
+          {decoded.header.alg !== undefined && (
+            <span className="px-2 sm:px-3 py-1 rounded-full bg-white/10 text-xs font-medium text-white">
+              {String(decoded.header.alg)}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Key Binding (RFC 7800) */}
+      <KeyBindingBlock binding={keyBinding} />
 
       {/* Visual Token Breakdown */}
       <div className="p-3 sm:p-4 rounded-xl bg-surface-900/50 border border-white/5">
@@ -297,6 +401,86 @@ export function TokenInspector({ token }: TokenInspectorProps) {
       </div>
     </div>
   )
+}
+
+// KeyBindingBlock renders RFC 7800 confirmation-key binding, modelled on
+// TLSInspector's Certificate Binding (RFC 8705) treatment: a real
+// thumbprint is computed from cnf.jwk and compared against the claimed
+// cnf.jkt rather than the panel trusting either value on its own. Renders
+// nothing for a token with no cnf claim at all -- a token that was never
+// meant to be key-bound gets no block, rather than a block reporting
+// "not bound" as if that were itself a finding.
+function KeyBindingBlock({ binding }: { binding: KeyBindingInfo | null }) {
+  if (!binding || binding.status === 'not_bound') {
+    return null
+  }
+
+  const { icon: Icon, tone, label } = keyBindingStatusDisplay(binding.status)
+  const kty = keyBindingKty(binding)
+
+  return (
+    <div className="p-3 sm:p-4 rounded-xl bg-surface-900/50 border border-white/5">
+      <div className="flex items-center gap-2 mb-2">
+        <Fingerprint className="w-4 h-4 text-surface-400" />
+        <h4 className="text-xs font-semibold text-surface-400 uppercase tracking-wider">Key Binding (RFC 7800)</h4>
+      </div>
+      <div className="rounded-lg bg-surface-950 p-2.5 text-xs space-y-1.5">
+        <div className={`flex items-center gap-1.5 font-medium ${tone}`}>
+          <Icon className="w-3.5 h-3.5" />
+          {label}
+        </div>
+        {kty && <FieldRow label="cnf.jwk.kty" value={kty} />}
+        {binding.status === 'jkt_only' && <FieldRow label="cnf.jkt" value={binding.jkt} mono />}
+        {(binding.status === 'unsupported_kty' || binding.status === 'match' || binding.status === 'mismatch') && (
+          <FieldRow label="cnf.jkt (claimed)" value={binding.jkt} mono />
+        )}
+        {(binding.status === 'match' || binding.status === 'mismatch') && (
+          <FieldRow
+            label="Computed thumbprint"
+            value={binding.computedThumbprint}
+            mono
+            valueClassName={binding.status === 'match' ? 'text-green-300' : 'text-red-300'}
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+// keyBindingKty reads kty for display: 'unsupported_kty' carries it as its
+// own field (computed before the jwkThumbprint call, since that call is
+// exactly what failed to produce a usable kty branch), every other
+// jwk-bearing state reads it straight off the jwk, and 'jkt_only' has no
+// jwk at all to read one from.
+function keyBindingKty(binding: KeyBindingInfo): string | undefined {
+  switch (binding.status) {
+    case 'not_bound':
+    case 'jkt_only':
+      return undefined
+    case 'unsupported_kty':
+      return binding.kty
+    case 'jwk_only':
+    case 'match':
+    case 'mismatch':
+      return typeof binding.jwk.kty === 'string' ? binding.jwk.kty : 'unknown'
+  }
+}
+
+function keyBindingStatusDisplay(status: KeyBindingInfo['status']): { icon: ElementType; tone: string; label: string } {
+  switch (status) {
+    case 'match':
+      return { icon: CheckCircle, tone: 'text-green-400', label: 'jkt matches the jwk thumbprint' }
+    case 'mismatch':
+      return { icon: XCircle, tone: 'text-red-400', label: 'jkt does not match the jwk thumbprint' }
+    case 'unsupported_kty':
+      return { icon: ShieldQuestion, tone: 'text-yellow-400', label: 'Cannot compute a thumbprint for this key type' }
+    case 'jwk_only':
+      return { icon: AlertTriangle, tone: 'text-yellow-400', label: 'cnf.jwk present, no cnf.jkt to compare against' }
+    case 'jkt_only':
+      return { icon: AlertTriangle, tone: 'text-yellow-400', label: 'cnf.jkt present, no cnf.jwk to verify against' }
+    case 'not_bound':
+      return { icon: Info, tone: 'text-surface-400', label: 'Not key-bound' }
+  }
 }
 
 // Token Section Component
