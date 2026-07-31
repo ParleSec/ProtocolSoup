@@ -14,7 +14,6 @@ import (
 	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
-	"github.com/fxamacker/cbor/v2"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -33,48 +32,6 @@ const (
 	// select the verifier's response-encryption key from client_metadata.jwks.
 	mdocResponseEncAlg = "ECDH-ES"
 )
-
-// jsonSafeValue converts a CBOR-decoded mdoc element value into a value that the
-// standard encoding/json marshaler can serialize. Generic CBOR decoding yields
-// map[any]any for maps, cbor.Tag for tagged values such as full-date (tag 1004,
-// used by mDL birth_date/issue_date/expiry_date), and []byte for byte strings.
-// encoding/json cannot marshal map[any]any (a non-string map key) and renders
-// cbor.Tag as an opaque struct, so an un-normalized mDL element (e.g. the nested
-// driving_privileges array) would fail to encode and leave the response body
-// empty. Normalizing here keeps the credential summary JSON-serializable while
-// preserving the real disclosed values (ISO/IEC 18013-5 mDL data elements).
-func jsonSafeValue(value any) any {
-	switch typed := value.(type) {
-	case nil:
-		return nil
-	case cbor.Tag:
-		return jsonSafeValue(typed.Content)
-	case map[any]any:
-		out := make(map[string]any, len(typed))
-		for key, val := range typed {
-			out[fmt.Sprintf("%v", key)] = jsonSafeValue(val)
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, val := range typed {
-			out[key] = jsonSafeValue(val)
-		}
-		return out
-	case []any:
-		out := make([]any, len(typed))
-		for i, val := range typed {
-			out[i] = jsonSafeValue(val)
-		}
-		return out
-	case []byte:
-		return base64.RawURLEncoding.EncodeToString(typed)
-	case time.Time:
-		return typed.UTC().Format(time.RFC3339)
-	default:
-		return typed
-	}
-}
 
 // credentialFormatMsoMdoc is the OID4VCI/ISO 18013-5 mso_mdoc credential format
 // identifier (OID4VCI Appendix A.3). mso_mdoc credentials are base64url-encoded
@@ -292,7 +249,7 @@ func mdocCredentialSummary(rawCredential string) *credentialSummary {
 		elements := disclosed[mdoc.NameSpace(ns)]
 		nsClaims := make(map[string]interface{}, len(elements))
 		for element, value := range elements {
-			nsClaims[element] = jsonSafeValue(value)
+			nsClaims[element] = mdoc.JSONSafeValue(value)
 		}
 		claims[ns] = nsClaims
 	}

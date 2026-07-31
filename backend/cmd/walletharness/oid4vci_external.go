@@ -119,11 +119,25 @@ type pendingOID4VCIAuthState struct {
 
 const oid4vciAuthorizationStateTTL = 15 * time.Minute
 
+// maxCredentialImportBodyBytes caps the request body for handleAPIImport,
+// the HTTP entry point through which a caller can paste an arbitrary
+// credential directly (apiImportRequest.Credential) rather than one this
+// server fetched itself from a negotiated OID4VCI credential endpoint. Per
+// internal/cose's decModeUntrusted, this is one of the two externally-supplied
+// credential surfaces (the other is the Looking Glass decode endpoint);
+// enforcing the cap here, before the body is buffered, keeps it consistent
+// with that surface rather than relying solely on decodeJSONBody's general
+// 1 MiB safety net. 64 KiB comfortably covers a real mDL or SD-JWT VC
+// (including one carrying a portrait image), well above anything this
+// project issues.
+const maxCredentialImportBodyBytes = 64 * 1024
+
 func (s *walletHarnessServer) handleAPIImport(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxCredentialImportBodyBytes)
 
 	var req apiImportRequest
 	if err := decodeJSONBody(r, &req); err != nil {

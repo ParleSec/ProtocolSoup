@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	intcose "github.com/ParleSec/ProtocolSoup/internal/cose"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const (
@@ -115,6 +116,125 @@ func DecodeIssuerSigned(data []byte) (IssuerSigned, error) {
 		}
 	}
 	return out, nil
+}
+
+// maxUntrustedNestedLevels mirrors decModeUntrusted's MaxNestedLevels in
+// internal/cose. Duplicated here (rather than exported from cose) because
+// this gate enforces the cumulative depth *across* tag-24 recursion, which
+// cose's per-Unmarshal-call limit cannot see: cose only bounds one decode
+// call at a time, and a nesting bomb split across a tag-24 boundary is two
+// calls. This constant is the budget the two calls must share.
+const maxUntrustedNestedLevels = 16
+
+// CheckUntrustedCBOR decodes externally-supplied mdoc CBOR under the hardened
+// untrusted limits (cose.UnmarshalUntrusted: MaxNestedLevels 16,
+// MaxArrayElements 1024, MaxMapPairs 1024) and returns the observed nesting
+// depth alongside any error. MSOMdocFormat.ParseCredential calls this
+// unconditionally, before any typed decode, so every externally-supplied
+// credential that reaches the registry inherits it; the wire verification
+// paths (mdoc.DecodeDeviceResponse, mdoc.DecodeIssuerSigned called directly)
+// are untouched and keep the shared decMode.
+//
+// It recurses into CBOR tag 24 (Encoded CBOR data item) content because mdoc
+// wraps IssuerSignedItemBytes and MobileSecurityObjectBytes in tag 24 as byte
+// strings: a single outer decode sees each as an opaque bstr and counts none
+// of its internal depth, so a nesting bomb placed inside an
+// IssuerSignedItemBytes would pass an outer-only check and then be decoded by
+// the typed path under the shared (loose) decode mode. The outer nesting
+// level is carried into the recursive decode's depth count, so tag-24
+// wrapping cannot be used to reset the budget.
+//
+// The decode is into `any` solely to enforce the limits; the decoded value is
+// discarded once measured. This materialises maps and slices for the whole
+// document -- it is not allocation-free -- but the cost is bounded by the
+// same limits it enforces and by the caller's byte cap, and it is paid only
+// on externally-supplied credentials.
+func CheckUntrustedCBOR(data []byte) (int, error) {
+	return checkUntrustedCBORDepth(data, 0)
+}
+
+func checkUntrustedCBORDepth(data []byte, outerDepth int) (int, error) {
+	var decoded any
+	if err := intcose.UnmarshalUntrusted(data, &decoded); err != nil {
+		return outerDepth, fmt.Errorf("mdoc: untrusted CBOR decode: %w", err)
+	}
+	return measureUntrustedCBORDepth(decoded, outerDepth)
+}
+
+// measureUntrustedCBORDepth walks a value already decoded by
+// cose.UnmarshalUntrusted and returns the deepest nesting level reached,
+// recursing into tag-24 byte-string content with depth carried forward.
+// Counting follows fxamacker's own MaxNestedLevels convention: every map,
+// array, and tag adds one level; leaf scalars (strings, numbers, bools, plain
+// byte strings) add none.
+func measureUntrustedCBORDepth(value any, depth int) (int, error) {
+	switch typed := value.(type) {
+	case cbor.Tag:
+		next := depth + 1
+		if next > maxUntrustedNestedLevels {
+			return next, fmt.Errorf("mdoc: untrusted CBOR nesting depth %d exceeds maximum %d", next, maxUntrustedNestedLevels)
+		}
+		if typed.Number == intcose.TagEncodedCBOR {
+			if innerBytes, ok := typed.Content.([]byte); ok {
+				return checkUntrustedCBORDepth(innerBytes, next)
+			}
+		}
+		return measureUntrustedCBORDepth(typed.Content, next)
+	case map[any]any:
+		deepest := depth + 1
+		if deepest > maxUntrustedNestedLevels {
+			return deepest, fmt.Errorf("mdoc: untrusted CBOR nesting depth %d exceeds maximum %d", deepest, maxUntrustedNestedLevels)
+		}
+		for key, val := range typed {
+			keyDepth, err := measureUntrustedCBORDepth(key, depth+1)
+			if err != nil {
+				return keyDepth, err
+			}
+			if keyDepth > deepest {
+				deepest = keyDepth
+			}
+			valDepth, err := measureUntrustedCBORDepth(val, depth+1)
+			if err != nil {
+				return valDepth, err
+			}
+			if valDepth > deepest {
+				deepest = valDepth
+			}
+		}
+		return deepest, nil
+	case map[string]any:
+		deepest := depth + 1
+		if deepest > maxUntrustedNestedLevels {
+			return deepest, fmt.Errorf("mdoc: untrusted CBOR nesting depth %d exceeds maximum %d", deepest, maxUntrustedNestedLevels)
+		}
+		for _, val := range typed {
+			valDepth, err := measureUntrustedCBORDepth(val, depth+1)
+			if err != nil {
+				return valDepth, err
+			}
+			if valDepth > deepest {
+				deepest = valDepth
+			}
+		}
+		return deepest, nil
+	case []any:
+		deepest := depth + 1
+		if deepest > maxUntrustedNestedLevels {
+			return deepest, fmt.Errorf("mdoc: untrusted CBOR nesting depth %d exceeds maximum %d", deepest, maxUntrustedNestedLevels)
+		}
+		for _, element := range typed {
+			elementDepth, err := measureUntrustedCBORDepth(element, depth+1)
+			if err != nil {
+				return elementDepth, err
+			}
+			if elementDepth > deepest {
+				deepest = elementDepth
+			}
+		}
+		return deepest, nil
+	default:
+		return depth, nil
+	}
 }
 
 // BuildIssuerNameSpaces encodes a map of namespace -> items into
