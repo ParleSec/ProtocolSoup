@@ -9,13 +9,14 @@
  * - Optionally poll deferred endpoint
  */
 
-import { FlowExecutorBase, type FlowExecutorConfig } from './base'
+import { FlowExecutorBase, type FlowExecutorConfig, type CredentialInspectionMetadata } from './base'
 import {
   decodeJWTWithoutValidation,
   generateRS256SigningMaterial,
   signRS256JWT,
   type RS256SigningMaterial,
 } from '../../utils/crypto'
+import { api } from '../../utils/api'
 
 export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
@@ -126,7 +127,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       }
 
       if (typeof credentialResponse.credential === 'string') {
-        this.captureCredential(credentialResponse.credential, {
+        await this.captureCredential(credentialResponse.credential, {
           format: this.selectedCredentialFormat(credentialResponse),
           credentialConfigurationID: this.selectedCredentialConfigurationID(),
         })
@@ -456,7 +457,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
           transactionId,
         },
       })
-      this.captureCredential(payload.credential, {
+      await this.captureCredential(payload.credential, {
         format: this.selectedCredentialFormat(payload),
         credentialConfigurationID: this.selectedCredentialConfigurationID(),
         deferredFlow: true,
@@ -489,7 +490,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     throw new Error('Deferred credential response missing credential')
   }
 
-  private captureCredential(rawCredential: string, additionalMetadata?: Record<string, unknown>): void {
+  private async captureCredential(rawCredential: string, additionalMetadata?: Record<string, unknown>): Promise<void> {
     const credentialFormat = String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'mso_mdoc'
     // mso_mdoc credentials are a base64url-encoded CBOR IssuerSigned structure
     // (ISO/IEC 18013-5), not a JOSE JWT. They have no "~" disclosure tail and
@@ -506,7 +507,35 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       })
       decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
     }
-    const disclosureCount = rawCredential.split('~').filter(Boolean).length - 1
+
+    // hasDisclosures/disclosureCount used to be computed here by counting
+    // "~" characters -- an SD-JWT-only mechanism that is affirmatively wrong
+    // for mdoc (whose selective disclosure lives in salted IssuerSignedItems
+    // committed through MSO valueDigests, never zero for an issued mDL) and
+    // only crudely right for SD-JWT (it cannot see decoy digests, nested
+    // disclosures, or array-element disclosures). credentialInspection below
+    // replaces both fields for every format with the backend's
+    // format-accurate selective-disclosure summary, so those two fields are
+    // gone rather than fixed only for mdoc.
+    //
+    // This is a side-channel decode of an artifact this flow already
+    // produced, not a new fabricated protocol event -- the same shape of
+    // call as the existing /lookingglass/decode precedent for JWTs. A
+    // failure here (network error, non-2xx, timeout, or a malformed body)
+    // must render as an explicit failure state in the inspector, never a
+    // silent fallback to a raw-blob-only view, so the failure is captured
+    // into the same metadata field rather than swallowed.
+    let credentialInspection: CredentialInspectionMetadata
+    try {
+      const inspection = await api.decodeCredential(rawCredential)
+      credentialInspection = { status: 'decoded', evidence: inspection.evidence, assurance: inspection.assurance }
+    } catch (error) {
+      credentialInspection = {
+        status: 'decode_failed',
+        reason: error instanceof Error ? error.message : 'Unknown error decoding credential',
+      }
+    }
+
     this.addVCArtifact({
       type: 'credential',
       title: `Issued ${credentialFormat} Credential`,
@@ -517,8 +546,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
         ? { header: decodedCredentialJWT.header, payload: decodedCredentialJWT.payload }
         : {},
       metadata: {
-        hasDisclosures: rawCredential.includes('~'),
-        disclosureCount: disclosureCount > 0 ? disclosureCount : 0,
+        credentialInspection,
         ...(additionalMetadata || {}),
       },
     })
@@ -528,7 +556,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       description: `Issued ${credentialFormat} credential captured from credential endpoint`,
       data: {
         format: credentialFormat,
-        hasDisclosures: rawCredential.includes('~'),
+        ...(isMdoc ? {} : { hasDisclosures: rawCredential.includes('~') }),
       },
     })
   }
