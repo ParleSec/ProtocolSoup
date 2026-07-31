@@ -1428,12 +1428,19 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 		if strings.TrimSpace(storedRecord.IssuerJWK.Kty) != "" {
 			issuerKeys = append(issuerKeys, storedRecord.IssuerJWK)
 		}
-		if err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
+		// Any non-Verified status carries a non-nil error (see
+		// vc.IssuerTrustStatus), so this keeps hard-failing on both a
+		// checked failure and an unevaluated signature exactly as it did
+		// before ValidateIssuerSignature grew a status return. This path
+		// verifies a *presented* credential against its issuance-time
+		// lineage, so unlike the decode endpoint it has no use for a
+		// lenient "unevaluated but shown anyway" outcome.
+		if trustStatus, err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
 			Credential:       rawCredential,
 			ParsedCredential: parsedCredential,
 			IssuerKeys:       issuerKeys,
 		}); err != nil {
-			return nil, newVerifierPolicyError("credential_signature_invalid", "presented credential signature validation failed", err)
+			return nil, newVerifierPolicyError("credential_signature_invalid", fmt.Sprintf("presented credential signature validation failed (issuer_trust=%s)", trustStatus), err)
 		}
 		issuer := strings.TrimSpace(parsedCredential.Issuer)
 		if strings.TrimSpace(storedRecord.Issuer) != "" && strings.TrimSpace(issuer) != strings.TrimSpace(storedRecord.Issuer) {
