@@ -201,6 +201,7 @@ Run the smallest set that covers your change. CI may run additional checks, but 
 | Backend lint-sensitive changes | `cd backend && golangci-lint run ./...` |
 | Frontend UI or Looking Glass | `cd frontend && npm ci && npm run lint && npx tsc --noEmit && npm run build` |
 | Frontend protocol references | `cd frontend && npm run verify-refs` |
+| `cnf.jkt` / JWK thumbprint helper (`src/utils/crypto.ts`) | `cd frontend && npm run verify-jwk-thumbprint` |
 | Wallet UI | `cd wallet-ui && npm ci && npx tsc --noEmit && npm run build` |
 | Docs site | `cd docs/starlight && npm ci && npm run build` |
 | OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |

@@ -73,6 +73,7 @@ Run the smallest set that covers your change before requesting review.
 | Backend lint-sensitive changes | `cd backend && golangci-lint run ./...` |
 | Frontend UI or Looking Glass | `cd frontend && npm run lint && npx tsc --noEmit && npm run build` |
 | Frontend protocol references | `cd frontend && npm run verify-refs` |
+| `cnf.jkt` / JWK thumbprint helper (`src/utils/crypto.ts`) | `cd frontend && npm run verify-jwk-thumbprint` |
 | Wallet UI | `cd wallet-ui && npx tsc --noEmit && npm run build` |
 | Docs site | `cd docs/starlight && npm run build` |
 | OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |
@@ -81,7 +82,7 @@ Run the smallest set that covers your change before requesting review.
 | Palette content (`content/**`) | `cd backend && go run ./cmd/content-validate -content ../content && go test ./internal/palette/...` |
 | Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db` |
 
-The protocol-reference verifier retries temporary upstream failures. Responses that do not prove a link is dead—such as bot-blocking `403`, rate-limiting `429`, and temporary `5xx` responses—are reported as warnings; definitive failures such as `404` or `410`, missing anchors, and section mismatches remain errors. Pass `--strict` to make warnings fail the command.
+The protocol-reference verifier retries temporary upstream failures. Responses that do not prove a link is dead such as bot-blocking `403`, rate-limiting `429`, and temporary `5xx` responses—are reported as warnings; definitive failures such as `404` or `410`, missing anchors, and section mismatches remain errors. Pass `--strict` to make warnings fail the command.
 
 The canonical contract for palette artefacts lives in [`content/SCHEMA.md`](https://github.com/ParleSec/ProtocolSoup/blob/master/content/SCHEMA.md). New axis values must be added to `content/taxonomy.yaml`, and synonyms to `content/aliases.yaml`. Both files are validated in CI by `cmd/content-validate`.
 

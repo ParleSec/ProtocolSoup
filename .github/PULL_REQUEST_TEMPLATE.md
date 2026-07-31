@@ -31,6 +31,7 @@ Fixes #
 - [ ] Backend lint: `cd backend && golangci-lint run ./...`
 - [ ] Frontend: `cd frontend && npm run lint && npx tsc --noEmit && npm run build`
 - [ ] Frontend references: `cd frontend && npm run verify-refs`
+- [ ] JWK thumbprint (RFC 7638): `cd frontend && npm run verify-jwk-thumbprint`
 - [ ] Wallet UI: `cd wallet-ui && npx tsc --noEmit && npm run build`
 - [ ] Docs: `cd docs/starlight && npm run build`
 - [ ] OpenAPI: `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1`
