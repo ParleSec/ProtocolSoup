@@ -3,6 +3,7 @@ package vc
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/pbkdf2"
 	cryptorand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -17,7 +18,6 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
-	"golang.org/x/crypto/pbkdf2"
 )
 
 // WalletCredentialRecord stores a wallet-held credential and trust material.
@@ -445,7 +445,10 @@ func marshalWalletSnapshot(snapshot walletCredentialStoreSnapshot, secret string
 	if _, err := cryptorand.Read(salt); err != nil {
 		return nil, err
 	}
-	key := pbkdf2.Key([]byte(secret), salt, walletStorePBKDF2Iterations, walletStorePBKDF2DerivedKeySize, sha256.New)
+	key, err := pbkdf2.Key(sha256.New, secret, salt, walletStorePBKDF2Iterations, walletStorePBKDF2DerivedKeySize)
+	if err != nil {
+		return nil, err
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -500,7 +503,10 @@ func unmarshalWalletSnapshot(raw []byte, secret string) (*walletCredentialStoreS
 		if err != nil {
 			return nil, fmt.Errorf("decode wallet snapshot ciphertext: %w", err)
 		}
-		key := pbkdf2.Key([]byte(secret), salt, encryptedEnvelope.Iterations, walletStorePBKDF2DerivedKeySize, sha256.New)
+		key, err := pbkdf2.Key(sha256.New, secret, salt, encryptedEnvelope.Iterations, walletStorePBKDF2DerivedKeySize)
+		if err != nil {
+			return nil, err
+		}
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			return nil, err
