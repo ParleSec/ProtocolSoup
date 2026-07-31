@@ -20,7 +20,7 @@ async function main() {
   const title = 'Protocol Soup'
   const subtitle = 'An Interactive Protocol Sandbox'
   const tagline = 'Real flows against real infrastructure'
-  const chips = ['OAuth 2.0', 'OIDC', 'SAML', 'SPIFFE/SPIRE', 'SCIM 2.0', 'SSF (Shared Signals)']
+  const chips = ['OAuth 2.0', 'OIDC', 'SAML', 'SPIFFE', 'SCIM 2.0', 'SSF', 'OID4VCI', 'OID4VP']
 
   // Embed fonts to make rendering deterministic across machines/CI (avoid system font differences).
   const fontDir = path.join(process.cwd(), 'node_modules', '@fontsource', 'space-grotesk', 'files')
