@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
   ...(isStaticExport ? { output: 'export' } : {}),
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    // TypeScript 7's native compiler does not expose the JS compiler API
+    // Next.js uses by default, so it must run the project-local `tsc` CLI
+    // instead. See https://nextjs.org/docs/app/api-reference/config/next-config-js/useTypeScriptCli
+    useTypeScriptCli: true,
+  },
   ...(!isStaticExport
     ? {
         async rewrites() {
