@@ -1,28 +1,46 @@
-# ProtocolSoup
+<div align="center">
 
-An interactive sandbox for exploring authentication and identity protocols. Execute **real** protocol flows against a local Mock IdP, inspect HTTP traffic in real-time, decode tokens, and understand security protocols hands-on.
+<img src="frontend/public/og-image.png" alt="ProtocolSoup - an interactive protocol sandbox. Real flows against real infrastructure." width="100%">
 
-> Real flows against real infrastructure
+<br>
 
-**Protocols:** OAuth 2.0 • OpenID Connect • SAML 2.0 • SPIFFE/SPIRE • SCIM 2.0 • Shared Signals (SSF) • OID4VP • OID4VCI
+<p>
+  <a href="https://github.com/ParleSec/ProtocolSoup/actions/workflows/ci-cd.yml"><img src="https://github.com/ParleSec/ProtocolSoup/actions/workflows/ci-cd.yml/badge.svg" alt="CI status"></a>
+  <a href="https://github.com/ParleSec/ProtocolSoup/releases"><img src="https://img.shields.io/github/v/release/ParleSec/ProtocolSoup?sort=semver" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="Apache 2.0 license"></a>
+  <a href="https://docs.protocolsoup.com/"><img src="https://img.shields.io/badge/docs-docs.protocolsoup.com-6366f1" alt="Documentation"></a>
+</p>
 
-## Live Website
-### Main
-**[protocolsoup.com](https://protocolsoup.com)**
+<p>
+  <a href="https://protocolsoup.com"><b>Live Sandbox</b></a> ·
+  <a href="https://docs.protocolsoup.com/">Documentation</a> ·
+  <a href="https://docs.protocolsoup.com/start-here/quickstart/">Quickstart</a> ·
+  <a href="https://wallet.protocolsoup.com">Wallet Harness</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-### Documenation
+</div>
 
-**[docs.protocolsoup.com](https://docs.protocolsoup.com)**
-
-### VC Wallet 
-
-**[wallet.protocolsoup.com](https://wallet.protocolsoup.com)**
+<br>
 
 ---
 
-## Quick Start
+<br>
 
-Run the full stack locally with Docker:
+ProtocolSoup is a hands-on sandbox for the protocols that hold identity and access together.
+
+OAuth 2.0, OpenID Connect, SAML, SPIFFE/SPIRE, SCIM, Shared Signals, and the OpenID4VC credential family. Run every flow end to end against a live Mock IdP and watch it happen in the Looking Glass: real wire traffic, real tokens, and real state changes, decoded as they occur.
+
+> [!NOTE]
+> **Nothing here is simulated.** Every token is signed by a real key, every request crosses a real network boundary, every state change is real. Fake data teaches fake patterns, and engineers repeat those patterns in production.
+
+<br>
+
+---
+
+<br>
+
+## Quick Start
 
 ```bash
 git clone https://github.com/ParleSec/ProtocolSoup.git
@@ -32,494 +50,182 @@ docker compose up -d --build
 
 Then open:
 
-- UI: `http://localhost:3000`
-- Gateway/API: `http://localhost:8080`
-- Health check: `http://localhost:8080/health`
+- **UI** -- `http://localhost:3000`
+- **Gateway API** -- `http://localhost:8080`
+- **Health check** -- `http://localhost:8080/health`
 
-For source development, see [CONTRIBUTING.md](CONTRIBUTING.md). For the full public setup guide, see [docs.protocolsoup.com/start-here/quickstart](https://docs.protocolsoup.com/start-here/quickstart/).
+Single-service, monolith, and SPIFFE/SPIRE variants are covered in the [quickstart guide](https://docs.protocolsoup.com/start-here/quickstart/).
 
-## Features
+<br>
+
+---
+
+<br>
+
+## What You Can Do
 
 | Feature | Description |
 |---------|-------------|
-| **Looking Glass** | Execute protocol flows and inspect every HTTP request/response in real-time via WebSocket |
-| **Token Inspector** | Decode JWTs (access, ID, refresh tokens), examine claims, verify signatures, view SAML assertions |
-| **Mock IdP** | Self-contained identity provider with preconfigured test users and clients |
-| **Flow Visualizer** | Step-by-step animated protocol flow diagrams |
-| **Plugin Architecture** | Add new protocols without modifying core infrastructure |
-| **SSF Sandbox** | Interactive Shared Signals Framework testing with real-time event delivery |
+| **Looking Glass** | Inspect every request and response as it happens, with unredacted payloads |
+| **Token Inspector** | Decode tokens, verify signatures, read SAML assertions and credentials |
+| **Flow Visualizer** | Animated step-by-step flow diagrams with per-stage timing |
+| **Learning Surface** | Parameter explainers, attack and mitigation notes, and spec citations |
+| **Search Palette** | Deterministic cmd+K search that explains why every result matched |
+| **Mock IdP** | Self-contained provider with generated users, clients, and sessions |
+| **Wallet Harness** | Standalone OID4VP wallet for issuance and presentation |
+| **Plugin Architecture** | Add protocols without touching core infrastructure |
+
+See [what you can do](https://docs.protocolsoup.com/using/what-you-can-do/) and the [Looking Glass guide](https://docs.protocolsoup.com/using/looking-glass/) for walkthroughs.
+
+<br>
 
 ---
 
-## Supported Flows
+<br>
 
-### OAuth 2.0
+## Protocols
 
-| Flow | RFC | Description |
-|------|-----|-------------|
-| Authorization Code | RFC 6749 | Standard web app flow with PKCE support |
-| Client Credentials | RFC 6749 / RFC 7523 | Machine-to-machine authentication with `client_secret` or session-registered `private_key_jwt` |
-| Refresh Token | RFC 6749 | Token renewal flow |
-| Token Introspection | RFC 7662 | Active token metadata inspection |
-| Token Revocation | RFC 7009 | Token invalidation |
+Every flow runs against the real specification. Each protocol links to a guide listing its supported flows, endpoints, and what to validate.
 
-### OpenID Connect
+| Protocol | Standards |
+|----------|-----------|
+| [OAuth 2.0](https://docs.protocolsoup.com/protocols/oauth2) | RFC 6749, 7009, 7523, 7636, 7662, 8414 |
+| [OpenID Connect](https://docs.protocolsoup.com/protocols/oidc) | OIDC Core, Discovery |
+| [SAML 2.0](https://docs.protocolsoup.com/protocols/saml) | Core, Bindings, Profiles, Metadata |
+| [SPIFFE/SPIRE](https://docs.protocolsoup.com/protocols/spiffe) | SPIFFE ID, X.509-SVID, JWT-SVID, Workload API |
+| [SCIM 2.0](https://docs.protocolsoup.com/protocols/scim) | RFC 7642, 7643, 7644 |
+| [Shared Signals](https://docs.protocolsoup.com/protocols/ssf) | OpenID SSF, CAEP, RISC, RFC 8417, 8935 |
+| [OID4VCI](https://docs.protocolsoup.com/protocols/oid4vci) | OID4VCI, SD-JWT VC, JSON-LD Data Integrity, ISO mdoc |
+| [OID4VP](https://docs.protocolsoup.com/protocols/oid4vp) | OID4VP, DCQL, ISO 18013-5 |
 
-| Flow | Spec | Description |
-|------|------|-------------|
-| Authorization Code | OIDC Core | OAuth 2.0 + ID token for identity |
-| Hybrid Flow | OIDC Core | Immediate ID token + code exchange |
-| Discovery | OIDC Discovery | OpenID Provider metadata endpoint |
-| UserInfo | OIDC Core | User claims endpoint |
+Conformance tests run on every push and on a nightly schedule, covering OID4VCI and OID4VP runtime behavior plus optional interop against an external wallet. The OpenID Provider carries its own conformance suite and can register dedicated clients for external OIDF certification runs.
 
-### SAML 2.0
-
-| Flow | Binding | Description |
-|------|---------|-------------|
-| SP-Initiated SSO | POST / Redirect | Service Provider starts authentication |
-| IdP-Initiated SSO | POST | Identity Provider starts authentication |
-| Single Logout (SLO) | POST / Redirect | Federated logout |
-
-### SPIFFE/SPIRE
-
-| Flow | Description |
-|------|-------------|
-| X.509-SVID | Acquire X.509 certificate via Workload API |
-| JWT-SVID | Acquire JWT identity token |
-| mTLS Configuration | Automatic certificate rotation |
-| Trust Bundle | CA certificate distribution |
-
-> SPIFFE flows execute against real SPIRE infrastructure on [protocolsoup.com](https://protocolsoup.com).
-
-### SCIM 2.0
-
-| Flow | RFC | Description |
-|------|-----|-------------|
-| User Lifecycle | RFC 7643/7644 | Create, read, update, delete users |
-| Group Management | RFC 7643/7644 | Group membership provisioning |
-| Filter Queries | RFC 7644 | SCIM filter syntax for searches |
-| Schema Discovery | RFC 7643 | Resource type and schema introspection |
-
-### Shared Signals Framework (SSF)
-
-| Flow | Spec | Description |
-|------|------|-------------|
-| Stream Management | OpenID SSF | Create and configure event streams |
-| CAEP Events | CAEP | Session revocation, token revocation, credential change |
-| RISC Events | RISC | Account compromise, credential compromise indicators |
-| SET Delivery | RFC 8935 | Security Event Token push delivery |
+<br>
 
 ---
 
-## Test Credentials
+<br>
 
-Demo users and client secrets are generated at startup unless provided via environment variables.
+## Documentation
 
-Environment overrides:
-- `MOCKIDP_ALICE_PASSWORD`
-- `MOCKIDP_BOB_PASSWORD`
-- `MOCKIDP_ADMIN_PASSWORD`
-- `MOCKIDP_DEMO_CLIENT_SECRET`
-- `MOCKIDP_MACHINE_CLIENT_SECRET`
+The docs site is the source of truth. This README is only an entry point.
 
-You can fetch the current demo credentials from:
-- `GET /oauth2/demo/users`
-- `GET /oauth2/demo/clients`
-- `GET /saml/demo/users`
+- [Start here](https://docs.protocolsoup.com/start-here/overview) - orientation and first run
+- [API reference](https://docs.protocolsoup.com/api/overview/) - backed by the contracts in [`openapi/v1/`](openapi/v1)
+- [Environment variables](https://docs.protocolsoup.com/deploy/environment-variables/) - every variable, per service
+- [Container images](https://docs.protocolsoup.com/deploy/services/overview/) - per-service deployment and configuration
+- [Deployment topologies](https://docs.protocolsoup.com/deploy/deployment-models/) - full stack, single service, monolith, or custom
+- [Development setup](https://docs.protocolsoup.com/developers/development-setup/) - prerequisites and the validation matrix
+- [Adding a protocol](https://docs.protocolsoup.com/developers/extending/add-a-protocol/) - the plugin walkthrough
 
----
+In-repo: [CONTRIBUTING.md](CONTRIBUTING.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md).
 
-## API Reference
-
-### OAuth 2.0
-
-```
-GET  /oauth2/authorize          Authorization endpoint
-POST /oauth2/token              Token endpoint
-POST /oauth2/introspect         Token introspection
-POST /oauth2/revoke             Token revocation
-POST /oauth2/authorize          Authorization form submit
-```
-
-### OpenID Connect
-
-```
-GET  /oidc/.well-known/openid-configuration    Discovery document
-GET  /oidc/.well-known/jwks.json               JSON Web Key Set
-GET  /oidc/authorize                           Authorization endpoint
-POST /oidc/token                               Token endpoint
-GET  /oidc/userinfo                            UserInfo endpoint
-```
-
-### SAML 2.0
-
-```
-GET  /saml/metadata             IdP Metadata (XML)
-GET  /saml/sso                  SSO Service (Redirect Binding)
-POST /saml/sso                  SSO Service (POST Binding)
-POST /saml/acs                  Assertion Consumer Service
-GET  /saml/slo                  Single Logout (Redirect)
-POST /saml/slo                  Single Logout (POST)
-```
-
-### SPIFFE/SPIRE
-
-```
-GET  /spiffe/status                            Workload API status
-GET  /spiffe/svid/x509                         X.509-SVID certificate
-GET  /spiffe/svid/x509/chain                   PEM certificate chain
-GET  /spiffe/svid/jwt?audience=<aud>           JWT-SVID token
-GET  /spiffe/.well-known/spiffe-bundle         SPIFFE bundle endpoint
-GET  /spiffe/trust-bundle                      Trust bundle details
-GET  /spiffe/workload                          Workload identity info
-POST /spiffe/validate/jwt                      Validate JWT-SVID
-POST /spiffe/validate/x509                     Validate X.509-SVID
-```
-
-### SCIM 2.0
-
-```
-GET    /scim/v2/ServiceProviderConfig          Service provider configuration
-GET    /scim/v2/ResourceTypes                  Available resource types
-GET    /scim/v2/Schemas                        Schema definitions
-GET    /scim/v2/Users                          List users (supports filtering)
-POST   /scim/v2/Users                          Create user
-GET    /scim/v2/Users/{id}                     Get user by ID
-PUT    /scim/v2/Users/{id}                     Replace user
-PATCH  /scim/v2/Users/{id}                     Partial update user
-DELETE /scim/v2/Users/{id}                     Delete user
-GET    /scim/v2/Groups                         List groups
-POST   /scim/v2/Groups                         Create group
-GET    /scim/v2/Groups/{id}                    Get group by ID
-PATCH  /scim/v2/Groups/{id}                    Update group membership
-DELETE /scim/v2/Groups/{id}                    Delete group
-POST   /scim/v2/Bulk                           Bulk operations
-```
-
-### Shared Signals Framework (SSF)
-
-```
-GET  /ssf/.well-known/ssf-configuration        Transmitter configuration
-GET  /ssf/jwks                                 Signing keys (JWKS)
-POST /ssf/stream                               Create event stream
-GET  /ssf/stream/{id}                          Get stream configuration
-PUT  /ssf/stream/{id}                          Update stream
-DELETE /ssf/stream/{id}                        Delete stream
-POST /ssf/stream/{id}/subjects                 Add subject to stream
-DELETE /ssf/stream/{id}/subjects/{subject}     Remove subject
-POST /ssf/stream/{id}/events                   Emit event to stream
-GET  /ssf/stream/{id}/events                   List stream events
-POST /ssf/actions/{event-type}                 Trigger security event (demo)
-GET  /ssf/security-state/{email}               User security state
-GET  /ssf/receiver/events                      List received events (proxy to 8081)
-GET  /ssf/receiver/status                      Receiver status (proxy to 8081)
-GET  /ssf/receiver/actions                     Response actions taken (proxy to 8081)
-```
-
-### Internal API
-
-```
-GET  /api/protocols                            List available protocols
-POST /api/lookingglass/decode                  Decode tokens
-WS   /ws/lookingglass/{session}                Real-time event stream
-GET  /health                                   Health check
-```
+<br>
 
 ---
 
-## Project Structure
+<br>
+
+## Architecture
+
+The backend is split into independently deployable services that share one codebase, written in Go behind a Next.js App Router frontend. `docker compose up -d` starts six of them:
+
+- **Gateway** - aggregates `/api` and routes protocol paths to upstreams
+- **Federation** - OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP
+- **SCIM** - user and group provisioning
+- **SSF** - Shared Signals streams and the event receiver
+- **Redis** - `private_key_jwt` replay protection
+- **Frontend** - the Next.js UI
+
+Three more deploy separately: SPIFFE via the `docker-compose.spiffe.yml` overlay, the VC service for standalone OID4VCI and OID4VP, and the wallet harness. `backend/cmd/server` still builds a single-process monolith, which is the quickest way to run everything without Docker.
+
+Every ProtocolSoup service is published to GHCR, Redis aside since it uses the upstream image. See [deploy/services](https://docs.protocolsoup.com/deploy/services/overview/).
+
+<details>
+<summary><b>Repository layout</b></summary>
+
+<br>
 
 ```
 ProtocolSoup/
 ├── backend/
-│   ├── cmd/server/main.go         # Application entry point
+│   ├── cmd/                        # One entry point per service, plus content tooling
 │   └── internal/
-│       ├── core/                   # HTTP server, config, middleware
+│       ├── core/                   # HTTP server, config, bootstrap, middleware
 │       ├── crypto/                 # JWT/JWK key management (RS256, ES256)
+│       ├── gateway/                # Upstream routing and protocol aggregation
 │       ├── lookingglass/           # Real-time protocol inspection engine
 │       ├── mockidp/                # Mock identity provider (users, clients, sessions)
-│       ├── plugin/                 # Plugin system interfaces & lifecycle
-│       ├── spiffe/                 # SPIFFE Workload API client, mTLS utilities
-│       └── protocols/
-│           ├── oauth2/             # OAuth 2.0 implementation
-│           ├── oidc/               # OpenID Connect (extends OAuth 2.0)
-│           ├── saml/               # SAML 2.0 SSO & SLO
-│           ├── scim/               # SCIM 2.0 user/group provisioning
-│           ├── spiffe/             # SPIFFE/SPIRE handlers
-│           ├── ssf/                # Shared Signals Framework
-│           ├── oid4vci/            # OID4VCI credential issuance
-│           └── oid4vp/             # OID4VP verifiable presentations
+│       ├── palette/                # Search index builder and query service
+│       ├── plugin/                 # Plugin interfaces and lifecycle
+│       ├── spiffe/                 # Workload API client and mTLS utilities
+│       ├── vc/, mdoc/, cose/       # Shared credential, mdoc, and COSE libraries
+│       └── protocols/              # oauth2, oidc, saml, scim, spiffe, ssf, oid4vci, oid4vp
+├── content/                        # Source of truth for search palette artefacts
 ├── frontend/
 │   └── src/
-│       ├── components/             # Shared UI components
-│       │   ├── common/             # Layout, navigation
-│       │   └── lookingglass/       # Token inspector, flow diagrams, timeline
-│       ├── lookingglass/           # Flow executors & visualization
-│       │   └── flows/              # Protocol-specific executors
-│       ├── pages/                  # Route pages (Dashboard, LookingGlass, etc.)
+│       ├── app/                    # Next.js App Router routes and metadata
+│       ├── views/                  # Page-level compositions
+│       ├── components/             # Shared UI, including the search palette
+│       ├── lookingglass/flows/     # Protocol flow executors
 │       ├── protocols/              # Protocol registry
-│       └── hooks/                  # WebSocket, state management
-├── docker/
-│   ├── docker-compose.yml          # Split services (base)
-│   ├── docker-compose.spiffe.yml   # SPIFFE/SPIRE overlay
-│   ├── docker-compose.simple.yml   # Legacy monolith (no SPIFFE)
-│   ├── docker-compose.dev.yml      # Legacy development configuration
-│   ├── docker-compose.prod.yml     # Legacy production configuration
-│   ├── spire/                      # SPIRE server/agent configurations
-│   └── Dockerfile.*                # Container definitions
-├── docs/
-│   ├── ARCHITECTURE.md             # System architecture overview
-│   ├── ADDING_PROTOCOLS.md         # Guide for adding new protocols
-│   └── SPIFFE.md                   # SPIFFE/SPIRE integration details
-├── fly.toml                        # Fly.io deployment (main app)
-└── fly.spire-server.toml           # Fly.io deployment (SPIRE server)
+│       └── hooks/                  # WebSocket and state management
+├── wallet-ui/                      # Standalone wallet harness frontend
+├── openapi/v1/                     # API contracts (gateway, federation, scim, vc)
+├── docker/                         # Dockerfiles, Compose stacks, SPIRE configs
+└── docs/
+    ├── starlight/                  # Public docs site (docs.protocolsoup.com)
+    └── packages/                   # Per-image reference docs
 ```
 
----
+</details>
 
-## Technology Stack
-
-### Backend
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Go | 1.25 | Core language |
-| chi | 5.2 | HTTP router |
-| golang-jwt | 5.3 | JWT creation/validation |
-| gorilla/websocket | 1.5 | Real-time communication |
-| go-spiffe | 2.6 | SPIFFE Workload API client |
-| modernc/sqlite | 1.29 | Embedded database for SCIM/SSF |
-
-### Frontend
-
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| React | 18.3 | UI framework |
-| TypeScript | 5.6 | Type safety |
-| Next.js | 16.x | SSR/SSG app framework (App Router) |
-| Tailwind CSS | 3.4 | Styling |
-| Framer Motion | 11.5 | Animations |
-
-### Infrastructure
-
-| Technology | Purpose |
-|------------|---------|
-| Docker | Containerization |
-| Nginx | Reverse proxy |
-| SPIRE | Workload identity (local) |
-| Fly.io | Production hosting |
+<br>
 
 ---
 
-## Documentation
-
-- [Docs Home](https://docs.protocolsoup.com/) - Public docs portal
-- [Start Here](https://docs.protocolsoup.com/start-here/overview) - First-run orientation and setup
-- [Use ProtocolSoup](https://docs.protocolsoup.com/using/what-you-can-do/) - User flows and walkthroughs
-- [Container Images](https://docs.protocolsoup.com/deploy/overview/) - GHCR deployment guidance
-- [API Reference](https://docs.protocolsoup.com/api/overview/) - OpenAPI-backed integration docs
-- [Contribute](https://docs.protocolsoup.com/developers/overview/) - Development setup and contribution workflow
-- [Protocols](https://docs.protocolsoup.com/protocols/oauth2) - Standards-aligned protocol pages
-- [Support](SUPPORT.md) - Where to ask questions, report bugs, and get contributor help
-
----
+<br>
 
 ## Development
 
-### Prerequisites
+Requires Go 1.26+, Node.js 22.13+, and Docker.
 
-- Go 1.25+
-- Node.js 22.12+
-- Docker & Docker Compose
-
-### Running Locally (without Docker)
-
-**Backend (monolith):**
 ```bash
-cd backend
-go run ./cmd/server
+# Terminal 1 - monolith, all protocols in one process
+cd backend && go run ./cmd/server
+
+# Terminal 2
+cd frontend && npm install && npm run dev
 ```
 
-**Backend services via Compose (same topology as Quick Start, includes frontend):**
-```bash
-cd docker
-docker compose up -d
-```
+Search needs a palette index built from `content/` --> see [deploy/palette-index](https://docs.protocolsoup.com/deploy/palette-index/). 
 
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev
-```
+[CONTRIBUTING.md](CONTRIBUTING.md) lists the verification command for each area of the codebase, and every change is expected to run the matching one.
 
-### Environment Variables
-
-#### Core Services
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SHOWCASE_LISTEN_ADDR` | `:8080` | Server listen address |
-| `SHOWCASE_BASE_URL` | `http://localhost:8080` | Public base URL; production requires a pathless HTTPS origin with no trailing slash |
-| `OAUTH2_REPLAY_REDIS_URL` | in-memory in development/tests | Shared replay store for `private_key_jwt`; demo requires Redis and production requires a reachable secret `rediss://` URL |
-| `SHOWCASE_FRONTEND_ORIGIN` | (empty) | Optional Next.js runtime origin for backend web-route proxying |
-| `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
-| `SHOWCASE_SPIFFE_ENABLED` | `false` | Enable SPIFFE integration |
-| `SHOWCASE_SPIFFE_SOCKET_PATH` | `unix:///run/spire/sockets/agent.sock` | Workload API socket |
-| `SHOWCASE_SPIFFE_TRUST_DOMAIN` | `protocolsoup.com` | SPIFFE trust domain |
-
-#### Gateway
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FEDERATION_SERVICE_URL` | (empty) | Federation upstream base URL |
-| `SCIM_SERVICE_URL` | (empty) | SCIM upstream base URL |
-| `SPIFFE_SERVICE_URL` | (empty) | SPIFFE upstream base URL |
-| `SSF_SERVICE_URL` | (empty) | SSF upstream base URL |
-| `GATEWAY_REFRESH_INTERVAL` | `30s` | Protocol refresh interval |
-| `GATEWAY_STARTUP_RETRY_INITIAL` | `2s` | Initial startup retry delay |
-| `GATEWAY_STARTUP_RETRY_MAX` | `30s` | Maximum startup retry delay |
-| `GATEWAY_REQUEST_TIMEOUT` | `5s` | Upstream request timeout |
-
-#### SCIM / SSF
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCIM_DATA_DIR` | `./data` | SCIM storage directory |
-| `SSF_DATA_DIR` | `./data` | SSF storage directory |
-| `SCIM_API_TOKEN` | (empty) | Bearer token for SCIM API auth |
-| `SCIM_LOOKING_GLASS` | `true` | Enable Looking Glass capture for SCIM |
-| `SSF_RECEIVER_PORT` | `8081` | Standalone SSF receiver port |
-| `SSF_RECEIVER_TOKEN` | (auto) | Receiver bearer token for push delivery |
+<br>
 
 ---
 
-### Split Services (Base)
+<br>
 
-```bash
-cd ProtocolSoup/docker
-docker compose up -d
-```
+## Security
 
-This starts:
-- **Gateway** - Aggregates `/api` and routes protocol paths
-- **Federation** - OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP
-- **SCIM** - User and group provisioning
-- **SSF** - Shared Signals Framework
-- **Redis** - Shared atomic `private_key_jwt` replay reservations for the federation service
-- **Frontend** - Next.js App Router UI at `http://localhost:3000`
-- **Gateway API** - Available at `http://localhost:8080`
+ProtocolSoup is an **educational tool**. The Mock IdP, its generated users, and its demo clients exist to be inspected, so treat any deployment as untrusted and never point it at real identity data.
 
-### SPIFFE/SPIRE Overlay
+Production mode enforces an HTTPS base URL, a reachable `rediss://` replay store, and a readable palette index. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-```bash
-cd ProtocolSoup/docker
-docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
-```
-
-This adds:
-- **SPIFFE Service** - Workload API demos
-- **SPIRE Server/Agent** - Identity authority and SVID issuance
-- **SPIRE Registration** - Workload entry bootstrap
-
-### Standalone Usage (API-only Images)
-
-Build any service with the shared backend Dockerfile by selecting the entrypoint:
-
-```bash
-# Gateway
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/gateway -t protocol-lens-gateway .
-
-# Federation (OAuth2/OIDC/SAML)
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-federation -t protocol-lens-federation .
-
-# SCIM
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-scim -t protocol-lens-scim .
-
-# SSF
-docker build -f docker/Dockerfile.backend --build-arg SERVICE_CMD=./cmd/server-ssf -t protocol-lens-ssf .
-
-# SPIFFE (requires SPIRE server/agent)
-docker build -f docker/Dockerfile.backend-spiffe --build-arg SERVICE_CMD=./cmd/server-spiffe -t protocol-lens-spiffe .
-```
-
-Example standalone runs:
-
-```bash
-# SCIM service (data volume + optional Looking Glass)
-docker run -p 8082:8080 \
-  -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  -e SCIM_DATA_DIR=/data \
-  -e SCIM_LOOKING_GLASS=true \
-  -v scim-data:/data \
-  protocol-lens-scim
-
-# Gateway routing to standalone services
-docker run -p 8080:8080 \
-  -e FEDERATION_SERVICE_URL=http://host.docker.internal:8081 \
-  -e SCIM_SERVICE_URL=http://host.docker.internal:8082 \
-  -e SSF_SERVICE_URL=http://host.docker.internal:8083 \
-  protocol-lens-gateway
-```
-
-Note: `docker-compose.simple.yml`, `docker-compose.dev.yml`, and `docker-compose.prod.yml`
-target the legacy monolithic backend and are kept for reference.
-
-### Using Pre-built GHCR Images
-
-Pre-built container images are available from GitHub Container Registry. Use these for quick deployment without building from source.
-
-**Available images:**
-
-**[Container Image Documentation](docs/packages/README.md)** - Detailed docs for each image
-
-| Image | Description | Docs |
-|-------|-------------|------|
-| `ghcr.io/parlesec/protocolsoup-gateway` | API Gateway | [gateway.md](docs/packages/gateway.md) |
-| `ghcr.io/parlesec/protocolsoup-federation` | OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP | [federation.md](docs/packages/federation.md) |
-| `ghcr.io/parlesec/protocolsoup-scim` | SCIM 2.0 provisioning | [scim.md](docs/packages/scim.md) |
-| `ghcr.io/parlesec/protocolsoup-ssf` | Shared Signals Framework | [ssf.md](docs/packages/ssf.md) |
-| `ghcr.io/parlesec/protocolsoup-spiffe` | SPIFFE workload identity | [spiffe.md](docs/packages/spiffe.md) |
-| `ghcr.io/parlesec/protocolsoup-frontend` | Next.js App Router frontend UI | [frontend.md](docs/packages/frontend.md) |
-| `ghcr.io/parlesec/protocolsoup-vc` | OID4VCI + OID4VP verifiable credentials APIs | [vc.md](docs/packages/vc.md) |
-| `ghcr.io/parlesec/protocolsoup-wallet` | OID4VP wallet harness | [wallet.md](docs/packages/wallet.md) |
-| `ghcr.io/parlesec/protocolsoup-spire-server` | SPIRE Server (CA) | [spire-server.md](docs/packages/spire-server.md) |
-| `ghcr.io/parlesec/protocolsoup-spire-agent` | SPIRE Agent | [spire-agent.md](docs/packages/spire-agent.md) |
-| `ghcr.io/parlesec/protocolsoup-spire-registration` | SPIRE registration | [spire-registration.md](docs/packages/spire-registration.md) |
-
-**Quick start with GHCR images:**
-
-```bash
-# Pull and run individual services
-docker pull ghcr.io/parlesec/protocolsoup-federation:latest
-docker run -p 8080:8080 \
-  -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  ghcr.io/parlesec/protocolsoup-federation:latest
-
-# Standalone VC APIs + wallet harness
-docker run -p 8080:8080 ghcr.io/parlesec/protocolsoup-vc:latest
-docker run -p 8081:8080 \
-  -e WALLET_TARGET_BASE_URL=http://host.docker.internal:8080 \
-  ghcr.io/parlesec/protocolsoup-wallet:latest
-```
-
-**Using with docker-compose:**
-
-Edit `docker/docker-compose.yml` (and `docker/docker-compose.spiffe.yml` for SPIFFE/SPIRE):
-1. Comment out the `build:` section for each service
-2. Uncomment the `image: ghcr.io/parlesec/...` line
+<br>
 
 ---
 
-## Security Notes
+<br>
 
-This is an **educational tool** designed for learning and demonstration. The Mock IdP and test credentials are intentionally simple.
+## Contributing
 
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers development setup, conventions, and the pull request workflow. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to all project spaces.
 
----
-
-
+<br>
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
