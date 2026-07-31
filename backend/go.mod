@@ -17,7 +17,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.8.1
 	github.com/veraison/go-cose v1.3.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
