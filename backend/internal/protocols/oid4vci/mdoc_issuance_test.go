@@ -290,6 +290,196 @@ func TestMsoMdocAuthorizationCodeIssuance(t *testing.T) {
 	}
 }
 
+// TestMsoMdocIssuedCredentialNestingDepthWithinHardenedCeiling measures the
+// actual CBOR nesting depth of a real, production-shaped issued mDL --
+// including driving_privileges, the one element with array-of-maps-of-
+// tagged-full-dates structure, which is the deepest path in
+// buildMDLIssuerSignedItems -- against mdoc.CheckUntrustedCBOR's hardened
+// gate. This exists because a prior revision of the MaxNestedLevels=16
+// derivation stated a depth (~8) that did not match the gate's own
+// cumulative tag-24 accounting once that accounting was corrected; this
+// test replaces "asserted in a comment" with "measured against a real
+// issued credential", and fails if a future change to the mDL element set
+// or its encoding pushes the real depth close enough to 16 that the margin
+// this ceiling assumes no longer holds.
+func TestMsoMdocIssuedCredentialNestingDepthWithinHardenedCeiling(t *testing.T) {
+	server, _, _ := newMdocTestEnv(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{mdocConfigurationID},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	walletSubject := asString(t, offerPayload["wallet_subject"])
+
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	tokenPayload := decodeJSONMap(t, tokenResp)
+	accessToken := asString(t, tokenPayload["access_token"])
+	cNonce := asString(t, tokenPayload["c_nonce"])
+
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate device key: %v", err)
+	}
+	proofJWT := createECDeviceProof(t, deviceKey, cNonce, walletSubject, testIssuerAudience)
+
+	credentialResp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": mdocConfigurationID,
+			"format":                      "mso_mdoc",
+			"proofs": []map[string]interface{}{
+				{"proof_type": "jwt", "jwt": proofJWT},
+			},
+		},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, credentialResp, http.StatusOK)
+	credentialPayload := decodeJSONMap(t, credentialResp)
+	credential := asString(t, credentialPayload["credential"])
+	if credential == "" {
+		t.Fatal("expected non-empty mso_mdoc credential")
+	}
+
+	raw, err := base64.RawURLEncoding.DecodeString(credential)
+	if err != nil {
+		t.Fatalf("base64url decode credential: %v", err)
+	}
+
+	depth, err := mdoc.CheckUntrustedCBOR(raw)
+	if err != nil {
+		t.Fatalf("mdoc.CheckUntrustedCBOR rejected a real production-shaped issued mDL: %v", err)
+	}
+	t.Logf("measured nesting depth of a real issued mDL (11 elements incl. driving_privileges): %d", depth)
+
+	// 16 mirrors mdoc.maxUntrustedNestedLevels (internal/mdoc/issuersigned.go),
+	// which is unexported; duplicated here as a literal rather than exported
+	// solely for this test's convenience.
+	const maxUntrustedNestedLevels = 16
+	if depth <= 0 {
+		t.Fatalf("measured depth %d is non-positive; a real IssuerSigned structure must nest at least a few levels deep", depth)
+	}
+	if depth >= maxUntrustedNestedLevels {
+		t.Fatalf("measured depth %d of a real issued mDL leaves no margin under MaxNestedLevels=%d", depth, maxUntrustedNestedLevels)
+	}
+	if margin := maxUntrustedNestedLevels - depth; margin < 4 {
+		t.Fatalf("measured depth %d leaves only %d levels of margin under MaxNestedLevels=%d, tighter than the intended headroom", depth, margin, maxUntrustedNestedLevels)
+	}
+}
+
+// TestMsoMdocIssuedCredentialValidateIssuerSignatureTriState exercises
+// vc.MSOMdocFormat.ValidateIssuerSignature's tri-state result against a real,
+// production-issued mDL (through the full HTTP issuance pipeline, not a
+// hand-assembled fixture), confirming the same trust outcomes the internal/vc
+// unit tests pin also hold end-to-end: verified against the issuing plugin's
+// own IACA root, failed against an unrelated one, and not evaluated when no
+// trust anchor is supplied at all.
+func TestMsoMdocIssuedCredentialValidateIssuerSignatureTriState(t *testing.T) {
+	server, testPlugin, _ := newMdocTestEnv(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{mdocConfigurationID},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	walletSubject := asString(t, offerPayload["wallet_subject"])
+
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	tokenPayload := decodeJSONMap(t, tokenResp)
+	accessToken := asString(t, tokenPayload["access_token"])
+	cNonce := asString(t, tokenPayload["c_nonce"])
+
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate device key: %v", err)
+	}
+	proofJWT := createECDeviceProof(t, deviceKey, cNonce, walletSubject, testIssuerAudience)
+
+	credentialResp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": mdocConfigurationID,
+			"format":                      "mso_mdoc",
+			"proofs": []map[string]interface{}{
+				{"proof_type": "jwt", "jwt": proofJWT},
+			},
+		},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, credentialResp, http.StatusOK)
+	credentialPayload := decodeJSONMap(t, credentialResp)
+	credential := asString(t, credentialPayload["credential"])
+	if credential == "" {
+		t.Fatal("expected non-empty mso_mdoc credential")
+	}
+
+	registry := vc.DefaultCredentialFormatRegistry()
+	formatHandler, ok := registry.Lookup("mso_mdoc")
+	if !ok {
+		t.Fatalf("mso_mdoc format handler not found in registry")
+	}
+
+	t.Run("verified_against_issuing_plugin_trust_anchor", func(t *testing.T) {
+		trustStatus, err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
+			Credential:         credential,
+			IssuerTrustAnchors: testPlugin.mdocPKI.TrustAnchors(),
+		})
+		if err != nil {
+			t.Fatalf("ValidateIssuerSignature(issuing plugin's own IACA root): %v", err)
+		}
+		if trustStatus != vc.IssuerTrustVerified {
+			t.Fatalf("trust status = %v, want IssuerTrustVerified", trustStatus)
+		}
+	})
+
+	t.Run("failed_against_unrelated_trust_anchor", func(t *testing.T) {
+		unrelatedPKI, err := mdoc.GenerateIssuerPKI(mdoc.DefaultPKIParams("https://unrelated-issuer.example/oid4vci"))
+		if err != nil {
+			t.Fatalf("GenerateIssuerPKI(unrelated): %v", err)
+		}
+		trustStatus, err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
+			Credential:         credential,
+			IssuerTrustAnchors: unrelatedPKI.TrustAnchors(),
+		})
+		if err == nil {
+			t.Fatalf("ValidateIssuerSignature(unrelated IACA root) unexpectedly succeeded")
+		}
+		if trustStatus != vc.IssuerTrustFailed {
+			t.Fatalf("trust status = %v, want IssuerTrustFailed", trustStatus)
+		}
+	})
+
+	t.Run("not_evaluated_without_trust_anchor", func(t *testing.T) {
+		trustStatus, err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
+			Credential: credential,
+		})
+		if err == nil {
+			t.Fatalf("ValidateIssuerSignature(no trust anchor) unexpectedly succeeded")
+		}
+		if trustStatus != vc.IssuerTrustNotEvaluated {
+			t.Fatalf("trust status = %v, want IssuerTrustNotEvaluated", trustStatus)
+		}
+	})
+}
+
 // TestMsoMdocRejectsNonECDeviceKey confirms an RSA proof key is rejected, since
 // mdoc device keys must be EC2/P-256.
 func TestMsoMdocRejectsNonECDeviceKey(t *testing.T) {

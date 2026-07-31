@@ -398,15 +398,271 @@ func (f *LDPVCFormat) BuildPresentation(input PresentationBuildInput) (*Presenta
 	return buildWrappedPresentation(input, strings.TrimSpace(parsed.Original), parsed.Format)
 }
 
-func (f *LDPVCFormat) ValidateIssuerSignature(input CredentialValidationInput) error {
+func (f *LDPVCFormat) ValidateIssuerSignature(input CredentialValidationInput) (IssuerTrustStatus, error) {
 	parsed, err := ensureParsedCredentialForValidation(f, input)
 	if err != nil {
-		return err
+		return IssuerTrustNotEvaluated, err
 	}
 	if strings.HasPrefix(strings.TrimSpace(parsed.Original), "{") {
-		return validateDataIntegrityCredential(parsed, input)
+		// verifyDataIntegrityDocument can resolve a verification method from
+		// a self-certifying did:key inside the proof itself, so an empty
+		// IssuerKeys does not necessarily mean no trust material existed the
+		// way it does for the JWT path below. Rather than approximate that
+		// distinction, report every data-integrity outcome other than
+		// success as Failed: this never overclaims Verified, and the only
+		// cost is that a genuinely trust-anchor-less data-integrity check
+		// reads as Failed instead of the more precise NotEvaluated.
+		if err := validateDataIntegrityCredential(parsed, input); err != nil {
+			return IssuerTrustFailed, err
+		}
+		return IssuerTrustVerified, nil
 	}
 	return validateJWTSignature(parsed.Original, input.IssuerKeys)
+}
+
+// MSOMdocFormat implements the ISO/IEC 18013-5 mso_mdoc profile: base64url-encoded
+// CBOR IssuerSigned, selective disclosure via per-element salted digests
+// committed in the MobileSecurityObject (MSO) rather than SD-JWT-style
+// tilde-delimited disclosures, and issuer trust via an x5chain of
+// certificates rooted at an IACA, rather than a JWK set.
+//
+// Registered last in DefaultCredentialFormatRegistry: ParseAnyCredential
+// returns the first successful parse, and mdoc is unambiguous against the
+// other four formats purely by input shape. base64.RawURLEncoding rejects
+// the '.' in a compact JWT/SD-JWT immediately, and rejects the '{' that
+// opens a raw JSON-LD credential immediately, so mdoc can never shadow an
+// earlier format's input by accident, and does not need to run before one
+// that would otherwise mis-accept it.
+type MSOMdocFormat struct{}
+
+func (f *MSOMdocFormat) FormatID() string { return "mso_mdoc" }
+
+// CanPresent reports false. mdoc presentation is real, but it is the ISO/IEC
+// 18013-5 DeviceResponse path (mdoc.BuildDeviceResponse, driven by
+// walletharness's createMdocVPToken), not the generic JWT-wrapped VP path
+// every other format shares through BuildPresentation. That path needs the
+// holder's mdoc device private key and the OID4VP SessionTranscript
+// (handover bytes), neither of which PresentationBuildInput carries -- it
+// was shaped for a bearer JWT signer. CanPresent exists so callers can ask
+// "does the generic path work for this format" without attempting it; for
+// mdoc the honest answer is no, and BuildPresentation below is unreachable
+// through any caller that respects CanPresent.
+func (f *MSOMdocFormat) CanPresent() bool { return false }
+
+func (f *MSOMdocFormat) BuildPresentation(input PresentationBuildInput) (*PresentationBuildResult, error) {
+	return nil, fmt.Errorf("mdoc: presentation is built via the ISO/IEC 18013-5 DeviceResponse path, not CredentialFormat.BuildPresentation; CanPresent() reports false for this format")
+}
+
+func (f *MSOMdocFormat) ParseCredential(raw string) (*ParsedCredential, error) {
+	issuerSigned, err := decodeMdocIssuerSignedGated(raw)
+	if err != nil {
+		return nil, err
+	}
+	msoBytes, _, err := mdoc.ParseIssuerAuth(issuerSigned.IssuerAuth)
+	if err != nil {
+		return nil, fmt.Errorf("mdoc: parse IssuerAuth: %w", err)
+	}
+	mso, err := mdoc.DecodeMSOBytes(msoBytes)
+	if err != nil {
+		return nil, fmt.Errorf("mdoc: decode MobileSecurityObject: %w", err)
+	}
+	disclosed, err := mdoc.CollectDisclosedElements(issuerSigned)
+	if err != nil {
+		return nil, fmt.Errorf("mdoc: collect disclosed elements: %w", err)
+	}
+
+	claims := make(map[string]interface{}, len(disclosed))
+	subject := ""
+	for ns, elements := range disclosed {
+		nsClaims := make(map[string]interface{}, len(elements))
+		for elementID, value := range elements {
+			safeValue := mdoc.JSONSafeValue(value)
+			nsClaims[elementID] = safeValue
+			if elementID == "document_number" && subject == "" {
+				if s, ok := safeValue.(string); ok {
+					subject = s
+				} else {
+					subject = fmt.Sprint(safeValue)
+				}
+			}
+		}
+		claims[ns] = nsClaims
+	}
+
+	return &ParsedCredential{
+		Original:  strings.TrimSpace(raw),
+		Format:    f.FormatID(),
+		Subject:   subject,
+		Doctype:   mso.DocType,
+		Claims:    claims,
+		IsSDJWT:   false,
+		IssuedAt:  mso.ValidityInfo.Signed,
+		ExpiresAt: mso.ValidityInfo.ValidUntil,
+	}, nil
+}
+
+// ValidateIssuerSignature verifies the mdoc's IssuerAuth COSE_Sign1 against
+// IssuerTrustAnchors (an IACA root pool) and recomputes valueDigests. It
+// independently re-decodes and re-gates input.Credential rather than reusing
+// input.ParsedCredential, so the hardened CBOR limits apply on this path even
+// if a future caller reaches ValidateIssuerSignature without having called
+// ParseCredential first.
+func (f *MSOMdocFormat) ValidateIssuerSignature(input CredentialValidationInput) (IssuerTrustStatus, error) {
+	issuerSigned, err := decodeMdocIssuerSignedGated(input.Credential)
+	if err != nil {
+		return IssuerTrustNotEvaluated, err
+	}
+	// A nil pool must not reach mdoc.VerifyIssuerSigned: x509.Certificate.Verify
+	// falls back to the host OS root store when VerifyOptions.Roots is nil,
+	// which would turn "no trust anchor was supplied" into a certificate-path
+	// error indistinguishable from a genuine chain failure. Checking here is
+	// what makes "no IACA root" read as IssuerTrustNotEvaluated rather than
+	// IssuerTrustFailed.
+	if input.IssuerTrustAnchors == nil {
+		return IssuerTrustNotEvaluated, fmt.Errorf("mdoc: no IACA trust anchor was supplied")
+	}
+	if _, err := mdoc.VerifyIssuerSigned(issuerSigned, input.IssuerTrustAnchors, time.Now().UTC()); err != nil {
+		return IssuerTrustFailed, fmt.Errorf("mdoc: issuer signature verification failed: %w", err)
+	}
+	return IssuerTrustVerified, nil
+}
+
+// decodeMdocIssuerSignedGated decodes a base64url mso_mdoc credential into an
+// IssuerSigned, applying mdoc.CheckUntrustedCBOR unconditionally before any
+// typed decode. Both ParseCredential and ValidateIssuerSignature call this
+// rather than mdoc.DecodeIssuerSigned directly, so the hardened limits apply
+// regardless of which method a caller reaches first -- the gate cannot be
+// bypassed by a call path that only exercises one of the two.
+func decodeMdocIssuerSignedGated(raw string) (mdoc.IssuerSigned, error) {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return mdoc.IssuerSigned{}, fmt.Errorf("mdoc: credential is required")
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(normalized)
+	if err != nil {
+		return mdoc.IssuerSigned{}, fmt.Errorf("mdoc: decode base64url credential: %w", err)
+	}
+	if _, err := mdoc.CheckUntrustedCBOR(decoded); err != nil {
+		return mdoc.IssuerSigned{}, err
+	}
+	issuerSigned, err := mdoc.DecodeIssuerSigned(decoded)
+	if err != nil {
+		return mdoc.IssuerSigned{}, fmt.Errorf("mdoc: decode IssuerSigned: %w", err)
+	}
+	return issuerSigned, nil
+}
+
+// MdocDigestsConsistentWithMSO independently re-decodes an mso_mdoc
+// credential under the same hardened untrusted-CBOR gate as ParseCredential
+// (via decodeMdocIssuerSignedGated) and recomputes each presented
+// IssuerSignedItem's digest against the credential's own MSO valueDigests
+// via mdoc.VerifyValueDigests.
+//
+// This is NOT signature or issuer-trust verification, and must never be
+// described as such in a field name, a UI label, or docs text: it
+// establishes that the presented items hash to the values the MSO itself
+// declares -- internal self-consistency -- not that the MSO was produced by
+// a trusted issuer. An MSO with no valid signature at all, or no signature
+// checked at all, can still be perfectly self-consistent, because whoever
+// built the credential computed the items and the digests together from the
+// same source. Only ValidateIssuerSignature, checked against a real IACA
+// trust anchor, establishes authenticity.
+func MdocDigestsConsistentWithMSO(raw string) (bool, error) {
+	issuerSigned, err := decodeMdocIssuerSignedGated(raw)
+	if err != nil {
+		return false, err
+	}
+	msoBytes, _, err := mdoc.ParseIssuerAuth(issuerSigned.IssuerAuth)
+	if err != nil {
+		return false, fmt.Errorf("mdoc: parse IssuerAuth: %w", err)
+	}
+	mso, err := mdoc.DecodeMSOBytes(msoBytes)
+	if err != nil {
+		return false, fmt.Errorf("mdoc: decode MobileSecurityObject: %w", err)
+	}
+	if err := mdoc.VerifyValueDigests(issuerSigned.NameSpaces, mso.ValueDigests, mso.DigestAlgorithm); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// CredentialAssurance reports how much of a decoded credential has actually
+// been checked, kept structurally separate from CredentialEvidence so a
+// caller cannot read "what this artifact contains" and "what has been
+// verified about it" as the same fact. See InspectCredential.
+type CredentialAssurance struct {
+	// IssuerTrust is ValidateIssuerSignature's tri-state, carried verbatim
+	// rather than derived or hardcoded. InspectCredential supplies no
+	// IssuerKeys and no IssuerTrustAnchors, so this reads
+	// IssuerTrustNotEvaluated for every format today -- but it is computed
+	// by actually calling ValidateIssuerSignature, so a format whose check
+	// can resolve trust from the artifact alone (LDPVCFormat's did:key
+	// path) reports whatever it actually found rather than a value assumed
+	// ahead of time.
+	IssuerTrust IssuerTrustStatus
+	// IssuerTrustDetail is ValidateIssuerSignature's error text, if any.
+	IssuerTrustDetail string
+	// DigestsConsistentWithMSO is nil for every format except mso_mdoc,
+	// because mdoc is the only format with a self-contained per-item digest
+	// -- MSO valueDigests -- that can be recomputed from the artifact alone
+	// with no external trust material. Non-nil means the check in
+	// MdocDigestsConsistentWithMSO ran; the bool is its result. See that
+	// function's doc comment for why this is not authenticity.
+	DigestsConsistentWithMSO *bool
+	// DigestConsistencyDetail is the mismatch or decode error detail when
+	// DigestsConsistentWithMSO is non-nil and false.
+	DigestConsistencyDetail string
+}
+
+// CredentialInspectionResult is the shared body behind POST
+// /lookingglass/decode/credential: the same format-agnostic evidence every
+// other BuildCredentialEvidence caller uses, plus the assurance envelope
+// stating plainly how much of it has been checked.
+type CredentialInspectionResult struct {
+	Evidence  CredentialEvidence
+	Assurance CredentialAssurance
+}
+
+// InspectCredential decodes a pasted credential for the Looking Glass
+// credential-inspection endpoint. It is the "issued" lifecycle stage by
+// definition: whatever this function is given is being looked at as a
+// standalone artifact, never as what a holder chose to reveal in a
+// presentation.
+//
+// Every credential passed here is externally supplied -- this is the
+// paste-a-credential endpoint -- so the HTTP handler calling this must apply
+// a body-size cap before this is reached (a transport concern, per A2); the
+// mdoc-specific hardened CBOR decode limits apply unconditionally inside
+// MSOMdocFormat.ParseCredential regardless of that cap.
+//
+// This function never supplies IssuerKeys or IssuerTrustAnchors, so
+// Assurance.IssuerTrust reads not-evaluated for every format by default --
+// there is deliberately no IACA root or issuer JWK set for a pasted
+// credential from an arbitrary issuer to be checked against.
+func InspectCredential(raw string) (*CredentialInspectionResult, error) {
+	evidence, err := BuildCredentialEvidence(raw, LifecycleStageIssued)
+	if err != nil {
+		return nil, err
+	}
+
+	assurance := CredentialAssurance{IssuerTrust: IssuerTrustNotEvaluated}
+	if formatHandler, ok := DefaultCredentialFormatRegistry().Lookup(evidence.Format); ok {
+		trustStatus, trustErr := formatHandler.ValidateIssuerSignature(CredentialValidationInput{Credential: raw})
+		assurance.IssuerTrust = trustStatus
+		if trustErr != nil {
+			assurance.IssuerTrustDetail = trustErr.Error()
+		}
+	}
+
+	if strings.EqualFold(evidence.Format, "mso_mdoc") {
+		consistent, digestErr := MdocDigestsConsistentWithMSO(raw)
+		assurance.DigestsConsistentWithMSO = &consistent
+		if digestErr != nil {
+			assurance.DigestConsistencyDetail = digestErr.Error()
+		}
+	}
+
+	return &CredentialInspectionResult{Evidence: *evidence, Assurance: assurance}, nil
 }
 
 func ensureParsedCredential(format CredentialFormat, input PresentationBuildInput) (*ParsedCredential, error) {

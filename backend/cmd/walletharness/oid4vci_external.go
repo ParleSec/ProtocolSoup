@@ -1301,13 +1301,23 @@ func (s *walletHarnessServer) validateImportedCredential(
 	if err != nil {
 		return nil, err
 	}
-	if err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
+	// This accepts arbitrary pasted or externally-fetched credentials, so it
+	// is a trust boundary rather than a reporting surface: not-evaluated must
+	// refuse import exactly like a checked failure, never fall through as an
+	// accepted-but-unverified credential. vc.IssuerTrustStatus guarantees a
+	// non-nil error for both IssuerTrustFailed and IssuerTrustNotEvaluated,
+	// so keeping this as a plain err != nil check -- rather than special
+	// casing on trustStatus -- is what enforces that refusal. No
+	// IssuerTrustAnchors is supplied here: an arbitrary external issuer has
+	// no IACA root this wallet can know in advance, so an mdoc import always
+	// reports IssuerTrustNotEvaluated and is refused by this same check.
+	if trustStatus, err := formatHandler.ValidateIssuerSignature(vc.CredentialValidationInput{
 		Credential:       strings.TrimSpace(credential),
 		ParsedCredential: parsedCredential,
 		IssuerKeys:       issuerKeys,
 		HTTPClient:       s.httpClient,
 	}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("validate issuer signature (issuer_trust=%s): %w", trustStatus, err)
 	}
 	return parsedCredential, nil
 }
