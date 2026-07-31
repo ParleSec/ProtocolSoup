@@ -110,6 +110,75 @@ export async function apiPostForm<T>(
 }
 
 /**
+ * Wire shape of vc.NamespaceDisclosureCounts from the backend
+ * (POST /lookingglass/decode/credential). mdoc only.
+ */
+export interface DecodeCredentialNamespaceCounts {
+  committed_count: number
+  present_count: number
+}
+
+/**
+ * Wire shape of vc.SelectiveDisclosureSummary. Present only for formats with
+ * a selective-disclosure mechanism (mso_mdoc, dc+sd-jwt); absent otherwise.
+ * committed_count_is_exact distinguishes mdoc's genuine valueDigests count
+ * from SD-JWT's decoy-inclusive upper bound -- the two must never be
+ * rendered with the same confidence.
+ */
+export interface DecodeCredentialSelectiveDisclosure {
+  mechanism: string
+  committed_count: number
+  committed_count_is_exact: boolean
+  present_count: number
+  lifecycle_stage: 'issued' | 'presented'
+  digest_algorithm?: string
+  per_namespace?: Record<string, DecodeCredentialNamespaceCounts>
+  has_unrepresented_disclosure_forms: boolean
+}
+
+/**
+ * Wire shape of vc.CredentialAssurance. issuer_trust is the tri-state
+ * verbatim ("verified" / "failed" / "not_evaluated") -- never collapse it to
+ * a boolean. digests_consistent_with_mso is present only for mso_mdoc, and
+ * proves internal consistency between the presented items and the MSO, not
+ * authenticity of the MSO -- it must never be relabelled "verified" or "ok".
+ */
+export interface DecodeCredentialAssurance {
+  issuer_trust: 'verified' | 'failed' | 'not_evaluated'
+  issuer_trust_detail?: string
+  digests_consistent_with_mso?: boolean
+  digest_consistency_detail?: string
+}
+
+/**
+ * Wire shape of vc.CredentialEvidence. issued_at/expires_at are RFC3339 and
+ * present only when the credential itself carried the corresponding claim
+ * (mso_mdoc: MSO ValidityInfo.signed/validUntil; ldp_vc: issuanceDate or
+ * validFrom, expirationDate or validUntil; JWT-based formats: exp only, iat
+ * is not read). Absence must render as "not stated by the credential", not
+ * as a fallback to any other time source.
+ */
+export interface DecodeCredentialEvidence {
+  format?: string
+  vct?: string
+  doctype?: string
+  credential_types?: string[]
+  full_claims?: Record<string, unknown>
+  disclosed_claims?: Record<string, unknown>
+  selective_disclosure?: DecodeCredentialSelectiveDisclosure
+  issued_at?: string
+  expires_at?: string
+}
+
+/**
+ * Response body for POST /lookingglass/decode/credential.
+ */
+export interface DecodeCredentialResponse {
+  evidence: DecodeCredentialEvidence
+  assurance: DecodeCredentialAssurance
+}
+
+/**
  * Token response type
  */
 export interface TokenResponse {
@@ -219,6 +288,24 @@ export const api = {
     errors?: string[]
   }> {
     return apiPost('/lookingglass/decode', { token })
+  },
+
+  /**
+   * Decode a pasted credential (any registered vc.CredentialFormat,
+   * including mso_mdoc) into the same shared evidence shape issuance and
+   * verification use, wrapped in an assurance envelope. This is a
+   * side-channel decode of an artifact the flow already produced -- the
+   * same shape of call as decodeToken above, which already does this for
+   * JWTs -- not a new fabricated protocol event. A 10s client-side timeout
+   * is set so a hung request surfaces as an explicit decode failure rather
+   * than leaving the caller waiting indefinitely.
+   */
+  decodeCredential(credential: string): Promise<DecodeCredentialResponse> {
+    return apiFetch<DecodeCredentialResponse>('/lookingglass/decode/credential', {
+      method: 'POST',
+      body: JSON.stringify({ credential }),
+      signal: AbortSignal.timeout(10_000),
+    })
   },
 
   /**

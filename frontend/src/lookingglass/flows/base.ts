@@ -5,6 +5,8 @@
  * Each executor implements a specific OAuth 2.0 or OIDC flow per RFC.
  */
 
+import type { DecodeCredentialAssurance, DecodeCredentialEvidence } from '../../utils/api'
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -142,6 +144,28 @@ export interface VCArtifact {
   metadata?: Record<string, unknown>
   timestamp: Date
 }
+
+/**
+ * Result of decoding a just-issued credential through
+ * POST /lookingglass/decode/credential, stored under
+ * VCArtifact.metadata.credentialInspection. Shared between the flow that
+ * produces it (oid4vci-pre-authorized's captureCredential) and the
+ * inspector that consumes it (VCInspector), so the two cannot drift apart
+ * on the shape of "decoded" vs "the call itself failed" -- a decode
+ * failure (network error, non-2xx, timeout, or malformed body) must render
+ * as an explicit failure state, never a silent fallback to the pre-decode
+ * raw-blob-only view.
+ */
+export type CredentialInspectionMetadata =
+  | {
+      status: 'decoded'
+      evidence: DecodeCredentialEvidence
+      assurance: DecodeCredentialAssurance
+    }
+  | {
+      status: 'decode_failed'
+      reason: string
+    }
 
 export type FlowStateListener = (state: FlowExecutorState) => void
 
