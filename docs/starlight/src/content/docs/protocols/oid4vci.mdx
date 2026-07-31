@@ -168,6 +168,17 @@ As of the parity-then-flip change, the issuer's **default and lead** credential 
 
 Note that the mDL proof uses an EC P-256 device key signed with `ES256`: the proof `cnf.jwk` is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key, per ISO/IEC 18013-5.
 
+## Credential Inspection (Looking Glass)
+
+The Looking Glass credential inspector treats every registered credential format — including `mso_mdoc`, the default and lead configuration — as a first-class surface; there is no per-format branch in the UI. After the credential endpoint returns an issued credential, the Looking Glass flow calls `POST /lookingglass/decode/credential` to decode it through the same shared `CredentialFormat` registry and evidence shape that OID4VP presentation verification already produces, rather than a JWT-only decoder that would treat `mso_mdoc`'s CBOR encoding as opaque.
+
+The response keeps two things structurally separate, because they must never be rendered as if they were the same claim:
+
+- **Evidence** - the credential's own claims (namespace-nested for `mso_mdoc`), plus a selective-disclosure summary naming its mechanism (`mso_valuedigests` for `mso_mdoc`, `sd_jwt_disclosures` for `dc+sd-jwt`), a committed-element count, and whether that count is exact. The `mso_mdoc` MSO `valueDigests` count is exact — ISO/IEC 18013-5 has no decoy-digest mechanism. An SD-JWT `_sd` digest count is reported as an upper bound only, because the spec permits decoy digests specifically so a verifier cannot infer the true claim count from it. This replaces an earlier disclosure count that used SD-JWT tilde-counting semantics for every format, which was always zero for `mso_mdoc` regardless of how many elements the MSO actually committed to.
+- **Assurance** - what has actually been checked, never collapsed into a single validity flag. This endpoint supplies no issuer keys or IACA trust anchors, so `issuer_trust` reads `not_evaluated` for every format — distinct from `failed`, which means a signature check ran against real trust material and did not succeed. For `mso_mdoc` only, `digests_consistent_with_mso` independently recomputes each disclosed `IssuerSignedItem`'s digest against the credential's own MSO `valueDigests`. That proves internal consistency between the items and the MSO, **not authenticity of the MSO itself** — an unauthenticated MSO with matching digests is trivially forgeable.
+
+Both fields are part of the shared, format-agnostic evidence/assurance shape rather than `mso_mdoc`-specific additions: the same selective-disclosure summary and assurance envelope render for `dc+sd-jwt`, `jwt_vc_json`, `jwt_vc_json-ld`, and `ldp_vc`, with the fields that do not apply to a given format simply absent rather than zeroed.
+
 ## What To Validate
 
 - Credential offer envelope: exactly one of `credential_offer` or `credential_offer_uri`
@@ -181,3 +192,4 @@ Note that the mDL proof uses an EC P-256 device key signed with `ES256`: the pro
 - Client attestation (when configured): a request presenting `OAuth-Client-Attestation`/`-PoP` is authenticated by that mechanism, not silently downgraded on failure; replayed PoP `jti` is rejected
 - Key attestation (when a configuration requires it): credential requests without a valid `key_attestation` proof header are rejected with `invalid_proof`
 - Encrypted responses (when requested): `credential_response_encryption` is validated against advertised `alg`/`enc` values and the response is returned as a JWE
+- Credential inspection: `POST /lookingglass/decode/credential` on an issued `mso_mdoc` reports a non-zero, exact `committed_count` and `issuer_trust: not_evaluated` (never `failed`, since no trust anchor was supplied); the same call on `dc+sd-jwt` reports `committed_count_is_exact: false`
