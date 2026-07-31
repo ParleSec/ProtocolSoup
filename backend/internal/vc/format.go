@@ -3,6 +3,7 @@ package vc
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -13,24 +14,66 @@ import (
 	"time"
 
 	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 )
+
+// IssuerTrustStatus reports the outcome of ValidateIssuerSignature as a
+// tri-state rather than a binary pass/fail. A plain error return cannot
+// distinguish "checked the signature against real trust material and it did
+// not verify" from "no trust material was available to check against at
+// all" (no IACA root for an mdoc, no issuer JWKs for a JWT-based format) --
+// yet callers such as the credential decode endpoint (POST
+// /lookingglass/decode/credential) must report exactly that distinction to
+// the user rather than reconstructing it from context.
+//
+// The zero value is IssuerTrustNotEvaluated, so a status left unset by
+// mistake reads as "not evaluated" rather than as a false Verified.
+//
+// ValidateIssuerSignature returns a non-nil error for both IssuerTrustFailed
+// and IssuerTrustNotEvaluated, never only for IssuerTrustFailed. Every
+// existing "if err != nil { reject }" caller therefore keeps its current,
+// conservative behaviour unchanged by this signature growing a return value:
+// it continues to refuse both a checked failure and an unevaluated
+// signature. A nil error occurs only with IssuerTrustVerified. Only a caller
+// that explicitly inspects the returned status -- rather than only the error
+// -- can tell a checked failure apart from an unevaluated one.
+type IssuerTrustStatus int
+
+const (
+	IssuerTrustNotEvaluated IssuerTrustStatus = iota
+	IssuerTrustVerified
+	IssuerTrustFailed
+)
+
+// String renders the status for logs and API responses. These values are
+// serialized verbatim by the credential decode endpoint, so keep them stable.
+func (s IssuerTrustStatus) String() string {
+	switch s {
+	case IssuerTrustVerified:
+		return "verified"
+	case IssuerTrustFailed:
+		return "failed"
+	default:
+		return "not_evaluated"
+	}
+}
 
 // TokenSigner signs a JWT-like claim set with the wallet's active key material.
 type TokenSigner func(claims map[string]interface{}, headerOverrides map[string]interface{}) (string, error)
 
 // PresentationBuildInput carries the wallet context required to build a presentation.
 type PresentationBuildInput struct {
-	Credential             string
-	ParsedCredential       *ParsedCredential
-	Holder                 string
-	HolderPublicJWK        intcrypto.JWK
-	HolderJWKThumbprint    string
+	Credential               string
+	ParsedCredential         *ParsedCredential
+	Holder                   string
+	HolderPublicJWK          intcrypto.JWK
+	HolderJWKThumbprint      string
 	HolderVerificationMethod string
-	Audience               string
-	Nonce                  string
-	PresentationDefinition map[string]interface{}
-	Signer                 TokenSigner
-	ProofSigner            func(data []byte) ([]byte, error)
+	Audience                 string
+	Nonce                    string
+	PresentationDefinition   map[string]interface{}
+	Signer                   TokenSigner
+	ProofSigner              func(data []byte) ([]byte, error)
 }
 
 // PresentationBuildResult contains the serialized presentation token and its format.
@@ -45,6 +88,18 @@ type CredentialValidationInput struct {
 	ParsedCredential *ParsedCredential
 	IssuerKeys       []intcrypto.JWK
 	HTTPClient       *http.Client
+	// IssuerTrustAnchors carries IACA root certificates for mso_mdoc's
+	// x5chain path validation (mdoc.VerifyIssuerSigned). JWT-based formats
+	// use IssuerKeys instead; this field exists because mdoc's trust model is
+	// X.509 certificate chains, not JWKs, and CredentialValidationInput was
+	// otherwise shaped entirely around the JWT formats it originally served.
+	// A nil pool means "no trust anchor was supplied", which MSOMdocFormat
+	// reports as IssuerTrustNotEvaluated rather than attempting path
+	// validation against it -- x509.Certificate.Verify falls back to the
+	// host OS root store when Roots is nil, which would otherwise turn an
+	// absent trust anchor into a misleading certificate-path error that
+	// reads as IssuerTrustFailed.
+	IssuerTrustAnchors *x509.CertPool
 }
 
 // ParsedCredential is a normalized, format-agnostic view of a held credential.
@@ -73,7 +128,7 @@ type CredentialFormat interface {
 	CanPresent() bool
 	BuildPresentation(input PresentationBuildInput) (*PresentationBuildResult, error)
 	ParseCredential(raw string) (*ParsedCredential, error)
-	ValidateIssuerSignature(input CredentialValidationInput) error
+	ValidateIssuerSignature(input CredentialValidationInput) (IssuerTrustStatus, error)
 }
 
 // CredentialFormatRegistry stores supported credential format handlers and provides format detection.
@@ -107,6 +162,9 @@ func DefaultCredentialFormatRegistry() *CredentialFormatRegistry {
 			&LDPVCFormat{},
 			&JWTVCFormat{formatID: "jwt_vc_json-ld"},
 			&JWTVCFormat{formatID: "jwt_vc_json"},
+			// Registered last: see MSOMdocFormat's doc comment for why
+			// ordering here is defensive rather than load-bearing.
+			&MSOMdocFormat{},
 		)
 	})
 	return defaultCredentialFormatRegistry
@@ -256,10 +314,10 @@ func (f *SDJWTFormat) BuildPresentation(input PresentationBuildInput) (*Presenta
 	}, nil
 }
 
-func (f *SDJWTFormat) ValidateIssuerSignature(input CredentialValidationInput) error {
+func (f *SDJWTFormat) ValidateIssuerSignature(input CredentialValidationInput) (IssuerTrustStatus, error) {
 	parsed, err := ensureParsedCredentialForValidation(f, input)
 	if err != nil {
-		return err
+		return IssuerTrustNotEvaluated, err
 	}
 	return validateJWTSignature(parsed.IssuerSignedJWT, input.IssuerKeys)
 }
@@ -300,10 +358,10 @@ func (f *JWTVCFormat) BuildPresentation(input PresentationBuildInput) (*Presenta
 	return buildWrappedPresentation(input, strings.TrimSpace(parsed.Original), firstNonEmptyFormat(parsed.Format, f.FormatID()))
 }
 
-func (f *JWTVCFormat) ValidateIssuerSignature(input CredentialValidationInput) error {
+func (f *JWTVCFormat) ValidateIssuerSignature(input CredentialValidationInput) (IssuerTrustStatus, error) {
 	parsed, err := ensureParsedCredentialForValidation(f, input)
 	if err != nil {
-		return err
+		return IssuerTrustNotEvaluated, err
 	}
 	return validateJWTSignature(parsed.Original, input.IssuerKeys)
 }
@@ -525,18 +583,25 @@ func parseJSONLDCredential(raw string, formatID string) (*ParsedCredential, erro
 	return parsed, nil
 }
 
-func validateJWTSignature(token string, issuerKeys []intcrypto.JWK) error {
+// validateJWTSignature verifies token against issuerKeys and reports the
+// tri-state outcome. Both an empty token and no issuer keys are
+// IssuerTrustNotEvaluated: neither is "checked and failed", each is "there
+// was nothing to check, or nothing to check it against". Every other
+// negative outcome -- an unusable key, a signature that does not verify --
+// is IssuerTrustFailed, because a check was actually attempted against real
+// trust material and did not succeed.
+func validateJWTSignature(token string, issuerKeys []intcrypto.JWK) (IssuerTrustStatus, error) {
 	normalized := strings.TrimSpace(token)
 	if normalized == "" {
-		return fmt.Errorf("credential jwt is required")
+		return IssuerTrustNotEvaluated, fmt.Errorf("credential jwt is required")
 	}
 	if len(issuerKeys) == 0 {
-		return fmt.Errorf("issuer keys are required")
+		return IssuerTrustNotEvaluated, fmt.Errorf("issuer keys are required")
 	}
 
 	decoded, err := intcrypto.DecodeTokenWithoutValidation(normalized)
 	if err != nil {
-		return fmt.Errorf("decode credential jwt: %w", err)
+		return IssuerTrustNotEvaluated, fmt.Errorf("decode credential jwt: %w", err)
 	}
 	kid := strings.TrimSpace(formatString(decoded.Header["kid"]))
 	alg := strings.TrimSpace(formatString(decoded.Header["alg"]))
@@ -564,7 +629,7 @@ func validateJWTSignature(token string, issuerKeys []intcrypto.JWK) error {
 		}
 		valid, err := intcrypto.VerifySignatureWithKey(normalized, publicKey)
 		if err == nil && valid {
-			return nil
+			return IssuerTrustVerified, nil
 		}
 		if err != nil {
 			lastErr = err
@@ -575,7 +640,7 @@ func validateJWTSignature(token string, issuerKeys []intcrypto.JWK) error {
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no usable issuer keys were provided")
 	}
-	return lastErr
+	return IssuerTrustFailed, lastErr
 }
 
 func normalizeCredentialFormatID(formatID string) string {
