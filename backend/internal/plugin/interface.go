@@ -42,6 +42,7 @@ type PluginConfig struct {
 	BaseURL              string      // Base URL of the server
 	DataDir              string      // Optional durable state directory shared across plugins
 	OAuth2ReplayRedisURL string      // Shared private_key_jwt replay store
+	CORSOrigins          []string    // Browser origins permitted to call this deployment
 	KeySet               interface{} // Crypto key set
 	MockIdP              interface{} // Mock identity provider
 	LookingGlass         interface{} // Looking glass engine

@@ -104,6 +104,7 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		BaseURL:              cfg.BaseURL,
 		DataDir:              cfg.DataDir,
 		OAuth2ReplayRedisURL: cfg.OAuth2ReplayRedisURL,
+		CORSOrigins:          cfg.CORSOrigins,
 		KeySet:               keySet,
 		MockIdP:              idp,
 		LookingGlass:         lg,
