@@ -2,6 +2,7 @@ package agentauth
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -13,6 +14,13 @@ import (
 type identityRequest struct {
 	Type      string `json:"type"`
 	AgentName string `json:"agent_name"`
+
+	// AssertionType names the kind of assertion carried in Assertion, when
+	// Type is identityTypeAssertion. The only value defined by auth.md is the
+	// ID-JAG (assertionTypeIDJAG); it is read here purely to give a caller
+	// who tries one a precise reason rather than the generic rejection below.
+	AssertionType string `json:"assertion_type"`
+	Assertion     string `json:"assertion"`
 }
 
 // handleIdentity registers an agent and returns a service-signed identity
@@ -45,19 +53,34 @@ func (p *Plugin) handleIdentity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Type != identityTypeAnonymous {
+		detail := `Only "anonymous" registration is supported; see the agent_auth block in the authorization server metadata`
+		title := "Only anonymous registration is offered"
+		description := "This deployment federates with no agent provider, so it cannot verify an ID-JAG. Advertising an identity type it cannot check would let an agent believe an assertion had been validated when it had not."
+
+		// A caller presenting an ID-JAG specifically gets told exactly why it
+		// is refused, rather than a generic rejection that could as easily
+		// mean the type name was misspelled.
+		if req.Type == identityTypeAssertion && req.AssertionType == assertionTypeIDJAG {
+			detail = fmt.Sprintf(
+				`This deployment does not federate with an external agent provider, so it cannot verify an ID-JAG (%s); only "anonymous" registration is supported`,
+				assertionTypeIDJAG)
+			title = "ID-JAG verification requires a federated agent provider"
+			description = "An ID-JAG is minted and signed by an external agent provider. Verifying it means fetching that provider's keys and trusting its issuer, which this deployment does not do for any provider, so the assertion is refused unread rather than accepted and left unverified."
+		}
+
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported identity type rejected",
 			map[string]interface{}{
 				"requested":                req.Type,
+				"assertion_type":           req.AssertionType,
 				"identity_types_supported": []string{identityTypeAnonymous},
 			},
 			lookingglass.Annotation{
 				Type:        lookingglass.AnnotationTypeExplanation,
-				Title:       "Only anonymous registration is offered",
-				Description: "This deployment federates with no agent provider, so it cannot verify an ID-JAG. Advertising an identity type it cannot check would let an agent believe an assertion had been validated when it had not.",
+				Title:       title,
+				Description: description,
 				Reference:   "auth.md, Identity Assertion (ID-JAG)",
 			})
-		writeOAuthError(w, http.StatusBadRequest, "unsupported_identity_type",
-			`Only "anonymous" registration is supported; see the agent_auth block in the authorization server metadata`)
+		writeOAuthError(w, http.StatusBadRequest, "unsupported_identity_type", detail)
 		return
 	}
 

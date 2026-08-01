@@ -277,6 +277,28 @@ func TestIdentityEndpointRejectsUnsupportedIdentityType(t *testing.T) {
 	}
 }
 
+// A caller that specifically presents an ID-JAG is told why it is refused —
+// this deployment federates with no external agent provider whose keys it
+// could verify the assertion against — rather than the same generic message
+// given to a misspelled or otherwise unknown identity type.
+func TestIdentityEndpointNamesWhyAnIDJAGIsRefused(t *testing.T) {
+	p := newTestPlugin(t)
+
+	status, body := postJSON(t, p.handleIdentity, "/agentauth/identity",
+		`{"type":"identity_assertion","assertion_type":"urn:ietf:params:oauth:token-type:id-jag","assertion":"eyJhbGciOiJSUzI1NiJ9.e30.x"}`)
+
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", status)
+	}
+	if body["error"] != "unsupported_identity_type" {
+		t.Errorf("error = %#v, want unsupported_identity_type", body["error"])
+	}
+	description, _ := body["error_description"].(string)
+	if !strings.Contains(description, "ID-JAG") || !strings.Contains(description, "federate") {
+		t.Errorf("error_description = %q, want it to explain the ID-JAG federation gap", description)
+	}
+}
+
 // The claim ceremony follows the RFC 8628 polling model end to end: pending
 // while the person has not acted, then a wider scope and a fresh assertion once
 // they have.
