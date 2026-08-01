@@ -74,7 +74,7 @@ func (s *Server) setupRouter() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.config.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-Looking-Glass-Session", lookingglass.OwnerTokenHeader, "If-Match", "If-None-Match"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-Looking-Glass-Session", lookingglass.OwnerTokenHeader, "If-Match", "If-None-Match", "MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"},
 		ExposedHeaders:   []string{"Link", "X-Request-ID", "ETag", "Location"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -145,11 +145,27 @@ func (s *Server) setupRouter() {
 			// path with the issuer's path component appended, not under
 			// /oid4vci itself. A wallet resolving authorization_servers from
 			// the credential issuer metadata needs this to find
-			// authorization_endpoint.
-			r.Get("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
-				http.NotFound(w, r)
-			})
+			// authorization_endpoint. The bare path belongs to the origin
+			// issuer and is claimed by the OIDC plugin below.
 			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server/*", protocolRouter)
+		}
+
+		if info.ID == "agentauth" {
+			// The agentic registration server's issuer is
+			// https://{host}/agentauth, so RFC 8414 Section 3.1 puts its
+			// metadata under the root well-known path with that component
+			// appended. Agents reach it from the authorization_servers list
+			// in Protected Resource Metadata.
+			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server/agentauth", protocolRouter)
+		}
+
+		if info.ID == "mcp" {
+			// The AI Catalog is the site-wide index domain-level discovery
+			// starts from, and the one well-known location the Server Card
+			// discovery spec endorses. The card itself is served from the
+			// reserved suffix on the server's own endpoint, /mcp/server-card,
+			// which the catalog points at.
+			r.Method(http.MethodGet, "/.well-known/ai-catalog.json", protocolRouter)
 		}
 
 		if info.ID == "oauth2" {
@@ -166,6 +182,20 @@ func (s *Server) setupRouter() {
 		// for backward compatibility; both delegate to the same handler.
 		if info.ID == "oidc" {
 			r.Method(http.MethodGet, "/.well-known/openid-configuration", protocolRouter)
+
+			// RFC 8414 Section 3: the OP issuer is the pathless origin, so
+			// its Authorization Server metadata belongs at the bare
+			// well-known path. Protected Resource Metadata names this issuer,
+			// and a plain OAuth 2.0 client resolving it looks here rather
+			// than at the OpenID Connect discovery document.
+			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server", protocolRouter)
+
+			// RFC 9728 Section 3.1 derives the metadata URL by inserting the
+			// well-known suffix between the host and the resource identifier's
+			// path. The origin itself and the UserInfo endpoint are the two
+			// resource identifiers this deployment publishes.
+			r.Method(http.MethodGet, "/.well-known/oauth-protected-resource", protocolRouter)
+			r.Method(http.MethodGet, "/.well-known/oauth-protected-resource/oidc/userinfo", protocolRouter)
 		}
 	}
 
@@ -235,7 +265,34 @@ func (s *Server) setupFrontendProxy(r chi.Router) {
 		http.Error(w, "Frontend runtime unavailable", http.StatusBadGateway)
 	}
 
+	// Pages answer with HTML or markdown depending on the request's Accept
+	// header, so a cache MUST key on it (RFC 9110 Section 12.5.5). Next.js
+	// rewrites the Vary header of a page response itself, discarding anything
+	// the app sets, so the header is corrected here at the public edge.
+	proxy.ModifyResponse = func(response *http.Response) error {
+		if strings.HasPrefix(response.Header.Get("Content-Type"), "text/html") {
+			addVaryAccept(response.Header)
+		}
+		return nil
+	}
+
 	r.Handle("/*", proxy)
+}
+
+// addVaryAccept adds Accept to the response's Vary field without disturbing the
+// field values already present.
+func addVaryAccept(header http.Header) {
+	for _, value := range header.Values("Vary") {
+		for _, field := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(field), "Accept") {
+				return
+			}
+			if strings.TrimSpace(field) == "*" {
+				return
+			}
+		}
+	}
+	header.Add("Vary", "Accept")
 }
 
 // Health check response
