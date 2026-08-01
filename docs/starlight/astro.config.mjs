@@ -60,6 +60,13 @@ export default defineConfig({
               ],
             },
             {
+              label: 'Agents',
+              items: [
+                { slug: 'protocols/agentauth' },
+                { slug: 'protocols/mcp' },
+              ],
+            },
+            {
               label: 'Workload Identity',
               items: [
                 { slug: 'protocols/spiffe' },
@@ -90,6 +97,7 @@ export default defineConfig({
             { label: 'Release Process', link: '/developers/release-process/' },
             { slug: 'deploy/environment-variables' },
             { slug: 'deploy/palette-index' },
+            { slug: 'deploy/agent-discovery' },
             {
               label: 'Services',
               items: [

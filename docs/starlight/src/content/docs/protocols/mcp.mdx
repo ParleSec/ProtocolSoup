@@ -1,0 +1,257 @@
+---
+title: "Model Context Protocol"
+description: "A remote MCP server over the stateless Streamable HTTP transport of revision 2026-07-28, with an SEP-2127 Server Card and AI Catalog for discovery."
+---
+
+# Model Context Protocol
+
+ProtocolSoup runs a remote MCP server at `/mcp`. It speaks revision
+**2026-07-28** over the Streamable HTTP transport and exposes read-only tools
+over the protocol catalog this sandbox already publishes, so an agent that is
+not running inside a browser tab can reach the same data the
+[WebMCP tools](/deploy/agent-discovery/#webmcp) expose to one that is.
+
+## Standards
+
+| Document | Role |
+|----------|------|
+| [MCP 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) | Protocol revision |
+| [Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http) | Transport binding |
+| [`server/discover`](https://modelcontextprotocol.io/specification/2026-07-28/server/discover) | Mandatory capability RPC |
+| [JSON-RPC 2.0](https://www.jsonrpc.org/specification) | Message encoding |
+| [SEP-2127](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127) | Server Cards |
+| [AI Catalog](https://github.com/Agent-Card/ai-catalog) | Domain-level discovery |
+
+## There is no handshake
+
+Revision 2026-07-28 removed the `initialize` / `initialized` exchange and the
+`Mcp-Session-Id` header. Every request now stands alone and carries its own
+protocol version, client identity, and client capabilities in `_meta`, so any
+instance behind a plain load balancer can answer any request without shared
+state.
+
+A client that wants the server's capabilities before doing anything else calls
+`server/discover`, which is optional to call but mandatory for a server to
+implement. A client is equally free to send `tools/call` as its first request
+and handle an `UnsupportedProtocolVersionError` if the version does not match.
+
+## Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/mcp` | The single MCP endpoint; one JSON-RPC message per request |
+| `GET` | `/mcp/server-card` | Server Card, `application/mcp-server-card+json` |
+| `GET` | `/.well-known/ai-catalog.json` | AI Catalog listing this server's card |
+
+`GET` and `DELETE` on `/mcp` return `405`. Both had meaning in earlier
+revisions — opening an SSE stream and ending a session — and neither exists
+now, so a client from an older revision is turned away rather than left waiting.
+
+## Request metadata travels twice
+
+Every `POST` mirrors selected body fields into HTTP headers so gateways, rate
+limiters, and WAFs can route and meter without parsing JSON:
+
+| Header | Mirrors | Required for |
+|--------|---------|--------------|
+| `MCP-Protocol-Version` | `_meta["io.modelcontextprotocol/protocolVersion"]` | Every request |
+| `Mcp-Method` | `method` | Every request |
+| `Mcp-Name` | `params.name` | `tools/call` |
+
+The body stays the source of truth. When a header and the body disagree, or a
+required header is missing, the server answers `400` with JSON-RPC error
+`-32020` (`HeaderMismatch`) rather than trusting either one:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32020,
+    "message": "Header mismatch: Mcp-Name header value 'decode_jwt' does not match body value 'list_protocols'"
+  }
+}
+```
+
+A value that cannot travel safely in an HTTP field - non-ASCII characters,
+control characters, leading or trailing whitespace - is sent in the Base64
+sentinel form `=?base64?{value}?=`. The server decodes before comparing, so an
+encoded `Mcp-Name` is accepted. The converse also holds: a plain value carrying
+characters the client was required to encode is rejected, because accepting it
+would admit a value no conforming client could have sent unencoded.
+
+### Required request metadata
+
+There is no handshake in this revision, so each request carries what a session
+would once have established. Two `_meta` fields are required on every request,
+and omitting either is a malformed request answered with `400` and `-32602`:
+
+| Field | Purpose |
+|-------|---------|
+| `io.modelcontextprotocol/protocolVersion` | The revision this request speaks |
+| `io.modelcontextprotocol/clientCapabilities` | What the server may assume of the caller |
+
+An empty capabilities object is valid and is what most callers send here: no
+tool on this server needs anything of the client. Declaring capabilities is
+still required, because a server may never assume one it was not told about.
+`io.modelcontextprotocol/clientInfo` is optional and used only for logging.
+
+Every result carries `io.modelcontextprotocol/serverInfo` in its `_meta`, so a
+response identifies what answered it without relying on prior state.
+
+## Calling a tool
+
+```bash
+curl -sX POST https://protocolsoup.com/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: list_protocols' \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "list_protocols",
+      "arguments": { "query": "oauth" },
+      "_meta": {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": { "name": "curl", "version": "1.0" }
+      }
+    }
+  }'
+```
+
+## Tools
+
+Every tool is read-only and reads live state: the plugin registry that serves
+the site's own catalog, or the key set that signs the sandbox's tokens.
+
+| Tool | Returns |
+|------|---------|
+| `list_protocols` | The protocols this sandbox implements and the RFCs each follows, optionally filtered |
+| `list_protocol_flows` | The flows a protocol defines, and whether each can be executed interactively |
+| `describe_protocol_flow` | One flow in full: ordered steps, actors, parameters, security considerations |
+| `decode_jwt` | A token's header and payload, plus whether its signature verifies against this sandbox's key set |
+
+`decode_jwt` never requires a valid signature to decode, because an
+unverifiable token is exactly the one worth reading. It reports the
+verification result alongside the claims instead of withholding them.
+
+Arguments are validated against the tool's declared `inputSchema` before the
+tool runs. Every schema sets `additionalProperties: false`, so an argument the
+schema does not declare is rejected rather than silently ignored.
+
+A tool that fails returns `isError: true` inside the result rather than a
+JSON-RPC error, so the model can see the failure and correct itself instead of
+the client treating it as a transport fault. Argument validation failures are
+reported the same way, for the same reason. A tool that does not exist is a
+different case and comes back as `-32602`, since `tools/call` itself exists.
+
+Results from `server/discover`, `tools/list`, and `tools/call` carry
+`resultType: "complete"`, marking them final rather than interim results
+awaiting further input. `tools/list` additionally carries `ttlMs` and
+`cacheScope`, so a client or intermediary can cache the tool set for a known
+duration instead of re-listing on every connection.
+
+`tools/list` supports pagination but never needs it: the whole tool set fits in
+one page, so no `nextCursor` is issued. A `cursor` presented to this server is
+therefore one it cannot have minted, and it answers `-32602` rather than
+silently returning the first page again. An empty string is a valid cursor, so
+presence rather than emptiness is what decides.
+
+## Discovery
+
+Domain-level discovery begins at the AI Catalog, not at the card:
+
+```bash
+curl https://protocolsoup.com/.well-known/ai-catalog.json
+```
+
+```json
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:protocolsoup.com:mcp:protocol-sandbox",
+      "type": "application/mcp-server-card+json",
+      "url": "https://protocolsoup.com/mcp/server-card"
+    }
+  ]
+}
+```
+
+Following that `url` gives the Server Card: identity, transport, and supported
+protocol versions.
+
+```json
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+  "name": "com.protocolsoup/protocol-sandbox",
+  "version": "1.0.0",
+  "description": "Read-only tools over a sandbox that runs real authentication and identity protocols",
+  "title": "Protocol Soup",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://protocolsoup.com/mcp",
+      "supportedProtocolVersions": ["2026-07-28"]
+    }
+  ]
+}
+```
+
+The card does not list tools, resources, or prompts. That omission is a safety
+property rather than an oversight: a static document fetched before the client
+connects must never become something a client trusts for access-control
+decisions. Primitives are discovered at runtime through `tools/list`, and even
+the fields the card does declare are advisory — a client should prefer what the
+live connection reports where the two disagree.
+
+For where the card is served and why a copy also sits under `.well-known`, see
+[Agent Discovery](/deploy/agent-discovery/#mcp-discovery).
+
+## Deviations from the specification
+
+- **No authorization.** The tools read public sandbox data, so the endpoint
+  takes no token. A production MCP server exposing anything private would be an
+  OAuth 2.0 resource server and would advertise its authorization servers
+  through [Protected Resource Metadata](/protocols/agentauth/).
+- **JSON responses only.** The transport permits a request to be answered with
+  either a JSON object or an SSE stream. Every tool here returns promptly, so
+  the server always answers with `application/json` and never opens a stream.
+  A client must support both, so this is not a compatibility problem.
+- **No resources or prompts.** Only the `tools` capability is declared, and
+  `server/discover` reports exactly that. `prompts/list` and `resources/list`
+  return `404` with `-32601`.
+- **Modern revisions only.** The server does not implement the legacy
+  `initialize` handshake, so a client speaking `2025-11-25` or earlier is
+  rejected with a modern JSON-RPC error naming the version this server does
+  support.
+Each of these is a permitted choice rather than a departure: the transport lets
+a server answer with JSON or SSE, extensions beyond `tools` are optional,
+legacy support is a MAY, and authentication is a SHOULD whose implications are
+weighed above.
+
+## Origin validation
+
+The transport requires the endpoint to validate `Origin`, and returns `403`
+when a request carries one this deployment does not serve. Only an allowlist
+prevents DNS rebinding, so a well-formed but unknown browser origin is refused
+rather than waved through.
+
+The allowlist is the deployment's own origin plus `SHOWCASE_CORS_ORIGINS`. Two
+cases are worth calling out:
+
+- A request with **no** `Origin` is accepted. It is not a browser request, so
+  there is nothing to validate, and refusing it would lock out every SDK and
+  command-line client.
+- The opaque origin `null`, sent by sandboxed documents, is refused, because it
+  cannot be attributed to any origin and so cannot be allowlisted.
+
+A wildcard `*` in the CORS configuration is skipped rather than honoured, so a
+permissive CORS setting cannot silently disable the check. A browser-based
+agent served from another origin must be added to `SHOWCASE_CORS_ORIGINS`
+explicitly.
