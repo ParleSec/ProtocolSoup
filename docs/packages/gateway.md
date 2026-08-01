@@ -60,6 +60,15 @@
 - `GET /api/protocols/{id}/flows`
 - `POST /api/protocols/{id}/demo/{flow}`
 
+### MCP Server
+
+- `POST /mcp` — Streamable HTTP endpoint, MCP revision `2026-07-28`
+- `GET /mcp/server-card` — SEP-2127 Server Card
+- `GET /.well-known/ai-catalog.json` — AI Catalog naming the card
+
+Tools are read-only and read the gateway's own protocol registry. See
+[Model Context Protocol](https://docs.protocolsoup.com/protocols/mcp/).
+
 ### Looking Glass Proxy APIs
 
 - `POST /api/lookingglass/decode`
