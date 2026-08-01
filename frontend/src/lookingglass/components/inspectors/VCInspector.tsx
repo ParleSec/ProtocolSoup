@@ -641,20 +641,41 @@ function CredentialEvidenceFields({ evidence }: { evidence: CredentialEvidenceVi
         </div>
       )}
       {evidence.selectiveDisclosure && <SelectiveDisclosureBlock summary={evidence.selectiveDisclosure} />}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <div className="text-[11px] text-cyan-300">Disclosed claims</div>
-          <pre className="p-2 rounded bg-surface-900 text-[11px] text-surface-300 overflow-x-auto">
-            {JSON.stringify(evidence.disclosedClaims, null, 2)}
-          </pre>
+      {Object.keys(evidence.disclosedClaims).length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <div className="text-[11px] text-cyan-300">Disclosed claims</div>
+            <pre className="p-2 rounded bg-surface-900 text-[11px] text-surface-300 overflow-x-auto">
+              {JSON.stringify(evidence.disclosedClaims, null, 2)}
+            </pre>
+          </div>
+          <div className="space-y-1">
+            <div className="text-[11px] text-violet-300">Full reconstructed claims</div>
+            <pre className="p-2 rounded bg-surface-900 text-[11px] text-surface-300 overflow-x-auto">
+              {JSON.stringify(evidence.fullClaims, null, 2)}
+            </pre>
+          </div>
         </div>
+      ) : (
+        // disclosedClaims vs fullClaims is only a meaningful distinction for
+        // dc+sd-jwt, where a holder can present a proper subset of the
+        // issuer's disclosures. BuildCredentialEvidence never populates
+        // DisclosedClaims for mso_mdoc (there is no equivalent split there --
+        // CollectDisclosedElements' output is what SelectiveDisclosureBlock
+        // above already renders), and an issued-but-not-yet-presented
+        // dc+sd-jwt can legitimately carry none either. Rendering an empty
+        // "Disclosed claims: {}" panel next to a fully-populated "Full
+        // reconstructed claims" one in either case would assert a disclosure
+        // state the artifact never claimed -- the same failure shape this
+        // component exists to avoid -- so fall back to one plain claims
+        // panel instead of a split that has nothing real on one side.
         <div className="space-y-1">
-          <div className="text-[11px] text-violet-300">Full reconstructed claims</div>
+          <div className="text-[11px] text-violet-300">Claims</div>
           <pre className="p-2 rounded bg-surface-900 text-[11px] text-surface-300 overflow-x-auto">
             {JSON.stringify(evidence.fullClaims, null, 2)}
           </pre>
         </div>
-      </div>
+      )}
     </div>
   )
 }
