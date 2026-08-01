@@ -89,10 +89,10 @@ func writeSCIMError(w http.ResponseWriter, status int, scimType string, detail s
 	w.Header().Set("Content-Type", "application/scim+json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:Error"},
-		"status":  status,
+		"schemas":  []string{"urn:ietf:params:scim:api:messages:2.0:Error"},
+		"status":   status,
 		"scimType": scimType,
-		"detail":  detail,
+		"detail":   detail,
 	})
 }
 
@@ -100,8 +100,8 @@ func writeSCIMError(w http.ResponseWriter, status int, scimType string, detail s
 type ProvisioningEvent struct {
 	ID        string                 `json:"id"`
 	Timestamp time.Time              `json:"timestamp"`
-	Source    string                 `json:"source"` // "okta", "azure", etc.
-	Action    string                 `json:"action"` // "create", "update", "delete"
+	Source    string                 `json:"source"`   // "okta", "azure", etc.
+	Action    string                 `json:"action"`   // "create", "update", "delete"
 	Resource  string                 `json:"resource"` // "User", "Group"
 	UserAgent string                 `json:"userAgent"`
 	Data      map[string]interface{} `json:"data"`
@@ -109,8 +109,8 @@ type ProvisioningEvent struct {
 
 // ProvisioningLog tracks provisioning events from external IdPs
 type ProvisioningLog struct {
-	events []ProvisioningEvent
-	mu     sync.RWMutex
+	events  []ProvisioningEvent
+	mu      sync.RWMutex
 	maxSize int
 }
 
@@ -152,22 +152,22 @@ func GetProvisioningEvents(limit int) []ProvisioningEvent {
 // DetectIdPSource attempts to detect the IdP from request headers
 func DetectIdPSource(r *http.Request) string {
 	userAgent := r.Header.Get("User-Agent")
-	
+
 	// Okta's SCIM client
 	if strings.Contains(userAgent, "Okta") {
 		return "okta"
 	}
-	
+
 	// Azure AD SCIM client
 	if strings.Contains(userAgent, "Azure") || strings.Contains(userAgent, "Microsoft") {
 		return "azure"
 	}
-	
+
 	// OneLogin
 	if strings.Contains(userAgent, "OneLogin") {
 		return "onelogin"
 	}
-	
+
 	// JumpCloud
 	if strings.Contains(userAgent, "JumpCloud") {
 		return "jumpcloud"
@@ -194,16 +194,16 @@ type InternalTokenResponse struct {
 // Security: Only responds to same-origin requests (Sec-Fetch-Site: same-origin)
 func HandleInternalToken(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// Security check: Only allow same-origin requests
 	// Modern browsers send Sec-Fetch-Site header for all requests
 	fetchSite := r.Header.Get("Sec-Fetch-Site")
 	origin := r.Header.Get("Origin")
 	referer := r.Header.Get("Referer")
-	
+
 	// Strict same-origin check
 	isSameOrigin := fetchSite == "same-origin" || fetchSite == "same-site"
-	
+
 	// Fallback for older browsers: check Origin matches our host
 	if !isSameOrigin && fetchSite == "" {
 		// If Origin header is present, it must match
@@ -216,9 +216,9 @@ func HandleInternalToken(w http.ResponseWriter, r *http.Request) {
 			isSameOrigin = strings.Contains(referer, host)
 		}
 	}
-	
+
 	config := loadAuthConfig()
-	
+
 	// For cross-origin requests, return status but never the token
 	if !isSameOrigin {
 		log.Printf("SCIM internal token request rejected: cross-origin (Sec-Fetch-Site: %s)", fetchSite)
@@ -229,7 +229,7 @@ func HandleInternalToken(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	// Same-origin request from Looking Glass
 	if !config.RequireAuth {
 		json.NewEncoder(w).Encode(InternalTokenResponse{
@@ -239,7 +239,7 @@ func HandleInternalToken(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	// Return the token for Looking Glass to use
 	json.NewEncoder(w).Encode(InternalTokenResponse{
 		Token:       config.APIToken,
@@ -248,4 +248,3 @@ func HandleInternalToken(w http.ResponseWriter, r *http.Request) {
 		Message:     "Token retrieved successfully",
 	})
 }
-

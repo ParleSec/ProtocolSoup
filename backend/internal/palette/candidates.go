@@ -12,12 +12,12 @@ import (
 // (FTS5, axis-value join, edge traversal). The ranker uses these traces
 // both to score the row and to emit visible match reasons.
 type candidate struct {
-	ID         string
-	BM25       float64
-	BM25Phrase string
-	axisHits   []axisHit
-	edgeHits   []edgeHit
-	aliasHits  []aliasHit
+	ID          string
+	BM25        float64
+	BM25Phrase  string
+	axisHits    []axisHit
+	edgeHits    []edgeHit
+	aliasHits   []aliasHit
 	protocolHit *protocolNameHit
 }
 

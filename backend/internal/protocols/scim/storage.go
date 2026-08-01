@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	ErrNotFound      = errors.New("resource not found")
-	ErrConflict      = errors.New("resource already exists")
+	ErrNotFound        = errors.New("resource not found")
+	ErrConflict        = errors.New("resource already exists")
 	ErrVersionConflict = errors.New("version conflict")
 )
 
@@ -36,7 +36,7 @@ func NewStorage(dataDir string) (*Storage, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "scim.db")
-	
+
 	// Open SQLite database with modernc.org/sqlite (pure Go, no CGO)
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
 	if err != nil {
@@ -183,7 +183,7 @@ func (s *Storage) GetUser(ctx context.Context, id string) (*User, error) {
 	var version int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT data, version FROM scim_users WHERE id = ?`, id).Scan(&data, &version)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -213,7 +213,7 @@ func (s *Storage) GetUserByUserName(ctx context.Context, userName string) (*User
 	var version int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT data, version FROM scim_users WHERE user_name = ?`, userName).Scan(&data, &version)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -243,7 +243,7 @@ func (s *Storage) UpdateUser(ctx context.Context, id string, user *User, expecte
 	var createdAt string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT version, created_at FROM scim_users WHERE id = ?`, id).Scan(&currentVersion, &createdAt)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -261,7 +261,7 @@ func (s *Storage) UpdateUser(ctx context.Context, id string, user *User, expecte
 	now := time.Now().UTC()
 	created, _ := time.Parse(time.RFC3339, createdAt)
 	newVersion := currentVersion + 1
-	
+
 	user.Meta = &Meta{
 		ResourceType: "User",
 		Created:      &created,
@@ -448,7 +448,7 @@ func (s *Storage) GetGroup(ctx context.Context, id string) (*Group, error) {
 	var version int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT data, version FROM scim_groups WHERE id = ?`, id).Scan(&data, &version)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -516,7 +516,7 @@ func (s *Storage) UpdateGroup(ctx context.Context, id string, group *Group, expe
 	var createdAt string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT version, created_at FROM scim_groups WHERE id = ?`, id).Scan(&currentVersion, &createdAt)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -532,7 +532,7 @@ func (s *Storage) UpdateGroup(ctx context.Context, id string, group *Group, expe
 	now := time.Now().UTC()
 	created, _ := time.Parse(time.RFC3339, createdAt)
 	newVersion := currentVersion + 1
-	
+
 	group.Meta = &Meta{
 		ResourceType: "Group",
 		Created:      &created,
@@ -740,7 +740,7 @@ func (s *Storage) GetSyncState(ctx context.Context, targetURL string) (time.Time
 	var cursor sql.NullString
 	err := s.db.QueryRowContext(ctx,
 		`SELECT last_sync, cursor FROM scim_sync_state WHERE target_url = ?`, targetURL).Scan(&lastSync, &cursor)
-	
+
 	if err == sql.ErrNoRows {
 		return time.Time{}, "", nil
 	}
@@ -911,4 +911,3 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 func boolPtr(b bool) *bool {
 	return &b
 }
-

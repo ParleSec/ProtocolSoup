@@ -198,8 +198,8 @@ func TestEndToEndIssueAndVerify(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	validity := ValidityInfo{
-		Signed:    now,
-		ValidFrom: now.Add(-time.Hour),
+		Signed:     now,
+		ValidFrom:  now.Add(-time.Hour),
 		ValidUntil: now.Add(365 * 24 * time.Hour),
 	}
 

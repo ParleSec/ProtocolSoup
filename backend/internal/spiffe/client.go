@@ -270,4 +270,3 @@ func (c *ServiceClient) Close() error {
 func (c *ServiceClient) ServiceID() spiffeid.ID {
 	return c.serviceID
 }
-

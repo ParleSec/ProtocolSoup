@@ -79,10 +79,10 @@ func getWorkloadRegistrationFlow() plugin.FlowDefinition {
 				To:          "SPIRE Agent",
 				Type:        "response",
 				Parameters: map[string]string{
-					"sync_type":       "Streaming gRPC (long-lived connection) or periodic polling",
-					"entries":         "Registration entries where parent_id matches this agent",
-					"sync_interval":   "Configurable polling interval (default varies by SPIRE version)",
-					"selective_sync":  "Only entries relevant to this specific agent node are transmitted",
+					"sync_type":      "Streaming gRPC (long-lived connection) or periodic polling",
+					"entries":        "Registration entries where parent_id matches this agent",
+					"sync_interval":  "Configurable polling interval (default varies by SPIRE version)",
+					"selective_sync": "Only entries relevant to this specific agent node are transmitted",
 				},
 				Security: []string{
 					"Agent-to-Server sync uses mTLS with the agent's SVID - mutually authenticated",
@@ -176,10 +176,10 @@ func getNodeAttestationFlow() plugin.FlowDefinition {
 				To:          "Server Node Attestor",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"join_token_verify":  "Lookup token in server's token store, consume on match (single-use)",
-					"aws_iid_verify":     "Verify PKCS#7 signature using AWS public certificate, optionally call DescribeInstances",
-					"gcp_iit_verify":     "Validate OIDC token signature using Google's public keys, check audience and claims",
-					"k8s_psat_verify":    "Validate JWT against Kubernetes API server's OIDC discovery endpoint",
+					"join_token_verify":   "Lookup token in server's token store, consume on match (single-use)",
+					"aws_iid_verify":      "Verify PKCS#7 signature using AWS public certificate, optionally call DescribeInstances",
+					"gcp_iit_verify":      "Validate OIDC token signature using Google's public keys, check audience and claims",
+					"k8s_psat_verify":     "Validate JWT against Kubernetes API server's OIDC discovery endpoint",
 					"agent_id_assignment": "Server assigns agent SPIFFE ID based on verified platform identity (e.g., spiffe://domain/agent/aws_iid/i-1234567890abcdef0)",
 				},
 				Security: []string{
@@ -231,10 +231,10 @@ func getWorkloadAttestationFlow() plugin.FlowDefinition {
 				To:          "SPIRE Agent",
 				Type:        "request",
 				Parameters: map[string]string{
-					"socket_path":  "/run/spire/sockets/agent.sock (configurable, SPIFFE Workload API spec §3)",
-					"protocol":     "gRPC over Unix Domain Socket",
-					"peer_creds":   "Kernel provides PID, UID, GID of connecting process via SO_PEERCRED",
-					"api_method":   "FetchX509SVID, FetchJWTSVID, or FetchX509Bundles",
+					"socket_path": "/run/spire/sockets/agent.sock (configurable, SPIFFE Workload API spec §3)",
+					"protocol":    "gRPC over Unix Domain Socket",
+					"peer_creds":  "Kernel provides PID, UID, GID of connecting process via SO_PEERCRED",
+					"api_method":  "FetchX509SVID, FetchJWTSVID, or FetchX509Bundles",
 				},
 				Security: []string{
 					"Unix Domain Socket is local-only - cannot be accessed from remote hosts",
@@ -251,12 +251,12 @@ func getWorkloadAttestationFlow() plugin.FlowDefinition {
 				To:          "Workload Attestor Plugins",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"pid":       "Process ID from SO_PEERCRED (kernel-verified, unforgeable)",
-					"uid":       "User ID of the calling process",
-					"gid":       "Group ID of the calling process",
-					"exe_path":  "Executable binary path from /proc/{pid}/exe",
-					"cmdline":   "Command line arguments from /proc/{pid}/cmdline",
-					"cgroups":   "Control group membership from /proc/{pid}/cgroup (used by Docker/K8s attestors)",
+					"pid":      "Process ID from SO_PEERCRED (kernel-verified, unforgeable)",
+					"uid":      "User ID of the calling process",
+					"gid":      "Group ID of the calling process",
+					"exe_path": "Executable binary path from /proc/{pid}/exe",
+					"cmdline":  "Command line arguments from /proc/{pid}/cmdline",
+					"cgroups":  "Control group membership from /proc/{pid}/cgroup (used by Docker/K8s attestors)",
 				},
 				Security: []string{
 					"Agent MUST run with sufficient privileges to read /proc/{pid} of calling processes",
@@ -293,9 +293,9 @@ func getWorkloadAttestationFlow() plugin.FlowDefinition {
 				Type:        "internal",
 				Parameters: map[string]string{
 					"matching_algorithm": "Entry matches if entry.selectors ⊆ workload.selectors (all entry selectors present)",
-					"multi_match":       "Multiple matching entries = multiple SVIDs returned to workload",
-					"no_match":          "Zero matching entries = request denied (deny by default)",
-					"parent_filter":     "Only entries where parent_id matches this agent's SPIFFE ID are considered",
+					"multi_match":        "Multiple matching entries = multiple SVIDs returned to workload",
+					"no_match":           "Zero matching entries = request denied (deny by default)",
+					"parent_filter":      "Only entries where parent_id matches this agent's SPIFFE ID are considered",
 				},
 				Security: []string{
 					"Deny by default: no registration entry match = no SVID issued",
@@ -312,10 +312,10 @@ func getWorkloadAttestationFlow() plugin.FlowDefinition {
 				To:          "Workload",
 				Type:        "response",
 				Parameters: map[string]string{
-					"spiffe_id":  "spiffe://trust-domain/workload/path - from matching registration entry",
-					"ttl":        "SVID lifetime from registration entry TTL (or server default)",
-					"dns_names":  "DNS SANs from registration entry (for X.509-SVIDs)",
-					"hint":       "Suggested name for workload to use when selecting among multiple SVIDs",
+					"spiffe_id": "spiffe://trust-domain/workload/path - from matching registration entry",
+					"ttl":       "SVID lifetime from registration entry TTL (or server default)",
+					"dns_names": "DNS SANs from registration entry (for X.509-SVIDs)",
+					"hint":      "Suggested name for workload to use when selecting among multiple SVIDs",
 				},
 				Security: []string{
 					"Workloads CANNOT choose their own identity - it is assigned by the infrastructure",
@@ -346,8 +346,8 @@ func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "SPIRE Agent",
 				Type:        "request",
 				Parameters: map[string]string{
-					"api_method":    "SpiffeWorkloadAPI.FetchX509SVID (server-streaming gRPC, SPIFFE Workload API spec §6.1)",
-					"connection":    "Unix Domain Socket (no TLS - local only, SPIFFE Workload API spec §3)",
+					"api_method":      "SpiffeWorkloadAPI.FetchX509SVID (server-streaming gRPC, SPIFFE Workload API spec §6.1)",
+					"connection":      "Unix Domain Socket (no TLS - local only, SPIFFE Workload API spec §3)",
 					"security_header": "No authentication required - identity determined by workload attestation",
 				},
 				Security: []string{
@@ -365,10 +365,10 @@ func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "Key Manager",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"algorithm":    "EC P-256 (RECOMMENDED by SPIFFE spec), EC P-384, RSA 2048, or RSA 4096",
-					"key_id":       "Unique identifier for key lifecycle tracking",
-					"key_storage":  "Memory (default, keys lost on restart) or Disk (persisted, encrypted)",
-					"rotation":     "New key pair generated on each SVID renewal - forward secrecy",
+					"algorithm":   "EC P-256 (RECOMMENDED by SPIFFE spec), EC P-384, RSA 2048, or RSA 4096",
+					"key_id":      "Unique identifier for key lifecycle tracking",
+					"key_storage": "Memory (default, keys lost on restart) or Disk (persisted, encrypted)",
+					"rotation":    "New key pair generated on each SVID renewal - forward secrecy",
 				},
 				Security: []string{
 					"Private key is generated by the agent, not the workload - centralized key management",
@@ -385,11 +385,11 @@ func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "SPIRE Server",
 				Type:        "request",
 				Parameters: map[string]string{
-					"csr":           "X.509 Certificate Signing Request with workload's public key",
-					"spiffe_id":     "Set by server from registration entry (not in CSR, SPIFFE X.509-SVID spec §2)",
-					"dns_names":     "DNS SANs from registration entry dns_names field (OPTIONAL)",
-					"ttl_hint":      "Requested TTL from registration entry (server enforces maximum)",
-					"entry_id":      "Registration entry ID that authorized this SVID",
+					"csr":       "X.509 Certificate Signing Request with workload's public key",
+					"spiffe_id": "Set by server from registration entry (not in CSR, SPIFFE X.509-SVID spec §2)",
+					"dns_names": "DNS SANs from registration entry dns_names field (OPTIONAL)",
+					"ttl_hint":  "Requested TTL from registration entry (server enforces maximum)",
+					"entry_id":  "Registration entry ID that authorized this SVID",
 				},
 				Security: []string{
 					"CSR contains ONLY the public key - SPIFFE ID is set server-side to prevent spoofing",
@@ -406,14 +406,14 @@ func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "Certificate Authority",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"issuer":         "SPIRE's signing CA (intermediate CA under the trust domain root)",
-					"uri_san":        "spiffe://trust-domain/workload/path (REQUIRED, exactly one, SPIFFE X.509-SVID spec §2)",
-					"dns_sans":       "Optional DNS names from registration entry",
-					"serial_number":  "Unique serial number (cryptographically random, per RFC 5280 §4.1.2.2)",
-					"not_before":     "Current time (with small backdate for clock skew)",
-					"not_after":      "Current time + TTL (typically 1 hour, SPIFFE recommendation: short-lived)",
-					"key_usage":      "digitalSignature, keyEncipherment (SPIFFE X.509-SVID spec §4.3)",
-					"ext_key_usage":  "serverAuth, clientAuth (SPIFFE X.509-SVID spec §4.4)",
+					"issuer":        "SPIRE's signing CA (intermediate CA under the trust domain root)",
+					"uri_san":       "spiffe://trust-domain/workload/path (REQUIRED, exactly one, SPIFFE X.509-SVID spec §2)",
+					"dns_sans":      "Optional DNS names from registration entry",
+					"serial_number": "Unique serial number (cryptographically random, per RFC 5280 §4.1.2.2)",
+					"not_before":    "Current time (with small backdate for clock skew)",
+					"not_after":     "Current time + TTL (typically 1 hour, SPIFFE recommendation: short-lived)",
+					"key_usage":     "digitalSignature, keyEncipherment (SPIFFE X.509-SVID spec §4.3)",
+					"ext_key_usage": "serverAuth, clientAuth (SPIFFE X.509-SVID spec §4.4)",
 				},
 				Security: []string{
 					"X.509-SVID MUST contain exactly one URI SAN with the SPIFFE ID (spec §2)",
@@ -430,12 +430,12 @@ func getX509SVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "Workload",
 				Type:        "response",
 				Parameters: map[string]string{
-					"x509_svid":       "Signed X.509 certificate chain (leaf + intermediate CA certificates)",
-					"private_key":     "Private key corresponding to the SVID certificate (PEM-encoded)",
-					"trust_bundle":    "Trust domain root CA certificates for verifying peer SVIDs",
+					"x509_svid":         "Signed X.509 certificate chain (leaf + intermediate CA certificates)",
+					"private_key":       "Private key corresponding to the SVID certificate (PEM-encoded)",
+					"trust_bundle":      "Trust domain root CA certificates for verifying peer SVIDs",
 					"federated_bundles": "Root CAs for federated trust domains (if federation is configured)",
-					"spiffe_id":       "The SPIFFE ID encoded in the certificate's URI SAN",
-					"hint":            "Suggested use label for workloads receiving multiple SVIDs",
+					"spiffe_id":         "The SPIFFE ID encoded in the certificate's URI SAN",
+					"hint":              "Suggested use label for workloads receiving multiple SVIDs",
 				},
 				Security: []string{
 					"Private key is transmitted over the Unix socket (local only) - never over network",
@@ -466,10 +466,10 @@ func getJWTSVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "SPIRE Agent",
 				Type:        "request",
 				Parameters: map[string]string{
-					"api_method":  "SpiffeWorkloadAPI.FetchJWTSVID (unary gRPC, SPIFFE Workload API spec §6.3)",
-					"audience":    "REQUIRED - intended recipient service (e.g., spiffe://domain/backend or https://api.example.com)",
-					"spiffe_id":   "OPTIONAL - requested SPIFFE ID (if workload has multiple, selects which to use)",
-					"connection":  "Unix Domain Socket (local only, no TLS)",
+					"api_method": "SpiffeWorkloadAPI.FetchJWTSVID (unary gRPC, SPIFFE Workload API spec §6.3)",
+					"audience":   "REQUIRED - intended recipient service (e.g., spiffe://domain/backend or https://api.example.com)",
+					"spiffe_id":  "OPTIONAL - requested SPIFFE ID (if workload has multiple, selects which to use)",
+					"connection": "Unix Domain Socket (local only, no TLS)",
 				},
 				Security: []string{
 					"Audience parameter is REQUIRED - prevents token reuse at unintended services (JWT-SVID spec §3)",
@@ -486,10 +486,10 @@ func getJWTSVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "SPIRE Server",
 				Type:        "request",
 				Parameters: map[string]string{
-					"spiffe_id":  "Workload's SPIFFE ID from registration entry matching (set by agent, not workload)",
-					"audience":   "Forwarded from workload request - bound into the JWT 'aud' claim",
-					"ttl":        "Requested TTL from registration entry configuration (server enforces maximum)",
-					"entry_id":   "Registration entry that authorized this JWT-SVID",
+					"spiffe_id": "Workload's SPIFFE ID from registration entry matching (set by agent, not workload)",
+					"audience":  "Forwarded from workload request - bound into the JWT 'aud' claim",
+					"ttl":       "Requested TTL from registration entry configuration (server enforces maximum)",
+					"entry_id":  "Registration entry that authorized this JWT-SVID",
 				},
 				Security: []string{
 					"Agent-to-server mTLS ensures the request is from an authorized agent",
@@ -530,10 +530,10 @@ func getJWTSVIDIssuanceFlow() plugin.FlowDefinition {
 				To:          "Workload",
 				Type:        "response",
 				Parameters: map[string]string{
-					"jwt_svid":   "Signed JWT token (compact serialization: header.payload.signature)",
-					"spiffe_id":  "SPIFFE ID encoded in the 'sub' claim",
-					"expiry":     "Token expiration time (from 'exp' claim)",
-					"usage":      "Authorization: Bearer {jwt_svid} in HTTP headers or gRPC metadata",
+					"jwt_svid":  "Signed JWT token (compact serialization: header.payload.signature)",
+					"spiffe_id": "SPIFFE ID encoded in the 'sub' claim",
+					"expiry":    "Token expiration time (from 'exp' claim)",
+					"usage":     "Authorization: Bearer {jwt_svid} in HTTP headers or gRPC metadata",
 				},
 				Security: []string{
 					"JWT-SVIDs should be used immediately and fetched fresh for each request (not cached long-term)",
@@ -564,10 +564,10 @@ func getMTLSHandshakeFlow() plugin.FlowDefinition {
 				To:          "Server Service",
 				Type:        "request",
 				Parameters: map[string]string{
-					"tls_version":    "TLS 1.3 (RECOMMENDED) or TLS 1.2 (RFC 8446 / RFC 5246)",
-					"cipher_suites":  "TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3)",
+					"tls_version":      "TLS 1.3 (RECOMMENDED) or TLS 1.2 (RFC 8446 / RFC 5246)",
+					"cipher_suites":    "TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256 (TLS 1.3)",
 					"supported_groups": "x25519, secp256r1, secp384r1 (for key exchange)",
-					"extensions":     "supported_versions, signature_algorithms, server_name (SNI)",
+					"extensions":       "supported_versions, signature_algorithms, server_name (SNI)",
 				},
 				Security: []string{
 					"TLS 1.3 is strongly recommended - mandatory forward secrecy and faster handshake",
@@ -583,9 +583,9 @@ func getMTLSHandshakeFlow() plugin.FlowDefinition {
 				To:          "Client Service",
 				Type:        "response",
 				Parameters: map[string]string{
-					"certificate":       "Server's X.509-SVID leaf certificate",
-					"certificate_chain": "Intermediate CA certificates (SPIRE intermediate CA → root)",
-					"uri_san":           "spiffe://trust-domain/server/path (SPIFFE ID in SAN, X.509-SVID spec §2)",
+					"certificate":        "Server's X.509-SVID leaf certificate",
+					"certificate_chain":  "Intermediate CA certificates (SPIRE intermediate CA → root)",
+					"uri_san":            "spiffe://trust-domain/server/path (SPIFFE ID in SAN, X.509-SVID spec §2)",
 					"certificate_verify": "Signature proving server holds the private key (TLS 1.3, RFC 8446 §4.4.3)",
 				},
 				Security: []string{
@@ -602,9 +602,9 @@ func getMTLSHandshakeFlow() plugin.FlowDefinition {
 				To:          "Client Service",
 				Type:        "request",
 				Parameters: map[string]string{
-					"certificate_request":   "TLS CertificateRequest message (RFC 8446 §4.3.2)",
+					"certificate_request":     "TLS CertificateRequest message (RFC 8446 §4.3.2)",
 					"certificate_authorities": "Trust bundle root CAs the server accepts (SPIFFE trust bundle CAs)",
-					"signature_algorithms":  "Acceptable signature algorithms for client certificate",
+					"signature_algorithms":    "Acceptable signature algorithms for client certificate",
 				},
 				Security: []string{
 					"Mutual TLS requires BOTH sides to present certificates - not just the server",
@@ -620,9 +620,9 @@ func getMTLSHandshakeFlow() plugin.FlowDefinition {
 				To:          "Server Service",
 				Type:        "response",
 				Parameters: map[string]string{
-					"certificate":       "Client's X.509-SVID leaf certificate",
-					"certificate_chain": "Intermediate CA certificates to trust domain root",
-					"uri_san":           "spiffe://trust-domain/client/path (client's SPIFFE ID)",
+					"certificate":        "Client's X.509-SVID leaf certificate",
+					"certificate_chain":  "Intermediate CA certificates to trust domain root",
+					"uri_san":            "spiffe://trust-domain/client/path (client's SPIFFE ID)",
 					"certificate_verify": "Signature proving client holds the private key",
 				},
 				Security: []string{
@@ -660,11 +660,11 @@ func getMTLSHandshakeFlow() plugin.FlowDefinition {
 				To:          "Authorization Policy",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"peer_spiffe_id":  "Extracted from peer certificate URI SAN (e.g., spiffe://domain/frontend)",
-					"allowed_ids":     "Exact SPIFFE ID match (e.g., spiffe://domain/frontend)",
+					"peer_spiffe_id":   "Extracted from peer certificate URI SAN (e.g., spiffe://domain/frontend)",
+					"allowed_ids":      "Exact SPIFFE ID match (e.g., spiffe://domain/frontend)",
 					"allowed_patterns": "Path-based patterns (e.g., spiffe://domain/team-a/*)",
-					"allowed_domains": "Trust domain membership (e.g., any ID in spiffe://partner-domain/...)",
-					"action":          "Allow or deny the request based on policy evaluation",
+					"allowed_domains":  "Trust domain membership (e.g., any ID in spiffe://partner-domain/...)",
+					"action":           "Allow or deny the request based on policy evaluation",
 				},
 				Security: []string{
 					"Authentication (TLS) and authorization (policy) are separate concerns - both are required",
@@ -715,10 +715,10 @@ func getCertificateRotationFlow() plugin.FlowDefinition {
 				To:          "SVID Cache",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"check_interval":      "Periodic check (configurable, typically every 5-30 seconds)",
-					"rotation_threshold":  "Percentage of SVID lifetime at which to begin renewal (default: 50%)",
-					"svid_ttl":            "Total SVID lifetime (e.g., 1 hour = renewal at 30 minutes remaining)",
-					"backoff_on_failure":  "Exponential backoff if server is unreachable during rotation",
+					"check_interval":     "Periodic check (configurable, typically every 5-30 seconds)",
+					"rotation_threshold": "Percentage of SVID lifetime at which to begin renewal (default: 50%)",
+					"svid_ttl":           "Total SVID lifetime (e.g., 1 hour = renewal at 30 minutes remaining)",
+					"backoff_on_failure": "Exponential backoff if server is unreachable during rotation",
 				},
 				Security: []string{
 					"Early rotation ensures SVIDs are renewed well before expiration - no gap in identity",
@@ -735,10 +735,10 @@ func getCertificateRotationFlow() plugin.FlowDefinition {
 				To:          "SPIRE Server",
 				Type:        "request",
 				Parameters: map[string]string{
-					"new_csr":          "Fresh Certificate Signing Request with new public key",
-					"new_key_pair":     "Freshly generated EC P-256 or RSA key pair (not reused from previous SVID)",
-					"entry_id":         "Registration entry ID for this workload identity",
-					"agent_auth":       "Agent authenticates to server using its own (still valid) agent SVID via mTLS",
+					"new_csr":      "Fresh Certificate Signing Request with new public key",
+					"new_key_pair": "Freshly generated EC P-256 or RSA key pair (not reused from previous SVID)",
+					"entry_id":     "Registration entry ID for this workload identity",
+					"agent_auth":   "Agent authenticates to server using its own (still valid) agent SVID via mTLS",
 				},
 				Security: []string{
 					"New key pair on every rotation provides forward secrecy - old keys are discarded",
@@ -755,11 +755,11 @@ func getCertificateRotationFlow() plugin.FlowDefinition {
 				To:          "SPIRE Agent",
 				Type:        "response",
 				Parameters: map[string]string{
-					"new_x509_svid":    "Freshly signed X.509-SVID certificate with new validity period",
-					"new_serial":       "New unique serial number (different from previous SVID)",
-					"new_not_before":   "Current time (with backdate for clock skew)",
-					"new_not_after":    "Current time + TTL (fresh full lifetime)",
-					"updated_bundle":   "Trust bundle if CA keys have rotated (empty if unchanged)",
+					"new_x509_svid":  "Freshly signed X.509-SVID certificate with new validity period",
+					"new_serial":     "New unique serial number (different from previous SVID)",
+					"new_not_before": "Current time (with backdate for clock skew)",
+					"new_not_after":  "Current time + TTL (fresh full lifetime)",
+					"updated_bundle": "Trust bundle if CA keys have rotated (empty if unchanged)",
 				},
 				Security: []string{
 					"New SVID has a fresh full lifetime - no accumulated clock drift from previous SVID",
@@ -776,10 +776,10 @@ func getCertificateRotationFlow() plugin.FlowDefinition {
 				To:          "Workload",
 				Type:        "response",
 				Parameters: map[string]string{
-					"new_svid":          "New X.509-SVID certificate chain",
-					"new_private_key":   "New private key matching the new certificate",
-					"updated_bundle":    "Updated trust bundle (if CA rotation occurred)",
-					"delivery_method":   "Push via streaming gRPC (no polling, no restart required)",
+					"new_svid":        "New X.509-SVID certificate chain",
+					"new_private_key": "New private key matching the new certificate",
+					"updated_bundle":  "Updated trust bundle (if CA rotation occurred)",
+					"delivery_method": "Push via streaming gRPC (no polling, no restart required)",
 				},
 				Security: []string{
 					"Streaming delivery is immediate - no delay between agent receiving new SVID and workload receiving it",
@@ -796,11 +796,11 @@ func getCertificateRotationFlow() plugin.FlowDefinition {
 				To:          "TLS Stack",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"new_connections":    "Use new SVID certificate and private key",
+					"new_connections":      "Use new SVID certificate and private key",
 					"existing_connections": "Continue with old certificate until natural close (no disruption)",
-					"overlap_period":     "Old and new SVIDs are both valid during transition (old has remaining lifetime)",
-					"atomic_update":      "TLS config update is atomic - no window where neither cert is configured",
-					"old_key_cleanup":    "Old private key is securely zeroed from memory after transition",
+					"overlap_period":       "Old and new SVIDs are both valid during transition (old has remaining lifetime)",
+					"atomic_update":        "TLS config update is atomic - no window where neither cert is configured",
+					"old_key_cleanup":      "Old private key is securely zeroed from memory after transition",
 				},
 				Security: []string{
 					"Zero-downtime rotation: no service disruption, no dropped connections",
@@ -831,11 +831,11 @@ func getTrustBundleFederationFlow() plugin.FlowDefinition {
 				To:          "SPIRE Server",
 				Type:        "request",
 				Parameters: map[string]string{
-					"trust_domain":         "Foreign trust domain name (e.g., partner.example.com)",
-					"bundle_endpoint_url":  "URL to fetch the foreign bundle (e.g., https://spire.partner.example.com:8443/bundle)",
-					"endpoint_profile":     "https_spiffe (mTLS with SPIFFE) or https_web (Web PKI TLS for bootstrap)",
-					"endpoint_spiffe_id":   "Expected SPIFFE ID of the bundle endpoint server (for https_spiffe profile)",
-					"bundle_refresh_hint":  "How often to re-fetch the foreign bundle (e.g., 300s)",
+					"trust_domain":        "Foreign trust domain name (e.g., partner.example.com)",
+					"bundle_endpoint_url": "URL to fetch the foreign bundle (e.g., https://spire.partner.example.com:8443/bundle)",
+					"endpoint_profile":    "https_spiffe (mTLS with SPIFFE) or https_web (Web PKI TLS for bootstrap)",
+					"endpoint_spiffe_id":  "Expected SPIFFE ID of the bundle endpoint server (for https_spiffe profile)",
+					"bundle_refresh_hint": "How often to re-fetch the foreign bundle (e.g., 300s)",
 				},
 				Security: []string{
 					"Federation is an explicit trust decision - only federate with verified partner domains",
@@ -852,9 +852,9 @@ func getTrustBundleFederationFlow() plugin.FlowDefinition {
 				To:          "Foreign SPIRE Server",
 				Type:        "request",
 				Parameters: map[string]string{
-					"endpoint":     "GET https://foreign-server:8443/.well-known/spiffe-bundle (standard path) or custom URL",
-					"format":       "JWKS (JSON Web Key Set) with x5c parameter containing X.509 CA certificates",
-					"content_type": "application/json (SPIFFE Trust Domain and Bundle spec §4.1)",
+					"endpoint":       "GET https://foreign-server:8443/.well-known/spiffe-bundle (standard path) or custom URL",
+					"format":         "JWKS (JSON Web Key Set) with x5c parameter containing X.509 CA certificates",
+					"content_type":   "application/json (SPIFFE Trust Domain and Bundle spec §4.1)",
 					"authentication": "https_spiffe: mTLS with SPIFFE SVIDs | https_web: Web PKI TLS certificates",
 				},
 				Security: []string{
@@ -872,11 +872,11 @@ func getTrustBundleFederationFlow() plugin.FlowDefinition {
 				To:          "Datastore",
 				Type:        "internal",
 				Parameters: map[string]string{
-					"bundle_type":    "foreign (distinct from local trust domain bundle)",
-					"trust_domain":   "Foreign trust domain name (e.g., partner.example.com)",
-					"refresh_hint":   "Seconds until next fetch (from bundle endpoint or admin config)",
+					"bundle_type":     "foreign (distinct from local trust domain bundle)",
+					"trust_domain":    "Foreign trust domain name (e.g., partner.example.com)",
+					"refresh_hint":    "Seconds until next fetch (from bundle endpoint or admin config)",
 					"ca_certificates": "Foreign domain's root CA X.509 certificates (from JWKS x5c)",
-					"last_fetched":   "UTC timestamp of last successful bundle fetch",
+					"last_fetched":    "UTC timestamp of last successful bundle fetch",
 				},
 				Security: []string{
 					"Foreign bundles are stored separately from the local trust domain bundle",
@@ -912,9 +912,9 @@ func getTrustBundleFederationFlow() plugin.FlowDefinition {
 				To:          "Foreign Workload",
 				Type:        "request",
 				Parameters: map[string]string{
-					"local_svid":          "spiffe://local-domain/service-a (presented to foreign workload)",
-					"foreign_svid":        "spiffe://foreign-domain/service-b (received from foreign workload)",
-					"local_verification":  "Verify foreign SVID against federated bundle for foreign-domain",
+					"local_svid":           "spiffe://local-domain/service-a (presented to foreign workload)",
+					"foreign_svid":         "spiffe://foreign-domain/service-b (received from foreign workload)",
+					"local_verification":   "Verify foreign SVID against federated bundle for foreign-domain",
 					"foreign_verification": "Foreign workload verifies local SVID against their copy of local-domain's bundle",
 				},
 				Security: []string{
@@ -927,4 +927,3 @@ func getTrustBundleFederationFlow() plugin.FlowDefinition {
 		},
 	}
 }
-

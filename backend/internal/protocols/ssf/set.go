@@ -30,18 +30,18 @@ type SETClaims struct {
 
 // EventPayload represents the payload within an event
 type EventPayload struct {
-	Subject          *SETSubject `json:"subject,omitempty"`
-	EventTimestamp   int64       `json:"event_timestamp,omitempty"`
-	Reason           string      `json:"reason,omitempty"`
-	InitiatingEntity string      `json:"initiating_entity,omitempty"`
-	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
-	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
-	CredentialType   string      `json:"credential_type,omitempty"`
-	ChangeType       string      `json:"change_type,omitempty"`    // CAEP §3.2: create | revoke | update
-	CurrentStatus    string      `json:"current_status,omitempty"` // For device compliance change (CAEP §3.4)
-	PreviousStatus   string      `json:"previous_status,omitempty"`
-	CurrentLevel     string      `json:"current_level,omitempty"`  // For assurance level change (CAEP §3.3)
-	PreviousLevel    string      `json:"previous_level,omitempty"`
+	Subject          *SETSubject            `json:"subject,omitempty"`
+	EventTimestamp   int64                  `json:"event_timestamp,omitempty"`
+	Reason           string                 `json:"reason,omitempty"`
+	InitiatingEntity string                 `json:"initiating_entity,omitempty"`
+	ReasonAdmin      *ReasonInfo            `json:"reason_admin,omitempty"`
+	ReasonUser       *ReasonInfo            `json:"reason_user,omitempty"`
+	CredentialType   string                 `json:"credential_type,omitempty"`
+	ChangeType       string                 `json:"change_type,omitempty"`    // CAEP §3.2: create | revoke | update
+	CurrentStatus    string                 `json:"current_status,omitempty"` // For device compliance change (CAEP §3.4)
+	PreviousStatus   string                 `json:"previous_status,omitempty"`
+	CurrentLevel     string                 `json:"current_level,omitempty"` // For assurance level change (CAEP §3.3)
+	PreviousLevel    string                 `json:"previous_level,omitempty"`
 	NewValue         string                 `json:"new-value,omitempty"`
 	OldValue         string                 `json:"old-value,omitempty"`
 	Claims           map[string]interface{} `json:"claims,omitempty"` // CAEP §3.2: changed claims
@@ -243,10 +243,10 @@ func (d *SETDecoder) Decode(tokenString string) (*DecodedSET, error) {
 
 		metadata := GetEventMetadata(eventType)
 		decoded.Events = append(decoded.Events, DecodedEvent{
-			Type:            eventType,
-			Metadata:        metadata,
-			Payload:         eventPayload,
-			RawPayload:      payload,
+			Type:       eventType,
+			Metadata:   metadata,
+			Payload:    eventPayload,
+			RawPayload: payload,
 		})
 	}
 
@@ -325,6 +325,3 @@ type DecodedEvent struct {
 	Payload    EventPayload  `json:"payload"`
 	RawPayload interface{}   `json:"raw_payload"`
 }
-
-
-

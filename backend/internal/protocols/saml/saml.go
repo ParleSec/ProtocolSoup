@@ -20,11 +20,11 @@ const (
 
 // SAML 2.0 NameID Formats
 const (
-	NameIDFormatUnspecified  = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
-	NameIDFormatEmail        = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
-	NameIDFormatPersistent   = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
-	NameIDFormatTransient    = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
-	NameIDFormatEntity       = "urn:oasis:names:tc:SAML:2.0:nameid-format:entity"
+	NameIDFormatUnspecified = "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified"
+	NameIDFormatEmail       = "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+	NameIDFormatPersistent  = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent"
+	NameIDFormatTransient   = "urn:oasis:names:tc:SAML:2.0:nameid-format:transient"
+	NameIDFormatEntity      = "urn:oasis:names:tc:SAML:2.0:nameid-format:entity"
 )
 
 // SAML 2.0 Bindings
@@ -124,12 +124,12 @@ type AudienceRestriction struct {
 
 // AuthnStatement represents the SAML AuthnStatement element
 type AuthnStatement struct {
-	XMLName             xml.Name      `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnStatement"`
-	AuthnInstant        string        `xml:"AuthnInstant,attr"`
-	SessionIndex        string        `xml:"SessionIndex,attr,omitempty"`
-	SessionNotOnOrAfter string        `xml:"SessionNotOnOrAfter,attr,omitempty"`
+	XMLName             xml.Name         `xml:"urn:oasis:names:tc:SAML:2.0:assertion AuthnStatement"`
+	AuthnInstant        string           `xml:"AuthnInstant,attr"`
+	SessionIndex        string           `xml:"SessionIndex,attr,omitempty"`
+	SessionNotOnOrAfter string           `xml:"SessionNotOnOrAfter,attr,omitempty"`
 	SubjectLocality     *SubjectLocality `xml:"SubjectLocality,omitempty"`
-	AuthnContext        *AuthnContext `xml:"AuthnContext"`
+	AuthnContext        *AuthnContext    `xml:"AuthnContext"`
 }
 
 // SubjectLocality represents the SAML SubjectLocality element
@@ -173,10 +173,10 @@ type AttributeValue struct {
 
 // Signature represents the XML digital signature element
 type Signature struct {
-	XMLName        xml.Name    `xml:"http://www.w3.org/2000/09/xmldsig# Signature"`
-	SignedInfo     SignedInfo  `xml:"SignedInfo"`
-	SignatureValue string      `xml:"SignatureValue"`
-	KeyInfo        *KeyInfo    `xml:"KeyInfo,omitempty"`
+	XMLName        xml.Name   `xml:"http://www.w3.org/2000/09/xmldsig# Signature"`
+	SignedInfo     SignedInfo `xml:"SignedInfo"`
+	SignatureValue string     `xml:"SignatureValue"`
+	KeyInfo        *KeyInfo   `xml:"KeyInfo,omitempty"`
 }
 
 // SignedInfo represents the SignedInfo element
@@ -244,24 +244,24 @@ type X509Data struct {
 
 // AuthnRequest represents a SAML AuthnRequest message
 type AuthnRequest struct {
-	XMLName                        xml.Name  `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
-	SAMLP                          string    `xml:"xmlns:samlp,attr"`
-	SAML                           string    `xml:"xmlns:saml,attr"`
-	ID                             string    `xml:"ID,attr"`
-	Version                        string    `xml:"Version,attr"`
-	IssueInstant                   string    `xml:"IssueInstant,attr"`
-	Destination                    string    `xml:"Destination,attr,omitempty"`
-	ProtocolBinding                string    `xml:"ProtocolBinding,attr,omitempty"`
-	AssertionConsumerServiceURL    string    `xml:"AssertionConsumerServiceURL,attr,omitempty"`
-	AssertionConsumerServiceIndex  int       `xml:"AssertionConsumerServiceIndex,attr,omitempty"`
-	AttributeConsumingServiceIndex int       `xml:"AttributeConsumingServiceIndex,attr,omitempty"`
-	ForceAuthn                     bool      `xml:"ForceAuthn,attr,omitempty"`
-	IsPassive                      bool      `xml:"IsPassive,attr,omitempty"`
-	ProviderName                   string    `xml:"ProviderName,attr,omitempty"`
-	Consent                        string    `xml:"Consent,attr,omitempty"`
-	Issuer                         *Issuer   `xml:"Issuer,omitempty"`
-	Signature                      *Signature `xml:"Signature,omitempty"`
-	NameIDPolicy                   *NameIDPolicy `xml:"NameIDPolicy,omitempty"`
+	XMLName                        xml.Name               `xml:"urn:oasis:names:tc:SAML:2.0:protocol AuthnRequest"`
+	SAMLP                          string                 `xml:"xmlns:samlp,attr"`
+	SAML                           string                 `xml:"xmlns:saml,attr"`
+	ID                             string                 `xml:"ID,attr"`
+	Version                        string                 `xml:"Version,attr"`
+	IssueInstant                   string                 `xml:"IssueInstant,attr"`
+	Destination                    string                 `xml:"Destination,attr,omitempty"`
+	ProtocolBinding                string                 `xml:"ProtocolBinding,attr,omitempty"`
+	AssertionConsumerServiceURL    string                 `xml:"AssertionConsumerServiceURL,attr,omitempty"`
+	AssertionConsumerServiceIndex  int                    `xml:"AssertionConsumerServiceIndex,attr,omitempty"`
+	AttributeConsumingServiceIndex int                    `xml:"AttributeConsumingServiceIndex,attr,omitempty"`
+	ForceAuthn                     bool                   `xml:"ForceAuthn,attr,omitempty"`
+	IsPassive                      bool                   `xml:"IsPassive,attr,omitempty"`
+	ProviderName                   string                 `xml:"ProviderName,attr,omitempty"`
+	Consent                        string                 `xml:"Consent,attr,omitempty"`
+	Issuer                         *Issuer                `xml:"Issuer,omitempty"`
+	Signature                      *Signature             `xml:"Signature,omitempty"`
+	NameIDPolicy                   *NameIDPolicy          `xml:"NameIDPolicy,omitempty"`
 	RequestedAuthnContext          *RequestedAuthnContext `xml:"RequestedAuthnContext,omitempty"`
 }
 
@@ -299,10 +299,10 @@ type Response struct {
 
 // Status represents the SAML Status element
 type Status struct {
-	XMLName       xml.Name       `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
-	StatusCode    StatusCode     `xml:"StatusCode"`
-	StatusMessage string         `xml:"StatusMessage,omitempty"`
-	StatusDetail  *StatusDetail  `xml:"StatusDetail,omitempty"`
+	XMLName       xml.Name      `xml:"urn:oasis:names:tc:SAML:2.0:protocol Status"`
+	StatusCode    StatusCode    `xml:"StatusCode"`
+	StatusMessage string        `xml:"StatusMessage,omitempty"`
+	StatusDetail  *StatusDetail `xml:"StatusDetail,omitempty"`
 }
 
 // StatusCode represents the SAML StatusCode element
@@ -423,7 +423,7 @@ func NewResponse(issuer, destination, inResponseTo string, success bool) *Respon
 	if !success {
 		statusCode = StatusResponder
 	}
-	
+
 	return &Response{
 		SAMLP:        NamespaceSAMLp,
 		SAML:         NamespaceSAML,
@@ -448,7 +448,7 @@ func NewAssertion(issuer, audience, nameID, nameIDFormat, sessionIndex string, a
 	now := TimeNow()
 	notOnOrAfter := TimeIn(5 * time.Minute)
 	sessionNotOnOrAfter := TimeIn(8 * time.Hour)
-	
+
 	assertion := &Assertion{
 		SAML:         NamespaceSAML,
 		ID:           GenerateID(),
@@ -486,7 +486,7 @@ func NewAssertion(issuer, audience, nameID, nameIDFormat, sessionIndex string, a
 			},
 		},
 	}
-	
+
 	// Add attributes if provided
 	if len(attributes) > 0 {
 		assertion.AttributeStatement = &AttributeStatement{
@@ -507,7 +507,7 @@ func NewAssertion(issuer, audience, nameID, nameIDFormat, sessionIndex string, a
 			assertion.AttributeStatement.Attributes = append(assertion.AttributeStatement.Attributes, attr)
 		}
 	}
-	
+
 	return assertion
 }
 
@@ -538,7 +538,7 @@ func NewLogoutResponse(issuer, destination, inResponseTo string, success bool) *
 	if !success {
 		statusCode = StatusPartialLogout
 	}
-	
+
 	return &LogoutResponse{
 		SAMLP:        NamespaceSAMLp,
 		SAML:         NamespaceSAML,
@@ -567,4 +567,3 @@ func Marshal(v interface{}) ([]byte, error) {
 func Unmarshal(data []byte, v interface{}) error {
 	return xml.Unmarshal(data, v)
 }
-

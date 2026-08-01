@@ -134,28 +134,28 @@ type RefinementChip struct {
 
 // Response is the JSON returned from Service.Query.
 type Response struct {
-	Query            string           `json:"query"`
-	Results          []Result         `json:"results"`
-	RefinementChips  []RefinementChip `json:"refinement_chips"`
-	ResolvedAliases  []ResolvedAlias  `json:"resolved_aliases"`
-	TotalCandidates  int              `json:"total_candidates"`
-	ElapsedMicros    int64            `json:"elapsed_micros"`
+	Query           string           `json:"query"`
+	Results         []Result         `json:"results"`
+	RefinementChips []RefinementChip `json:"refinement_chips"`
+	ResolvedAliases []ResolvedAlias  `json:"resolved_aliases"`
+	TotalCandidates int              `json:"total_candidates"`
+	ElapsedMicros   int64            `json:"elapsed_micros"`
 }
 
 // Weights tunes scoring per axis. Use-case matches outrank everything else,
 // protocol-name aliases second, patterns and actors third. Adjusted in
 // tests; never tuned per-request.
 type Weights struct {
-	BM25            float64
-	UseCase         float64
-	ProblemDomain   float64
-	Actor           float64
-	Pattern         float64
-	ProtocolName    float64
-	Edge            float64
-	RunnableBoost   float64
-	AliasArtefact   float64
-	StatusLivePref  float64
+	BM25           float64
+	UseCase        float64
+	ProblemDomain  float64
+	Actor          float64
+	Pattern        float64
+	ProtocolName   float64
+	Edge           float64
+	RunnableBoost  float64
+	AliasArtefact  float64
+	StatusLivePref float64
 }
 
 // DefaultWeights returns the production weight schedule.

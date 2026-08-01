@@ -128,4 +128,3 @@ func (r *Registry) Count() int {
 	defer r.mu.RUnlock()
 	return len(r.plugins)
 }
-
