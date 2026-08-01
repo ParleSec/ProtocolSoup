@@ -29,6 +29,8 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       { source: '/api/:path*', destination: `${backendOrigin}/api/:path*` },
+      { source: '/agentauth/:path*', destination: `${backendOrigin}/agentauth/:path*` },
+      { source: '/mcp/:path*', destination: `${backendOrigin}/mcp/:path*` },
       { source: '/oauth2/:path*', destination: `${backendOrigin}/oauth2/:path*` },
       { source: '/oidc/:path*', destination: `${backendOrigin}/oidc/:path*` },
       { source: '/oid4vci/:path*', destination: `${backendOrigin}/oid4vci/:path*` },
