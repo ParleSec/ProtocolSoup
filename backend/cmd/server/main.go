@@ -11,6 +11,8 @@ import (
 
 	"github.com/ParleSec/ProtocolSoup/internal/core"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/agentauth"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/mcp"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oid4vci"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oid4vp"
@@ -50,6 +52,15 @@ func main() {
 		log.Fatalf("Failed to register OIDC plugin: %v", err)
 	}
 
+	// Register agentic registration (auth.md) plugin. The OP advertises its
+	// endpoints in the agent_auth block of the origin's RFC 8414 metadata, so
+	// an agent that resolves the origin issuer discovers where to register.
+	agentAuthPlugin := agentauth.NewPlugin()
+	if err := registry.Register(agentAuthPlugin); err != nil {
+		log.Fatalf("Failed to register agentic registration plugin: %v", err)
+	}
+	oidcPlugin.SetAgentAuthProvider(agentAuthPlugin)
+
 	// Register OID4VCI plugin
 	oid4vciPlugin := oid4vci.NewPlugin()
 	if err := registry.Register(oid4vciPlugin); err != nil {
@@ -85,6 +96,14 @@ func main() {
 	if err := registry.Register(ssfPlugin); err != nil {
 		log.Fatalf("Failed to register SSF plugin: %v", err)
 	}
+
+	// Register the remote MCP server. Its tools read the registry, so it is
+	// registered last and handed the registry it will read from.
+	mcpPlugin := mcp.NewPlugin()
+	if err := registry.Register(mcpPlugin); err != nil {
+		log.Fatalf("Failed to register MCP plugin: %v", err)
+	}
+	mcpPlugin.SetRegistry(registry)
 
 	// Initialize all plugins
 	ctx := context.Background()
