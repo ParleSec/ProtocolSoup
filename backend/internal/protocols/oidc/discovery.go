@@ -7,6 +7,11 @@ import (
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
+// scopesSupported are the scope values the OP honours. UserInfo derives the
+// claims it returns from the scopes granted to the presented access token, so
+// the protected resource metadata (RFC 9728) advertises the same list.
+var scopesSupported = []string{"openid", "profile", "email", "address", "phone", "roles"}
+
 // handleDiscovery returns the OpenID Connect discovery document
 func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	issuer := p.mockIdP.GetIssuer()
@@ -19,7 +24,7 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		JwksURI:               issuer + "/oidc/.well-known/jwks.json",
 		RevocationEndpoint:    issuer + "/oauth2/revoke",
 		IntrospectionEndpoint: issuer + "/oauth2/introspect",
-		ScopesSupported:       []string{"openid", "profile", "email", "address", "phone", "roles"},
+		ScopesSupported:       scopesSupported,
 		// Canonical response_type sets actually handled by the authorization
 		// endpoint (OIDC Core 1.0 Section 3). response_type is an unordered
 		// space-delimited set, so the canonical OIDF orderings are advertised.
