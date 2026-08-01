@@ -1,0 +1,135 @@
+---
+title: "Agentic Registration"
+description: "Self-registration and credential issuance for autonomous agents, with an RFC 8628-style claim ceremony that binds an agent to a person."
+---
+
+# Agentic Registration (auth.md)
+
+An autonomous agent has no browser session to inherit and no operator to click
+through a consent screen, so the usual OAuth entry points do not fit it. The
+[auth.md](https://github.com/workos/auth.md) profile closes that gap: the agent
+registers itself over a back channel, receives a signed identity assertion, and
+exchanges that assertion for an access token. If a person later wants to take
+responsibility for the agent, a separate ceremony binds the two together.
+
+## Standards
+
+- [RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) -- JWT profile for OAuth 2.0 authorization grants
+- [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628) -- Device authorization grant, the model for the claim ceremony
+- [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) -- Authorization server metadata, which carries the `agent_auth` block
+- [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009) -- Token revocation
+- [auth.md](https://github.com/workos/auth.md) -- The agentic registration profile itself
+
+## Available Flows
+
+| Flow ID | Name | Description |
+|---------|------|-------------|
+| `agent_anonymous_registration` | Anonymous Agent Registration | Register, receive an identity assertion, exchange it for a pre-claim access token |
+| `agent_claim_ceremony` | Agent Claim Ceremony | A person approves a `user_code` and the agent's scope widens |
+
+## Endpoints
+
+The issuer is `{origin}/agentauth`, so RFC 8414 Section 3.1 places its metadata
+at `/.well-known/oauth-authorization-server/agentauth`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/.well-known/oauth-authorization-server/agentauth` | Authorization server metadata with the `agent_auth` block |
+| `POST` | `/agentauth/identity` | Register an agent and mint an identity assertion |
+| `POST` | `/agentauth/identity/claim` | Start a claim ceremony and issue a `user_code` |
+| `POST` | `/agentauth/identity/claim/complete` | Record a person's approval |
+| `GET` | `/agentauth/claim` | The verification page a person opens |
+| `POST` | `/agentauth/token` | Exchange an assertion, or poll while a claim is pending |
+| `POST` | `/agentauth/revoke` | Revoke a registration |
+
+The same `agent_auth` block is repeated in the origin issuer's metadata at
+`/.well-known/oauth-authorization-server`, because that is where an agent
+resolving the origin from Protected Resource Metadata will look first.
+
+## Registration
+
+Only anonymous registration is offered:
+
+```bash
+curl -X POST https://protocolsoup.com/agentauth/identity \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"anonymous"}'
+```
+
+The response carries an `identity_assertion`, an `agent_id`, and a
+`claim_token`. The claim token is the handle for the ceremony below and cannot
+be recovered from the assertion.
+
+An ID-JAG (`urn:ietf:params:oauth:token-type:id-jag`) is deliberately **not**
+accepted. Verifying one requires the key set of the agent provider that minted
+it, and this deployment federates with no provider, so `identity_types_supported`
+advertises `anonymous` alone rather than implying a check that never happens.
+
+## Exchanging the assertion
+
+The assertion is an authorization grant under RFC 7523 Section 2.1:
+
+```bash
+curl -X POST https://protocolsoup.com/agentauth/token \
+  -d 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer' \
+  --data-urlencode 'assertion=<identity_assertion>'
+```
+
+Section 3 of that RFC lists what the server checks first, and all of it is
+enforced: the signature, `iss` and `aud` both naming this server, `exp` in the
+future and `nbf` in the past, a subject that is still registered, and a `jti`
+that has not been seen. Assertions are single use. Every failure is reported as
+`invalid_grant` with no detail, so a caller cannot use the endpoint to
+distinguish a bad signature from an unknown agent.
+
+An unclaimed agent receives the scope `agent:read`.
+
+## The claim ceremony
+
+Widening an agent's scope requires a person, and the ceremony is built so the
+agent cannot stand in for one. It is the RFC 8628 device authorization grant
+with the roles renamed:
+
+1. The agent posts its `claim_token` and an email to `/agentauth/identity/claim`
+   and receives a `user_code`, a `verification_uri`, `expires_in` of 600, and
+   `interval` of 5.
+2. The agent shows the person the code. It must not open the URI itself.
+3. The person opens the verification page, enters the code, and approves.
+4. The agent polls `/agentauth/token` with
+   `grant_type=urn:workos:agent-auth:grant-type:claim`.
+
+Polling behaves as RFC 8628 Section 3.5 specifies: `authorization_pending`
+before approval, `slow_down` if the agent polls faster than the interval it was
+given, and `expired_token` once the code lapses. On success the agent receives
+an access token scoped `agent:read agent:write` and a **replacement** identity
+assertion carrying `claimed: true` and an incremented `assertion_version`. The
+original assertion is not edited, so both remain accurate records of what was
+true when each was issued.
+
+The `user_code` alphabet omits vowels and easily confused characters, following
+the guidance in RFC 8628 Section 6.1, and a code is retired the moment it is
+redeemed.
+
+## Sandbox deviation
+
+The verification page does **not** authenticate the person approving an agent.
+A production deployment MUST sign the person in before this step and bind the
+agent to that authenticated account rather than to an email the agent supplied;
+without that, anyone who learns a `user_code` within its ten-minute window can
+take ownership of the agent. The page says so, and the Looking Glass raises it
+as a vulnerability annotation during the flow, because the point of running the
+ceremony here is to show where the security actually comes from.
+
+## Revocation
+
+```bash
+curl -X POST https://protocolsoup.com/agentauth/revoke -d 'token=<claim_token>'
+```
+
+RFC 7009 Section 2.2 requires a `200` whether or not the token was recognised,
+so the endpoint cannot be used to probe which tokens exist. Revocation stops
+further assertions being redeemed. Access tokens already issued remain valid
+until they expire, which is why their lifetime is one hour.
+
+The event identifier published in `events_supported` is
+`https://schemas.workos.com/events/agent/auth/identity/assertion/revoked`.
