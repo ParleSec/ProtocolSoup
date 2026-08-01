@@ -52,7 +52,7 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 			"error":    "invalid_request",
 			"endpoint": "/oidc/userinfo",
 		})
-		writeOIDCError(w, http.StatusBadRequest, "invalid_request", "More than one method used to transmit the access token (RFC 6750 Section 2)")
+		p.writeUserInfoError(w, http.StatusBadRequest, "invalid_request", "More than one method used to transmit the access token (RFC 6750 Section 2)")
 		return
 	case authHeader != "":
 		parts := strings.SplitN(authHeader, " ", 2)
@@ -62,7 +62,7 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 				"authorization":   authHeader,
 				"expected_scheme": "Bearer",
 			})
-			writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Invalid Authorization header format")
+			p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Invalid Authorization header format")
 			return
 		}
 		accessToken = parts[1]
@@ -73,7 +73,7 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 			"error":    "invalid_token",
 			"endpoint": "/oidc/userinfo",
 		})
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "No access token presented (RFC 6750 Section 2)")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "No access token presented (RFC 6750 Section 2)")
 		return
 	}
 
@@ -85,7 +85,7 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 			"error":        err.Error(),
 			"token_length": len(accessToken),
 		})
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Token validation failed")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Token validation failed")
 		return
 	}
 
@@ -99,14 +99,14 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 			"error":    "invalid_token",
 			"endpoint": "/oidc/userinfo",
 		})
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "The access token has been revoked (RFC 6750 Section 3.1)")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "The access token has been revoked (RFC 6750 Section 3.1)")
 		return
 	}
 
 	// Get user ID from token
 	userID, ok := claims["sub"].(string)
 	if !ok {
-		writeOIDCError(w, http.StatusUnauthorized, "invalid_token", "Missing subject claim")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Missing subject claim")
 		return
 	}
 

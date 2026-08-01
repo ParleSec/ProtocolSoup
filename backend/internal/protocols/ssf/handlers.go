@@ -504,9 +504,9 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	case "token-claims-change":
 		// CAEP §3.2: claims is a JSON object of changed claim names -> new values
 		claims := map[string]interface{}{
-			"role":     "viewer",
-			"group":    []string{"security-team"},
-			"exp":      time.Now().Add(1 * time.Hour).Unix(),
+			"role":  "viewer",
+			"group": []string{"security-team"},
+			"exp":   time.Now().Add(1 * time.Hour).Unix(),
 		}
 		if req.CurrentStatus != "" {
 			claims["role"] = req.CurrentStatus // allow overriding via request
@@ -568,8 +568,8 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 					Method: r.Method,
 					URL:    fmt.Sprintf("/ssf/actions/%s", action),
 					Headers: map[string]string{
-						"Content-Type":    "application/json",
-						"X-Ssf-Session":   sessionID,
+						"Content-Type":  "application/json",
+						"X-Ssf-Session": sessionID,
 					},
 					Body: string(reqBody),
 				},

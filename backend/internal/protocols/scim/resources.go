@@ -200,16 +200,16 @@ func NewListResponse() *ListResponse {
 
 // ServiceProviderConfig describes SCIM service provider capabilities
 type ServiceProviderConfig struct {
-	Schemas               []string             `json:"schemas"`
-	DocumentationURI      string               `json:"documentationUri,omitempty"`
-	Patch                 SupportedConfig      `json:"patch"`
-	Bulk                  BulkConfig           `json:"bulk"`
-	Filter                FilterConfig         `json:"filter"`
-	ChangePassword        SupportedConfig      `json:"changePassword"`
-	Sort                  SupportedConfig      `json:"sort"`
-	ETag                  SupportedConfig      `json:"etag"`
-	AuthenticationSchemes []AuthScheme         `json:"authenticationSchemes"`
-	Meta                  *Meta                `json:"meta,omitempty"`
+	Schemas               []string        `json:"schemas"`
+	DocumentationURI      string          `json:"documentationUri,omitempty"`
+	Patch                 SupportedConfig `json:"patch"`
+	Bulk                  BulkConfig      `json:"bulk"`
+	Filter                FilterConfig    `json:"filter"`
+	ChangePassword        SupportedConfig `json:"changePassword"`
+	Sort                  SupportedConfig `json:"sort"`
+	ETag                  SupportedConfig `json:"etag"`
+	AuthenticationSchemes []AuthScheme    `json:"authenticationSchemes"`
+	Meta                  *Meta           `json:"meta,omitempty"`
 }
 
 // SupportedConfig indicates whether a feature is supported
@@ -363,16 +363,16 @@ type ErrorResponse struct {
 
 // SCIM error types per RFC 7644 Section 3.12
 const (
-	ErrorTypeInvalidFilter    = "invalidFilter"
-	ErrorTypeTooMany          = "tooMany"
-	ErrorTypeUniqueness       = "uniqueness"
-	ErrorTypeMutability       = "mutability"
-	ErrorTypeInvalidSyntax    = "invalidSyntax"
-	ErrorTypeInvalidPath      = "invalidPath"
-	ErrorTypeNoTarget         = "noTarget"
-	ErrorTypeInvalidValue     = "invalidValue"
-	ErrorTypeInvalidVers      = "invalidVers"
-	ErrorTypeSensitive        = "sensitive"
+	ErrorTypeInvalidFilter = "invalidFilter"
+	ErrorTypeTooMany       = "tooMany"
+	ErrorTypeUniqueness    = "uniqueness"
+	ErrorTypeMutability    = "mutability"
+	ErrorTypeInvalidSyntax = "invalidSyntax"
+	ErrorTypeInvalidPath   = "invalidPath"
+	ErrorTypeNoTarget      = "noTarget"
+	ErrorTypeInvalidValue  = "invalidValue"
+	ErrorTypeInvalidVers   = "invalidVers"
+	ErrorTypeSensitive     = "sensitive"
 )
 
 // NewErrorResponse creates a SCIM error response
@@ -423,4 +423,3 @@ func ParseETag(etag string) (int, error) {
 	}
 	return version, err
 }
-

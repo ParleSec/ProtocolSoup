@@ -176,7 +176,7 @@ func GenerateSelfSignedCert(privateKey *rsa.PrivateKey, entityID string) (*x509.
 	// This would generate a real self-signed certificate
 	// For now, we return nil - the implementation should create a proper cert
 	// using x509.CreateCertificate
-	
+
 	// In a real implementation:
 	// template := &x509.Certificate{
 	//     SerialNumber: big.NewInt(time.Now().UnixNano()),
@@ -189,7 +189,7 @@ func GenerateSelfSignedCert(privateKey *rsa.PrivateKey, entityID string) (*x509.
 	//     ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	// }
 	// certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
-	
+
 	return nil, nil, fmt.Errorf("certificate generation not implemented - use real PKI in production")
 }
 
@@ -213,7 +213,7 @@ func InsertSignatureIntoXML(xmlData []byte, sig *Signature) ([]byte, error) {
 	if issuerEnd == -1 {
 		issuerEnd = strings.Index(xmlStr, "</Issuer>")
 	}
-	
+
 	if issuerEnd == -1 {
 		// Fallback: insert after opening tag
 		firstClose := strings.Index(xmlStr, ">")

@@ -1,0 +1,302 @@
+---
+title: "Agent Discovery"
+description: "Machine-readable surfaces ProtocolSoup publishes for AI agents, and the DNS records an operator must add."
+---
+
+# Agent Discovery
+
+ProtocolSoup publishes a set of machine-readable documents so autonomous
+agents can find its APIs, understand how to authenticate, and read its content
+without parsing HTML. Everything on this page except the DNS records is served
+by the application and needs no operator action.
+
+## What the deployment serves
+
+| Surface | Path | Served by | Specification |
+|---------|------|-----------|---------------|
+| API catalog | `/.well-known/api-catalog` | Frontend | [RFC 9727](https://www.rfc-editor.org/rfc/rfc9727) / [RFC 9264](https://www.rfc-editor.org/rfc/rfc9264) |
+| Protected resource metadata | `/.well-known/oauth-protected-resource` | Backend | [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) |
+| Protected resource metadata (UserInfo) | `/.well-known/oauth-protected-resource/oidc/userinfo` | Backend | [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728) |
+| Authorization server metadata (origin) | `/.well-known/oauth-authorization-server` | Backend | [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) |
+| Authorization server metadata (agents) | `/.well-known/oauth-authorization-server/agentauth` | Backend | RFC 8414 + [Auth.md](https://github.com/workos/auth.md) |
+| Agent skills index | `/.well-known/agent-skills/index.json` | Frontend | [Agent Skills Discovery RFC v0.2.0](https://github.com/cloudflare/agent-skills-discovery-rfc) |
+| Agent skill artifacts | `/.well-known/agent-skills/{name}/SKILL.md` | Frontend | Agent Skills Discovery RFC v0.2.0 |
+| Agent auth guide | `/auth.md` | Frontend | [Auth.md](https://github.com/workos/auth.md) |
+| Agent registration | `/agentauth/*` | Backend | [Agentic Registration](/protocols/agentauth/) |
+| AI Catalog | `/.well-known/ai-catalog.json` | Backend | [AI Catalog](https://github.com/Agent-Card/ai-catalog) |
+| MCP Server Card | `/mcp/server-card` | Backend | [SEP-2127](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127) |
+| MCP endpoint | `/mcp` | Backend | [Model Context Protocol](/protocols/mcp/) |
+| Content signals | `/robots.txt` | Frontend | [Content Signals](https://contentsignals.org/) |
+| Link headers | every page response | Frontend + backend edge | [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) |
+| Markdown representation | every page, via `Accept` | Frontend | Markdown for Agents |
+
+### Link headers
+
+Page responses carry an RFC 8288 `Link` header pointing at the API catalog, the
+gateway OpenAPI contract, the rendered API reference, the agent skills index,
+`llms.txt`, and the health endpoint. The relation types are all registered:
+`api-catalog` and `status` come from RFC 9727, `service-desc` and `service-doc`
+from RFC 8631.
+
+### Markdown for agents
+
+A request whose `Accept` header ranks `text/markdown` at least as highly as
+`text/html` receives a markdown rendering of the same page with
+`Content-Type: text/markdown`. HTML remains the default; browsers never send
+`text/markdown`, so they are unaffected.
+
+```bash
+curl -H 'Accept: text/markdown' https://protocolsoup.com/protocols
+```
+
+The markdown is generated from the HTML the site actually serves for that URL,
+so it cannot drift away from what a person sees.
+
+Because one URL can answer with either representation, responses must carry
+`Vary: Accept`. Next.js overwrites the `Vary` header of a page response, so the
+Go runtime adds the field to HTML responses as it proxies them. An operator who
+puts a different reverse proxy in front of the Next.js runtime must add
+`Vary: Accept` to HTML responses there instead.
+
+Sending the header is not sufficient on its own: a CDN in front of the origin
+has to act on it. **Cloudflare ignores `Vary` unless a Cache Rule opts in.** If
+the zone caches HTML — through Cache Everything or any cache rule — and the
+`vary` object is not configured, one URL holds a single cached entry and
+whichever representation is stored first is served to everyone, so browsers can
+receive markdown and agents can receive HTML. Configure it under
+**Caching → Cache Rules**:
+
+```json
+"action_parameters": {
+  "cache": true,
+  "vary": {
+    "default": { "action": "bypass" },
+    "headers": {
+      "accept": {
+        "action": "normalize",
+        "media_types": ["text/html", "text/markdown"]
+      }
+    }
+  }
+}
+```
+
+If the zone does not cache HTML at all, which is Cloudflare's default, there is
+nothing to configure.
+
+Cloudflare also offers
+[Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/)
+as a zone-level conversion at the edge. Do not enable it alongside this
+implementation; pick one, or the edge will convert a response the origin has
+already converted.
+
+`x-markdown-tokens` is not emitted. A token count is only meaningful if it is
+produced by a real tokenizer, and shipping one purely for this header is not
+worth the dependency weight.
+
+### Content signals
+
+`robots.txt` declares, for every user-agent group that is allowed to crawl:
+
+```
+Content-Signal: search=yes, ai-input=yes, ai-train=no
+```
+
+Search indexing and inference-time grounding are permitted; training and
+fine-tuning are not. Change the value in
+`frontend/src/app/(infrastructure)/robots.txt/route.ts` to alter the
+declaration.
+
+### Agent skills
+
+The skills index lists a `sha256` digest for each artifact. Both the index and
+the artifact route render through the same function, so a consumer that
+verifies the digest against the downloaded `SKILL.md` always gets a match.
+Add or edit skills in `frontend/src/lib/agent-skills.ts`; digests recompute
+automatically.
+
+### WebMCP
+
+The frontend registers browser tools through
+[WebMCP](https://webmachinelearning.github.io/webmcp/) when
+`navigator.modelContext` is available: `search_protocols`,
+`list_protocol_flows`, `decode_token`, and `open_protocol_page`. Each calls the
+same live API the UI uses. In browsers without the API the registration is
+skipped and nothing else changes.
+
+WebMCP only reaches agents that run inside a browser tab. Agents that do not
+have one use the [remote MCP server](/protocols/mcp/) at `/mcp`, which exposes
+overlapping tools over HTTP.
+
+### MCP discovery
+
+Domain-level discovery starts at the AI Catalog, which lists the deployment's
+MCP servers and gives the exact URL of each one's Server Card:
+
+```bash
+curl https://protocolsoup.com/.well-known/ai-catalog.json
+curl -H 'Accept: application/mcp-server-card+json' \
+  https://protocolsoup.com/mcp/server-card
+```
+
+The card lives at `/mcp/server-card` because the discovery specification
+reserves the `/server-card` suffix on a server's own Streamable HTTP URL. It
+considers `/.well-known/mcp/server-card` and recommends against it:
+`.well-known` is for site-wide metadata, an individual card is
+application-level metadata, and the catalog already carries each card's URL so
+nothing has to guess a path.
+
+Some tooling probes `/.well-known/mcp/server-card.json` regardless. This
+deployment does not serve it. No specification defines that location, so
+serving it would mint a new well-known URI, and
+[RFC 8615](https://www.rfc-editor.org/rfc/rfc8615) Section 3 requires an
+application minting one to register it with IANA — `mcp` is not registered.
+A scanner looking only there will report the card as missing; the card is at
+the reserved location the catalog advertises.
+
+Both documents are built by the backend from the running server's own
+configuration, so the endpoint and protocol versions they advertise cannot
+drift from what `server/discover` reports.
+
+## Reverse proxy requirements
+
+Any proxy placed in front of the runtime must leave the `/.well-known/` tree
+reachable. A common `location ~ /\.` rule that blocks dotfiles will also block
+every discovery document, because nginx evaluates regex locations ahead of
+prefix locations. `docker/nginx.prod.conf` excludes the tree explicitly:
+
+```nginx
+location ~ /\.(?!well-known) {
+    deny all;
+}
+```
+
+## DNS for AI Discovery (DNS-AID)
+
+DNS-AID records cannot be published by the application; they are zone data an
+operator adds at the DNS provider. They advertise agent entrypoints under the
+`_agents` namespace using ServiceMode `SVCB` records
+([draft-mozleywilliams-dnsop-dnsaid](https://datatracker.ietf.org/doc/draft-mozleywilliams-dnsop-dnsaid/),
+[RFC 9460](https://www.rfc-editor.org/rfc/rfc9460)).
+
+### Records to publish
+
+Add the following to the `protocolsoup.com` zone, substituting your own domain.
+The `_index` record is the entrypoint an agent resolves first.
+
+```txt
+; DNS for AI Discovery entrypoint. Points agents at the discovery documents
+; served over HTTPS on the apex.
+_index._agents.protocolsoup.com. 3600 IN SVCB 1 protocolsoup.com. alpn="h2,http/1.1" port=443 mandatory=alpn,port
+```
+
+Both `port` and `mandatory` belong in this record:
+
+- `port` is required content here, not a hint. [RFC 9460 Section 7.2](https://www.rfc-editor.org/rfc/rfc9460#section-7.2)
+  only lets clients fall back to "the authority endpoint's port" when `port` is
+  absent, and that fallback exists because the HTTPS RR ([Section 9](https://www.rfc-editor.org/rfc/rfc9460#section-9))
+  is resolved *from* an `https://` URL that already has an authority (a host and
+  an implied port). `_index._agents.protocolsoup.com` is not derived from a URL;
+  it is a bespoke DNS-AID discovery name defined by
+  [draft-mozleywilliams-dnsop-dnsaid](https://datatracker.ietf.org/doc/draft-mozleywilliams-dnsop-dnsaid/),
+  so there is no authority endpoint for a client to fall back to and no default
+  port is defined. Every SVCB example in the draft includes `port`, and
+  conformance scanners (e.g. `isitagentready.com`) reject a ServiceMode record
+  that omits it for exactly this reason.
+- `mandatory=alpn,port` follows the draft's own guidance: its Security
+  Considerations section says a publisher that needs a consumer to honor a key
+  should list it in `mandatory=` per [RFC 9460 Section 8](https://www.rfc-editor.org/rfc/rfc9460#section-8),
+  so that a client which cannot honor `alpn` or `port` skips the record instead
+  of guessing a transport or a port and silently connecting somewhere the
+  publisher never intended. That guards against an on-path attacker stripping
+  SvcParams to downgrade a client rather than being incidental.
+
+Two constraints from the draft do govern this record:
+
+- The `TargetName` MUST be present and MUST NOT contain underscores, because
+  agents use it for the TLS certificate name and any `TLSA` lookup when they
+  contact the index. `protocolsoup.com.` satisfies this; `_index._agents...`
+  would not.
+- Each record's `alpn` identifies exactly one protocol suite. An agent protocol
+  such as `mcp` or `a2a` MUST NOT be combined with another agent protocol in a
+  single `alpn` value; publish one record per agent protocol instead.
+
+The `SvcParamKeys` the draft defines for agent metadata — `cap`, `bap`,
+`well-known`, `cap-sha256` and the rest — have no IANA number assigned yet
+(draft-02 Section 7.1 defers them). Until they are registered, DNS software
+will not accept them by name, so they have to be written in the generic
+`keyNNNNN` form using the RFC 9460 private-use range 65280–65534, and only a
+consumer configured with the same numbers can read them. A record carrying
+`alpn` alone is valid, resolvable, and useful today, which is why the record
+above stops there.
+
+Do not publish records advertising `alpn="a2a"` or `alpn="mcp"`. Those announce
+an A2A agent endpoint and an MCP server, and this deployment runs neither. A
+record pointing at an endpoint that does not answer is worse than no record at
+all. Add them at the same time as the servers, not before.
+
+Your DNS provider must support `SVCB` records at an underscore-prefixed name.
+Cloudflare, Route 53, and NS1 do; several registrar-bundled DNS panels do not.
+If yours does not, move the zone before attempting this — the draft mentions a
+`TXT` fallback but explicitly discourages it.
+
+### On Cloudflare
+
+Add the record under **DNS → Records → Add record**, type `SVCB`, with name
+`_index._agents`, priority `1`, target `protocolsoup.com`, and value
+`alpn="h2,http/1.1" port=443 mandatory=alpn,port`. Or through the API:
+
+```bash
+curl "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+  --request POST \
+  --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  --json '{
+    "type": "SVCB",
+    "name": "_index._agents.protocolsoup.com",
+    "ttl": 3600,
+    "data": {
+      "priority": 1,
+      "target": "protocolsoup.com",
+      "value": "alpn=\"h2,http/1.1\" port=443 mandatory=alpn,port"
+    }
+  }'
+```
+
+Cloudflare
+[does not serve manually-added `HTTPS` records on a proxied name](https://developers.cloudflare.com/dns/manage-dns-records/reference/dns-record-types/#proxied-vs-dns-only-names),
+preferring the ones it synthesizes. That restriction does not reach this record:
+it is an `SVCB` record at `_index._agents`, a name that carries no `A` or
+`AAAA` record and therefore cannot be proxied. The apex can stay orange-clouded.
+
+### DNSSEC
+
+Sign the zone so validating resolvers can authenticate the answers:
+
+1. Enable DNSSEC signing for the zone at your DNS provider. On Cloudflare this
+   is **DNS → Settings → DNSSEC → Enable DNSSEC**.
+2. Publish the resulting DS record at the registrar for `protocolsoup.com`.
+   Domains on Cloudflare Registrar skip this step, as Cloudflare lodges the DS
+   record with the registry itself.
+3. Confirm the chain of trust validates before relying on the records.
+
+```bash
+# Chain of trust for the zone
+dig +dnssec DS protocolsoup.com @1.1.1.1
+
+# The entrypoint record, with the AD flag set when validation succeeds
+dig +dnssec SVCB _index._agents.protocolsoup.com @1.1.1.1
+```
+
+An answer without the `ad` flag means the resolver could not validate it, and
+an agent that requires authenticated discovery data will reject it.
+
+### Verifying
+
+```bash
+# Should return the SVCB record
+dig SVCB _index._agents.protocolsoup.com +short
+
+# Discovery documents the record leads to
+curl -s https://protocolsoup.com/.well-known/api-catalog | jq .
+curl -sI https://protocolsoup.com/ | grep -i '^link:'
+```

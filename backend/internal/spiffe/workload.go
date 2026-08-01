@@ -51,7 +51,7 @@ func DefaultConfig() *Config {
 	enabled := getEnvBool("SHOWCASE_SPIFFE_ENABLED", false)
 	socketPath := getEnvString("SHOWCASE_SPIFFE_SOCKET_PATH", "unix:///run/spire/sockets/agent.sock")
 	trustDomain := getEnvString("SHOWCASE_SPIFFE_TRUST_DOMAIN", "protocolsoup.com")
-	
+
 	return &Config{
 		SocketPath:  socketPath,
 		TrustDomain: trustDomain,
@@ -550,4 +550,3 @@ func (c *WorkloadClient) GetSVIDInfo() (*SVIDInfo, error) {
 		SignatureAlg: cert.SignatureAlgorithm.String(),
 	}, nil
 }
-

@@ -29,7 +29,7 @@ Use gateway when you run multiple protocol services and need a single API entryp
 - `POST /api/protocols/{id}/demo/{flow}` -- start demo session
 - `POST /api/lookingglass/decode` -- decode token
 - `GET /api/lookingglass/sessions` -- list Looking Glass sessions
-- `GET /.well-known/jwks.json` -- JSON Web Key Set
+- `GET /api/.well-known/jwks.json` -- JSON Web Key Set
 
 The start-demo response returns a 256-bit `session_token` owner capability
 once. Session lists remain metadata-only. Full session GETs require

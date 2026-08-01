@@ -565,6 +565,71 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
       { category: 'companion', label: 'RFC 7515 — JSON Web Signature (JWS)', href: 'https://datatracker.ietf.org/doc/html/rfc7515' },
     ],
   },
+  {
+    id: 'agentauth',
+    name: 'Agentic Registration',
+    description: 'Self-registration and credential issuance for autonomous agents. An agent registers over a back channel, receives a signed identity assertion, and exchanges it for an access token. A claim ceremony modelled on the device authorization grant later binds the agent to a person and widens its scope.',
+    spec: 'auth.md, RFC 7523, RFC 8628',
+    specUrl: 'https://github.com/workos/auth.md',
+    flows: [
+      {
+        id: 'anonymous-registration',
+        name: 'Anonymous Registration',
+        rfc: 'RFC 7523 §2.1',
+        references: [
+          { category: 'core', label: 'RFC 7523 §2.1 — Using JWTs as Authorization Grants', href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-2.1' },
+          { category: 'core', label: 'RFC 7523 §3 — JWT Format and Processing Requirements', href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-3' },
+        ],
+      },
+      {
+        id: 'claim-ceremony',
+        name: 'Claim Ceremony',
+        rfc: 'RFC 8628 §3.3',
+        references: [
+          { category: 'core', label: 'RFC 8628 §3.3 — User Interaction', href: 'https://datatracker.ietf.org/doc/html/rfc8628#section-3.3' },
+          { category: 'core', label: 'RFC 8628 §3.5 — Device Access Token Response', href: 'https://datatracker.ietf.org/doc/html/rfc8628#section-3.5' },
+          { category: 'security', label: 'RFC 8628 §5.1 — User Code Brute Forcing', href: 'https://datatracker.ietf.org/doc/html/rfc8628#section-5.1' },
+        ],
+      },
+    ],
+    references: [
+      { category: 'core', label: 'auth.md — Agentic Registration Profile', href: 'https://github.com/workos/auth.md' },
+      { category: 'core', label: 'RFC 7523 — JWT Profile for OAuth 2.0 Client Authentication and Authorization Grants', href: 'https://datatracker.ietf.org/doc/html/rfc7523' },
+      { category: 'core', label: 'RFC 8628 — OAuth 2.0 Device Authorization Grant', href: 'https://datatracker.ietf.org/doc/html/rfc8628' },
+      { category: 'core', label: 'RFC 8414 — OAuth 2.0 Authorization Server Metadata', href: 'https://datatracker.ietf.org/doc/html/rfc8414' },
+      { category: 'security', label: 'RFC 8628 §5.4 — Remote Phishing', href: 'https://datatracker.ietf.org/doc/html/rfc8628#section-5.4' },
+      { category: 'companion', label: 'RFC 7009 — OAuth 2.0 Token Revocation', href: 'https://datatracker.ietf.org/doc/html/rfc7009' },
+      { category: 'companion', label: 'RFC 9728 — OAuth 2.0 Protected Resource Metadata', href: 'https://datatracker.ietf.org/doc/html/rfc9728' },
+      { category: 'profile', label: 'ID-JAG — Identity Assertion Authorization Grant', href: 'https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/', note: 'Referenced by auth.md; not accepted by this deployment' },
+    ],
+  },
+  {
+    id: 'mcp',
+    name: 'Model Context Protocol',
+    description: 'A remote MCP server over the Streamable HTTP transport. Revision 2026-07-28 is stateless: there is no initialize handshake and no session header, so every request carries its own protocol version and client identity and any instance can answer it. Read-only tools expose the protocol catalog, flow definitions, and JWT decoding to agents that are not running in a browser.',
+    spec: 'MCP 2026-07-28, SEP-2127',
+    specUrl: 'https://modelcontextprotocol.io/specification/2026-07-28',
+    flows: [
+      {
+        id: 'mcp-tool-call',
+        name: 'Discovery and Tool Call',
+        rfc: 'MCP 2026-07-28',
+        references: [
+          { category: 'core', label: 'MCP — Streamable HTTP Transport', href: 'https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http' },
+          { category: 'core', label: 'MCP — server/discover', href: 'https://modelcontextprotocol.io/specification/2026-07-28/server/discover' },
+          { category: 'core', label: 'MCP — Versioning and Compatibility', href: 'https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning' },
+        ],
+      },
+    ],
+    references: [
+      { category: 'core', label: 'MCP 2026-07-28 — Specification', href: 'https://modelcontextprotocol.io/specification/2026-07-28' },
+      { category: 'core', label: 'JSON-RPC 2.0', href: 'https://www.jsonrpc.org/specification' },
+      { category: 'core', label: 'SEP-2127 — MCP Server Cards', href: 'https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2127' },
+      { category: 'security', label: 'MCP — Server Validation and Header Mirroring', href: 'https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#server-validation' },
+      { category: 'companion', label: 'Server Card Discovery — AI Catalog and card placement', href: 'https://github.com/modelcontextprotocol/experimental-ext-server-card/blob/main/docs/discovery.md' },
+      { category: 'companion', label: 'WebMCP — browser-side tool exposure', href: 'https://webmachinelearning.github.io/webmcp/' },
+    ],
+  },
 ]
 
 export const PROTOCOL_IDS = PROTOCOL_CATALOG_DATA.map((protocol) => protocol.id)

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { WebMcpTools } from '@/components/agent/WebMcpTools.client'
 import { Layout } from '@/components/common/Layout'
 import { CmdKPalette } from '@/components/palette/CmdKPalette'
 import { SITE_CONFIG } from '@/config/seo'
@@ -87,6 +88,7 @@ export default function RootLayout({
         ))}
         <Layout>{children}</Layout>
         <CmdKPalette />
+        <WebMcpTools />
       </body>
     </html>
   )
