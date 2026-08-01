@@ -6,13 +6,13 @@ export async function GET() {
     const protocolUrl = `${SITE_ORIGIN}/protocol/${protocol.id}`
     const lines = [
       `### ${protocol.name}`,
-      `- Guide: ${protocolUrl}`,
-      `- Specification: ${protocol.specUrl}`,
+      `- [Guide](${protocolUrl})`,
+      `- [Specification](${protocol.specUrl})`,
       `- Summary: ${protocol.description}`,
       '- Flows:',
       ...protocol.flows.map(
         (flow) =>
-          `  - ${flow.name}: ${SITE_ORIGIN}/protocol/${protocol.id}/flow/${flow.id} (${flow.rfc})`,
+          `  - [${flow.name}](${SITE_ORIGIN}/protocol/${protocol.id}/flow/${flow.id}) (${flow.rfc})`,
       ),
       '',
     ]
@@ -25,14 +25,14 @@ export async function GET() {
     '> Deep-link catalog for protocol guides, flow references, and standards coverage.',
     '',
     '## Platforms',
-    `- Main: ${SITE_ORIGIN}`,
-    `- Docs: ${DOCS_ORIGIN}`,
+    `- [Main](${SITE_ORIGIN})`,
+    `- [Docs](${DOCS_ORIGIN})`,
     '',
     '## Protocol Catalog',
     ...protocolSections,
     '## Crawl Entry Points',
-    `- Sitemap index: ${SITE_ORIGIN}/sitemap-index.xml`,
-    `- App sitemap: ${SITE_ORIGIN}/sitemap.xml`,
+    `- [Sitemap index](${SITE_ORIGIN}/sitemap-index.xml)`,
+    `- [App sitemap](${SITE_ORIGIN}/sitemap.xml)`,
     '',
   ].join('\n')
 
