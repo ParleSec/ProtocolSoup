@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ParleSec/ProtocolSoup/internal/core"
@@ -21,10 +22,11 @@ import (
 // this server. Registering protocol well-known routes must not shadow the
 // catch-all proxy for sibling well-known paths the backend does not own.
 func TestFrontendProxyReceivesUnregisteredWellKnownPaths(t *testing.T) {
+	var receivedPath atomic.Value
 	frontend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath.Store(r.URL.Path)
 		w.Header().Set("X-Served-By", "frontend")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(r.URL.Path))
 	}))
 	defer frontend.Close()
 
@@ -52,8 +54,8 @@ func TestFrontendProxyReceivesUnregisteredWellKnownPaths(t *testing.T) {
 			if got := response.Header().Get("X-Served-By"); got != "frontend" {
 				t.Fatalf("X-Served-By = %q, want %q: path was not proxied to the frontend", got, "frontend")
 			}
-			if response.Body.String() != path {
-				t.Fatalf("proxied path = %q, want %q", response.Body.String(), path)
+			if got, _ := receivedPath.Load().(string); got != path {
+				t.Fatalf("frontend received path = %q, want %q", got, path)
 			}
 		})
 	}
