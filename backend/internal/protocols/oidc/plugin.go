@@ -17,6 +17,7 @@ import (
 type Plugin struct {
 	*plugin.BasePlugin
 	oauth2Plugin    *oauth2.Plugin
+	agentAuth       AgentAuthMetadataProvider
 	mockIdP         *mockidp.MockIdP
 	keySet          *crypto.KeySet
 	lookingGlass    *lookingglass.Engine
@@ -74,6 +75,13 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// Discovery document
 	router.Get("/.well-known/openid-configuration", p.handleDiscovery)
+
+	// OAuth 2.0 Authorization Server Metadata (RFC 8414) for the same issuer
+	router.Get(authorizationServerWellKnown, p.handleAuthorizationServerMetadata)
+
+	// Protected resource metadata (RFC 9728) for the UserInfo endpoint
+	router.Get(protectedResourceWellKnown, p.handleProtectedResourceMetadata)
+	router.Get(protectedResourceWellKnown+"/*", p.handleProtectedResourceMetadata)
 
 	// JWKS endpoint
 	router.Get("/.well-known/jwks.json", p.handleJWKS)
