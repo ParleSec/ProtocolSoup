@@ -119,10 +119,10 @@ type ValidityInfo struct {
 // holder's device key, document type, and validity window into a single signed
 // unit.
 type MobileSecurityObject struct {
-	Version         string         `cbor:"version"`
-	DigestAlgorithm string         `cbor:"digestAlgorithm"`
-	ValueDigests    ValueDigests   `cbor:"valueDigests"`
-	DeviceKeyInfo   DeviceKeyInfo  `cbor:"deviceKeyInfo"`
-	DocType         string         `cbor:"docType"`
-	ValidityInfo    ValidityInfo   `cbor:"validityInfo"`
+	Version         string        `cbor:"version"`
+	DigestAlgorithm string        `cbor:"digestAlgorithm"`
+	ValueDigests    ValueDigests  `cbor:"valueDigests"`
+	DeviceKeyInfo   DeviceKeyInfo `cbor:"deviceKeyInfo"`
+	DocType         string        `cbor:"docType"`
+	ValidityInfo    ValidityInfo  `cbor:"validityInfo"`
 }

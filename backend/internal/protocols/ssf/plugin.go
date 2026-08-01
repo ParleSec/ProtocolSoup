@@ -21,10 +21,10 @@ import (
 // Plugin implements the SSF protocol plugin
 type Plugin struct {
 	*plugin.BasePlugin
-	storage         *Storage
-	transmitter     *Transmitter
-	receiverService *ReceiverService
-	actionExecutor  *MockIdPActionExecutor
+	storage          *Storage
+	transmitter      *Transmitter
+	receiverService  *ReceiverService
+	actionExecutor   *MockIdPActionExecutor
 	lookingGlass     *lookingglass.Engine
 	keySet           *crypto.KeySet
 	baseURL          string

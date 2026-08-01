@@ -23,10 +23,10 @@ import (
 
 // SignatureValidationError represents a signature validation failure with context
 type SignatureValidationError struct {
-	Code        string
-	Message     string
-	Details     string
-	RFCSection  string
+	Code       string
+	Message    string
+	Details    string
+	RFCSection string
 }
 
 func (e *SignatureValidationError) Error() string {
@@ -46,8 +46,8 @@ const (
 
 // SignatureValidator validates XML digital signatures per XML-DSig specification
 type SignatureValidator struct {
-	mu              sync.RWMutex
-	trustedCerts    map[string]*x509.Certificate // EntityID -> Certificate
+	mu                sync.RWMutex
+	trustedCerts      map[string]*x509.Certificate // EntityID -> Certificate
 	allowedAlgorithms map[string]bool
 }
 
@@ -68,19 +68,19 @@ func NewSignatureValidator() *SignatureValidator {
 			// WARNING: SHA-1 is cryptographically weak and SHOULD NOT be used for new deployments
 			// Included per industry practice for enterprise federation compatibility
 			"http://www.w3.org/2000/09/xmldsig#rsa-sha1": true, // #nosec G401 - Legacy support required
-			
+
 			// Digest algorithms
 			"http://www.w3.org/2001/04/xmlenc#sha256": true,
 			"http://www.w3.org/2001/04/xmlenc#sha384": true,
 			"http://www.w3.org/2001/04/xmlenc#sha512": true,
 			// LEGACY: SHA-1 digest support
 			"http://www.w3.org/2000/09/xmldsig#sha1": true, // #nosec G401 - Legacy support required
-			
+
 			// Canonicalization algorithms
 			"http://www.w3.org/2001/10/xml-exc-c14n#":             true, // Exclusive C14N
 			"http://www.w3.org/2001/10/xml-exc-c14n#WithComments": true,
 			"http://www.w3.org/TR/2001/REC-xml-c14n-20010315":     true, // Canonical XML 1.0
-			
+
 			// Transform algorithms
 			"http://www.w3.org/2000/09/xmldsig#enveloped-signature": true,
 		},
@@ -92,7 +92,7 @@ func (v *SignatureValidator) RegisterTrustedCertificate(entityID string, cert *x
 	if cert == nil {
 		return errors.New("certificate cannot be nil")
 	}
-	
+
 	// Validate certificate
 	now := time.Now()
 	if now.Before(cert.NotBefore) {
@@ -109,7 +109,7 @@ func (v *SignatureValidator) RegisterTrustedCertificate(entityID string, cert *x
 			Details: fmt.Sprintf("NotAfter: %s", cert.NotAfter),
 		}
 	}
-	
+
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.trustedCerts[entityID] = cert
@@ -146,14 +146,14 @@ func (v *SignatureValidator) ValidateResponseSignature(xmlData []byte, issuerEnt
 		Errors:   make([]string, 0),
 		Warnings: make([]string, 0),
 	}
-	
+
 	// Parse the response to extract signature
 	var response Response
 	if err := xml.Unmarshal(xmlData, &response); err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("Failed to parse SAML Response: %v", err))
 		return result, err
 	}
-	
+
 	// Check for signature on Response
 	if response.Signature != nil {
 		if err := v.validateSignature(xmlData, response.Signature, issuerEntityID, result); err != nil {
@@ -162,7 +162,7 @@ func (v *SignatureValidator) ValidateResponseSignature(xmlData []byte, issuerEnt
 			result.SignatureVerified = true
 		}
 	}
-	
+
 	// Check for signature on Assertions
 	for i, assertion := range response.Assertions {
 		if assertion != nil && assertion.Signature != nil {
@@ -172,7 +172,7 @@ func (v *SignatureValidator) ValidateResponseSignature(xmlData []byte, issuerEnt
 				result.Errors = append(result.Errors, fmt.Sprintf("Failed to marshal assertion %d: %v", i, err))
 				continue
 			}
-			
+
 			if err := v.validateSignature(assertionXML, assertion.Signature, issuerEntityID, result); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("Assertion %d signature validation failed: %v", i, err))
 			} else {
@@ -180,12 +180,12 @@ func (v *SignatureValidator) ValidateResponseSignature(xmlData []byte, issuerEnt
 			}
 		}
 	}
-	
+
 	// Per SAML 2.0 Profiles, at least Response or Assertion MUST be signed
 	if response.Signature == nil && !hasSignedAssertion(response.Assertions) {
 		result.Errors = append(result.Errors, "Neither Response nor Assertion is signed (SAML 2.0 Profiles Section 4.1.4.3 violation)")
 	}
-	
+
 	result.Valid = len(result.Errors) == 0 && result.SignatureVerified
 	return result, nil
 }
@@ -198,7 +198,7 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 			Message: "No signature present",
 		}
 	}
-	
+
 	// Validate signature algorithm is allowed
 	sigAlg := sig.SignedInfo.SignatureMethod.Algorithm
 	result.Algorithm = sigAlg
@@ -210,12 +210,12 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 			RFCSection: "XML-DSig Section 6.1",
 		}
 	}
-	
+
 	// Check for weak algorithms and add warning
 	if strings.Contains(sigAlg, "sha1") {
 		result.Warnings = append(result.Warnings, "SHA-1 signature algorithm is deprecated; recommend SHA-256 or stronger")
 	}
-	
+
 	// Validate digest algorithm
 	digestAlg := sig.SignedInfo.Reference.DigestMethod.Algorithm
 	result.DigestAlgorithm = digestAlg
@@ -227,10 +227,10 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 			RFCSection: "XML-DSig Section 6.2",
 		}
 	}
-	
+
 	// Get reference URI
 	result.ReferenceURI = sig.SignedInfo.Reference.URI
-	
+
 	// Get the trusted certificate
 	cert, ok := v.GetTrustedCertificate(issuerEntityID)
 	if !ok {
@@ -245,7 +245,7 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 					Details: err.Error(),
 				}
 			}
-			
+
 			parsedCert, err := x509.ParseCertificate(certDER)
 			if err != nil {
 				return &SignatureValidationError{
@@ -255,7 +255,7 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 				}
 			}
 			cert = parsedCert
-			result.Warnings = append(result.Warnings, 
+			result.Warnings = append(result.Warnings,
 				"Using certificate from signature KeyInfo; should validate against trusted metadata")
 		} else {
 			return &SignatureValidationError{
@@ -266,18 +266,18 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 		}
 	}
 	result.CertificateValid = true
-	
+
 	// Verify digest
 	if err := v.verifyDigest(xmlData, sig, digestAlg); err != nil {
 		return err
 	}
 	result.DigestVerified = true
-	
+
 	// Verify signature value
 	if err := v.verifySignatureValue(sig, cert, sigAlg); err != nil {
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -285,11 +285,11 @@ func (v *SignatureValidator) validateSignature(xmlData []byte, sig *Signature, i
 func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digestAlg string) error {
 	// Extract the referenced content
 	refURI := sig.SignedInfo.Reference.URI
-	
+
 	// For enveloped signatures, the reference is to the parent element
 	// The URI format is "#ID" where ID is the element's ID attribute
 	var contentToHash []byte
-	
+
 	if refURI == "" || refURI == "#" {
 		// Reference to the entire document
 		contentToHash = xmlData
@@ -314,7 +314,7 @@ func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digest
 			RFCSection: "SAML 2.0 Security Considerations",
 		}
 	}
-	
+
 	// Apply transforms (for enveloped signature, we need to remove the Signature element)
 	for _, transform := range sig.SignedInfo.Reference.Transforms.Transforms {
 		if transform.Algorithm == "http://www.w3.org/2000/09/xmldsig#enveloped-signature" {
@@ -322,10 +322,10 @@ func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digest
 		}
 		// Canonicalization transforms are applied implicitly
 	}
-	
+
 	// Canonicalize the content (Exclusive C14N)
 	canonicalized := canonicalizeXML(contentToHash)
-	
+
 	// Compute digest
 	var computedDigest []byte
 	switch {
@@ -345,7 +345,7 @@ func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digest
 			Details: digestAlg,
 		}
 	}
-	
+
 	// Compare with expected digest
 	expectedDigest, err := base64.StdEncoding.DecodeString(
 		strings.TrimSpace(sig.SignedInfo.Reference.DigestValue))
@@ -356,7 +356,7 @@ func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digest
 			Details: err.Error(),
 		}
 	}
-	
+
 	if !compareBytes(computedDigest, expectedDigest) {
 		return &SignatureValidationError{
 			Code:       ErrCodeDigestMismatch,
@@ -365,7 +365,7 @@ func (v *SignatureValidator) verifyDigest(xmlData []byte, sig *Signature, digest
 			RFCSection: "XML-DSig Section 3.1.1",
 		}
 	}
-	
+
 	return nil
 }
 
@@ -380,10 +380,10 @@ func (v *SignatureValidator) verifySignatureValue(sig *Signature, cert *x509.Cer
 			Details: err.Error(),
 		}
 	}
-	
+
 	// Canonicalize SignedInfo
 	canonicalized := canonicalizeXML(signedInfoXML)
-	
+
 	// Decode signature value
 	sigValue, err := base64.StdEncoding.DecodeString(
 		strings.ReplaceAll(strings.TrimSpace(sig.SignatureValue), " ", ""))
@@ -394,7 +394,7 @@ func (v *SignatureValidator) verifySignatureValue(sig *Signature, cert *x509.Cer
 			Details: err.Error(),
 		}
 	}
-	
+
 	// Get public key
 	rsaPubKey, ok := cert.PublicKey.(*rsa.PublicKey)
 	if !ok {
@@ -403,11 +403,11 @@ func (v *SignatureValidator) verifySignatureValue(sig *Signature, cert *x509.Cer
 			Message: "Certificate does not contain RSA public key",
 		}
 	}
-	
+
 	// Verify signature based on algorithm
 	var hashFunc crypto.Hash
 	var hash []byte
-	
+
 	switch {
 	case strings.Contains(sigAlg, "sha256"):
 		hashFunc = crypto.SHA256
@@ -428,7 +428,7 @@ func (v *SignatureValidator) verifySignatureValue(sig *Signature, cert *x509.Cer
 			Details: sigAlg,
 		}
 	}
-	
+
 	// Verify RSA PKCS#1 v1.5 signature
 	if err := rsa.VerifyPKCS1v15(rsaPubKey, hashFunc, hash, sigValue); err != nil {
 		return &SignatureValidationError{
@@ -438,7 +438,7 @@ func (v *SignatureValidator) verifySignatureValue(sig *Signature, cert *x509.Cer
 			RFCSection: "XML-DSig Section 6.1",
 		}
 	}
-	
+
 	return nil
 }
 
@@ -462,17 +462,17 @@ func extractElementByID(xmlData []byte, id string) ([]byte, error) {
 	// This looks for elements with ID="<id>" or Id="<id>"
 	pattern := fmt.Sprintf(`<[^>]*(?:ID|Id)="%s"[^>]*>`, regexp.QuoteMeta(id))
 	re := regexp.MustCompile(pattern)
-	
+
 	loc := re.FindIndex(xmlData)
 	if loc == nil {
 		return nil, fmt.Errorf("element with ID %s not found", id)
 	}
-	
+
 	// Find the matching closing tag
 	startIdx := loc[0]
 	depth := 1
 	tagName := extractTagName(xmlData[startIdx:])
-	
+
 	// Simple depth-based matching (should use proper XML parser in production)
 	endIdx := loc[1]
 	for endIdx < len(xmlData) && depth > 0 {
@@ -487,8 +487,8 @@ func extractElementByID(xmlData []byte, id string) ([]byte, error) {
 						break
 					}
 				}
-			} else if !strings.HasPrefix(string(xmlData[endIdx:]), "<?") && 
-			          !strings.HasPrefix(string(xmlData[endIdx:]), "<!") {
+			} else if !strings.HasPrefix(string(xmlData[endIdx:]), "<?") &&
+				!strings.HasPrefix(string(xmlData[endIdx:]), "<!") {
 				// Opening tag of same name
 				openTag := fmt.Sprintf("<%s", tagName)
 				if strings.HasPrefix(string(xmlData[endIdx:]), openTag) {
@@ -498,11 +498,11 @@ func extractElementByID(xmlData []byte, id string) ([]byte, error) {
 		}
 		endIdx++
 	}
-	
+
 	if depth != 0 {
 		return nil, fmt.Errorf("malformed XML: unmatched tags for element %s", id)
 	}
-	
+
 	return xmlData[startIdx:endIdx], nil
 }
 
@@ -513,12 +513,12 @@ func extractTagName(tag []byte) string {
 	for start < len(tag) && (tag[start] == ' ' || tag[start] == '\t') {
 		start++
 	}
-	
+
 	end := start
 	for end < len(tag) && tag[end] != ' ' && tag[end] != '>' && tag[end] != '/' {
 		end++
 	}
-	
+
 	return string(tag[start:end])
 }
 
@@ -537,20 +537,20 @@ func canonicalizeXML(xmlData []byte) []byte {
 	// 2. Normalize whitespace in tags
 	// 3. Sort attributes alphabetically
 	// 4. Normalize namespace declarations
-	
+
 	result := xmlData
-	
+
 	// Remove XML declaration
 	declRe := regexp.MustCompile(`<\?xml[^?]*\?>`)
 	result = declRe.ReplaceAll(result, []byte{})
-	
+
 	// Normalize line endings to LF
 	result = []byte(strings.ReplaceAll(string(result), "\r\n", "\n"))
 	result = []byte(strings.ReplaceAll(string(result), "\r", "\n"))
-	
+
 	// Trim leading/trailing whitespace
 	result = []byte(strings.TrimSpace(string(result)))
-	
+
 	return result
 }
 
@@ -584,10 +584,10 @@ func NewAssertionCache(ttl time.Duration) *AssertionCache {
 		consumed: make(map[string]time.Time),
 		ttl:      ttl,
 	}
-	
+
 	// Start background cleanup goroutine
 	go cache.cleanup()
-	
+
 	return cache
 }
 
@@ -596,7 +596,7 @@ func NewAssertionCache(ttl time.Duration) *AssertionCache {
 func (c *AssertionCache) MarkConsumed(assertionID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	if _, exists := c.consumed[assertionID]; exists {
 		return &SignatureValidationError{
 			Code:       "REPLAY_ATTACK",
@@ -605,7 +605,7 @@ func (c *AssertionCache) MarkConsumed(assertionID string) error {
 			RFCSection: "SAML 2.0 Profiles Section 4.1.4.5",
 		}
 	}
-	
+
 	c.consumed[assertionID] = time.Now()
 	return nil
 }
@@ -622,7 +622,7 @@ func (c *AssertionCache) IsConsumed(assertionID string) bool {
 func (c *AssertionCache) cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		c.mu.Lock()
 		cutoff := time.Now().Add(-c.ttl)
@@ -653,9 +653,9 @@ func NewRequestIDCache(ttl time.Duration) *RequestIDCache {
 		pending: make(map[string]time.Time),
 		ttl:     ttl,
 	}
-	
+
 	go cache.cleanup()
-	
+
 	return cache
 }
 
@@ -673,10 +673,10 @@ func (c *RequestIDCache) ValidateInResponseTo(inResponseTo string) error {
 		// IdP-initiated SSO has no InResponseTo
 		return nil
 	}
-	
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	issuedAt, exists := c.pending[inResponseTo]
 	if !exists {
 		return &SignatureValidationError{
@@ -686,7 +686,7 @@ func (c *RequestIDCache) ValidateInResponseTo(inResponseTo string) error {
 			RFCSection: "SAML 2.0 Profiles Section 4.1.4.3",
 		}
 	}
-	
+
 	// Check if request has expired
 	if time.Since(issuedAt) > c.ttl {
 		delete(c.pending, inResponseTo)
@@ -697,7 +697,7 @@ func (c *RequestIDCache) ValidateInResponseTo(inResponseTo string) error {
 			RFCSection: "SAML 2.0 Profiles Section 4.1.4.3",
 		}
 	}
-	
+
 	// Remove from pending (one-time use)
 	delete(c.pending, inResponseTo)
 	return nil
@@ -707,7 +707,7 @@ func (c *RequestIDCache) ValidateInResponseTo(inResponseTo string) error {
 func (c *RequestIDCache) cleanup() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		c.mu.Lock()
 		cutoff := time.Now().Add(-c.ttl)

@@ -25,27 +25,27 @@ type EntityDescriptor struct {
 
 // SPSSODescriptor represents the Service Provider SSO Descriptor
 type SPSSODescriptor struct {
-	XMLName                    xml.Name                     `xml:"urn:oasis:names:tc:SAML:2.0:metadata SPSSODescriptor"`
-	ProtocolSupportEnumeration string                       `xml:"protocolSupportEnumeration,attr"`
-	AuthnRequestsSigned        bool                         `xml:"AuthnRequestsSigned,attr,omitempty"`
-	WantAssertionsSigned       bool                         `xml:"WantAssertionsSigned,attr,omitempty"`
-	KeyDescriptors             []KeyDescriptor              `xml:"KeyDescriptor,omitempty"`
-	SingleLogoutServices       []SingleLogoutService        `xml:"SingleLogoutService,omitempty"`
-	NameIDFormats              []string                     `xml:"NameIDFormat,omitempty"`
-	AssertionConsumerServices  []AssertionConsumerService   `xml:"AssertionConsumerService"`
-	AttributeConsumingServices []AttributeConsumingService  `xml:"AttributeConsumingService,omitempty"`
+	XMLName                    xml.Name                    `xml:"urn:oasis:names:tc:SAML:2.0:metadata SPSSODescriptor"`
+	ProtocolSupportEnumeration string                      `xml:"protocolSupportEnumeration,attr"`
+	AuthnRequestsSigned        bool                        `xml:"AuthnRequestsSigned,attr,omitempty"`
+	WantAssertionsSigned       bool                        `xml:"WantAssertionsSigned,attr,omitempty"`
+	KeyDescriptors             []KeyDescriptor             `xml:"KeyDescriptor,omitempty"`
+	SingleLogoutServices       []SingleLogoutService       `xml:"SingleLogoutService,omitempty"`
+	NameIDFormats              []string                    `xml:"NameIDFormat,omitempty"`
+	AssertionConsumerServices  []AssertionConsumerService  `xml:"AssertionConsumerService"`
+	AttributeConsumingServices []AttributeConsumingService `xml:"AttributeConsumingService,omitempty"`
 }
 
 // IDPSSODescriptor represents the Identity Provider SSO Descriptor
 type IDPSSODescriptor struct {
-	XMLName                    xml.Name                `xml:"urn:oasis:names:tc:SAML:2.0:metadata IDPSSODescriptor"`
-	ProtocolSupportEnumeration string                  `xml:"protocolSupportEnumeration,attr"`
-	WantAuthnRequestsSigned    bool                    `xml:"WantAuthnRequestsSigned,attr,omitempty"`
-	KeyDescriptors             []KeyDescriptor         `xml:"KeyDescriptor,omitempty"`
-	SingleLogoutServices       []SingleLogoutService   `xml:"SingleLogoutService,omitempty"`
-	NameIDFormats              []string                `xml:"NameIDFormat,omitempty"`
-	SingleSignOnServices       []SingleSignOnService   `xml:"SingleSignOnService"`
-	Attributes                 []MetadataAttribute     `xml:"Attribute,omitempty"`
+	XMLName                    xml.Name              `xml:"urn:oasis:names:tc:SAML:2.0:metadata IDPSSODescriptor"`
+	ProtocolSupportEnumeration string                `xml:"protocolSupportEnumeration,attr"`
+	WantAuthnRequestsSigned    bool                  `xml:"WantAuthnRequestsSigned,attr,omitempty"`
+	KeyDescriptors             []KeyDescriptor       `xml:"KeyDescriptor,omitempty"`
+	SingleLogoutServices       []SingleLogoutService `xml:"SingleLogoutService,omitempty"`
+	NameIDFormats              []string              `xml:"NameIDFormat,omitempty"`
+	SingleSignOnServices       []SingleSignOnService `xml:"SingleSignOnService"`
+	Attributes                 []MetadataAttribute   `xml:"Attribute,omitempty"`
 }
 
 // KeyDescriptor represents a key descriptor in metadata
@@ -81,12 +81,12 @@ type AssertionConsumerService struct {
 
 // AttributeConsumingService represents requested attributes
 type AttributeConsumingService struct {
-	XMLName             xml.Name                   `xml:"urn:oasis:names:tc:SAML:2.0:metadata AttributeConsumingService"`
-	Index               int                        `xml:"index,attr"`
-	IsDefault           bool                       `xml:"isDefault,attr,omitempty"`
-	ServiceNames        []LocalizedName            `xml:"ServiceName"`
-	ServiceDescriptions []LocalizedName            `xml:"ServiceDescription,omitempty"`
-	RequestedAttributes []RequestedAttribute       `xml:"RequestedAttribute,omitempty"`
+	XMLName             xml.Name             `xml:"urn:oasis:names:tc:SAML:2.0:metadata AttributeConsumingService"`
+	Index               int                  `xml:"index,attr"`
+	IsDefault           bool                 `xml:"isDefault,attr,omitempty"`
+	ServiceNames        []LocalizedName      `xml:"ServiceName"`
+	ServiceDescriptions []LocalizedName      `xml:"ServiceDescription,omitempty"`
+	RequestedAttributes []RequestedAttribute `xml:"RequestedAttribute,omitempty"`
 }
 
 // LocalizedName represents a localized string
@@ -115,10 +115,10 @@ type MetadataAttribute struct {
 
 // Organization represents organization information
 type Organization struct {
-	XMLName                  xml.Name          `xml:"urn:oasis:names:tc:SAML:2.0:metadata Organization"`
-	OrganizationNames        []LocalizedName   `xml:"OrganizationName"`
-	OrganizationDisplayNames []LocalizedName   `xml:"OrganizationDisplayName"`
-	OrganizationURLs         []LocalizedURL    `xml:"OrganizationURL"`
+	XMLName                  xml.Name        `xml:"urn:oasis:names:tc:SAML:2.0:metadata Organization"`
+	OrganizationNames        []LocalizedName `xml:"OrganizationName"`
+	OrganizationDisplayNames []LocalizedName `xml:"OrganizationDisplayName"`
+	OrganizationURLs         []LocalizedURL  `xml:"OrganizationURL"`
 }
 
 // LocalizedURL represents a localized URL
@@ -129,12 +129,12 @@ type LocalizedURL struct {
 
 // ContactPerson represents contact information
 type ContactPerson struct {
-	XMLName      xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:metadata ContactPerson"`
-	ContactType  string   `xml:"contactType,attr"` // technical, support, administrative, billing, other
-	Company      string   `xml:"Company,omitempty"`
-	GivenName    string   `xml:"GivenName,omitempty"`
-	SurName      string   `xml:"SurName,omitempty"`
-	EmailAddress []string `xml:"EmailAddress,omitempty"`
+	XMLName         xml.Name `xml:"urn:oasis:names:tc:SAML:2.0:metadata ContactPerson"`
+	ContactType     string   `xml:"contactType,attr"` // technical, support, administrative, billing, other
+	Company         string   `xml:"Company,omitempty"`
+	GivenName       string   `xml:"GivenName,omitempty"`
+	SurName         string   `xml:"SurName,omitempty"`
+	EmailAddress    []string `xml:"EmailAddress,omitempty"`
 	TelephoneNumber []string `xml:"TelephoneNumber,omitempty"`
 }
 
@@ -144,27 +144,27 @@ type ContactPerson struct {
 
 // MetadataConfig contains configuration for generating metadata
 type MetadataConfig struct {
-	EntityID            string
-	BaseURL             string
-	Certificate         *x509.Certificate
+	EntityID             string
+	BaseURL              string
+	Certificate          *x509.Certificate
 	WantAssertionsSigned bool
 	AuthnRequestsSigned  bool
-	
+
 	// SP-specific
-	ACSURL              string
-	SLOURL              string
-	
+	ACSURL string
+	SLOURL string
+
 	// IdP-specific
-	SSOURL              string
-	
+	SSOURL string
+
 	// Organization info
-	OrgName             string
-	OrgDisplayName      string
-	OrgURL              string
-	
+	OrgName        string
+	OrgDisplayName string
+	OrgURL         string
+
 	// Contact info
-	TechnicalContact    string
-	SupportContact      string
+	TechnicalContact string
+	SupportContact   string
 }
 
 // GenerateSPMetadata generates Service Provider metadata
@@ -207,13 +207,13 @@ func GenerateSPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			},
 		},
 	}
-	
+
 	// Add certificate if provided
 	// Per XML Signature spec and SAML Metadata, X509Certificate contains
 	// the base64-encoded DER certificate (not PEM)
 	if config.Certificate != nil {
 		certB64 := base64.StdEncoding.EncodeToString(config.Certificate.Raw)
-		
+
 		metadata.SPSSODescriptor.KeyDescriptors = []KeyDescriptor{
 			{
 				Use: "signing",
@@ -233,7 +233,7 @@ func GenerateSPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			},
 		}
 	}
-	
+
 	// Add organization info
 	if config.OrgName != "" {
 		metadata.Organization = &Organization{
@@ -248,7 +248,7 @@ func GenerateSPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			},
 		}
 	}
-	
+
 	// Add contact persons
 	if config.TechnicalContact != "" {
 		metadata.ContactPerson = append(metadata.ContactPerson, ContactPerson{
@@ -262,7 +262,7 @@ func GenerateSPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			EmailAddress: []string{config.SupportContact},
 		})
 	}
-	
+
 	return metadata, nil
 }
 
@@ -309,13 +309,13 @@ func GenerateIDPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			},
 		},
 	}
-	
+
 	// Add certificate if provided
 	// Per XML Signature spec and SAML Metadata, X509Certificate contains
 	// the base64-encoded DER certificate (not PEM)
 	if config.Certificate != nil {
 		certB64 := base64.StdEncoding.EncodeToString(config.Certificate.Raw)
-		
+
 		metadata.IDPSSODescriptor.KeyDescriptors = []KeyDescriptor{
 			{
 				Use: "signing",
@@ -327,7 +327,7 @@ func GenerateIDPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			},
 		}
 	}
-	
+
 	// Add organization info
 	if config.OrgName != "" {
 		metadata.Organization = &Organization{
@@ -342,7 +342,7 @@ func GenerateIDPMetadata(config *MetadataConfig) (*EntityDescriptor, error) {
 			},
 		}
 	}
-	
+
 	return metadata, nil
 }
 
@@ -352,8 +352,7 @@ func MarshalMetadata(metadata *EntityDescriptor) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Add XML declaration
 	return []byte(xml.Header + string(xmlData)), nil
 }
-

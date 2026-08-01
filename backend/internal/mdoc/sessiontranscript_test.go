@@ -114,8 +114,8 @@ func TestOpenID4VPHandoverUnencryptedNull(t *testing.T) {
 // response_uri (which would otherwise produce a transcript that fails interop).
 func TestOpenID4VPHandoverRequiresInputs(t *testing.T) {
 	cases := []struct {
-		name                          string
-		clientID, nonce, responseURI  string
+		name                         string
+		clientID, nonce, responseURI string
 	}{
 		{"missing client_id", "", specVectorNonce, specVectorResponseURI},
 		{"missing nonce", specVectorClientID, "", specVectorResponseURI},

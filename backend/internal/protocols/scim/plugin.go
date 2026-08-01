@@ -606,9 +606,9 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "SCIM Server",
 					Type:        "internal",
 					Parameters: map[string]string{
-						"processing_order": "Sequential - array index order (RFC 7644 §3.7)",
+						"processing_order":  "Sequential - array index order (RFC 7644 §3.7)",
 						"bulkId_resolution": "bulkId:value references replaced with actual resource IDs",
-						"error_handling":   "Continue or abort based on failOnErrors threshold",
+						"error_handling":    "Continue or abort based on failOnErrors threshold",
 					},
 					Security: []string{
 						"Failed operations MUST NOT affect already-completed operations (no rollback per spec)",
@@ -624,9 +624,9 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "IdP",
 					Type:        "response",
 					Parameters: map[string]string{
-						"status":     "200 OK (overall request succeeded)",
-						"schemas":    "urn:ietf:params:scim:api:messages:2.0:BulkResponse",
-						"Operations": "Array of {method, location, bulkId, status, response} per operation",
+						"status":        "200 OK (overall request succeeded)",
+						"schemas":       "urn:ietf:params:scim:api:messages:2.0:BulkResponse",
+						"Operations":    "Array of {method, location, bulkId, status, response} per operation",
 						"status_per_op": "Individual HTTP status codes (201, 200, 204, 4xx, etc.)",
 					},
 					Security: []string{
@@ -708,11 +708,11 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Client",
 					Type:        "response",
 					Parameters: map[string]string{
-						"User.endpoint":           "/Users",
-						"User.schema":             "urn:ietf:params:scim:schemas:core:2.0:User (REQUIRED)",
-						"User.schemaExtensions":   "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User (OPTIONAL)",
-						"Group.endpoint":          "/Groups",
-						"Group.schema":            "urn:ietf:params:scim:schemas:core:2.0:Group (REQUIRED)",
+						"User.endpoint":         "/Users",
+						"User.schema":           "urn:ietf:params:scim:schemas:core:2.0:User (REQUIRED)",
+						"User.schemaExtensions": "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User (OPTIONAL)",
+						"Group.endpoint":        "/Groups",
+						"Group.schema":          "urn:ietf:params:scim:schemas:core:2.0:Group (REQUIRED)",
 					},
 					Security: []string{
 						"schemaExtensions[].required indicates whether an extension MUST be present in resources",
@@ -812,10 +812,10 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "External Server",
 					Type:        "request",
 					Parameters: map[string]string{
-						"method":       "POST",
-						"endpoint":     "/Users",
-						"Content-Type": "application/scim+json",
-						"body":         "User resource mapped to target schema",
+						"method":        "POST",
+						"endpoint":      "/Users",
+						"Content-Type":  "application/scim+json",
+						"body":          "User resource mapped to target schema",
 						"Authorization": "Bearer {token}",
 					},
 					Security: []string{
@@ -850,10 +850,10 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Database",
 					Type:        "internal",
 					Parameters: map[string]string{
-						"source_id": "User ID in the IdP / source system",
-						"target_id": "User ID assigned by the external SCIM server",
+						"source_id":       "User ID in the IdP / source system",
+						"target_id":       "User ID assigned by the external SCIM server",
 						"target_location": "Full URL for the user at the target",
-						"last_synced": "Timestamp of last successful provisioning",
+						"last_synced":     "Timestamp of last successful provisioning",
 					},
 					Security: []string{
 						"ID mappings enable incremental sync - only changed users are updated",

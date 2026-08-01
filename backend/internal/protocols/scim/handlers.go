@@ -25,7 +25,7 @@ func (p *Plugin) handleServiceProviderConfig(w http.ResponseWriter, r *http.Requ
 	})
 
 	config := GetServiceProviderConfig(p.baseURL)
-	
+
 	p.emitEvent("scim.response", "ServiceProviderConfig", map[string]interface{}{
 		"status": 200,
 	})
@@ -41,11 +41,11 @@ func (p *Plugin) handleResourceTypes(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resourceTypes := GetResourceTypes(p.baseURL)
-	
+
 	response := NewListResponse()
 	response.TotalResults = len(resourceTypes)
 	response.ItemsPerPage = len(resourceTypes)
-	
+
 	for _, rt := range resourceTypes {
 		data, _ := json.Marshal(rt)
 		response.Resources = append(response.Resources, data)
@@ -57,7 +57,7 @@ func (p *Plugin) handleResourceTypes(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleResourceType(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	
+
 	resourceTypes := GetResourceTypes(p.baseURL)
 	for _, rt := range resourceTypes {
 		if rt.ID == id {
@@ -66,17 +66,17 @@ func (p *Plugin) handleResourceType(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	
+
 	WriteError(w, ErrResourceNotFound("ResourceType", id))
 }
 
 func (p *Plugin) handleSchemas(w http.ResponseWriter, r *http.Request) {
 	schemas := GetSchemas(p.baseURL)
-	
+
 	response := NewListResponse()
 	response.TotalResults = len(schemas)
 	response.ItemsPerPage = len(schemas)
-	
+
 	for _, s := range schemas {
 		data, _ := json.Marshal(s)
 		response.Resources = append(response.Resources, data)
@@ -88,14 +88,14 @@ func (p *Plugin) handleSchemas(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleSchema(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	
+
 	// URL-decode the schema ID (URNs contain colons which are URL-encoded)
 	decodedID, err := url.PathUnescape(id)
 	if err != nil {
 		WriteError(w, ErrInvalidValue("Invalid schema ID URL encoding"))
 		return
 	}
-	
+
 	schema := GetSchema(p.baseURL, decodedID)
 	if schema == nil {
 		WriteError(w, ErrResourceNotFound("Schema", decodedID))
@@ -110,12 +110,12 @@ func (p *Plugin) handleSchema(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	// Parse query parameters
 	filter := r.URL.Query().Get("filter")
 	startIndex, _ := strconv.Atoi(r.URL.Query().Get("startIndex"))
 	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
-	
+
 	if startIndex < 1 {
 		startIndex = 1
 	}
@@ -142,7 +142,7 @@ func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, ErrInvalidFilter(err.Error()))
 			return
 		}
-		
+
 		translator := NewSQLTranslator("user")
 		sql, params, _ := translator.Translate(parsed)
 		p.emitEvent("scim.filter.parsed", "Filter Analysis", map[string]interface{}{
@@ -198,7 +198,7 @@ func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
@@ -465,11 +465,11 @@ func (p *Plugin) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleListGroups(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	filter := r.URL.Query().Get("filter")
 	startIndex, _ := strconv.Atoi(r.URL.Query().Get("startIndex"))
 	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
-	
+
 	if startIndex < 1 {
 		startIndex = 1
 	}
@@ -512,7 +512,7 @@ func (p *Plugin) handleListGroups(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
@@ -770,7 +770,7 @@ func (p *Plugin) executeBulkOperation(op BulkOperation) BulkOperationResult {
 	// Parse path to determine resource type and ID
 	path := strings.TrimPrefix(op.Path, "/")
 	parts := strings.Split(path, "/")
-	
+
 	if len(parts) == 0 {
 		result.Status = "400"
 		errResp, _ := json.Marshal(NewErrorResponse(400, ErrorTypeInvalidPath, "Invalid path"))
@@ -999,7 +999,7 @@ func (p *Plugin) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// For now, search both Users and Groups
 	ctx := r.Context()
-	
+
 	startIndex := searchReq.StartIndex
 	if startIndex < 1 {
 		startIndex = 1
@@ -1187,18 +1187,18 @@ func (p *Plugin) handleConnectionStatus(w http.ResponseWriter, r *http.Request) 
 		"detectedIdP":      detectedIdP,
 		"scimEndpoint":     p.baseURL + "/scim/v2",
 		"supportedFeatures": map[string]bool{
-			"patch":      true,
-			"bulk":       true,
-			"filter":     true,
-			"etag":       true,
-			"sort":       true,
+			"patch":          true,
+			"bulk":           true,
+			"filter":         true,
+			"etag":           true,
+			"sort":           true,
 			"changePassword": true,
 		},
 		"recentEventsCount": len(events),
 		"configuration": map[string]string{
-			"usersEndpoint":    p.baseURL + "/scim/v2/Users",
-			"groupsEndpoint":   p.baseURL + "/scim/v2/Groups",
-			"schemasEndpoint":  p.baseURL + "/scim/v2/Schemas",
+			"usersEndpoint":   p.baseURL + "/scim/v2/Users",
+			"groupsEndpoint":  p.baseURL + "/scim/v2/Groups",
+			"schemasEndpoint": p.baseURL + "/scim/v2/Schemas",
 		},
 	}
 
@@ -1219,7 +1219,7 @@ func (p *Plugin) emitEvent(eventType, name string, data map[string]interface{}) 
 // logProvisioningAction logs a provisioning action from an external IdP
 func (p *Plugin) logProvisioningAction(r *http.Request, action, resource, resourceID string, data map[string]interface{}) {
 	source := DetectIdPSource(r)
-	
+
 	event := ProvisioningEvent{
 		ID:        resourceID,
 		Timestamp: timeNow(),
@@ -1239,4 +1239,3 @@ func (p *Plugin) logProvisioningAction(r *http.Request, action, resource, resour
 		"data":       data,
 	})
 }
-

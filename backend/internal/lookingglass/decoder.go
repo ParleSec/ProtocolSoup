@@ -28,15 +28,15 @@ type DecodedJWT struct {
 
 // JWTAnalysis contains analysis of a JWT
 type JWTAnalysis struct {
-	Algorithm    string          `json:"algorithm"`
-	Type         string          `json:"type"` // access_token, id_token, refresh_token
-	IsExpired    bool            `json:"is_expired"`
-	ExpiresIn    string          `json:"expires_in,omitempty"`
-	Issuer       string          `json:"issuer,omitempty"`
-	Subject      string          `json:"subject,omitempty"`
-	Audience     interface{}     `json:"audience,omitempty"`
-	Claims       []ClaimAnalysis `json:"claims"`
-	SecurityNotes []string       `json:"security_notes"`
+	Algorithm     string          `json:"algorithm"`
+	Type          string          `json:"type"` // access_token, id_token, refresh_token
+	IsExpired     bool            `json:"is_expired"`
+	ExpiresIn     string          `json:"expires_in,omitempty"`
+	Issuer        string          `json:"issuer,omitempty"`
+	Subject       string          `json:"subject,omitempty"`
+	Audience      interface{}     `json:"audience,omitempty"`
+	Claims        []ClaimAnalysis `json:"claims"`
+	SecurityNotes []string        `json:"security_notes"`
 }
 
 // ClaimAnalysis provides analysis of individual claims
@@ -114,18 +114,18 @@ func (d *Decoder) analyzeJWT(header, payload map[string]interface{}) JWTAnalysis
 
 	// OIDC claims
 	oidcClaims := map[string]string{
-		"nonce":               "Nonce - Mitigates replay attacks",
-		"auth_time":           "Authentication Time - When user was authenticated",
-		"acr":                 "Authentication Context Class Reference",
-		"amr":                 "Authentication Methods References",
-		"azp":                 "Authorized Party - Party to which the token was issued",
-		"name":                "Full name of the user",
-		"given_name":          "Given name(s) or first name(s)",
-		"family_name":         "Surname(s) or last name(s)",
-		"email":               "Email address",
-		"email_verified":      "Whether email has been verified",
-		"preferred_username":  "Preferred username",
-		"picture":             "URL of profile picture",
+		"nonce":              "Nonce - Mitigates replay attacks",
+		"auth_time":          "Authentication Time - When user was authenticated",
+		"acr":                "Authentication Context Class Reference",
+		"amr":                "Authentication Methods References",
+		"azp":                "Authorized Party - Party to which the token was issued",
+		"name":               "Full name of the user",
+		"given_name":         "Given name(s) or first name(s)",
+		"family_name":        "Surname(s) or last name(s)",
+		"email":              "Email address",
+		"email_verified":     "Whether email has been verified",
+		"preferred_username": "Preferred username",
+		"picture":            "URL of profile picture",
 	}
 
 	// Analyze each claim
@@ -278,13 +278,13 @@ func (d *Decoder) DecodeAuthorizationRequest(requestURL string) (*DecodedAuthori
 
 // DecodedTokenRequest represents a decoded token request
 type DecodedTokenRequest struct {
-	GrantType    string   `json:"grant_type"`
-	Code         string   `json:"code,omitempty"`
-	RedirectURI  string   `json:"redirect_uri,omitempty"`
-	ClientID     string   `json:"client_id,omitempty"`
-	CodeVerifier string   `json:"code_verifier,omitempty"`
-	RefreshToken string   `json:"refresh_token,omitempty"`
-	Scope        string   `json:"scope,omitempty"`
+	GrantType     string   `json:"grant_type"`
+	Code          string   `json:"code,omitempty"`
+	RedirectURI   string   `json:"redirect_uri,omitempty"`
+	ClientID      string   `json:"client_id,omitempty"`
+	CodeVerifier  string   `json:"code_verifier,omitempty"`
+	RefreshToken  string   `json:"refresh_token,omitempty"`
+	Scope         string   `json:"scope,omitempty"`
 	SecurityNotes []string `json:"security_notes"`
 }
 
@@ -296,13 +296,13 @@ func (d *Decoder) DecodeTokenRequest(body string) (*DecodedTokenRequest, error) 
 	}
 
 	decoded := &DecodedTokenRequest{
-		GrantType:    values.Get("grant_type"),
-		Code:         values.Get("code"),
-		RedirectURI:  values.Get("redirect_uri"),
-		ClientID:     values.Get("client_id"),
-		CodeVerifier: values.Get("code_verifier"),
-		RefreshToken: values.Get("refresh_token"),
-		Scope:        values.Get("scope"),
+		GrantType:     values.Get("grant_type"),
+		Code:          values.Get("code"),
+		RedirectURI:   values.Get("redirect_uri"),
+		ClientID:      values.Get("client_id"),
+		CodeVerifier:  values.Get("code_verifier"),
+		RefreshToken:  values.Get("refresh_token"),
+		Scope:         values.Get("scope"),
 		SecurityNotes: make([]string, 0),
 	}
 
@@ -326,4 +326,3 @@ func (d *Decoder) DecodeTokenRequest(body string) (*DecodedTokenRequest, error) 
 
 	return decoded, nil
 }
-

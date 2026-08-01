@@ -19,12 +19,12 @@ type SLOState struct {
 	NameIDFormat   string
 	SessionIndexes []string
 	RelayState     string
-	
+
 	// Track which SPs have been notified and responded
 	PendingSPs   map[string]bool   // SP EntityID -> sent logout request
 	CompletedSPs map[string]bool   // SP EntityID -> received logout response
 	FailedSPs    map[string]string // SP EntityID -> error message
-	
+
 	// Final status
 	Complete bool
 	Success  bool
@@ -56,15 +56,15 @@ func (s *SLOState) AddPendingSP(entityID string) {
 func (s *SLOState) MarkSPComplete(entityID string, success bool, errorMsg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	delete(s.PendingSPs, entityID)
-	
+
 	if success {
 		s.CompletedSPs[entityID] = true
 	} else {
 		s.FailedSPs[entityID] = errorMsg
 	}
-	
+
 	// Check if all SPs have responded
 	if len(s.PendingSPs) == 0 {
 		s.Complete = true
@@ -108,7 +108,7 @@ func ParseLogoutRequest(xmlData []byte) (*LogoutRequestInfo, error) {
 	if err := xml.Unmarshal(xmlData, &request); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal LogoutRequest: %w", err)
 	}
-	
+
 	info := &LogoutRequestInfo{
 		ID:             request.ID,
 		Destination:    request.Destination,
@@ -116,28 +116,28 @@ func ParseLogoutRequest(xmlData []byte) (*LogoutRequestInfo, error) {
 		Reason:         request.Reason,
 		SessionIndexes: request.SessionIndex,
 	}
-	
+
 	if request.Issuer != nil {
 		info.Issuer = request.Issuer.Value
 	}
-	
+
 	if request.NameID != nil {
 		info.NameID = request.NameID.Value
 		info.NameIDFormat = request.NameID.Format
 	}
-	
+
 	return info, nil
 }
 
 // LogoutResponseInfo contains parsed information from a LogoutResponse
 type LogoutResponseInfo struct {
-	ID           string
-	Issuer       string
-	InResponseTo string
-	Destination  string
-	StatusCode   string
+	ID            string
+	Issuer        string
+	InResponseTo  string
+	Destination   string
+	StatusCode    string
 	StatusMessage string
-	Success      bool
+	Success       bool
 }
 
 // ParseLogoutResponse parses a LogoutResponse XML into structured info
@@ -146,23 +146,23 @@ func ParseLogoutResponse(xmlData []byte) (*LogoutResponseInfo, error) {
 	if err := xml.Unmarshal(xmlData, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal LogoutResponse: %w", err)
 	}
-	
+
 	info := &LogoutResponseInfo{
 		ID:           response.ID,
 		InResponseTo: response.InResponseTo,
 		Destination:  response.Destination,
 	}
-	
+
 	if response.Issuer != nil {
 		info.Issuer = response.Issuer.Value
 	}
-	
+
 	if response.Status != nil {
 		info.StatusCode = response.Status.StatusCode.Value
 		info.StatusMessage = response.Status.StatusMessage
 		info.Success = response.Status.StatusCode.Value == StatusSuccess
 	}
-	
+
 	return info, nil
 }
 
@@ -189,7 +189,7 @@ func NewSLOManager() *SLOManager {
 func (m *SLOManager) StartSLO(state *SLOState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	m.states[state.RequestID] = state
 	m.byNameID[state.NameID] = append(m.byNameID[state.NameID], state.RequestID)
 }
@@ -205,7 +205,7 @@ func (m *SLOManager) GetState(requestID string) *SLOState {
 func (m *SLOManager) GetStatesByNameID(nameID string) []*SLOState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	requestIDs := m.byNameID[nameID]
 	states := make([]*SLOState, 0, len(requestIDs))
 	for _, id := range requestIDs {
@@ -220,11 +220,11 @@ func (m *SLOManager) GetStatesByNameID(nameID string) []*SLOState {
 func (m *SLOManager) CompleteSLO(requestID string) *SLOState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	
+
 	state := m.states[requestID]
 	if state != nil {
 		delete(m.states, requestID)
-		
+
 		// Remove from nameID index
 		if ids, ok := m.byNameID[state.NameID]; ok {
 			for i, id := range ids {
@@ -238,7 +238,7 @@ func (m *SLOManager) CompleteSLO(requestID string) *SLOState {
 			}
 		}
 	}
-	
+
 	return state
 }
 
@@ -248,7 +248,7 @@ func (m *SLOManager) HandleLogoutResponse(responseInfo *LogoutResponseInfo) (*SL
 	if state == nil {
 		return nil, fmt.Errorf("no SLO state found for response to: %s", responseInfo.InResponseTo)
 	}
-	
+
 	errorMsg := ""
 	if !responseInfo.Success {
 		errorMsg = responseInfo.StatusMessage
@@ -256,9 +256,9 @@ func (m *SLOManager) HandleLogoutResponse(responseInfo *LogoutResponseInfo) (*SL
 			errorMsg = responseInfo.StatusCode
 		}
 	}
-	
+
 	state.MarkSPComplete(responseInfo.Issuer, responseInfo.Success, errorMsg)
-	
+
 	return state, nil
 }
 
@@ -293,7 +293,7 @@ func CreateLogoutRequestForParticipant(issuer string, participant *SessionPartic
 	if participant.SessionIndex != "" {
 		sessionIndexes = append(sessionIndexes, participant.SessionIndex)
 	}
-	
+
 	return NewLogoutRequest(
 		issuer,
 		participant.SLOURL,
@@ -302,4 +302,3 @@ func CreateLogoutRequestForParticipant(issuer string, participant *SessionPartic
 		sessionIndexes,
 	)
 }
-

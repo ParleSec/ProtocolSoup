@@ -100,15 +100,15 @@ func TestParseIsVague(t *testing.T) {
 			expect: false,
 		},
 		{
-			name: "phrase present",
-			req:  Request{Q: `"sign in"`},
-			cat:  catalog{aliases: map[string][]aliasRow{}},
+			name:   "phrase present",
+			req:    Request{Q: `"sign in"`},
+			cat:    catalog{aliases: map[string][]aliasRow{}},
 			expect: false,
 		},
 		{
-			name: "scope set",
-			req:  Request{Q: "stuff", Scope: ScopeFlow},
-			cat:  catalog{aliases: map[string][]aliasRow{}},
+			name:   "scope set",
+			req:    Request{Q: "stuff", Scope: ScopeFlow},
+			cat:    catalog{aliases: map[string][]aliasRow{}},
 			expect: false,
 		},
 	}

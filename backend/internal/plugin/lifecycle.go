@@ -212,4 +212,3 @@ func (mp *ManagedPlugin) Shutdown(ctx context.Context) error {
 	mp.lm.SetState(id, StateStopped)
 	return nil
 }
-

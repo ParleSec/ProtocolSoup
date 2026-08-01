@@ -23,27 +23,27 @@ type ReceiverService struct {
 	port           int
 	transmitterURL string
 	bearerToken    string
-	
+
 	// JWKS cache
-	jwksCache     *JWKSCache
+	jwksCache *JWKSCache
 
 	// JTI replay detection per RFC 8935 §2 step 4 / RFC 8417 §2.2
 	seenJTIs   map[string]time.Time
 	seenJTIsMu sync.RWMutex
-	
+
 	// Event and action logs
-	receivedEvents   []ReceivedEvent
-	responseActions  []ResponseAction
-	eventsMu         sync.RWMutex
-	actionsMu        sync.RWMutex
-	
+	receivedEvents  []ReceivedEvent
+	responseActions []ResponseAction
+	eventsMu        sync.RWMutex
+	actionsMu       sync.RWMutex
+
 	// Callback to execute real actions
 	actionExecutor ActionExecutor
-	
+
 	// Event broadcast channels
 	eventListeners []chan<- ReceiverEvent
 	listenerMu     sync.RWMutex
-	
+
 	// HTTP server
 	server *http.Server
 }
@@ -66,11 +66,11 @@ type ActionExecutor interface {
 
 // JWKSCache caches public keys fetched from the transmitter
 type JWKSCache struct {
-	keys       map[string]*rsa.PublicKey
-	fetchedAt  time.Time
-	ttl        time.Duration
-	jwksURL    string
-	mu         sync.RWMutex
+	keys      map[string]*rsa.PublicKey
+	fetchedAt time.Time
+	ttl       time.Duration
+	jwksURL   string
+	mu        sync.RWMutex
 }
 
 // NewJWKSCache creates a new JWKS cache
@@ -94,16 +94,16 @@ func (c *JWKSCache) GetKey(keyID string) (*rsa.PublicKey, *CapturedHTTPExchange,
 		}
 	}
 	c.mu.RUnlock()
-	
+
 	// Fetch fresh JWKS (returns captured HTTP exchange)
 	exchange, err := c.refresh()
 	if err != nil {
 		return nil, exchange, err
 	}
-	
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	
+
 	key, ok := c.keys[keyID]
 	if !ok {
 		return nil, exchange, fmt.Errorf("key %s not found in JWKS", keyID)
@@ -116,9 +116,9 @@ func (c *JWKSCache) GetKey(keyID string) (*rsa.PublicKey, *CapturedHTTPExchange,
 func (c *JWKSCache) refresh() (*CapturedHTTPExchange, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	log.Printf("[SSF Receiver] Fetching JWKS from %s", c.jwksURL)
-	
+
 	startTime := time.Now()
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(c.jwksURL)
@@ -149,7 +149,7 @@ func (c *JWKSCache) refresh() (*CapturedHTTPExchange, error) {
 	for k := range resp.Header {
 		exchange.Response.Headers[k] = resp.Header.Get(k)
 	}
-	
+
 	if resp.StatusCode != http.StatusOK {
 		exchange.Response.Body = fmt.Sprintf("HTTP %d", resp.StatusCode)
 		return exchange, fmt.Errorf("JWKS fetch returned status %d", resp.StatusCode)
@@ -161,14 +161,14 @@ func (c *JWKSCache) refresh() (*CapturedHTTPExchange, error) {
 		return exchange, fmt.Errorf("failed to read JWKS body: %w", err)
 	}
 	exchange.Response.Body = string(bodyBytes)
-	
+
 	var jwks struct {
 		Keys []json.RawMessage `json:"keys"`
 	}
 	if err := json.Unmarshal(bodyBytes, &jwks); err != nil {
 		return exchange, fmt.Errorf("failed to decode JWKS: %w", err)
 	}
-	
+
 	// Parse each key
 	newKeys := make(map[string]*rsa.PublicKey)
 	for _, keyData := range jwks.Keys {
@@ -181,25 +181,25 @@ func (c *JWKSCache) refresh() (*CapturedHTTPExchange, error) {
 		if err := json.Unmarshal(keyData, &keyInfo); err != nil {
 			continue
 		}
-		
+
 		if keyInfo.Kty != "RSA" {
 			continue
 		}
-		
+
 		// Parse RSA public key from JWK
 		key, err := parseRSAPublicKeyFromJWK(keyInfo.N, keyInfo.E)
 		if err != nil {
 			log.Printf("[SSF Receiver] Failed to parse key %s: %v", keyInfo.Kid, err)
 			continue
 		}
-		
+
 		newKeys[keyInfo.Kid] = key
 		log.Printf("[SSF Receiver] Cached key: %s", keyInfo.Kid)
 	}
-	
+
 	c.keys = newKeys
 	c.fetchedAt = time.Now()
-	
+
 	log.Printf("[SSF Receiver] JWKS cache refreshed with %d keys", len(newKeys))
 	return exchange, nil
 }
@@ -211,22 +211,22 @@ func parseRSAPublicKeyFromJWK(nBase64, eBase64 string) (*rsa.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode N: %w", err)
 	}
-	
+
 	// Decode E (exponent) - base64url encoded
 	eBytes, err := base64.RawURLEncoding.DecodeString(eBase64)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode E: %w", err)
 	}
-	
+
 	// Convert exponent bytes to int
 	var e int
 	for _, b := range eBytes {
 		e = e<<8 + int(b)
 	}
-	
+
 	// Create public key
 	n := new(big.Int).SetBytes(nBytes)
-	
+
 	return &rsa.PublicKey{
 		N: n,
 		E: e,
@@ -236,7 +236,7 @@ func parseRSAPublicKeyFromJWK(nBase64, eBase64 string) (*rsa.PublicKey, error) {
 // NewReceiverService creates a new standalone SSF receiver
 func NewReceiverService(port int, transmitterURL, bearerToken string, executor ActionExecutor) *ReceiverService {
 	jwksURL := transmitterURL + "/ssf/jwks"
-	
+
 	return &ReceiverService{
 		port:            port,
 		transmitterURL:  transmitterURL,
@@ -286,23 +286,23 @@ func (rs *ReceiverService) Start() error {
 	router := chi.NewRouter()
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
-	
+
 	// SSF Receiver endpoints
 	router.Post("/ssf/push", rs.handlePush)
 	router.Get("/ssf/status", rs.handleStatus)
 	router.Get("/ssf/events", rs.handleGetEvents)
 	router.Get("/ssf/actions", rs.handleGetActions)
 	router.Delete("/ssf/logs", rs.handleClearLogs)
-	
+
 	rs.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", rs.port),
 		Handler: router,
 	}
-	
+
 	log.Printf("[SSF Receiver] Starting on port %d", rs.port)
 	log.Printf("[SSF Receiver] Transmitter URL: %s", rs.transmitterURL)
 	log.Printf("[SSF Receiver] Push endpoint: http://localhost:%d/ssf/push", rs.port)
-	
+
 	return rs.server.ListenAndServe()
 }
 
@@ -327,7 +327,7 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	
+
 	// RFC 8935 §2: Validate Content-Type
 	ct := r.Header.Get("Content-Type")
 	if ct != "application/secevent+jwt" {
@@ -344,25 +344,25 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", "Failed to read request body")
 		return
 	}
-	
+
 	setToken := string(body)
 	if setToken == "" {
 		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", "Empty SET token")
 		return
 	}
-	
+
 	// Extract session ID from delivery header (not from the SET itself)
 	sessionID := r.Header.Get("X-SSF-Session")
 
 	log.Printf("[SSF Receiver] Received push delivery: %d bytes (session: %s)", len(body), sessionID)
-	
+
 	status := rs.processSET(r.Context(), setToken, sessionID)
-	
+
 	if status.Status == "failed" {
 		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", status.Description)
 		return
 	}
-	
+
 	// RFC 8935 §2.2: 202 Accepted on success
 	w.WriteHeader(http.StatusAccepted)
 }
@@ -403,20 +403,20 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 			"token_length":    len(setToken),
 		},
 	})
-	
+
 	// Decode the SET header to get the key ID
 	token, _, err := new(jwt.Parser).ParseUnverified(setToken, jwt.MapClaims{})
 	if err != nil {
 		log.Printf("[SSF Receiver] Failed to parse SET header: %v", err)
 		return SetStatus{Status: "failed", Description: "Invalid SET format"}
 	}
-	
+
 	keyID, ok := token.Header["kid"].(string)
 	if !ok {
 		log.Printf("[SSF Receiver] SET missing kid header")
 		return SetStatus{Status: "failed", Description: "Missing key ID"}
 	}
-	
+
 	// Fetch the public key from JWKS (may trigger a real HTTP fetch to the transmitter)
 	publicKey, jwksExchange, err := rs.jwksCache.GetKey(keyID)
 	if err != nil {
@@ -434,7 +434,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 			Data:      jwksExchange,
 		})
 	}
-	
+
 	// Verify the SET signature
 	parsedToken, err := jwt.Parse(setToken, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
@@ -442,7 +442,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		}
 		return publicKey, nil
 	})
-	
+
 	if err != nil {
 		log.Printf("[SSF Receiver] SET signature verification failed: %v", err)
 		rs.addReceivedEvent(ReceivedEvent{
@@ -465,9 +465,9 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 
 		return SetStatus{Status: "failed", Description: fmt.Sprintf("Signature verification failed: %v", err)}
 	}
-	
+
 	log.Printf("[SSF Receiver] SET signature verified successfully")
-	
+
 	// Build structured DecodedSET directly from the verified token's claims
 	// instead of re-parsing via DecodeWithoutValidation (which would be a redundant third parse).
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
@@ -555,7 +555,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 			"event_count": len(decoded.Events),
 		},
 	})
-	
+
 	// Record the received event
 	processedAt := time.Now()
 	rs.addReceivedEvent(ReceivedEvent{
@@ -567,7 +567,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		Processed:      true,
 		ProcessedAt:    &processedAt,
 	})
-	
+
 	// Extract subject email from the decoded SET
 	var subjectEmail string
 	if decoded.Subject != nil {
@@ -589,7 +589,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		log.Printf("[SSF Receiver] Processing event: %s for subject: %s (session: %s)", event.Type, subjectEmail, sessionID)
 		rs.executeResponseActions(ctx, jti, event, subjectEmail, sessionID)
 	}
-	
+
 	// Record JTI as seen for replay detection
 	if jti != "" {
 		rs.seenJTIsMu.Lock()
@@ -640,7 +640,7 @@ func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID str
 func (rs *ReceiverService) addReceivedEvent(event ReceivedEvent) {
 	rs.eventsMu.Lock()
 	defer rs.eventsMu.Unlock()
-	
+
 	if len(rs.receivedEvents) >= 100 {
 		rs.receivedEvents = rs.receivedEvents[1:]
 	}
@@ -651,7 +651,7 @@ func (rs *ReceiverService) addReceivedEvent(event ReceivedEvent) {
 func (rs *ReceiverService) addResponseAction(action ResponseAction) {
 	rs.actionsMu.Lock()
 	defer rs.actionsMu.Unlock()
-	
+
 	if len(rs.responseActions) >= 200 {
 		rs.responseActions = rs.responseActions[1:]
 	}
@@ -675,13 +675,13 @@ func (rs *ReceiverService) handleStatus(w http.ResponseWriter, r *http.Request) 
 func (rs *ReceiverService) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	rs.eventsMu.RLock()
 	defer rs.eventsMu.RUnlock()
-	
+
 	// Return in reverse order (newest first)
 	events := make([]ReceivedEvent, len(rs.receivedEvents))
 	for i, e := range rs.receivedEvents {
 		events[len(rs.receivedEvents)-1-i] = e
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"events": events,
@@ -692,13 +692,13 @@ func (rs *ReceiverService) handleGetEvents(w http.ResponseWriter, r *http.Reques
 func (rs *ReceiverService) handleGetActions(w http.ResponseWriter, r *http.Request) {
 	rs.actionsMu.RLock()
 	defer rs.actionsMu.RUnlock()
-	
+
 	// Return in reverse order (newest first)
 	actions := make([]ResponseAction, len(rs.responseActions))
 	for i, a := range rs.responseActions {
 		actions[len(rs.responseActions)-1-i] = a
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"actions": actions,
@@ -740,7 +740,7 @@ func writeReceiverSSFError(w http.ResponseWriter, status int, errCode, descripti
 func (rs *ReceiverService) GetReceivedEvents() []ReceivedEvent {
 	rs.eventsMu.RLock()
 	defer rs.eventsMu.RUnlock()
-	
+
 	result := make([]ReceivedEvent, len(rs.receivedEvents))
 	for i, e := range rs.receivedEvents {
 		result[len(rs.receivedEvents)-1-i] = e
@@ -834,11 +834,10 @@ func buildDecodedSETFromClaims(claims jwt.MapClaims, header map[string]interface
 func (rs *ReceiverService) GetResponseActions() []ResponseAction {
 	rs.actionsMu.RLock()
 	defer rs.actionsMu.RUnlock()
-	
+
 	result := make([]ResponseAction, len(rs.responseActions))
 	for i, a := range rs.responseActions {
 		result[len(rs.responseActions)-1-i] = a
 	}
 	return result
 }
-
