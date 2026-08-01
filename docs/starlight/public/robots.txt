@@ -1,4 +1,15 @@
+# Content Signals — https://contentsignals.org/
+#
+# search   — building a search index and returning links and short excerpts.
+# ai-input — supplying content to an AI model at inference time, such as
+#            retrieval-augmented generation or grounding a generated answer.
+# ai-train — training or fine-tuning an AI model.
+#
+# These directives express the operator's preferences. They do not replace the
+# terms of the repository licence or any applicable law.
+
 User-agent: *
+Content-Signal: search=yes, ai-input=yes, ai-train=no
 Allow: /
 
 Sitemap: https://docs.protocolsoup.com/sitemap.xml

@@ -46,8 +46,19 @@
   - `/robots.txt`
   - `/sitemap.xml`
   - `/sitemap-index.xml`
+- Serves agent discovery documents (see [Agent Discovery](https://docs.protocolsoup.com/deploy/agent-discovery/)):
+  - `/.well-known/api-catalog`
+  - `/.well-known/agent-skills/index.json`
+  - `/.well-known/agent-skills/:name/SKILL.md`
+  - `/auth.md`
+  - `/llms.txt`, `/llms-full.txt`
+- Negotiates `Accept: text/markdown` on page routes, rendering markdown from the
+  page's own HTML. Requires `Vary: Accept` to be added at the edge, which the Go
+  runtime does when it proxies the frontend.
 - Rewritten HTTP upstream paths:
   - `/api`
+  - `/agentauth`
+  - `/mcp`
   - `/oauth2`
   - `/oidc`
   - `/oid4vci`
