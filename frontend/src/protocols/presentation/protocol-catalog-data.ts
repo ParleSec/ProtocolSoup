@@ -574,6 +574,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
     flows: [
       {
         id: 'anonymous-registration',
+        backendId: 'agent_anonymous_registration',
         name: 'Anonymous Registration',
         rfc: 'RFC 7523 §2.1',
         references: [
@@ -583,6 +584,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
       },
       {
         id: 'claim-ceremony',
+        backendId: 'agent_claim_ceremony',
         name: 'Claim Ceremony',
         rfc: 'RFC 8628 §3.3',
         references: [
@@ -612,6 +614,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
     flows: [
       {
         id: 'mcp-tool-call',
+        backendId: 'mcp_tool_call',
         name: 'Discovery and Tool Call',
         rfc: 'MCP 2026-07-28',
         references: [
