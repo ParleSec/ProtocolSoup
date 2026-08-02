@@ -53,6 +53,12 @@ use_cases:
     note: Exchanging a refresh token for a new access token without user interaction.
   pkce-protection:
     note: Binding an authorization request to a code_verifier to prevent code interception.
+  agent-registration:
+    note: Autonomous agent self-registers and obtains an identity assertion and access token.
+  agent-ownership:
+    note: Binding a previously registered agent to a human owner and widening its scope.
+  agent-tooling:
+    note: Agent discovers and invokes tools exposed by a remote protocol server.
 
 actors:
   public-client:
@@ -91,6 +97,14 @@ actors:
     note: SCIM client (typically an IdP) issuing provisioning requests.
   scim-service-provider:
     note: SCIM-protected resource accepting provisioning requests.
+  agent:
+    note: Autonomous software agent that registers, authenticates, and calls APIs without a human in the loop.
+  human-owner:
+    note: Person who claims ownership of a registered agent and authorises wider scopes.
+  mcp-client:
+    note: MCP client that discovers server cards and invokes JSON-RPC tools.
+  mcp-server:
+    note: MCP server exposing tools over a Streamable HTTP transport.
 
 patterns:
   front-channel-redirect:
@@ -129,6 +143,10 @@ patterns:
     note: Both parties present X.509 certificates during TLS handshake.
   bearer:
     note: Token presented as proof of authorization, valid for whoever holds it.
+  device-grant:
+    note: Authorization via a short user code entered on a secondary device or browser, as in RFC 8628.
+  json-rpc:
+    note: Request/response exchange encoded as JSON-RPC 2.0 messages.
 
 problem_domains:
   authentication:
@@ -151,3 +169,7 @@ problem_domains:
     note: Distribution, rotation, and trust of cryptographic keys.
   discovery:
     note: Locating endpoints, keys, and supported features.
+  agent-identity:
+    note: Establishing and binding cryptographic identity for autonomous agents.
+  agent-tooling:
+    note: Exposing and invoking tools that agents use to inspect or act on a system.
