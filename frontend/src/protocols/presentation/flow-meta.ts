@@ -1,6 +1,8 @@
 import type { ElementType } from 'react'
 import {
   AlertTriangle,
+  Bot,
+  Cpu,
   Eye,
   Fingerprint,
   Key,
@@ -11,6 +13,7 @@ import {
   Send,
   Shield,
   Unlock,
+  UserCheck,
   Users,
   Zap,
 } from 'lucide-react'
@@ -170,6 +173,23 @@ export const FLOW_PRESENTATION_META: Record<string, FlowPresentationMeta> = {
     color: 'from-orange-500 to-amber-600',
     features: ['Batch Processing', 'Atomic', 'Efficient'],
   },
+  agent_anonymous_registration: {
+    icon: Bot,
+    color: 'from-teal-500 to-cyan-600',
+    features: ['Anonymous Register', 'Identity Assertion', 'JWT Bearer Grant'],
+    recommended: true,
+  },
+  agent_claim_ceremony: {
+    icon: UserCheck,
+    color: 'from-cyan-500 to-blue-600',
+    features: ['Claim Ceremony', 'User Code', 'Ownership Binding'],
+  },
+  mcp_tool_call: {
+    icon: Cpu,
+    color: 'from-sky-500 to-blue-600',
+    features: ['Server Card', 'server/discover', 'JSON-RPC Tools'],
+    recommended: true,
+  },
 }
 
 const FEATURE_DESCRIPTIONS: Record<string, string> = {
@@ -210,6 +230,22 @@ const FEATURE_DESCRIPTIONS: Record<string, string> = {
   'Stream Management': 'Configure and manage event streams',
   'Real-time Signals': 'Immediate notification of security events',
   'Zero Trust Ready': 'Enable continuous access evaluation',
+  'Anonymous Agent Registration': 'Self-register without a human owner via the identity endpoint',
+  'Identity Assertion (JWT)': 'Service-signed JWT asserting agent identity per auth.md',
+  'RFC 7523 JWT Bearer Grant': 'Exchange an identity assertion for an access token',
+  'Claim Ceremony': 'Bind a registered agent to a person using a device-grant pattern',
+  'Device-Grant Pattern': 'User code + browser approval borrowed from RFC 8628',
+  'Pre-Claim Scopes': 'Read-only agent:read scope until ownership is proven',
+  'auth.md Profile': 'Agentic registration profile on top of OAuth metadata',
+  'Agent Ownership Binding': 'Widen scope after a person claims the agent',
+  'Streamable HTTP Transport': 'MCP revision 2026-07-28 over HTTP without sessions',
+  'Server Cards (SEP-2127)': 'Discoverable MCP server identity and transport metadata',
+  'JSON-RPC Tool Calls': 'Call tools with mirrored Mcp-Method and Mcp-Name headers',
+  'Stateless Revision': 'Every request carries protocol version and client identity',
+  'AI Catalog Discovery': 'Find MCP servers via /.well-known/ai-catalog.json',
+  'Protocol Catalog Tools': 'Read-only tools exposing protocols, flows, and JWT decode',
+  'JWT Decode Tool': 'Decode and inspect JWTs from an MCP client',
+  'Header Mirroring': 'Validate transport headers against the JSON-RPC body',
 }
 
 export function getFeatureDescription(feature: string): string {

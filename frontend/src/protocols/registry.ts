@@ -194,5 +194,37 @@ export const protocolMeta: Record<string, {
       'Zero Trust Ready',
     ],
   },
+  // Agentic Registration (auth.md)
+  agentauth: {
+    icon: 'Bot',
+    color: 'teal',
+    gradient: 'from-teal-500 to-cyan-500',
+    features: [
+      'Anonymous Agent Registration',
+      'Identity Assertion (JWT)',
+      'RFC 7523 JWT Bearer Grant',
+      'Claim Ceremony',
+      'Device-Grant Pattern',
+      'Pre-Claim Scopes',
+      'auth.md Profile',
+      'Agent Ownership Binding',
+    ],
+  },
+  // Model Context Protocol
+  mcp: {
+    icon: 'Cpu',
+    color: 'sky',
+    gradient: 'from-sky-500 to-blue-500',
+    features: [
+      'Streamable HTTP Transport',
+      'Server Cards (SEP-2127)',
+      'JSON-RPC Tool Calls',
+      'Stateless Revision',
+      'AI Catalog Discovery',
+      'Protocol Catalog Tools',
+      'JWT Decode Tool',
+      'Header Mirroring',
+    ],
+  },
 }
 

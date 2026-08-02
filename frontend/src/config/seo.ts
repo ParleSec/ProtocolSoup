@@ -212,6 +212,38 @@ export const PAGE_SEO: Record<string, PageSEO> = {
     ],
     ogType: 'article',
   },
+
+  // Agentic Registration (auth.md)
+  '/protocol/agentauth': {
+    title: 'Agentic Registration - Agent Identity and Claim Ceremony',
+    description: 'Learn anonymous agent registration, identity assertions, RFC 7523 JWT bearer grants, and the claim ceremony that binds an agent to a person.',
+    keywords: [
+      'agentic registration',
+      'agent auth',
+      'auth.md',
+      'identity assertion',
+      'rfc 7523',
+      'agent claim ceremony',
+      'rfc 8628 device grant',
+    ],
+    ogType: 'article',
+  },
+
+  // Model Context Protocol
+  '/protocol/mcp': {
+    title: 'Model Context Protocol - MCP Server Discovery and Tool Calls',
+    description: 'Explore MCP Streamable HTTP, Server Cards, AI Catalog discovery, and JSON-RPC tool calls against Protocol Soup\'s remote MCP server.',
+    keywords: [
+      'model context protocol',
+      'mcp tutorial',
+      'mcp server card',
+      'streamable http',
+      'json-rpc tools',
+      'sep-2127',
+      'ai catalog',
+    ],
+    ogType: 'article',
+  },
 }
 
 /**
@@ -227,6 +259,9 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
     saml: 'SAML 2.0',
     spiffe: 'SPIFFE/SPIRE',
     scim: 'SCIM 2.0',
+    ssf: 'Shared Signals (SSF)',
+    agentauth: 'Agentic Registration',
+    mcp: 'Model Context Protocol',
   }
 
   const protocolName = protocolNames[protocolId] || protocolId.toUpperCase()
@@ -262,6 +297,9 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
     'filter-queries': ['scim filter', 'scim query', 'rfc 7644 filter'],
     'schema-discovery': ['scim schema', 'resource types', 'service provider config'],
     'bulk-operations': ['scim bulk', 'batch provisioning', 'bulk user creation'],
+    'anonymous-registration': ['agent registration', 'anonymous agent', 'identity assertion', 'rfc 7523'],
+    'claim-ceremony': ['agent claim ceremony', 'user code', 'device authorization grant', 'rfc 8628'],
+    'mcp-tool-call': ['mcp tool call', 'server discover', 'mcp server card', 'json-rpc mcp'],
   }
 
   const keywords = flowKeywords[flowId] || [`${protocolId} ${flowId}`, flowName.toLowerCase()]

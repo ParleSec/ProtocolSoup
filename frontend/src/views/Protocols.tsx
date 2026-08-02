@@ -97,6 +97,18 @@ function ProtocolCard({ protocol }: { protocol: ProtocolCatalogItem }) {
       text: 'text-amber-400',
       tag: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
     },
+    teal: {
+      border: 'border-teal-500/20',
+      bg: 'bg-teal-500/10',
+      text: 'text-teal-400',
+      tag: 'bg-teal-500/10 text-teal-300 border-teal-500/20',
+    },
+    sky: {
+      border: 'border-sky-500/20',
+      bg: 'bg-sky-500/10',
+      text: 'text-sky-400',
+      tag: 'bg-sky-500/10 text-sky-300 border-sky-500/20',
+    },
   }
   const c = colors[protocol.color as keyof typeof colors]
 

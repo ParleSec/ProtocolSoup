@@ -1,5 +1,5 @@
 import type { ElementType } from 'react'
-import { Eye, Fingerprint, FileKey, Key, KeyRound, Radio, Shield, Users } from 'lucide-react'
+import { Bot, Cpu, Eye, Fingerprint, FileKey, Key, KeyRound, Radio, Shield, Users } from 'lucide-react'
 import { PROTOCOL_CATALOG_DATA, type ProtocolReference } from './protocol-catalog-data'
 
 export interface ProtocolFlowSummary {
@@ -13,7 +13,7 @@ export interface ProtocolCatalogItem {
   name: string
   description: string
   icon: ElementType
-  color: 'blue' | 'orange' | 'cyan' | 'green' | 'purple' | 'amber'
+  color: 'blue' | 'orange' | 'cyan' | 'green' | 'purple' | 'amber' | 'teal' | 'sky'
   spec: string
   specUrl: string
   flows: ProtocolFlowSummary[]
@@ -34,6 +34,8 @@ const ICON_BY_PROTOCOL: Record<string, ElementType> = {
   spiffe: Shield,
   scim: Users,
   ssf: Radio,
+  agentauth: Bot,
+  mcp: Cpu,
 }
 
 const COLOR_BY_PROTOCOL: Record<string, ProtocolCatalogItem['color']> = {
@@ -45,6 +47,8 @@ const COLOR_BY_PROTOCOL: Record<string, ProtocolCatalogItem['color']> = {
   spiffe: 'green',
   scim: 'purple',
   ssf: 'amber',
+  agentauth: 'teal',
+  mcp: 'sky',
 }
 
 export const PROTOCOL_CATALOG: ProtocolCatalogItem[] = PROTOCOL_CATALOG_DATA.map((item) => ({
