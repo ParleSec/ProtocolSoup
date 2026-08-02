@@ -177,15 +177,20 @@ export function FlowDetail({
       case 'spiffe': return 'SPIFFE/SPIRE'
       case 'scim': return 'SCIM 2.0'
       case 'ssf': return 'Shared Signals (SSF)'
+      case 'agentauth': return 'Agentic Registration'
+      case 'mcp': return 'Model Context Protocol'
       default: return id
     }
   }
 
   const badges = getBadges()
-  const flowExecutionPath = buildFlowExecutionPath({
-    protocolId,
-    flowId: currentFlowId,
-  })
+  const showExecutionCta = protocolId === 'ssf' || flow.executable !== false
+  const flowExecutionPath = showExecutionCta
+    ? buildFlowExecutionPath({
+        protocolId,
+        flowId: currentFlowId,
+      })
+    : null
 
   return (
     <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6 px-1 sm:px-0">
@@ -218,17 +223,19 @@ export function FlowDetail({
             <p className="text-sm text-surface-400">{flow.description}</p>
           </div>
           
-          <Link
-            href={flowExecutionPath}
-            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r ${
-              protocolId === 'ssf' 
-                ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
-                : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
-            } border text-sm font-medium transition-all w-full`}
-          >
-            {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
-          </Link>
+          {flowExecutionPath && (
+            <Link
+              href={flowExecutionPath}
+              className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r ${
+                protocolId === 'ssf' 
+                  ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
+                  : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
+              } border text-sm font-medium transition-all w-full`}
+            >
+              {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
+            </Link>
+          )}
         </div>
         
         {/* Desktop layout - side by side */}
@@ -238,17 +245,19 @@ export function FlowDetail({
             <p className="text-surface-400">{flow.description}</p>
           </div>
           
-          <Link
-            href={flowExecutionPath}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r ${
-              protocolId === 'ssf' 
-                ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
-                : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
-            } border text-sm font-medium transition-all flex-shrink-0`}
-          >
-            {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
-          </Link>
+          {flowExecutionPath && (
+            <Link
+              href={flowExecutionPath}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r ${
+                protocolId === 'ssf' 
+                  ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
+                  : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
+              } border text-sm font-medium transition-all flex-shrink-0`}
+            >
+              {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
+            </Link>
+          )}
         </div>
 
         {/* Badges */}
@@ -392,14 +401,16 @@ export function FlowDetail({
           <span className="hidden sm:inline">All Protocols</span>
           <span className="sm:hidden">Back</span>
         </Link>
-        <Link
-          href={flowExecutionPath}
-          className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
-        >
-          <span className="hidden sm:inline">{protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}</span>
-          <span className="sm:hidden">{protocolId === 'ssf' ? 'SSF Sandbox' : 'Looking Glass'}</span>
-          <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-        </Link>
+        {flowExecutionPath && (
+          <Link
+            href={flowExecutionPath}
+            className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
+          >
+            <span className="hidden sm:inline">{protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}</span>
+            <span className="sm:hidden">{protocolId === 'ssf' ? 'SSF Sandbox' : 'Looking Glass'}</span>
+            <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </Link>
+        )}
       </div>
     </div>
   )

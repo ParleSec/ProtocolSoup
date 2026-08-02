@@ -196,7 +196,7 @@ function extractSecurityTitle(text: string): string {
  */
 class FlowRegistry {
   private protocols: Map<string, LookingGlassProtocol> = new Map()
-  private loading: Map<string, Promise<LookingGlassProtocol>> = new Map()
+  private loading: Map<string, Promise<LookingGlassProtocol | null>> = new Map()
   private allProtocolsLoaded = false
   private allProtocolsPromise: Promise<LookingGlassProtocol[]> | null = null
 
@@ -220,10 +220,12 @@ class FlowRegistry {
     try {
       const response = await api.getProtocols()
       
-      // Load each protocol with its flows
-      const protocols = await Promise.all(
+      // Load each protocol with its flows; drop docs-only protocols that have
+      // no executable Looking Glass flows (e.g. agentauth, mcp).
+      const loaded = await Promise.all(
         response.protocols.map(p => this.loadProtocol(p.id))
       )
+      const protocols = loaded.filter((p): p is LookingGlassProtocol => p !== null)
       
       this.allProtocolsLoaded = true
       return protocols
@@ -234,9 +236,10 @@ class FlowRegistry {
   }
 
   /**
-   * Load a specific protocol with its flows
+   * Load a specific protocol with its flows.
+   * Returns null when the protocol has no executable Looking Glass flows.
    */
-  async loadProtocol(protocolId: string): Promise<LookingGlassProtocol> {
+  async loadProtocol(protocolId: string): Promise<LookingGlassProtocol | null> {
     // Return cached if available
     const cached = this.protocols.get(protocolId)
     if (cached) {
@@ -255,14 +258,16 @@ class FlowRegistry {
     
     try {
       const protocol = await promise
-      this.protocols.set(protocolId, protocol)
+      if (protocol) {
+        this.protocols.set(protocolId, protocol)
+      }
       return protocol
     } finally {
       this.loading.delete(protocolId)
     }
   }
 
-  private async _loadProtocol(protocolId: string): Promise<LookingGlassProtocol> {
+  private async _loadProtocol(protocolId: string): Promise<LookingGlassProtocol | null> {
     // Load protocol info and flows in parallel
     const [protocolInfo, flowsResponse] = await Promise.all([
       api.getProtocol(protocolId),
@@ -276,6 +281,11 @@ class FlowRegistry {
     const executableFlows = flowsResponse.flows.filter(f => f.executable !== false)
     const flows = executableFlows.map(f => transformFlow(f, protocolId))
 
+    // Protocols with no runnable flows should not appear in Looking Glass
+    if (flows.length === 0) {
+      return null
+    }
+
     return {
       ...baseProtocol,
       flows,
@@ -287,7 +297,7 @@ class FlowRegistry {
    */
   async getFlow(protocolId: string, flowId: string): Promise<LookingGlassFlow | null> {
     const protocol = await this.loadProtocol(protocolId)
-    return protocol.flows.find(f => f.id === flowId) || null
+    return protocol?.flows.find(f => f.id === flowId) || null
   }
 
   /**
@@ -295,7 +305,7 @@ class FlowRegistry {
    */
   async getFlows(protocolId: string): Promise<LookingGlassFlow[]> {
     const protocol = await this.loadProtocol(protocolId)
-    return protocol.flows
+    return protocol?.flows ?? []
   }
 
   /**

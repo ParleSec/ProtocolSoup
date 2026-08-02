@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { 
   ArrowLeft, ArrowRight, Shield, Key,
   Fingerprint, Zap, Eye, Radio,
-  Users, KeyRound
+  Users, KeyRound, Bot, Cpu
 } from 'lucide-react'
 import type { FlowDefinition, Protocol } from '../protocols/registry'
 import { protocolMeta } from '../protocols/registry'
@@ -13,6 +13,13 @@ import { buildFlowExecutionPath } from '@/components/palette/runDispatch'
 import { FLOW_PRESENTATION_META, getFeatureDescription } from '../protocols/presentation/flow-meta'
 import { getCatalogProtocol, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
 import { ProtocolReferences } from '../components/ProtocolReferences'
+
+const NEUTRAL_PROTOCOL_META = {
+  icon: 'Shield',
+  color: 'gray',
+  gradient: 'from-gray-500 to-gray-600',
+  features: [] as string[],
+}
 
 interface ProtocolDemoProps {
   protocolId: string
@@ -26,7 +33,7 @@ export function ProtocolDemo({
   flows,
 }: ProtocolDemoProps) {
 
-  const meta = protocolMeta[protocolId] || protocolMeta.oauth2
+  const meta = protocolMeta[protocolId] || NEUTRAL_PROTOCOL_META
   const getProtocolIcon = (id: string) => {
     switch (id) {
       case 'oidc': return Fingerprint
@@ -36,6 +43,8 @@ export function ProtocolDemo({
       case 'saml': return Key
       case 'scim': return Users
       case 'ssf': return Radio
+      case 'agentauth': return Bot
+      case 'mcp': return Cpu
       default: return Shield
     }
   }
@@ -45,10 +54,12 @@ export function ProtocolDemo({
   const recommendedFlow = flows.find(f => FLOW_PRESENTATION_META[f.id]?.recommended) || flows[0]
 
   const catalogEntry = getCatalogProtocol(protocolId)
-  const executionPath = recommendedFlow
-    ? buildFlowExecutionPath({ protocolId, flowId: recommendedFlow.id })
-    : protocolId === 'ssf'
-      ? '/ssf-sandbox'
+  const hasExecutableFlow = flows.some(f => f.executable !== false)
+  const showExecutionCta = protocolId === 'ssf' || hasExecutableFlow
+  const executionPath = protocolId === 'ssf'
+    ? '/ssf-sandbox'
+    : recommendedFlow && hasExecutableFlow
+      ? buildFlowExecutionPath({ protocolId, flowId: recommendedFlow.id })
       : '/looking-glass'
 
   return (
@@ -82,13 +93,15 @@ export function ProtocolDemo({
             <span className="sm:hidden">Recommended Flow</span>
           </Link>
         )}
-        <Link
-          href={executionPath}
-          className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm sm:text-base font-medium hover:bg-white/10 transition-colors"
-        >
-          {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
-        </Link>
+        {showExecutionCta && (
+          <Link
+            href={executionPath}
+            className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm sm:text-base font-medium hover:bg-white/10 transition-colors"
+          >
+            {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
+          </Link>
+        )}
       </div>
 
       {/* Flows Grid - Data from modular plugins */}
@@ -170,21 +183,23 @@ export function ProtocolDemo({
       )}
 
       {/* Protocol Features - from modular meta */}
-      <div className="glass rounded-xl p-4 sm:p-6">
-        <h2 className="font-display text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
-          {protocol.name} Features
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
-          {meta.features.slice(0, 3).map((feature, i) => (
-            <FeatureCard
-              key={feature}
-              title={feature}
-              description={getFeatureDescription(feature)}
-              color={['blue', 'green', 'purple'][i % 3]}
-            />
-          ))}
+      {meta.features.length > 0 && (
+        <div className="glass rounded-xl p-4 sm:p-6">
+          <h2 className="font-display text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
+            {protocol.name} Features
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
+            {meta.features.slice(0, 3).map((feature, i) => (
+              <FeatureCard
+                key={feature}
+                title={feature}
+                description={getFeatureDescription(feature)}
+                color={['blue', 'green', 'purple'][i % 3]}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
