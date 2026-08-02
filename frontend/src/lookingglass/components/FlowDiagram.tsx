@@ -459,6 +459,93 @@ const actorConfig: Record<string, {
     shortLabel: 'SecOps',
     color: '#ef4444', // red
   },
+  // Agentic Registration (auth.md) and MCP actors
+  'Agent': {
+    icon: Globe,
+    label: 'Autonomous Agent',
+    shortLabel: 'Agent',
+    color: '#60a5fa', // blue
+  },
+  'Origin': {
+    icon: Database,
+    label: 'Site Origin',
+    shortLabel: 'Origin',
+    color: '#fb923c', // orange
+  },
+  'MCP Server': {
+    icon: Shield,
+    label: 'MCP Server',
+    shortLabel: 'MCP',
+    color: '#c084fc', // purple
+  },
+  // SPIFFE/SPIRE attestation and federation actors
+  'Datastore': {
+    icon: Database,
+    label: 'SPIRE Datastore',
+    shortLabel: 'Datastore',
+    color: '#9ca3af', // gray
+  },
+  'Node Attestor Plugin': {
+    icon: Shield,
+    label: 'Node Attestor Plugin',
+    shortLabel: 'Node Attestor',
+    color: '#fbbf24', // yellow
+  },
+  'Server Node Attestor': {
+    icon: Shield,
+    label: 'Server Node Attestor',
+    shortLabel: 'Node Attestor',
+    color: '#fbbf24', // yellow
+  },
+  'Workload Attestor Plugins': {
+    icon: Shield,
+    label: 'Workload Attestor Plugins',
+    shortLabel: 'Workload Attestor',
+    color: '#fbbf24', // yellow
+  },
+  'SPIRE Agents': {
+    icon: Shield,
+    label: 'SPIRE Agents',
+    shortLabel: 'Agents',
+    color: '#4ade80', // green
+  },
+  'Foreign SPIRE Server': {
+    icon: Database,
+    label: 'Foreign SPIRE Server',
+    shortLabel: 'Foreign Server',
+    color: '#fb923c', // orange
+  },
+  'Local Workload': {
+    icon: Globe,
+    label: 'Local Workload',
+    shortLabel: 'Local',
+    color: '#60a5fa', // blue
+  },
+  'Foreign Workload': {
+    icon: Globe,
+    label: 'Foreign Workload',
+    shortLabel: 'Foreign',
+    color: '#f59e0b', // amber
+  },
+  'Authorization Policy': {
+    icon: Shield,
+    label: 'Authorization Policy',
+    shortLabel: 'Policy',
+    color: '#ef4444', // red
+  },
+  // SAML Single Logout actors
+  'Initiating Party': {
+    icon: Globe,
+    label: 'Initiating Party',
+    shortLabel: 'Initiator',
+    color: '#60a5fa', // blue
+  },
+  'Initiating Service Provider': {
+    icon: Globe,
+    label: 'Initiating Service Provider',
+    shortLabel: 'Initiating SP',
+    color: '#60a5fa', // blue
+  },
 }
 
 // Message type colors - more muted
