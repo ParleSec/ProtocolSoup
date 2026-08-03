@@ -246,7 +246,8 @@ func (p *Plugin) matchMdocAgainstDCQL(session *requestSession, verified []verifi
 	if session == nil {
 		return evidenceSet, nil
 	}
-	requirements := vc.ParseDCQLCredentialRequirements(session.DCQLQuery)
+	dcqlQuery := vc.ParseDCQLQuery(session.DCQLQuery)
+	requirements := dcqlQuery.Credentials
 	requirementsByID := make(map[string]struct{}, len(requirements))
 	for _, requirement := range requirements {
 		requirementID := strings.TrimSpace(requirement.ID)
@@ -265,6 +266,12 @@ func (p *Plugin) matchMdocAgainstDCQL(session *requestSession, verified []verifi
 			}
 		}
 	}
+	// referencedByCredentialSets is nil when the query has no credential_sets
+	// (OID4VP 1.0 Section 6.2), so every requirement below is unconditionally
+	// required exactly as it was before credential_sets support existed --
+	// this is the backward-compatibility bar for this loop.
+	referencedByCredentialSets := vc.CredentialIDsReferencedByCredentialSets(dcqlQuery)
+	matchedRequirementIDs := make(map[string]bool, len(requirements))
 	for _, requirement := range requirements {
 		matched := false
 		failureCode := "dcql_format_mismatch"
@@ -286,9 +293,19 @@ func (p *Plugin) matchMdocAgainstDCQL(session *requestSession, verified []verifi
 				failureMessage = message
 			}
 		}
-		if !matched {
+		if matched {
+			matchedRequirementIDs[strings.TrimSpace(requirement.ID)] = true
+			continue
+		}
+		// A requirement referenced by a credential_sets option is only
+		// required as part of satisfying that option; its failure to match
+		// is adjudicated below by vc.EvaluateCredentialSets, not here.
+		if !referencedByCredentialSets[strings.TrimSpace(requirement.ID)] {
 			return nil, newVerifierPolicyError(failureCode, failureMessage, nil)
 		}
+	}
+	if satisfied, unsatisfiedSets := vc.EvaluateCredentialSets(dcqlQuery, matchedRequirementIDs); !satisfied {
+		return nil, newVerifierPolicyError("dcql_credential_set_unsatisfied", fmt.Sprintf("presented mso_mdoc credentials do not satisfy required dcql credential_sets %v", unsatisfiedSets), nil)
 	}
 	return evidenceSet, nil
 }

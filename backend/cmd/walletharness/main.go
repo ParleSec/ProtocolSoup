@@ -2945,82 +2945,141 @@ func formatToDefaultConfigurationID(format string) string {
 	}
 }
 
+// matchWalletCredentialsToDCQL reports which stored wallet credentials are
+// eligible to be presented for a DCQL query. This wallet harness presents
+// exactly one credential per request/response (see createVPToken, which
+// takes a single presentedCredentialJWT and never combines credentials into
+// one vp_token), so:
+//
+//   - Without credential_sets (OID4VP 1.0 Section 6.1 credential_sets is
+//     absent): a credential is eligible if it satisfies at least one
+//     Credential Query in the DCQL query, exactly as before credential_sets
+//     support existed. (A DCQL query with more than one Credential Query and
+//     no credential_sets technically requires all of them per Section 6.4.2,
+//     but presenting all of them at once is the pre-existing architectural
+//     limit this function has always had; that is unrelated to credential_sets
+//     and out of scope here.)
+//   - With credential_sets present: a credential is only eligible if
+//     presenting it ALONE would satisfy the whole query -- every
+//     unconditionally-required Credential Query (one not referenced by any
+//     credential_sets option) plus vc.EvaluateCredentialSets. This can only
+//     ever be true for a credential_sets option of size one; a required
+//     option needing two or more distinct Credential Query ids together is
+//     structurally unsatisfiable by this single-credential wallet, and is
+//     reported via reasons rather than silently claimed as a match.
 func matchWalletCredentialsToDCQL(credentials map[string]walletCredentialMaterial, dcqlQueryRaw string) ([]walletCredentialMaterial, []string) {
-	requirements := vc.ParseDCQLCredentialRequirements(dcqlQueryRaw)
+	query := vc.ParseDCQLQuery(dcqlQueryRaw)
+	requirements := query.Credentials
 	if len(requirements) == 0 {
 		return nil, nil
 	}
+	referencedByCredentialSets := vc.CredentialIDsReferencedByCredentialSets(query)
+
 	var matched []walletCredentialMaterial
 	var reasons []string
 	for credID, cred := range credentials {
-		// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so they take
-		// the mdoc DCQL matcher (doctype + [namespace, elementIdentifier] paths)
-		// rather than vc.BuildCredentialEvidence. vc.MSOMdocFormat means
-		// BuildCredentialEvidence now parses mdoc successfully rather than
-		// failing, but its CredentialEvidence.FullClaims is still the flat
-		// JWT/SD-JWT claim shape, not [namespace, elementIdentifier] paths --
-		// the wrong shape for vc.RequirementMatchesMdoc below, so mdoc still
-		// needs this separate branch even though the parse no longer fails.
-		if strings.EqualFold(strings.TrimSpace(cred.Format), credentialFormatMsoMdoc) {
-			mdocEvidence, err := mdocMatchEvidence(cred)
-			if err != nil {
-				reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
+		matchedRequirementIDs, credReasons := matchedDCQLRequirementIDsForCredential(credID, cred, requirements)
+		reasons = append(reasons, credReasons...)
+		if len(matchedRequirementIDs) == 0 {
+			continue
+		}
+		if len(query.CredentialSets) == 0 {
+			matched = append(matched, cred)
+			continue
+		}
+		eligible := true
+		for _, requirement := range requirements {
+			id := strings.TrimSpace(requirement.ID)
+			if referencedByCredentialSets[id] {
 				continue
 			}
-			anyMatch := false
-			for _, req := range requirements {
-				ok, _, reason := vc.RequirementMatchesMdoc(req, mdocEvidence)
-				if ok {
-					anyMatch = true
-					break
-				}
-				reasons = append(reasons, fmt.Sprintf("credential %s: %s", credID, reason))
-			}
-			if anyMatch {
-				matched = append(matched, cred)
-			}
-			continue
-		}
-		// The wallet's own stored copy of an issued credential is being
-		// checked for eligibility here, not something the holder has
-		// presented, so this is LifecycleStageIssued.
-		evidence, err := vc.BuildCredentialEvidence(cred.CredentialJWT, vc.LifecycleStageIssued)
-		if err != nil {
-			reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
-			continue
-		}
-		if normalizedFormat := strings.TrimSpace(cred.Format); normalizedFormat != "" {
-			evidence.Format = normalizedFormat
-		}
-		if normalizedVCT := strings.TrimSpace(cred.VCT); normalizedVCT != "" {
-			evidence.VCT = normalizedVCT
-		}
-		if normalizedDoctype := strings.TrimSpace(cred.Doctype); normalizedDoctype != "" {
-			evidence.Doctype = normalizedDoctype
-		}
-		if len(evidence.CredentialTypes) == 0 {
-			summary := summarizeCredential(cred.CredentialJWT)
-			if summary != nil {
-				evidence.CredentialTypes = append([]string{}, summary.CredentialTypes...)
-			}
-		}
-		anyMatch := false
-		for _, req := range requirements {
-			ok, _, reason := vc.RequirementMatchesEvidence(req, *evidence)
-			if ok {
-				anyMatch = true
+			if !matchedRequirementIDs[id] {
+				eligible = false
 				break
 			}
-			reasons = append(reasons, fmt.Sprintf("credential %s: %s", credID, reason))
 		}
-		if anyMatch {
-			matched = append(matched, cred)
+		if eligible {
+			if satisfied, _ := vc.EvaluateCredentialSets(query, matchedRequirementIDs); !satisfied {
+				eligible = false
+			}
 		}
+		if !eligible {
+			reasons = append(reasons, fmt.Sprintf("credential %s: cannot alone satisfy the requested credential_sets combination(s); this wallet presents one credential per request", credID))
+			continue
+		}
+		matched = append(matched, cred)
 	}
 	sort.Slice(matched, func(i, j int) bool {
 		return matched[i].UpdatedAt.After(matched[j].UpdatedAt)
 	})
 	return matched, reasons
+}
+
+// matchedDCQLRequirementIDsForCredential evaluates a single stored wallet
+// credential against every Credential Query in a DCQL query's `credentials`
+// array (mso_mdoc and JWT/SD-JWT credentials use different DCQL matchers,
+// mirroring the two branches matchWalletCredentialsToDCQL had before it
+// needed per-requirement-id granularity for credential_sets) and returns the
+// set of Credential Query `id`s the credential individually satisfies.
+func matchedDCQLRequirementIDsForCredential(credID string, cred walletCredentialMaterial, requirements []vc.DCQLCredentialRequirement) (map[string]bool, []string) {
+	matchedIDs := make(map[string]bool, len(requirements))
+	var reasons []string
+	// mso_mdoc credentials are base64url CBOR (not a JWT/SD-JWT), so they take
+	// the mdoc DCQL matcher (doctype + [namespace, elementIdentifier] paths)
+	// rather than vc.BuildCredentialEvidence. vc.MSOMdocFormat means
+	// BuildCredentialEvidence now parses mdoc successfully rather than
+	// failing, but its CredentialEvidence.FullClaims is still the flat
+	// JWT/SD-JWT claim shape, not [namespace, elementIdentifier] paths --
+	// the wrong shape for vc.RequirementMatchesMdoc below, so mdoc still
+	// needs this separate branch even though the parse no longer fails.
+	if strings.EqualFold(strings.TrimSpace(cred.Format), credentialFormatMsoMdoc) {
+		mdocEvidence, err := mdocMatchEvidence(cred)
+		if err != nil {
+			reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
+			return matchedIDs, reasons
+		}
+		for _, req := range requirements {
+			ok, _, reason := vc.RequirementMatchesMdoc(req, mdocEvidence)
+			if ok {
+				matchedIDs[strings.TrimSpace(req.ID)] = true
+				continue
+			}
+			reasons = append(reasons, fmt.Sprintf("credential %s: %s", credID, reason))
+		}
+		return matchedIDs, reasons
+	}
+	// The wallet's own stored copy of an issued credential is being checked
+	// for eligibility here, not something the holder has presented, so this
+	// is LifecycleStageIssued.
+	evidence, err := vc.BuildCredentialEvidence(cred.CredentialJWT, vc.LifecycleStageIssued)
+	if err != nil {
+		reasons = append(reasons, fmt.Sprintf("credential %s: %v", credID, err))
+		return matchedIDs, reasons
+	}
+	if normalizedFormat := strings.TrimSpace(cred.Format); normalizedFormat != "" {
+		evidence.Format = normalizedFormat
+	}
+	if normalizedVCT := strings.TrimSpace(cred.VCT); normalizedVCT != "" {
+		evidence.VCT = normalizedVCT
+	}
+	if normalizedDoctype := strings.TrimSpace(cred.Doctype); normalizedDoctype != "" {
+		evidence.Doctype = normalizedDoctype
+	}
+	if len(evidence.CredentialTypes) == 0 {
+		summary := summarizeCredential(cred.CredentialJWT)
+		if summary != nil {
+			evidence.CredentialTypes = append([]string{}, summary.CredentialTypes...)
+		}
+	}
+	for _, req := range requirements {
+		ok, _, reason := vc.RequirementMatchesEvidence(req, *evidence)
+		if ok {
+			matchedIDs[strings.TrimSpace(req.ID)] = true
+			continue
+		}
+		reasons = append(reasons, fmt.Sprintf("credential %s: %s", credID, reason))
+	}
+	return matchedIDs, reasons
 }
 
 func matchWalletCredentialsToPresentationDefinition(credentials map[string]walletCredentialMaterial, presentationDefinition map[string]interface{}) ([]walletCredentialMaterial, []string) {

@@ -262,6 +262,142 @@ func TestEvaluateMdocPresentationRejectsDCQLMismatch(t *testing.T) {
 	}
 }
 
+// mdocCredentialSetsDCQLQuery builds an mso_mdoc DCQL query with two
+// Credential Queries -- "mdl" (satisfiable by the mDL DeviceResponse these
+// tests build via buildMdocVPToken) and "unused_pid" (a distinct doctype the
+// tests never present) -- plus the given top-level credential_sets array
+// (OID4VP 1.0 Section 6.2), for exercising vc.EvaluateCredentialSets on the
+// mdoc verification path (matchMdocAgainstDCQL).
+func mdocCredentialSetsDCQLQuery(t *testing.T, credentialSets []map[string]interface{}) string {
+	t.Helper()
+	query := map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id":     "mdl",
+				"format": "mso_mdoc",
+				"meta":   map[string]interface{}{"doctype_values": []string{"org.iso.18013.5.1.mDL"}},
+				"claims": []map[string]interface{}{
+					{"path": []string{"org.iso.18013.5.1", "family_name"}},
+					{"path": []string{"org.iso.18013.5.1", "document_number"}},
+				},
+			},
+			{
+				"id":     "unused_pid",
+				"format": "mso_mdoc",
+				"meta":   map[string]interface{}{"doctype_values": []string{"eu.europa.ec.eudi.pid.1"}},
+			},
+		},
+		"credential_sets": credentialSets,
+	}
+	raw, err := json.Marshal(query)
+	if err != nil {
+		t.Fatalf("marshal mdoc credential_sets dcql query: %v", err)
+	}
+	return string(raw)
+}
+
+// TestEvaluateMdocPresentationCredentialSetSatisfiedByOneAlternative proves a
+// required credential_sets entry on the mdoc path succeeds when the presented
+// DeviceResponse satisfies at least one of its options, even though
+// "unused_pid" (a different Credential Query in the same `credentials` array)
+// was never presented.
+func TestEvaluateMdocPresentationCredentialSetSatisfiedByOneAlternative(t *testing.T) {
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("device key: %v", err)
+	}
+	issuerSigned, pki := issueMdocForVerifier(t, deviceKey)
+
+	p := NewPlugin()
+	p.mdocTrustAnchors = pki.TrustAnchors()
+
+	handover := realHandover(t, "verifier-client-1", "nonce-xyz", "https://verifier.example/response", nil)
+	vpToken := buildMdocVPToken(t, deviceKey, issuerSigned, handover)
+	session := &requestSession{
+		ID:          "req-cs-1",
+		ClientID:    "verifier-client-1",
+		Nonce:       "nonce-xyz",
+		ResponseURI: "https://verifier.example/response",
+		DCQLQuery: mdocCredentialSetsDCQLQuery(t, []map[string]interface{}{
+			{"options": [][]string{{"unused_pid"}, {"mdl"}}, "required": true},
+		}),
+	}
+
+	result := p.evaluateVPToken(session, vpToken)
+	if !result.Policy.Allowed {
+		t.Fatalf("expected credential_sets satisfied by mdl alone, got code=%q reasons=%v", result.Policy.Code, result.Policy.Reasons)
+	}
+}
+
+// TestEvaluateMdocPresentationDeniesUnsatisfiedRequiredCredentialSet proves a
+// required credential_sets entry whose only option references a Credential
+// Query the wallet never presented is denied with the new
+// dcql_credential_set_unsatisfied reason code, even though a different,
+// independently-satisfied credential_sets entry exists for "mdl".
+func TestEvaluateMdocPresentationDeniesUnsatisfiedRequiredCredentialSet(t *testing.T) {
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("device key: %v", err)
+	}
+	issuerSigned, pki := issueMdocForVerifier(t, deviceKey)
+
+	p := NewPlugin()
+	p.mdocTrustAnchors = pki.TrustAnchors()
+
+	handover := realHandover(t, "verifier-client-1", "nonce-xyz", "https://verifier.example/response", nil)
+	vpToken := buildMdocVPToken(t, deviceKey, issuerSigned, handover)
+	session := &requestSession{
+		ID:          "req-cs-2",
+		ClientID:    "verifier-client-1",
+		Nonce:       "nonce-xyz",
+		ResponseURI: "https://verifier.example/response",
+		DCQLQuery: mdocCredentialSetsDCQLQuery(t, []map[string]interface{}{
+			{"options": [][]string{{"mdl"}}, "required": true},
+			{"options": [][]string{{"unused_pid"}}, "required": true},
+		}),
+	}
+
+	result := p.evaluateVPToken(session, vpToken)
+	if result.Policy.Allowed {
+		t.Fatal("expected denial when a required credential_sets entry has no satisfiable option")
+	}
+	if !containsPolicyCode(result, "dcql_credential_set_unsatisfied") {
+		t.Fatalf("expected dcql_credential_set_unsatisfied reason, got %v", result.Policy.ReasonCodes)
+	}
+}
+
+// TestEvaluateMdocPresentationAllowsUnsatisfiedOptionalCredentialSet proves a
+// credential_sets entry marked required:false does not block the overall mdoc
+// query from succeeding even when none of its options are satisfiable.
+func TestEvaluateMdocPresentationAllowsUnsatisfiedOptionalCredentialSet(t *testing.T) {
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("device key: %v", err)
+	}
+	issuerSigned, pki := issueMdocForVerifier(t, deviceKey)
+
+	p := NewPlugin()
+	p.mdocTrustAnchors = pki.TrustAnchors()
+
+	handover := realHandover(t, "verifier-client-1", "nonce-xyz", "https://verifier.example/response", nil)
+	vpToken := buildMdocVPToken(t, deviceKey, issuerSigned, handover)
+	session := &requestSession{
+		ID:          "req-cs-3",
+		ClientID:    "verifier-client-1",
+		Nonce:       "nonce-xyz",
+		ResponseURI: "https://verifier.example/response",
+		DCQLQuery: mdocCredentialSetsDCQLQuery(t, []map[string]interface{}{
+			{"options": [][]string{{"mdl"}}, "required": true},
+			{"options": [][]string{{"unused_pid"}}, "required": false},
+		}),
+	}
+
+	result := p.evaluateVPToken(session, vpToken)
+	if !result.Policy.Allowed {
+		t.Fatalf("expected optional unsatisfied credential_sets entry to not block, got code=%q reasons=%v", result.Policy.Code, result.Policy.Reasons)
+	}
+}
+
 // TestEvaluateMdocPresentationRequiresHandover confirms the verifier does not
 // guess a handover: without one bound to the session it reports a clear reason
 // (the OID4VP handover is fixed by the online profile).
