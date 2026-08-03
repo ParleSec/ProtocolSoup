@@ -445,6 +445,135 @@ func TestMatchWalletCredentialsToDCQLSupportsNormalizedJWTAndLDPFormats(t *testi
 	}
 }
 
+// walletCredentialSetsFixture returns a single stored jwt_vc_json credential
+// plus a DCQL query builder with two Credential Queries -- "degree_requirement"
+// (satisfiable by that credential) and "unused_requirement" (a vct the
+// fixture credential never carries) -- so tests can attach different
+// top-level credential_sets arrays (OID4VP 1.0 Section 6.2) and exercise
+// matchWalletCredentialsToDCQL's single-credential-aware credential_sets
+// handling.
+func walletCredentialSetsFixture(t *testing.T) (map[string]walletCredentialMaterial, func(credentialSets string) string) {
+	t.Helper()
+	subject := "did:key:zExampleHolder"
+	const universityDegreeVCT = "https://protocolsoup.com/credentials/university_degree"
+	credentials := map[string]walletCredentialMaterial{
+		"cred-1": {
+			CredentialID:              "cred-1",
+			CredentialJWT:             signedCredentialJWTWithClaims(t, subject, false),
+			Format:                    "jwt_vc_json",
+			CredentialConfigurationID: "UniversityDegreeCredential",
+			VCT:                       universityDegreeVCT,
+			UpdatedAt:                 time.Now().UTC(),
+		},
+	}
+	buildQuery := func(credentialSets string) string {
+		return `{
+			"credentials": [
+				{
+					"id": "degree_requirement",
+					"format": "jwt_vc_json",
+					"meta": {"vct_values": ["` + universityDegreeVCT + `"], "type_values": ["UniversityDegreeCredential"]},
+					"claims": [{"path": ["degree"]}]
+				},
+				{
+					"id": "unused_requirement",
+					"format": "jwt_vc_json",
+					"meta": {"vct_values": ["https://protocolsoup.com/credentials/never_issued"]}
+				}
+			],
+			"credential_sets": [` + credentialSets + `]
+		}`
+	}
+	return credentials, buildQuery
+}
+
+// TestMatchWalletCredentialsToDCQLCredentialSetSatisfiedByOneAlternative
+// proves the stored credential is still recommended when a required
+// credential_sets option references it, even though a second Credential
+// Query ("unused_requirement") in the same query is never satisfied -- the
+// pre-credential_sets behaviour of requiring every entry in `credentials`
+// does not apply once credential_sets is present (OID4VP 1.0 Section 6.4.2).
+func TestMatchWalletCredentialsToDCQLCredentialSetSatisfiedByOneAlternative(t *testing.T) {
+	credentials, buildQuery := walletCredentialSetsFixture(t)
+	dcql := buildQuery(`{"options": [["unused_requirement"], ["degree_requirement"]], "required": true}`)
+
+	matched, reasons := matchWalletCredentialsToDCQL(credentials, dcql)
+	if len(matched) != 1 {
+		t.Fatalf("expected the credential to be recommended via the degree_requirement option, got %d matched (reasons=%v)", len(matched), reasons)
+	}
+}
+
+// TestMatchWalletCredentialsToDCQLDeniesUnsatisfiedRequiredCredentialSet
+// proves the credential is NOT recommended when a required credential_sets
+// entry's only option needs a Credential Query the credential cannot satisfy
+// -- this wallet harness presents exactly one credential per request
+// (createVPToken), so it can never single-handedly satisfy both
+// "degree_requirement" and "unused_requirement" together.
+func TestMatchWalletCredentialsToDCQLDeniesUnsatisfiedRequiredCredentialSet(t *testing.T) {
+	credentials, _ := walletCredentialSetsFixture(t)
+	// The fixture's buildQuery helper only supports a single credential_sets
+	// entry per call; this test needs two, so it's built directly here.
+	dcql := `{
+		"credentials": [
+			{
+				"id": "degree_requirement",
+				"format": "jwt_vc_json",
+				"meta": {"vct_values": ["https://protocolsoup.com/credentials/university_degree"], "type_values": ["UniversityDegreeCredential"]},
+				"claims": [{"path": ["degree"]}]
+			},
+			{
+				"id": "unused_requirement",
+				"format": "jwt_vc_json",
+				"meta": {"vct_values": ["https://protocolsoup.com/credentials/never_issued"]}
+			}
+		],
+		"credential_sets": [
+			{"options": [["degree_requirement"]], "required": true},
+			{"options": [["unused_requirement"]], "required": true}
+		]
+	}`
+
+	matched, reasons := matchWalletCredentialsToDCQL(credentials, dcql)
+	if len(matched) != 0 {
+		t.Fatalf("expected no match since the credential cannot alone satisfy every required credential_sets entry, got %d matched", len(matched))
+	}
+	if len(reasons) == 0 {
+		t.Fatal("expected a reason explaining why the credential was not recommended")
+	}
+}
+
+// TestMatchWalletCredentialsToDCQLAllowsUnsatisfiedOptionalCredentialSet
+// proves a credential_sets entry marked required:false does not prevent the
+// credential from being recommended even though that entry's only option is
+// unsatisfiable.
+func TestMatchWalletCredentialsToDCQLAllowsUnsatisfiedOptionalCredentialSet(t *testing.T) {
+	credentials, _ := walletCredentialSetsFixture(t)
+	dcql := `{
+		"credentials": [
+			{
+				"id": "degree_requirement",
+				"format": "jwt_vc_json",
+				"meta": {"vct_values": ["https://protocolsoup.com/credentials/university_degree"], "type_values": ["UniversityDegreeCredential"]},
+				"claims": [{"path": ["degree"]}]
+			},
+			{
+				"id": "unused_requirement",
+				"format": "jwt_vc_json",
+				"meta": {"vct_values": ["https://protocolsoup.com/credentials/never_issued"]}
+			}
+		],
+		"credential_sets": [
+			{"options": [["degree_requirement"]], "required": true},
+			{"options": [["unused_requirement"]], "required": false}
+		]
+	}`
+
+	matched, reasons := matchWalletCredentialsToDCQL(credentials, dcql)
+	if len(matched) != 1 {
+		t.Fatalf("expected the credential to still be recommended, got %d matched (reasons=%v)", len(matched), reasons)
+	}
+}
+
 func TestExtractPublicKeyFromMethodSupportsOKP(t *testing.T) {
 	keySet, err := intcrypto.NewKeySet()
 	if err != nil {

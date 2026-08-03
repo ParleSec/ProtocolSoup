@@ -263,9 +263,10 @@ appoint its own trust root.
    - nonce binding (VP token nonce matches request nonce)
    - audience binding (VP token audience includes `client_id`, or `origin:<origin>` on the DC API path)
    - token expiry
-   - holder binding (`iss`/`sub` matches wallet identity, `cnf.jkt` matches key thumbprint)
+   - holder binding (`iss`/`sub` matches wallet identity, `cnf.jkt` matches key thumbprint, and for SD-JWT VC, the Key Binding JWT `iat` is within a 5-minute freshness window)
   - credential evidence (issuer signature, subject binding, disclosure integrity, and trust policy checks)
-   - DCQL claim-path completeness (all required claim paths present in disclosed claims)
+   - DCQL claim-path completeness: all required claim paths present in disclosed claims, or, when a Credential Query declares `claim_sets`, at least one alternative combination of claim `id`s fully disclosed
+   - DCQL `credential_sets` (when present): each required Credential Set Query's `options` has at least one fully-matched combination of Credential Query `id`s; `required: false` entries do not block the decision
 5. **Result** — Policy decision is stored and returned as `allowed`/`denied` with `code`, `message`, `reasons`, and `reason_codes`.
 
 ## Endpoints
@@ -289,7 +290,7 @@ appoint its own trust root.
 ## What To Validate
 
 - Authorization request: signed request object with `typ=oauth-authz-req+jwt`, `client_id`, `response_mode`, `response_uri`, `nonce`, `state`, `exp`
-- DCQL contract: exactly one of `dcql_query` or `scope`; required claim paths derived from DCQL are enforced
+- DCQL contract: exactly one of `dcql_query` or `scope`; required claim paths derived from DCQL are enforced, including `claim_sets` alternatives and top-level `credential_sets` combinations when present
 - Client identification: chosen client_id scheme follows OpenID4VP scheme-specific trust validation
 - `direct_post` response: `state` maps to active request and `vp_token` is present
 - `direct_post.jwt` response: decrypts successfully and inner JWT signature/type/audience/subject/expiry checks pass

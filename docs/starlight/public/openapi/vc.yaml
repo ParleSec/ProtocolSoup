@@ -705,7 +705,12 @@ components:
             mode (`profile: haip`), each `mso_mdoc` credential that does not
             already declare `trusted_authorities` gains an `aki` Trusted
             Authorities Query (OpenID4VP 1.0 Section 6.1.1) whose value is the
-            base64url SubjectKeyIdentifier of the configured IACA root.
+            base64url SubjectKeyIdentifier of the configured IACA root. A
+            Credential Query's `claim_sets` (Section 6.1) and the top-level
+            `credential_sets` (Section 6.2) are both honored: each expresses
+            alternative combinations (of claim `id`s, or of Credential Query
+            `id`s respectively) any one of which satisfies the request, with
+            `credential_sets` entries defaulting to `required: true`.
     CreateAuthorizationResponse:
       type: object
       properties:

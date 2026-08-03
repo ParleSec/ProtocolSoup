@@ -26,6 +26,13 @@ const (
 	credentialFormatJWTVCJSON  = "jwt_vc_json"
 	credentialFormatJWTVCJSONL = "jwt_vc_json-ld"
 	credentialFormatLDPVC      = "ldp_vc"
+
+	// kbJWTFreshnessSkew bounds how far from "now" a Key Binding JWT's iat may
+	// be (SD-JWT RFC 9901 §7.3 step 5.e: the Verifier MUST "check that the
+	// creation time of the Key Binding JWT, as determined by the iat claim,
+	// is within an acceptable window"); applied symmetrically since clocks can
+	// also run fast.
+	kbJWTFreshnessSkew = 5 * time.Minute
 )
 
 type createAuthorizationRequest struct {
@@ -891,8 +898,13 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 				} else {
 					result.NonceValidated = true
 				}
-				if _, hasIAT := kbClaims["iat"]; !hasIAT {
+				if issuedAt, err := kbClaims.GetIssuedAt(); err != nil || issuedAt == nil {
 					addPolicyReason(result, "kb_jwt_invalid", "kb-jwt missing iat")
+				} else {
+					now := time.Now().UTC()
+					if issuedAt.Before(now.Add(-kbJWTFreshnessSkew)) || issuedAt.After(now.Add(kbJWTFreshnessSkew)) {
+						addPolicyReason(result, "kb_jwt_invalid", "kb-jwt iat is outside the acceptable freshness window")
+					}
 				}
 				// Verify sd_hash
 				sdJWTWithoutKB := vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, "")
@@ -1473,10 +1485,17 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 		return nil, newVerifierPolicyError("credential_missing", "presented credential is missing", nil)
 	}
 
-	var requirements []dcqlCredentialRequirement
+	var dcqlQuery vc.DCQLQuery
 	if session != nil {
-		requirements = parseDCQLCredentialRequirements(session.DCQLQuery)
+		dcqlQuery = vc.ParseDCQLQuery(session.DCQLQuery)
 	}
+	requirements := dcqlQuery.Credentials
+	// referencedByCredentialSets is nil when the query has no credential_sets
+	// (OID4VP 1.0 Section 6.2), so every requirement below is unconditionally
+	// required exactly as it was before credential_sets support existed --
+	// this is the backward-compatibility bar for this loop.
+	referencedByCredentialSets := vc.CredentialIDsReferencedByCredentialSets(dcqlQuery)
+	matchedRequirementIDs := make(map[string]bool, len(requirements))
 	for _, requirement := range requirements {
 		matched := false
 		failureCode := "dcql_format_mismatch"
@@ -1495,9 +1514,24 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 				failureMessage = message
 			}
 		}
-		if !matched {
+		if matched {
+			if id := strings.TrimSpace(requirement.ID); id != "" {
+				matchedRequirementIDs[id] = true
+			}
+			continue
+		}
+		// A requirement referenced by a credential_sets option is only
+		// required as part of satisfying that option (Section 6.4.2: with
+		// credential_sets present, the Wallet returns presentations for the
+		// required Credential Set Queries' options, not unconditionally every
+		// entry in `credentials`); its failure to match is adjudicated below
+		// by vc.EvaluateCredentialSets, not here.
+		if !referencedByCredentialSets[strings.TrimSpace(requirement.ID)] {
 			return nil, newVerifierPolicyError(failureCode, failureMessage, nil)
 		}
+	}
+	if satisfied, unsatisfiedSets := vc.EvaluateCredentialSets(dcqlQuery, matchedRequirementIDs); !satisfied {
+		return nil, newVerifierPolicyError("dcql_credential_set_unsatisfied", fmt.Sprintf("presented credentials do not satisfy required dcql credential_sets %v", unsatisfiedSets), nil)
 	}
 
 	return evidenceSet, nil
@@ -1665,10 +1699,6 @@ func findStoredCredentialLineage(
 		return record, true
 	}
 	return vc.WalletCredentialRecord{}, false
-}
-
-func parseDCQLCredentialRequirements(rawDCQLQuery string) []dcqlCredentialRequirement {
-	return vc.ParseDCQLCredentialRequirements(rawDCQLQuery)
 }
 
 func requirementMatchesEvidence(requirement dcqlCredentialRequirement, evidence models.OID4VPCredentialEvidence) (bool, string, string) {
