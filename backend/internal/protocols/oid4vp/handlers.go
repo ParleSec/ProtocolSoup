@@ -902,7 +902,7 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 					addPolicyReason(result, "kb_jwt_invalid", "kb-jwt missing iat")
 				} else {
 					now := time.Now().UTC()
-					if issuedAt.Time.Before(now.Add(-kbJWTFreshnessSkew)) || issuedAt.Time.After(now.Add(kbJWTFreshnessSkew)) {
+					if issuedAt.Before(now.Add(-kbJWTFreshnessSkew)) || issuedAt.After(now.Add(kbJWTFreshnessSkew)) {
 						addPolicyReason(result, "kb_jwt_invalid", "kb-jwt iat is outside the acceptable freshness window")
 					}
 				}
