@@ -26,6 +26,13 @@ const (
 	credentialFormatJWTVCJSON  = "jwt_vc_json"
 	credentialFormatJWTVCJSONL = "jwt_vc_json-ld"
 	credentialFormatLDPVC      = "ldp_vc"
+
+	// kbJWTFreshnessSkew bounds how far from "now" a Key Binding JWT's iat may
+	// be (SD-JWT RFC 9901 §7.3 step 5.e: the Verifier MUST "check that the
+	// creation time of the Key Binding JWT, as determined by the iat claim,
+	// is within an acceptable window"); applied symmetrically since clocks can
+	// also run fast.
+	kbJWTFreshnessSkew = 5 * time.Minute
 )
 
 type createAuthorizationRequest struct {

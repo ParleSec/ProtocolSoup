@@ -719,6 +719,102 @@ func TestDirectPostPolicyDeniesDCQLFormatMismatch(t *testing.T) {
 	}
 }
 
+// credentialSetsDCQLQuery builds a DCQL query with two Credential Queries --
+// "degree_sd_jwt" (satisfiable by the wallet fixture's actual dc+sd-jwt
+// credential) and "unused_ldp_vc" (an ldp_vc requirement the single-credential
+// wallet fixture never presents) -- plus the given top-level credential_sets
+// array (OID4VP 1.0 Section 6.2), for exercising the verifier-side
+// vc.EvaluateCredentialSets wiring end to end.
+func credentialSetsDCQLQuery(credentialSets []map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"credentials": []map[string]interface{}{
+			{
+				"id": "degree_sd_jwt",
+				"meta": map[string]interface{}{
+					"vct_values": []string{testCredentialVCT},
+				},
+				"claims": []map[string]interface{}{
+					{"path": []string{"degree"}},
+				},
+			},
+			{
+				"id":     "unused_ldp_vc",
+				"format": "ldp_vc",
+				"meta": map[string]interface{}{
+					"type_values": []string{"UniversityDegreeCredential"},
+				},
+			},
+		},
+		"credential_sets": credentialSets,
+	}
+}
+
+// TestDirectPostPolicyAllowsCredentialSetSatisfiedByOneAlternative proves a
+// required credential_sets entry succeeds when the presented credential
+// satisfies at least one of its options, even though it does not satisfy
+// every entry in `credentials` (the pre-credential_sets behaviour) -- the
+// wallet's real dc+sd-jwt credential only ever matches "degree_sd_jwt", never
+// "unused_ldp_vc".
+func TestDirectPostPolicyAllowsCredentialSetSatisfiedByOneAlternative(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", credentialSetsDCQLQuery([]map[string]interface{}{
+		{"options": [][]string{{"unused_ldp_vc"}, {"degree_sd_jwt"}}, "required": true},
+	}))
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	assertPolicyAllowed(t, resultPayload)
+}
+
+// TestDirectPostPolicyDeniesUnsatisfiedRequiredCredentialSet proves a
+// required credential_sets entry whose only option references a Credential
+// Query the wallet never satisfies is denied with the new
+// dcql_credential_set_unsatisfied reason code, even though a different,
+// independently-satisfied credential_sets entry exists for the credential
+// that was actually presented.
+func TestDirectPostPolicyDeniesUnsatisfiedRequiredCredentialSet(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", credentialSetsDCQLQuery([]map[string]interface{}{
+		{"options": [][]string{{"degree_sd_jwt"}}, "required": true},
+		{"options": [][]string{{"unused_ldp_vc"}}, "required": true},
+	}))
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision, got %v", policyObj)
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "dcql_credential_set_unsatisfied") {
+		t.Fatalf("expected dcql_credential_set_unsatisfied reason code, got %v", reasonCodes)
+	}
+}
+
+// TestDirectPostPolicyAllowsUnsatisfiedOptionalCredentialSet proves a
+// credential_sets entry marked required:false does not block the overall
+// query from succeeding even when none of its options are satisfiable.
+func TestDirectPostPolicyAllowsUnsatisfiedOptionalCredentialSet(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequestWithDCQL(t, env.Server.URL, "direct_post", credentialSetsDCQLQuery([]map[string]interface{}{
+		{"options": [][]string{{"degree_sd_jwt"}}, "required": true},
+		{"options": [][]string{{"unused_ldp_vc"}}, "required": false},
+	}))
+	postWalletResponse(t, env.Server.URL, env.KeySet, createPayload, wallet, "")
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	assertPolicyAllowed(t, resultPayload)
+}
+
 func TestDirectPostPolicyAllowsDCQLAcrossSupportedFormats(t *testing.T) {
 	testCases := []struct {
 		name                      string
@@ -1283,6 +1379,115 @@ func createVPTokenWithExpiry(
 		t.Fatalf("sign vp token: %v", err)
 	}
 	return signed
+}
+
+// buildRawSDJWTKBVPToken builds a genuine SD-JWT+KB compact serialization
+// ("issuer-signed-jwt~disclosure~...~kb-jwt") signed over the wallet's real
+// credential, for tests that need to exercise the raw KB-JWT validation path
+// in evaluateSDJWTPresentation (aud/nonce/iat/sd_hash) directly, rather than
+// the vp+jwt-wrapped credential_jwt path createVPToken produces.
+func buildRawSDJWTKBVPToken(t *testing.T, createPayload map[string]interface{}, wallet *walletFixture, kbIssuedAt time.Time) string {
+	t.Helper()
+	envelope, err := vc.ParseSDJWTEnvelope(wallet.CredentialJWT)
+	if err != nil {
+		t.Fatalf("parse sd-jwt envelope: %v", err)
+	}
+	sdJWTWithoutKB := vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, "")
+	if !strings.HasSuffix(sdJWTWithoutKB, "~") {
+		sdJWTWithoutKB += "~"
+	}
+	sdHashRaw := sha256.Sum256([]byte(sdJWTWithoutKB))
+
+	kbClaims := jwt.MapClaims{
+		"aud":     asVPString(createPayload["client_id"]),
+		"nonce":   asVPString(createPayload["nonce"]),
+		"iat":     kbIssuedAt.Unix(),
+		"sd_hash": base64.RawURLEncoding.EncodeToString(sdHashRaw[:]),
+	}
+	kbToken := jwt.NewWithClaims(jwt.SigningMethodRS256, kbClaims)
+	kbToken.Header["typ"] = "kb+jwt"
+	kbToken.Header["kid"] = wallet.KeySet.RSAKeyID()
+	signedKB, err := kbToken.SignedString(wallet.KeySet.RSAPrivateKey())
+	if err != nil {
+		t.Fatalf("sign kb-jwt: %v", err)
+	}
+	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, signedKB)
+}
+
+func postRawSDJWTKBResponse(t *testing.T, serverURL string, createPayload map[string]interface{}, vpToken string) {
+	t.Helper()
+	formResp, err := http.PostForm(serverURL+"/oid4vp/response", url.Values{
+		"state":    {asVPString(createPayload["state"])},
+		"vp_token": {vpToken},
+	})
+	if err != nil {
+		t.Fatalf("post raw sd-jwt+kb wallet response failed: %v", err)
+	}
+	assertVPStatus(t, formResp, http.StatusOK)
+}
+
+// TestDirectPostPolicyAllowsFreshKBJWTIat proves a raw SD-JWT+KB presentation
+// (as opposed to the vp+jwt-wrapped credential_jwt path most tests in this
+// file exercise) with a KB-JWT iat inside the freshness window is accepted.
+func TestDirectPostPolicyAllowsFreshKBJWTIat(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	vpToken := buildRawSDJWTKBVPToken(t, createPayload, wallet, time.Now().UTC())
+	postRawSDJWTKBResponse(t, env.Server.URL, createPayload, vpToken)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	assertPolicyAllowed(t, resultPayload)
+}
+
+// TestDirectPostPolicyDeniesStaleKBJWTIat proves a KB-JWT whose iat is further
+// in the past than kbJWTFreshnessSkew is rejected (SD-JWT RFC 9901 Section 7.3
+// step 5.e).
+func TestDirectPostPolicyDeniesStaleKBJWTIat(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	staleIat := time.Now().UTC().Add(-(kbJWTFreshnessSkew + time.Minute))
+	vpToken := buildRawSDJWTKBVPToken(t, createPayload, wallet, staleIat)
+	postRawSDJWTKBResponse(t, env.Server.URL, createPayload, vpToken)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision for stale kb-jwt iat")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "kb_jwt_invalid") {
+		t.Fatalf("expected kb_jwt_invalid reason code, got %v", reasonCodes)
+	}
+}
+
+// TestDirectPostPolicyDeniesFutureKBJWTIat proves a KB-JWT whose iat is
+// further in the future than kbJWTFreshnessSkew is rejected symmetrically
+// (clocks can run fast as well as slow).
+func TestDirectPostPolicyDeniesFutureKBJWTIat(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	futureIat := time.Now().UTC().Add(kbJWTFreshnessSkew + time.Minute)
+	vpToken := buildRawSDJWTKBVPToken(t, createPayload, wallet, futureIat)
+	postRawSDJWTKBResponse(t, env.Server.URL, createPayload, vpToken)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatalf("expected denied policy decision for future kb-jwt iat")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "kb_jwt_invalid") {
+		t.Fatalf("expected kb_jwt_invalid reason code, got %v", reasonCodes)
+	}
 }
 
 func createEncryptedResponseJWT(
