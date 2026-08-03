@@ -11,13 +11,13 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3
-	github.com/mattn/go-sqlite3 v1.14.48
+	github.com/mattn/go-sqlite3 v1.14.49
 	github.com/piprate/json-gold v0.8.0
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/spiffe/go-spiffe/v2 v2.8.1
 	github.com/veraison/go-cose v1.3.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
