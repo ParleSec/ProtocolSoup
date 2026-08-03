@@ -26,6 +26,38 @@ type DCQLCredentialRequirement struct {
 	// will accept. HAIP 1.0 Section 5 mandates support for the "aki" (Authority
 	// Key Identifier) type on the mso_mdoc path.
 	TrustedAuthorities []DCQLTrustedAuthority
+	// ClaimSets is the DCQL claim_sets array (OID4VP 1.0 Section 6.1/6.4.1):
+	// each inner slice is a set of claim `id`s (Section 6.3) that must ALL be
+	// present together for that alternative to satisfy the requirement.
+	// Evaluated in order; the first fully-satisfied set wins. An empty
+	// ClaimSets preserves today's behaviour exactly: every entry in
+	// RequiredClaimPaths/RequiredClaimPathSegments is required, unconditionally.
+	ClaimSets [][]string
+	// claimsByID maps each claim `id` declared in this credential query's
+	// `claims` array to its path, for resolving ClaimSets entries. It is kept
+	// as an id-keyed map rather than a third slice index-aligned with
+	// RequiredClaimPaths/RequiredClaimPathSegments: those two are already
+	// independently deduplicated (and, for RequiredClaimPaths, sorted) for
+	// the pre-claim_sets matching path below, and a map has no ordering for
+	// that dedup/sort to disturb. This keeps the non-claim_sets matching path
+	// byte-for-byte identical to before claim_sets support was added.
+	claimsByID map[string]dcqlClaimPath
+	// unclaimedRequiredPaths/unclaimedRequiredPathSegments are the claims from
+	// this query's `claims` array that were not assigned a DCQL `id`. Per
+	// OID4VP 1.0 Section 6.3, `id` is REQUIRED once claim_sets is present, so
+	// conformant queries should never populate these; they exist purely to
+	// fail safe (treat an id-less claim as unconditionally required rather
+	// than silently unenforceable) if ClaimSets is non-empty anyway.
+	unclaimedRequiredPaths        []string
+	unclaimedRequiredPathSegments [][]string
+}
+
+// dcqlClaimPath is the resolved path (in both the dot-joined and raw-segment
+// forms used by RequirementMatchesEvidence and RequirementMatchesMdoc
+// respectively) for one claim `id` referenced by ClaimSets.
+type dcqlClaimPath struct {
+	path     string
+	segments []string
 }
 
 // DCQLTrustedAuthority is one entry of a DCQL Trusted Authorities Query
