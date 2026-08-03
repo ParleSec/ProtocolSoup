@@ -184,7 +184,7 @@ jobs:
           exit-code: '0'  # Don't fail build, but report issues
 
       - name: Upload Trivy scan results
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.4
         with:
           sarif_file: 'trivy-results-${{ matrix.name }}.sarif'
           category: 'container-${{ matrix.name }}'
