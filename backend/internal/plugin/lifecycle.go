@@ -70,6 +70,14 @@ func (lm *LifecycleManager) SetError(pluginID string, err error) {
 	lm.errors[pluginID] = err
 }
 
+// Remove deletes lifecycle state for an unregistered plugin.
+func (lm *LifecycleManager) Remove(pluginID string) {
+	lm.mu.Lock()
+	defer lm.mu.Unlock()
+	delete(lm.states, pluginID)
+	delete(lm.errors, pluginID)
+}
+
 // GetState gets the state of a plugin
 func (lm *LifecycleManager) GetState(pluginID string) State {
 	lm.mu.RLock()

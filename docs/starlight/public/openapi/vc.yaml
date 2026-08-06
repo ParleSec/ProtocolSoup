@@ -640,7 +640,7 @@ components:
           type: string
     HealthResponse:
       type: object
-      required: [status, version, protocols]
+      required: [status, version, protocols, plugins]
       properties:
         status:
           type: string
@@ -652,6 +652,23 @@ components:
           type: array
           items:
             type: string
+        plugins:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginHealth"
+    PluginHealth:
+      type: object
+      required: [plugin_id, state, healthy]
+      properties:
+        plugin_id:
+          type: string
+        state:
+          type: string
+          enum: [uninitialized, initializing, ready, shutting_down, stopped, error]
+        healthy:
+          type: boolean
+        error:
+          type: string
     CreateAuthorizationRequest:
       type: object
       required: [response_mode]
