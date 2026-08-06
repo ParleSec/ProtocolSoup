@@ -29,13 +29,32 @@ Use SCIM service for identity provisioning testing with SCIM-compatible IdPs, in
 - `GET|POST /scim/v2/Groups`, `GET|PUT|PATCH|DELETE /scim/v2/Groups/{id}`
 - `POST /scim/v2/Bulk`
 - `POST /scim/v2/.search`
+- `POST /scim/client/provision` — create a single user on an external SCIM service
+- `POST /scim/client/sync` — reconcile local users to an external SCIM service
+
+## Outbound Reconciliation
+
+`POST /scim/client/provision` and `POST /scim/client/sync` both send real outbound SCIM requests to the exact base URL supplied in `targetUrl`. Server-managed attributes (`id`, `meta`, `groups`, `password`) are stripped before a resource is forwarded; the source id is preserved as `externalId` for correlation.
+
+`sync` additionally retrieves `ServiceProviderConfig`, then creates users without a stored target mapping and replaces previously mapped users with `PUT`. Source-to-target IDs and the last fully successful sync time are stored in the SCIM SQLite database.
+
+```bash
+curl -X POST http://localhost:8080/scim/client/sync \
+  -H "Authorization: Bearer $SCIM_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"targetUrl":"https://app.example.com/scim/v2","authToken":"target-service-token"}'
+```
+
+A fully successful `sync` run returns `200`; a run with per-user failures returns `207` and operation details. Neither endpoint infers deletions—remote deprovisioning requires an explicit policy.
+
+Production targets must use HTTPS and must not resolve to a loopback, private, or link-local address; non-production environments accept HTTP and private targets so both endpoints can be exercised against docker-compose networks and local IdP emulators.
 
 ## Configuration
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External base URL |
-| `SCIM_API_TOKEN` | No | - | Bearer token for authenticated requests |
+| `SCIM_API_TOKEN` | Yes in production | - | Bearer token for authenticated requests and outbound client operations |
 | `SCIM_DATA_DIR` | No | `./data` | SQLite database directory |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
 
@@ -55,4 +74,5 @@ docker run -p 8080:8080 \
 - IdP connector URL is typically `http(s)://<host>/scim/v2`.
 - Demo data (users and groups) is seeded on first startup.
 - `SCIM_API_TOKEN` is checked via bearer auth middleware. Treat it as a credential.
+- The same bearer authentication protects `/scim/client/*`, including outbound provisioning and sync.
 - Mount `SCIM_DATA_DIR` for persistent provisioning state across container restarts.
