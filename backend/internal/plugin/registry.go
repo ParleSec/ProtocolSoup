@@ -9,16 +9,18 @@ import (
 
 // Registry manages protocol plugins
 type Registry struct {
-	plugins map[string]ProtocolPlugin
-	order   []string // Maintain registration order
-	mu      sync.RWMutex
+	plugins   map[string]ProtocolPlugin
+	order     []string // Maintain registration order
+	lifecycle *LifecycleManager
+	mu        sync.RWMutex
 }
 
 // NewRegistry creates a new plugin registry
 func NewRegistry() *Registry {
 	return &Registry{
-		plugins: make(map[string]ProtocolPlugin),
-		order:   make([]string, 0),
+		plugins:   make(map[string]ProtocolPlugin),
+		order:     make([]string, 0),
+		lifecycle: NewLifecycleManager(),
 	}
 }
 
@@ -38,6 +40,7 @@ func (r *Registry) Register(p ProtocolPlugin) error {
 
 	r.plugins[info.ID] = p
 	r.order = append(r.order, info.ID)
+	r.lifecycle.SetState(info.ID, StateUninitialized)
 
 	log.Printf("Registered plugin: %s (%s)", info.Name, info.ID)
 	return nil
@@ -53,6 +56,7 @@ func (r *Registry) Unregister(id string) error {
 	}
 
 	delete(r.plugins, id)
+	r.lifecycle.Remove(id)
 
 	// Remove from order slice
 	for i, pid := range r.order {
@@ -89,12 +93,10 @@ func (r *Registry) List() []ProtocolPlugin {
 
 // InitializeAll initializes all registered plugins
 func (r *Registry) InitializeAll(ctx context.Context, config PluginConfig) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	for _, id := range r.order {
-		p := r.plugins[id]
-		if err := p.Initialize(ctx, config); err != nil {
+	for _, p := range r.List() {
+		id := p.Info().ID
+		managed := NewManagedPlugin(p, r.lifecycle, nil)
+		if err := managed.Initialize(ctx, config); err != nil {
 			return fmt.Errorf("failed to initialize plugin %s: %w", id, err)
 		}
 		log.Printf("Initialized plugin: %s", id)
@@ -104,15 +106,14 @@ func (r *Registry) InitializeAll(ctx context.Context, config PluginConfig) error
 
 // ShutdownAll shuts down all registered plugins in reverse order
 func (r *Registry) ShutdownAll(ctx context.Context) error {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	var lastErr error
+	plugins := r.List()
 	// Shutdown in reverse order
-	for i := len(r.order) - 1; i >= 0; i-- {
-		id := r.order[i]
-		p := r.plugins[id]
-		if err := p.Shutdown(ctx); err != nil {
+	for i := len(plugins) - 1; i >= 0; i-- {
+		p := plugins[i]
+		id := p.Info().ID
+		managed := NewManagedPlugin(p, r.lifecycle, nil)
+		if err := managed.Shutdown(ctx); err != nil {
 			log.Printf("Error shutting down plugin %s: %v", id, err)
 			lastErr = err
 		} else {
@@ -120,6 +121,31 @@ func (r *Registry) ShutdownAll(ctx context.Context) error {
 		}
 	}
 	return lastErr
+}
+
+// HealthChecks returns lifecycle health in plugin registration order.
+func (r *Registry) HealthChecks() []HealthCheck {
+	plugins := r.List()
+	checks := make([]HealthCheck, 0, len(plugins))
+	for _, p := range plugins {
+		id := p.Info().ID
+		state := r.lifecycle.GetState(id)
+		check := HealthCheck{
+			PluginID: id,
+			State:    state.String(),
+			Healthy:  state == StateReady,
+		}
+		if err := r.lifecycle.GetError(id); err != nil {
+			check.Error = err.Error()
+		}
+		checks = append(checks, check)
+	}
+	return checks
+}
+
+// AllReady reports whether every registered plugin completed initialization.
+func (r *Registry) AllReady() bool {
+	return r.lifecycle.AllReady()
 }
 
 // Count returns the number of registered plugins

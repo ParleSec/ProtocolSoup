@@ -297,10 +297,11 @@ func addVaryAccept(header http.Header) {
 
 // Health check response
 type HealthResponse struct {
-	Status    string         `json:"status"`
-	Version   string         `json:"version"`
-	Protocols []string       `json:"protocols"`
-	Palette   *palette.Stats `json:"palette,omitempty"`
+	Status    string               `json:"status"`
+	Version   string               `json:"version"`
+	Protocols []string             `json:"protocols"`
+	Plugins   []plugin.HealthCheck `json:"plugins"`
+	Palette   *palette.Stats       `json:"palette,omitempty"`
 }
 
 // API index response
@@ -352,13 +353,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Status:    "healthy",
 		Version:   "1.0.0",
 		Protocols: protocols,
+		Plugins:   s.registry.HealthChecks(),
 	}
 	if s.palette != nil {
 		stats := s.palette.Stats()
 		resp.Palette = &stats
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	statusCode := http.StatusOK
+	if !s.registry.AllReady() {
+		resp.Status = "unhealthy"
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	writeJSON(w, statusCode, resp)
 }
 
 // Protocol list response

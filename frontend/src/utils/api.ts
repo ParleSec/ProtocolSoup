@@ -385,6 +385,12 @@ export const api = {
     status: string
     version: string
     protocols: string[]
+    plugins: Array<{
+      plugin_id: string
+      state: 'uninitialized' | 'initializing' | 'ready' | 'shutting_down' | 'stopped' | 'error'
+      healthy: boolean
+      error?: string
+    }>
   }> {
     return apiFetch('/health', { method: 'GET' })
   },
