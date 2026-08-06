@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
@@ -26,7 +27,18 @@ type Plugin struct {
 	loginRequestTTL       time.Duration
 	clientKeyResolver     *clientJWKSResolver
 	clientAssertionReplay clientAssertionReplayStore
-	now                   func() time.Time
+	// dpopReplay tracks DPoP proof jti values (RFC 9449 Section 11.1),
+	// scoped by jkt rather than by client -- a DPoP proof is bound to a
+	// key, not a registered client. Distinct store instance and Redis key
+	// prefix from clientAssertionReplay so the two replay spaces cannot
+	// collide.
+	dpopReplay dpop.ReplayStore
+	// dpopNonceIssuer, when non-nil, puts the RFC 9449 Section 8
+	// server-provided nonce challenge in force at the token endpoint. Nil
+	// (the default) means no behavioural change from Phase 3 -- nonces are
+	// opt-in hardening, enabled via PluginConfig.DPoPNonceRequired.
+	dpopNonceIssuer *dpop.NonceIssuer
+	now             func() time.Time
 }
 
 // NewPlugin creates a new OAuth 2.0 plugin
@@ -38,12 +50,13 @@ func NewPlugin() *Plugin {
 			Version:     "1.0.0",
 			Description: "OAuth 2.0 Authorization Framework implementation with PKCE support",
 			Tags:        []string{"authorization", "tokens", "pkce"},
-			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414"},
+			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414", "RFC 9449"},
 		}),
 		loginRequests:         make(map[string]loginRequestInfo),
 		loginRequestTTL:       10 * time.Minute,
 		clientKeyResolver:     newClientJWKSResolver(),
 		clientAssertionReplay: newMemoryClientAssertionReplayStore(),
+		dpopReplay:            dpop.NewMemoryReplayStore(),
 		now:                   time.Now,
 	}
 }
@@ -78,11 +91,28 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 			_ = p.clientAssertionReplay.Close()
 		}
 		p.clientAssertionReplay = store
+
+		dpopStore, err := dpop.NewRedisReplayStore(
+			ctx,
+			config.OAuth2ReplayRedisURL,
+			config.Environment == "production",
+		)
+		if err != nil {
+			return err
+		}
+		if p.dpopReplay != nil {
+			_ = p.dpopReplay.Close()
+		}
+		p.dpopReplay = dpopStore
 	} else {
 		environment := strings.ToLower(strings.TrimSpace(config.Environment))
 		if environment != "" && environment != "development" && environment != "test" {
 			return errors.New("OAUTH2_REPLAY_REDIS_URL is required outside development and tests")
 		}
+	}
+
+	if config.DPoPNonceRequired {
+		p.dpopNonceIssuer = dpop.NewNonceIssuer(5 * time.Minute)
 	}
 
 	go p.cleanupLoginRequests()
@@ -92,10 +122,16 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 
 // Shutdown shuts down the plugin
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	var err error
 	if p.clientAssertionReplay != nil {
-		return p.clientAssertionReplay.Close()
+		err = p.clientAssertionReplay.Close()
 	}
-	return nil
+	if p.dpopReplay != nil {
+		if closeErr := p.dpopReplay.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 // RegisterRoutes registers the plugin's HTTP routes
@@ -473,6 +509,98 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					Security: []string{
 						"Resource Server validates token before processing request",
 						"Check 'sub' claim identifies the client, not a user",
+					},
+				},
+			},
+		},
+		{
+			ID:          "client_credentials_dpop",
+			Name:        "Client Credentials + DPoP",
+			Description: "Client Credentials Grant (RFC 6749 §4.4) with the issued access token sender-constrained via DPoP (RFC 9449). The client proves possession of a private key on every request; the token alone, if stolen, is not enough to use it. DPoP is opt-in per request - client_secret_basic/private_key_jwt still authenticates the client itself, orthogonal to what DPoP proves.",
+			Executable:  true,
+			Category:    "authorization",
+			Steps: []plugin.FlowStep{
+				{
+					Order:       1,
+					Name:        "Generate DPoP Key Pair",
+					Description: "Client generates an ES256 (or RS256/EdDSA) key pair. The private key never leaves the client; only the public JWK is ever presented, embedded directly in the proof's header.",
+					From:        "Client",
+					To:          "Client",
+					Type:        "internal",
+					Parameters: map[string]string{
+						"alg": "ES256, RS256, or EdDSA - never none or a symmetric algorithm",
+					},
+					Security: []string{
+						"Private key is generated and stored non-extractable (WebCrypto) or in an HSM/TPM in production",
+						"A fresh key pair per client instance is RECOMMENDED to limit blast radius",
+					},
+				},
+				{
+					Order:       2,
+					Name:        "Mint DPoP Proof",
+					Description: "Client signs a proof JWT bound to this specific request: the token endpoint's HTTP method and URI, a fresh issued-at time, and a single-use jti (RFC 9449 §4.2).",
+					From:        "Client",
+					To:          "Client",
+					Type:        "internal",
+					Parameters: map[string]string{
+						"typ": "dpop+jwt (REQUIRED)",
+						"htm": "POST (must match the actual request method)",
+						"htu": "The exact token endpoint URL, no query or fragment",
+						"iat": "Current time - proofs older than ~60s are rejected",
+						"jti": "Single-use identifier - replayed proofs are rejected",
+					},
+					Security: []string{
+						"htu/htm binding prevents replaying a proof against a different endpoint or method",
+						"jti + iat window bound how long a captured proof (not the key) stays useful to an attacker",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "Token Request with DPoP Header",
+					Description: "Client sends the usual client_credentials request, plus the proof in a DPoP header. Client authentication (client_secret_basic or private_key_jwt) still applies unchanged - DPoP binds the token, it doesn't authenticate the client.",
+					From:        "Client",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"grant_type": "client_credentials (REQUIRED)",
+						"DPoP":       "The proof JWT from the previous step (REQUIRED for binding)",
+					},
+					Security: []string{
+						"Content-Type MUST be application/x-www-form-urlencoded",
+						"An invalid proof is rejected with invalid_dpop_proof before any grant is processed",
+					},
+				},
+				{
+					Order:       4,
+					Name:        "Sender-Constrained Token Response",
+					Description: "Authorization Server validates the proof, derives the RFC 7638 JWK thumbprint (jkt) of the client's public key, and binds the access token to it via a cnf.jkt claim. token_type is DPoP, not Bearer (RFC 9449 §5).",
+					From:        "Authorization Server",
+					To:          "Client",
+					Type:        "response",
+					Parameters: map[string]string{
+						"access_token": "JWT access token with a cnf.jkt claim (REQUIRED)",
+						"token_type":   "DPoP (REQUIRED - signals sender-constraint to the client)",
+						"expires_in":   "Token lifetime in seconds",
+					},
+					Security: []string{
+						"cnf.jkt binds the token to the key that proved possession, not to the client_id",
+						"A resource server that ignores cnf.jkt and accepts this as a plain Bearer token defeats the entire property",
+					},
+				},
+				{
+					Order:       5,
+					Name:        "Proof-of-Possession API Request",
+					Description: "Every API call now requires a fresh DPoP proof over that specific request, plus an ath claim binding the proof to this exact access token (RFC 9449 §4.2). The Authorization header uses the DPoP scheme, not Bearer.",
+					From:        "Client",
+					To:          "Resource Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"Authorization": "DPoP {access_token}",
+						"DPoP":          "A fresh proof for this request, with ath = base64url(SHA-256(access_token))",
+					},
+					Security: []string{
+						"Resource Server MUST reject a cnf.jkt-bound token presented without a matching proof",
+						"ath prevents replaying a valid proof from one request alongside a different stolen token",
 					},
 				},
 			},

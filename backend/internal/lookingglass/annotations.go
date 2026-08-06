@@ -103,6 +103,56 @@ func (l *AnnotationLibrary) OAuth2Annotations() map[string][]Annotation {
 				Reference:   "RFC 7009",
 			},
 		},
+		"dpop_proof": {
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "DPoP Proof (Demonstrating Proof of Possession)",
+				Description: "A signed JWT the client mints per-request, carrying the HTTP method (htm), target URI (htu), a fresh issued-at time (iat), a single-use identifier (jti), and its own public key (jwk) in the header. Possession of the matching private key is what the proof demonstrates -- the server never sees that key.",
+				Reference:   "RFC 9449 Section 4.2",
+			},
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Proof Freshness and Replay",
+				Description: "A proof's iat must fall within a narrow window of the server's clock, and its jti may only be accepted once. Both checks bound how long a captured proof (not the underlying key) remains useful to an attacker.",
+				Reference:   "RFC 9449 Section 11.1",
+				Severity:    "warning",
+			},
+		},
+		"dpop_cnf_jkt": {
+			{
+				Type:        AnnotationTypeBestPractice,
+				Title:       "Sender-Constrained Access Token (cnf.jkt)",
+				Description: "An access token issued against a valid DPoP proof carries a cnf.jkt claim: the RFC 7638 thumbprint of the client's public key. The resource server must then reject that token unless it is accompanied by a fresh proof from the same key -- the token alone, without the key, is not sufficient.",
+				Reference:   "RFC 9449 Section 4.1 & Section 7.1",
+			},
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "DPoP vs Bearer token_type",
+				Description: "A DPoP-bound token response uses token_type=DPoP rather than Bearer (RFC 6750), signalling to the client that every future presentation of this token must be accompanied by a matching proof.",
+				Reference:   "RFC 9449 Section 5",
+			},
+		},
+		"dpop_nonce": {
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "Server-Provided DPoP Nonce",
+				Description: "When enabled at an endpoint, the server rejects a proof that lacks its current nonce with error=use_dpop_nonce and a DPoP-Nonce response header. The client mints a fresh proof echoing that value in its nonce claim and retries -- this is a defined recovery path, not a hard failure.",
+				Reference:   "RFC 9449 Section 8",
+			},
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Independent AS/RS Nonce Spaces",
+				Description: "A nonce issued by an authorization server's token endpoint is not valid at a resource server's protected endpoint, and vice versa -- even when, as with this issuer's own credential endpoints, the two roles are served by the same process.",
+				Reference:   "RFC 9449 Section 8.2",
+				Severity:    "info",
+			},
+			{
+				Type:        AnnotationTypeBestPractice,
+				Title:       "Opt-In Hardening, Not a Baseline Requirement",
+				Description: "Nonces are disabled by default and enabled per endpoint by deployment configuration. Requiring one unconditionally would break every DPoP client that has not yet implemented the challenge/retry flow, so RFC 9449 treats it as optional additional protection.",
+				Reference:   "RFC 9449 Section 8",
+			},
+		},
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
@@ -790,6 +791,11 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"revocation_endpoint":                              issuer + "/revoke",
 		"introspection_endpoint":                           issuer + "/introspect",
 		"code_challenge_methods_supported":                 []string{"S256"},
+		// RFC 9449 Section 5.1: signals DPoP support and the acceptable
+		// proof JWS algorithms. DPoP itself is opt-in per request (no
+		// separate on/off switch to reflect here); this only advertises
+		// which algorithms a proof may use.
+		"dpop_signing_alg_values_supported": dpop.AllowedAlgorithmsList,
 	})
 }
 

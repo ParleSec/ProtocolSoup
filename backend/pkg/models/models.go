@@ -125,6 +125,10 @@ type RefreshToken struct {
 	AuthTime  time.Time `json:"auth_time"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+	// JKT is the RFC 7638 JWK thumbprint this refresh token is bound to when
+	// it was issued alongside a DPoP-bound access token (RFC 9449 Section
+	// 5). Empty for ordinary bearer-issued refresh tokens.
+	JKT string `json:"jkt,omitempty"`
 }
 
 // IntrospectionResponse represents token introspection response

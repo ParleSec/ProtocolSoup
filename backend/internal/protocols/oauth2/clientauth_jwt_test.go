@@ -26,6 +26,7 @@ import (
 	"time"
 
 	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
@@ -1639,6 +1640,32 @@ func TestOAuthAuthorizationServerMetadataAdvertisesImplementedJWTAuth(t *testing
 	}
 	algorithms, _ := metadata["token_endpoint_auth_signing_alg_values_supported"].([]interface{})
 	for _, algorithm := range []string{"RS256", "ES256", "EdDSA"} {
+		if !containsInterfaceString(algorithms, algorithm) {
+			t.Fatalf("%s missing from %#v", algorithm, algorithms)
+		}
+	}
+}
+
+// TestOAuthAuthorizationServerMetadataAdvertisesDPoPAlgorithms covers RFC
+// 9449 Section 5.1's dpop_signing_alg_values_supported metadata parameter,
+// which signals DPoP support and the acceptable proof JWS algorithms.
+func TestOAuthAuthorizationServerMetadataAdvertisesDPoPAlgorithms(t *testing.T) {
+	testServer := newOAuthAssertionTestServer(t)
+	testServer.plugin.baseURL = "https://as.example"
+	response, err := http.Get(testServer.server.URL + "/oauth2/.well-known/oauth-authorization-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	var metadata map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	algorithms, _ := metadata["dpop_signing_alg_values_supported"].([]interface{})
+	for _, algorithm := range dpop.AllowedAlgorithmsList {
 		if !containsInterfaceString(algorithms, algorithm) {
 			t.Fatalf("%s missing from %#v", algorithm, algorithms)
 		}
