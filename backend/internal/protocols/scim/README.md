@@ -15,6 +15,7 @@ This implementation provides:
 - **Schema Discovery**: ServiceProviderConfig, ResourceTypes, and Schemas endpoints
 - **ETag Support**: Optimistic concurrency control with version tracking
 - **Looking Glass Integration**: Real-time flow visualization for educational purposes
+- **Outbound Reconciliation**: Real target discovery, create/update calls, durable ID mappings, and per-operation visibility
 
 ## Service Deployment
 
@@ -155,6 +156,19 @@ When running standalone, set `SHOWCASE_BASE_URL` to the public URL you want SCIM
 |--------|----------|-------------|---------------|
 | POST | `/scim/v2/Bulk` | Bulk operations | RFC 7644 §3.7 |
 | POST | `/scim/v2/.search` | Server-side search | RFC 7644 §3.4.3 |
+
+### Outbound Client (Authenticated)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/scim/client/provision` | Create a single user on a target SCIM service |
+| POST | `/scim/client/sync` | Discover a target SCIM service and reconcile all local users with durable ID mappings |
+
+Both endpoints require the same `SCIM_API_TOKEN` bearer token as the inbound API and accept the target's exact SCIM base URL (e.g. `https://app.example.com/scim/v2`). Server-managed attributes (`id`, `meta`, `groups`, `password`) are always stripped before a resource is forwarded outbound; the source id is preserved as `externalId` for correlation.
+
+The sync endpoint additionally creates unmapped users, updates mapped users, persists successful mappings, and emits operation-level Looking Glass events. It returns `207 Multi-Status` when individual users fail. It does not infer remote deletions; deprovisioning requires an explicit policy.
+
+In production, target URLs must use HTTPS and must not resolve to a loopback, private, or link-local address — this prevents an authenticated caller from using either endpoint to reach internal infrastructure (SSRF). Non-production environments allow HTTP and private targets so the endpoints can be exercised against docker-compose networks and local IdP emulators.
 
 ## Authentication
 

@@ -21,6 +21,8 @@ tags:
     description: SCIM group lifecycle operations.
   - name: Bulk
     description: SCIM bulk and search operations.
+  - name: Client
+    description: Authenticated outbound SCIM provisioning operations.
 paths:
   /health:
     get:
@@ -666,6 +668,99 @@ paths:
             application/scim+json:
               schema:
                 $ref: "#/components/schemas/ScimError"
+  /scim/client/provision:
+    post:
+      tags: [Client]
+      summary: Provision a single user to an external SCIM service
+      description: |
+        Sends one CreateUser request to the target's exact SCIM base URL. Server-managed
+        attributes (id, meta, groups, password) are stripped before the request is sent;
+        the source id is preserved as externalId for correlation. This endpoint does not
+        persist a source-to-target mapping; use /scim/client/sync for repeatable
+        reconciliation across many users.
+      operationId: provisionUserToExternalScimService
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientProvisionRequest"
+      responses:
+        "200":
+          description: The user was created on the target SCIM service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "400":
+          description: Invalid request, missing userName, or invalid target URL.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Missing or invalid service bearer token.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "502":
+          description: The target SCIM service rejected the request or returned an invalid response.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/client/sync:
+    post:
+      tags: [Client]
+      summary: Reconcile local users to an external SCIM service
+      description: |
+        Discovers the target ServiceProviderConfig and performs a one-way reconciliation.
+        New users are created and previously mapped users are replaced with PUT. Successful
+        source-to-target ID mappings are persisted for later runs. Remote users are never
+        deleted implicitly; deprovisioning requires an explicit policy.
+      operationId: syncUsersToExternalScimService
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClientSyncRequest"
+      responses:
+        "200":
+          description: Every source user was reconciled successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientSyncResponse"
+        "207":
+          description: Reconciliation completed with one or more per-user failures.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientSyncResponse"
+        "400":
+          description: Invalid request or target URL.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: Missing or invalid service bearer token.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "502":
+          description: Target discovery or SCIM operations could not be completed.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
 components:
   securitySchemes:
     bearerAuth:
@@ -681,7 +776,7 @@ components:
           type: string
     HealthResponse:
       type: object
-      required: [status, version, protocols]
+      required: [status, version, protocols, plugins]
       properties:
         status:
           type: string
@@ -694,6 +789,114 @@ components:
           items:
             type: string
           example: [scim]
+        plugins:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginHealth"
+    PluginHealth:
+      type: object
+      required: [plugin_id, state, healthy]
+      properties:
+        plugin_id:
+          type: string
+        state:
+          type: string
+          enum: [uninitialized, initializing, ready, shutting_down, stopped, error]
+        healthy:
+          type: boolean
+        error:
+          type: string
+    ClientProvisionRequest:
+      type: object
+      required: [targetUrl, user]
+      properties:
+        targetUrl:
+          type: string
+          format: uri
+          description: Exact base URL of the target SCIM service, such as https://app.example.com/scim/v2.
+        authToken:
+          type: string
+          writeOnly: true
+          description: Bearer token sent only to the target SCIM service.
+        user:
+          $ref: "#/components/schemas/ScimUser"
+    ClientSyncRequest:
+      type: object
+      required: [targetUrl]
+      properties:
+        targetUrl:
+          type: string
+          format: uri
+          description: Exact base URL of the target SCIM service, such as https://app.example.com/scim/v2.
+        authToken:
+          type: string
+          writeOnly: true
+          description: Bearer token sent only to the target SCIM service.
+    ClientSyncResponse:
+      type: object
+      required: [status, targetUrl, startedAt, completedAt, sourceUserCount, result]
+      properties:
+        status:
+          type: string
+          enum: [completed, partial]
+        targetUrl:
+          type: string
+          format: uri
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        sourceUserCount:
+          type: integer
+          minimum: 0
+        lastSuccessfulSync:
+          type: string
+          format: date-time
+        result:
+          $ref: "#/components/schemas/ClientSyncResult"
+    ClientSyncResult:
+      type: object
+      required: [created, updated, deleted, errors, mappings]
+      properties:
+        created:
+          type: integer
+          minimum: 0
+        updated:
+          type: integer
+          minimum: 0
+        deleted:
+          type: integer
+          minimum: 0
+          description: Always zero because this endpoint does not infer deprovisioning.
+        errors:
+          type: integer
+          minimum: 0
+        mappings:
+          type: object
+          additionalProperties:
+            type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClientSyncOperation"
+    ClientSyncOperation:
+      type: object
+      required: [localId, operation, status]
+      properties:
+        localId:
+          type: string
+        remoteId:
+          type: string
+        operation:
+          type: string
+          enum: [create, update]
+        status:
+          type: string
+          enum: [success, error]
+        error:
+          type: string
     ApiIndexResponse:
       type: object
       required: [service, version, protocols, endpoints]

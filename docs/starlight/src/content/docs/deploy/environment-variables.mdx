@@ -39,7 +39,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SCIM_API_TOKEN` | - | Bearer token required for all SCIM API requests. Set this to any string; clients must send it in the `Authorization: Bearer <token>` header. |
+| `SCIM_API_TOKEN` | - | Bearer token required for all SCIM API requests and outbound client operations. The SCIM service refuses to start without it in production. |
 
 ## SSF Service
 

@@ -37,7 +37,7 @@ RFC alignment target: RFC 7642, RFC 7643, and RFC 7644.
 
 ### Health And Readiness
 
-- `GET /health` returns service health.
+- `GET /health` returns service health and per-plugin lifecycle state.
 - Container healthcheck probes `/health` by default.
 
 ## API Surface
@@ -73,6 +73,17 @@ RFC alignment target: RFC 7642, RFC 7643, and RFC 7644.
 - `POST /scim/v2/Bulk`
 - `POST /scim/v2/.search`
 
+### Outbound Client Endpoints
+
+- `POST /scim/client/provision` creates a single user on an external target.
+- `POST /scim/client/sync` discovers an external target and reconciles every local user.
+- Both endpoints require `SCIM_API_TOKEN` and accept the exact target SCIM base URL plus its bearer token.
+- Server-managed attributes (`id`, `meta`, `groups`, `password`) are always stripped before forwarding; the source id is preserved as `externalId`.
+- Successful source-to-target ID mappings from `sync` are persisted in SQLite and reused as `PUT` targets on later runs.
+- `200` means every user succeeded; `sync` returns `207` when it includes per-user failures.
+- The operation is intentionally one-way and never deletes remote users without an explicit deprovisioning policy.
+- In production, target URLs must use HTTPS and must not resolve to a loopback, private, or link-local address (SSRF hardening).
+
 ## Quick Start
 
 ### docker run
@@ -102,7 +113,9 @@ services:
 
 ## Security Hardening
 
-- Set `SCIM_API_TOKEN` in production; do not run with open auth outside local/demo use.
+- Set `SCIM_API_TOKEN` in production; the service refuses to start without it. Do not run with open auth outside local/demo use.
+- `SCIM_API_TOKEN` also protects `/scim/client/*`; use HTTPS target URLs in production.
+- `/scim/client/*` target URLs are rejected in production if they resolve to a loopback, private, or link-local address, preventing use of the endpoints for SSRF against internal infrastructure.
 - Use HTTPS at the edge between IdP and SCIM endpoint.
 - Restrict `SHOWCASE_CORS_ORIGINS` to trusted origins.
 - Persist data to a managed volume and protect that volume as sensitive identity state.
