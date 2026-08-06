@@ -35,6 +35,11 @@ const (
 	kbJWTFreshnessSkew = 5 * time.Minute
 )
 
+// kbJWTIatWithinFreshnessWindow reports whether a Key Binding JWT's iat is within kbJWTFreshnessSkew of now (SD-JWT RFC 9901 §7.3 step 5.e)
+func kbJWTIatWithinFreshnessWindow(issuedAt, now time.Time) bool {
+	return !issuedAt.Before(now.Add(-kbJWTFreshnessSkew)) && !issuedAt.After(now.Add(kbJWTFreshnessSkew))
+}
+
 type createAuthorizationRequest struct {
 	ClientID       string                 `json:"client_id"`
 	ClientIDScheme string                 `json:"client_id_scheme,omitempty"`
@@ -900,11 +905,8 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 				}
 				if issuedAt, err := kbClaims.GetIssuedAt(); err != nil || issuedAt == nil {
 					addPolicyReason(result, "kb_jwt_invalid", "kb-jwt missing iat")
-				} else {
-					now := time.Now().UTC()
-					if issuedAt.Before(now.Add(-kbJWTFreshnessSkew)) || issuedAt.After(now.Add(kbJWTFreshnessSkew)) {
-						addPolicyReason(result, "kb_jwt_invalid", "kb-jwt iat is outside the acceptable freshness window")
-					}
+				} else if !kbJWTIatWithinFreshnessWindow(issuedAt.Time, time.Now().UTC()) {
+					addPolicyReason(result, "kb_jwt_invalid", "kb-jwt iat is outside the acceptable freshness window")
 				}
 				// Verify sd_hash
 				sdJWTWithoutKB := vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, "")

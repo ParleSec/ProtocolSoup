@@ -1491,6 +1491,32 @@ func TestDirectPostPolicyDeniesFutureKBJWTIat(t *testing.T) {
 	}
 }
 
+// TestKBJWTIatWithinFreshnessWindowBoundary exercises kbJWTIatWithinFreshnessWindow
+// directly against fixed instants so the exact edges of the window (SD-JWT RFC
+// 9901 §7.3 step 5.e) are asserted deterministically, without the wall-clock
+// drift an HTTP round trip would introduce at an exact boundary.
+func TestKBJWTIatWithinFreshnessWindowBoundary(t *testing.T) {
+	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		issuedAt time.Time
+		want     bool
+	}{
+		{"exactly at past boundary", now.Add(-kbJWTFreshnessSkew), true},
+		{"exactly at future boundary", now.Add(kbJWTFreshnessSkew), true},
+		{"one second past the boundary", now.Add(-kbJWTFreshnessSkew - time.Second), false},
+		{"one second beyond the future boundary", now.Add(kbJWTFreshnessSkew + time.Second), false},
+		{"iat equals now", now, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := kbJWTIatWithinFreshnessWindow(tc.issuedAt, now); got != tc.want {
+				t.Fatalf("kbJWTIatWithinFreshnessWindow(%v, %v) = %v, want %v", tc.issuedAt, now, got, tc.want)
+			}
+		})
+	}
+}
+
 func createEncryptedResponseJWT(
 	t *testing.T,
 	verifierKeySet *crypto.KeySet,
