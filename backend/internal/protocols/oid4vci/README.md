@@ -15,7 +15,8 @@ This implementation provides:
 - **Multi-Format Issuance**: `mso_mdoc` (ISO/IEC 18013-5 mDL), `dc+sd-jwt`, `jwt_vc_json`, `jwt_vc_json-ld`, and `ldp_vc` (W3C Data Integrity with `ecdsa-rdfc-2019` / `eddsa-rdfc-2022` cryptosuites)
 - **Default Configuration**: the default and lead `credential_configurations_supported` entry is the mDL `mso_mdoc` (`MobileDrivingLicenceMsoMdoc`); a request that omits an explicit configuration receives the mDL, while SD-JWT VC (`UniversityDegreeCredential`) and the W3C formats remain selectable by naming their configuration
 - **Authorization Code Issuance**: RFC 8414 Authorization Server metadata discovery of the mockidp-backed `/oidc/authorize` + `/oid4vci/token` endpoints
-- **HAIP Building Blocks**: OAuth 2.0 Attestation-Based Client Authentication at the token endpoint, OID4VCI 1.0 Appendix D key attestation on the proof JWT (per credential configuration), and JWE-encrypted credential/deferred-credential responses — all opt-in via trust-anchor environment variables; DPoP and a complete HAIP wallet demo are not implemented
+- **Sender-Constrained Access Tokens (RFC 9449 DPoP)**: opt-in per request via a `DPoP` proof header at the token endpoint, binding the issued access/refresh token to the proof's key (`cnf.jkt`, `token_type: DPoP`); enforced on the credential, nonce, and deferred_credential endpoints when a token is bound, with an independent, per-role, off-by-default `DPoP-Nonce` challenge (RFC 9449 §8)
+- **HAIP Building Blocks**: OAuth 2.0 Attestation-Based Client Authentication at the token endpoint, OID4VCI 1.0 Appendix D key attestation on the proof JWT (per credential configuration), JWE-encrypted credential/deferred-credential responses, and DPoP sender-constraining — all opt-in via trust-anchor environment variables or request headers; a complete end-to-end HAIP wallet demo combining every building block at once is not implemented
 - **Looking Glass Integration**: End-to-end event emission for each issuance phase
 
 ## Service Deployment
@@ -98,13 +99,15 @@ The OID4VCI implementation is mounted as plugin ID `oid4vci` in the backend prot
 ### HAIP Controls (opt-in, trust-anchor-gated)
 
 These are API-level building blocks covered by backend regression tests, not a
-complete HAIP conformance claim. DPoP sender-constraining is absent, and the
-current Looking Glass/wallet executors do not produce the attestation material
-needed to exercise this path end to end.
+complete HAIP conformance claim. The current Looking Glass/wallet executors
+do not drive the client-attestation, key-attestation, DPoP proof, and
+encrypted-credential-request material together in one end-to-end HAIP demo,
+and no external conformance suite run has been recorded.
 
 - **Client attestation**: `OAuth-Client-Attestation` + `OAuth-Client-Attestation-PoP` headers at `/oid4vci/token` are validated end-to-end when `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` is configured — attestation `x5c` chain, `sub`/`exp`/`cnf.jwk`, PoP signature (against `cnf.jwk`), `aud`/`jti`/`iat`, and single-use `jti` replay protection. Presenting either header at all makes attestation the authentication verdict; a failure is never downgraded to `client_secret`/public-client auth. Unset trust anchor means the issuer accepts none.
 - **Key attestation**: credential configurations with `RequireKeyAttestation` (e.g. `MobileDrivingLicenceMsoMdocHAIP`) require a `key_attestation` JOSE header on the proof JWT, validated against `OID4VCI_KEY_ATTESTATION_TRUST_ANCHOR_PEM` — `x5c` chain, `iat`/`exp`/`attested_keys`, optional `nonce` match against the active `c_nonce`, and that the proof's `cnf.jwk` is among `attested_keys` and meets any required `key_storage`/`user_authentication` level.
 - **Encrypted responses**: a `credential_response_encryption` object on the Credential or Deferred Credential Request is validated against advertised `alg_values_supported`/`enc_values_supported` (`ECDH-ES`; `A128GCM`/`A256GCM`) and, when valid, the response is returned as a compact JWE instead of JSON.
+- **DPoP sender-constraining (RFC 9449)**: a `DPoP` proof header on the token request binds the issued access token (and refresh token, for `authorization_code`) to the proof's key via `cnf.jkt`, with `token_type: DPoP`. A bound token is then rejected at `/oid4vci/nonce`, `/oid4vci/credential`, and `/oid4vci/deferred_credential` unless presented as `Authorization: DPoP <token>` with a matching, unreplayed proof — presenting it as a bare bearer token fails outright. An independent, off-by-default `DPoP-Nonce` challenge is available separately at the token endpoint and at the resource endpoints. Opaque/reference access tokens cannot be bound; only JWT access tokens can.
 
 ## Error Semantics
 

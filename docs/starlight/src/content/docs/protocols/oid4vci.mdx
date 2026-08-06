@@ -12,6 +12,7 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 - RFC 8414 OAuth 2.0 Authorization Server Metadata
 - OAuth 2.0 Attestation-Based Client Authentication (draft-ietf-oauth-attestation-based-client-auth)
 - OID4VCI 1.0 Appendix D Key Attestation
+- RFC 9449 OAuth 2.0 Demonstrating Proof of Possession (DPoP), opt-in
 - High Assurance Interoperability Profile (HAIP) 1.0 building blocks (full profile conformance is not claimed)
 - SD-JWT VC profile (`dc+sd-jwt` credential format)
 - W3C Verifiable Credentials Data Model 1.1 / 2.0 (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` formats)
@@ -86,12 +87,26 @@ do not yet drive this authorization-code flow.
 ## HAIP issuance building blocks
 
 The issuer implements the following HAIP-related issuance controls as opt-in,
-trust-anchor-gated API features. This is not a claim of complete HAIP issuer
-support: DPoP sender-constrained access tokens are not implemented, and the
-Looking Glass and wallet harness do not yet generate the client-attestation,
-key-attestation, and encrypted-credential-request material for an end-to-end
-HAIP issuance demo. The unattested Final flow remains unaffected by default.
+trust-anchor-gated (or otherwise explicitly enabled) API features. This is
+not a claim of complete HAIP issuer support: the Looking Glass and wallet
+harness do not yet drive the client-attestation, key-attestation, DPoP proof,
+and encrypted-credential-request material together in a single end-to-end
+HAIP issuance demo, and no external conformance suite run has been recorded.
+The unattested Final flow remains unaffected by default.
 
+- **Sender-constrained access tokens (RFC 9449 DPoP).** The token endpoint
+  accepts an optional `DPoP` proof header; when present, the issued access
+  token (and, for the authorization_code grant, the refresh token) is bound
+  to the proof's key via a `cnf.jkt` claim, with `token_type: DPoP` in the
+  response instead of `Bearer`. A token bound this way is then rejected at
+  the credential, nonce, and deferred_credential endpoints unless presented
+  as `Authorization: DPoP <token>` with a matching, unreplayed DPoP proof —
+  presenting it as a bare bearer token fails outright, never silently
+  downgrades. A server-provided nonce challenge (`DPoP-Nonce` response
+  header, `use_dpop_nonce` error) is available independently at the token
+  endpoint and at the resource endpoints, off by default and enabled per
+  role by deployment configuration. Only JWT access tokens can be bound;
+  opaque/reference token binding is out of scope.
 - **Client attestation (OAuth 2.0 Attestation-Based Client Authentication).**
   The token endpoint accepts an `OAuth-Client-Attestation` +
   `OAuth-Client-Attestation-PoP` header pair as an alternative to

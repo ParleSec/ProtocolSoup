@@ -701,7 +701,13 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
           'Where the threat model warrants it, upgrade Bearer to a ' +
           'sender-constrained token: DPoP (RFC 9449) binds each token to a ' +
           'per-client key pair, so a stolen token is unusable without the ' +
-          'matching private key.',
+          'matching private key. This platform implements DPoP binding on ' +
+          'the token endpoint (opt-in per request via a `DPoP` proof ' +
+          'header) — run the "Client Credentials (DPoP)" flow in Looking ' +
+          'Glass to see a real bound token and its `cnf.jkt` claim. Only ' +
+          'JWT access tokens can be bound this way; opaque/reference token ' +
+          'binding is a separate mechanism this platform does not ' +
+          'implement.',
         rationale: 'Token theft becomes a non-event.',
         mitigates: [
           'referer-leakage',
@@ -1053,7 +1059,12 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
       'presents this is treated as the holder" — no further proof required ' +
       'at the RS. `DPoP` (RFC 9449) is the sender-constrained alternative: ' +
       'each request must carry a fresh proof-of-possession signed by the ' +
-      'client\'s private key.',
+      'client\'s private key. This platform issues `token_type: DPoP` on ' +
+      'the token endpoint when the client presents a valid `DPoP` proof ' +
+      'header (opt-in per request); absent that header, the response is ' +
+      'unchanged `Bearer`. The binding covers JWT access tokens only — ' +
+      'opaque/reference access tokens are not supported at all here, so ' +
+      'their binding is out of scope rather than merely unimplemented.',
     attacks: [
       {
         id: 'bearer-replay-cross-context',
@@ -1073,7 +1084,9 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
         action:
           'For high-value APIs (financial, healthcare, admin operations, ' +
           'FAPI 2.0), upgrade to DPoP (RFC 9449) — every API call must be ' +
-          'signed with the client\'s private key.',
+          'signed with the client\'s private key. Send a `DPoP` proof ' +
+          'header on the token request to see this platform\'s own ' +
+          'implementation bind the response.',
         rationale:
           'A stolen token is unusable without the matching private key.',
         mitigates: ['bearer-replay-cross-context'],

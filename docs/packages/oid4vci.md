@@ -19,12 +19,18 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
   configuration (opt-in via `OID4VCI_KEY_ATTESTATION_TRUST_ANCHOR_PEM`)
 - JWE-encrypted credential/deferred-credential responses
   (`credential_response_encryption`)
+- Sender-constrained access tokens (RFC 9449 DPoP), opt-in per request via a
+  `DPoP` proof header at the token endpoint, enforced on the credential,
+  nonce, and deferred_credential endpoints when a token is bound, with an
+  independent, off-by-default `DPoP-Nonce` challenge per role
 - Deferred issuance with `transaction_id`
 - Replay/freshness denial handling
 
-The attestation and encryption items are HAIP-related API building blocks, not
-a complete HAIP conformance claim. DPoP is not implemented, and the current
-Looking Glass/wallet flows do not exercise these controls end to end.
+The attestation, encryption, and DPoP items are HAIP-related API building
+blocks, not a complete HAIP conformance claim: the current Looking
+Glass/wallet flows do not drive them together end to end, and no external
+conformance suite run has been recorded. Only JWT access tokens can be
+DPoP-bound; opaque/reference token binding is out of scope.
 
 ## Default credential configuration
 

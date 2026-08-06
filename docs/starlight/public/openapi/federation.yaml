@@ -123,7 +123,28 @@ paths:
         grant accepts client_secret_basic, client_secret_post, or
         private_key_jwt (RFC 7523 Section 2.2). private_key_jwt is deliberately
         not enabled for authorization_code or refresh_token in this profile.
+        A request may optionally carry a DPoP proof header (RFC 9449
+        Section 4.3, htm=POST against this endpoint's URL); when present and
+        valid, the issued access token (and, for authorization_code, the
+        refresh token) is bound to the proof's key and token_type becomes
+        DPoP. Absent that header, behavior is unchanged Bearer issuance.
+        Only JWT access tokens can be bound this way -- opaque/reference
+        token binding is out of scope. A refresh_token grant against a
+        DPoP-bound refresh token must re-present a matching proof; a
+        mismatched or missing proof is rejected with invalid_grant. If the
+        deployment has DPoP nonce enforcement enabled for this endpoint, a
+        proof lacking the current server nonce is rejected with
+        use_dpop_nonce and a DPoP-Nonce response header instead.
       operationId: oauth2Token
+      parameters:
+        - in: header
+          name: DPoP
+          required: false
+          schema:
+            type: string
+          description: >-
+            RFC 9449 DPoP proof JWT. Optional; when omitted, tokens are
+            issued as plain Bearer tokens exactly as before DPoP existed.
       requestBody:
         required: true
         content:
@@ -163,6 +184,13 @@ paths:
       responses:
         "200":
           description: Access token response.
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: >-
+                Present only when this deployment has DPoP nonce
+                enforcement enabled for this endpoint (off by default).
           content:
             application/json:
               schema:
@@ -175,8 +203,24 @@ paths:
                     expires_in: 3600
                     refresh_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
                     scope: "openid profile email"
+                dpop_bound:
+                  summary: DPoP-bound response (client sent a valid DPoP proof header)
+                  value:
+                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    token_type: DPoP
+                    expires_in: 3600
+                    refresh_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    scope: "openid profile email"
         "400":
-          description: OAuth error response.
+          description: >-
+            OAuth error response, including invalid_dpop_proof (RFC 9449
+            Section 5) and use_dpop_nonce (RFC 9449 Section 8, only when
+            nonce enforcement is enabled for this endpoint).
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: Present when error is use_dpop_nonce.
           content:
             application/json:
               schema:
@@ -204,7 +248,9 @@ paths:
         "200":
           description: >-
             RFC 8414 metadata advertising private_key_jwt and its supported
-            signing algorithms.
+            signing algorithms, and (RFC 9449 Section 5.1)
+            dpop_signing_alg_values_supported listing the JWS algorithms
+            accepted for DPoP proof JWTs at the token endpoint.
           content:
             application/json:
               schema:
@@ -990,6 +1036,10 @@ components:
         error:
           type: string
           example: invalid_grant
+          description: >-
+            Includes invalid_dpop_proof (RFC 9449 Section 5) and, at
+            deployments with DPoP nonce enforcement enabled, use_dpop_nonce
+            (RFC 9449 Section 8).
         error_description:
           type: string
           example: Authorization code has expired
@@ -1004,6 +1054,11 @@ components:
         token_type:
           type: string
           example: Bearer
+          description: >-
+            Bearer, or DPoP (RFC 9449 Section 5) when the request carried a
+            valid DPoP proof header. A DPoP-typed access token's payload
+            carries a cnf.jkt claim binding it to the proof's key; only JWT
+            access tokens can be bound this way.
         expires_in:
           type: integer
           example: 3600

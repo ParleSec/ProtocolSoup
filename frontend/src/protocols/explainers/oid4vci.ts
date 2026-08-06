@@ -502,8 +502,15 @@ export const OID4VCI_EXPLAINERS: Record<string, ParameterExplainer> = {
       },
       {
         action:
-          'Consider sender-constrained tokens (DPoP) on the deferred ' +
-          'endpoint so the polling client must hold a key, not just the ID.',
+          'Sender-constrain the access token with DPoP (RFC 9449) so the ' +
+          'polling client must hold a key, not just the transaction_id. ' +
+          'This issuer supports it: when the token request carries a ' +
+          '`DPoP` proof header, the access token is bound via `cnf.jkt`, ' +
+          'and the deferred_credential endpoint then rejects that token ' +
+          'unless every poll re-presents a matching, unreplayed proof — ' +
+          'presenting it as a bare bearer token fails outright. Opt-in per ' +
+          'request; a token issued without a proof polls exactly as ' +
+          'before.',
         mitigates: ['deferred-credential-interception'],
       },
     ],
