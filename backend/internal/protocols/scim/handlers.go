@@ -1291,7 +1291,7 @@ func normalizeSCIMTargetURL(raw, environment string) (string, error) {
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", fmt.Errorf("targetUrl must not contain credentials, a query, or a fragment")
 	}
-	if parsed.Scheme != "https" && !(environment != "production" && parsed.Scheme == "http") {
+	if parsed.Scheme != "https" && (environment == "production" || parsed.Scheme != "http") {
 		return "", fmt.Errorf("targetUrl must use HTTPS (HTTP is allowed only outside production)")
 	}
 	if environment == "production" {
