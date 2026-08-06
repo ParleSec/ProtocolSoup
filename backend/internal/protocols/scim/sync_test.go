@@ -225,8 +225,7 @@ func TestHandleClientSyncDoesNotAdvanceLastSyncAfterUserFailure(t *testing.T) {
 
 func TestHandleClientProvisionStripsServerManagedFieldsAndNormalizesTarget(t *testing.T) {
 	var received User
-	var target *httptest.Server
-	target = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer remote-secret" {
 			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
 		}

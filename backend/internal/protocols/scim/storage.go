@@ -849,7 +849,7 @@ func (s *Storage) UpsertSyncMappings(ctx context.Context, targetURL string, mapp
 	if err != nil {
 		return fmt.Errorf("begin sync mapping transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	for localID, remoteID := range mappings {
 		if localID == "" || remoteID == "" {
