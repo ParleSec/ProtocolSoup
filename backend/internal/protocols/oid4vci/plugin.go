@@ -19,6 +19,7 @@ import (
 	"unicode"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
@@ -56,6 +57,10 @@ type accessGrant struct {
 	OfferID                    string
 	Deferred                   bool
 	ExpiresAt                  time.Time
+	// JKT is the RFC 7638 JWK thumbprint this access token is bound to when
+	// it was issued against a DPoP proof (RFC 9449 Section 4.1). Empty for
+	// ordinary bearer-issued tokens, which continue to work unchanged.
+	JKT string
 }
 
 type walletIdentity struct {
@@ -111,6 +116,21 @@ type Plugin struct {
 	walletsByUserID        map[string]string
 	usedAttestationPoPJTIs map[string]time.Time
 
+	// dpopReplay tracks DPoP proof jti values (RFC 9449 Section 11.1) for
+	// both this plugin's own token endpoint and its resource endpoints,
+	// scoped by jkt. A distinct store instance from the oauth2 plugin's --
+	// oid4vci issues and validates its own tokens independently.
+	dpopReplay dpop.ReplayStore
+	// dpopASNonceIssuer and dpopRSNonceIssuer put the RFC 9449 Section 8
+	// nonce challenge in force at, respectively, this plugin's own token
+	// endpoint (AS role) and its credential/nonce/deferred_credential
+	// endpoints (RS role). Kept as two independent NonceIssuer instances,
+	// each nil unless separately enabled by config, because Section 8.2
+	// requires the AS and RS nonce spaces be independent even when -- as
+	// here -- they belong to the same plugin instance.
+	dpopASNonceIssuer *dpop.NonceIssuer
+	dpopRSNonceIssuer *dpop.NonceIssuer
+
 	stopPruning chan struct{}
 }
 
@@ -133,6 +153,7 @@ func NewPlugin() *Plugin {
 		wallets:                  make(map[string]*walletIdentity),
 		walletsByUserID:          make(map[string]string),
 		usedAttestationPoPJTIs:   make(map[string]time.Time),
+		dpopReplay:               dpop.NewMemoryReplayStore(),
 	}
 }
 
@@ -186,6 +207,36 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		}
 	}
 
+	// DPoP replay store (RFC 9449 Section 11.1): reuses the same Redis
+	// instance configured for the oauth2 plugin's client-assertion replay
+	// cache when present, via its own store instance and RFC 9449 dpop
+	// package key prefix so the two replay spaces cannot collide.
+	// oid4vci's own access-grant state is already process-local (see
+	// accessGrants above), so falling back to the in-memory default when no
+	// Redis URL is configured is consistent with the rest of this plugin,
+	// not a new single-instance limitation.
+	if strings.TrimSpace(config.OAuth2ReplayRedisURL) != "" {
+		dpopStore, err := dpop.NewRedisReplayStore(
+			context.Background(),
+			config.OAuth2ReplayRedisURL,
+			config.Environment == "production",
+		)
+		if err != nil {
+			return fmt.Errorf("initialize dpop replay store: %w", err)
+		}
+		if p.dpopReplay != nil {
+			_ = p.dpopReplay.Close()
+		}
+		p.dpopReplay = dpopStore
+	}
+
+	if config.DPoPNonceRequired {
+		p.dpopASNonceIssuer = dpop.NewNonceIssuer(5 * time.Minute)
+	}
+	if config.DPoPResourceNonceRequired {
+		p.dpopRSNonceIssuer = dpop.NewNonceIssuer(5 * time.Minute)
+	}
+
 	p.stopPruning = make(chan struct{})
 	go p.pruneExpiredIssuanceState()
 
@@ -197,6 +248,9 @@ func (p *Plugin) Shutdown(ctx context.Context) error {
 	_ = ctx
 	if p.stopPruning != nil {
 		close(p.stopPruning)
+	}
+	if p.dpopReplay != nil {
+		return p.dpopReplay.Close()
 	}
 	return nil
 }

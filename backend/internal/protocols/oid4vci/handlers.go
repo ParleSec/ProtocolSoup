@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
@@ -253,18 +254,78 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 9449 (DPoP): validate an optional proof once, up front, since htm
+	// and htu are identical across both grant types at this single token
+	// endpoint. Absent header -> zero-value result, no behavioural change.
+	dpopResult, dpopErr := p.validateTokenEndpointDPoP(r)
+	if dpopErr != nil {
+		var infrastructureErr *dpop.InfrastructureError
+		if errors.As(dpopErr, &infrastructureErr) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Replay Store Unavailable", map[string]interface{}{
+				"error":  "server_error",
+				"reason": "dpop_replay_store_unavailable",
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "DPoP Replay Protection Unavailable",
+				Description: "The issuer failed closed because it could not reserve the proof's jti atomically.",
+				Severity:    "warning",
+				Reference:   "RFC 9449 Section 11.1",
+			})
+			writeOID4VCIError(w, http.StatusInternalServerError, "server_error", "DPoP validation is temporarily unavailable")
+			return
+		}
+		var nonceErr *dpop.NonceRequiredError
+		if errors.As(dpopErr, &nonceErr) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Nonce Challenge", map[string]interface{}{
+				"error":  dpop.ErrorUseDPoPNonce,
+				"reason": "server_requires_fresh_nonce",
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "DPoP Nonce Required",
+				Description: "The issuer requires the DPoP proof to carry a server-provided nonce. The wallet must retry with a fresh proof echoing the nonce from the DPoP-Nonce response header.",
+				Severity:    "info",
+				Reference:   "RFC 9449 Section 8",
+			})
+			w.Header().Set(dpop.NonceHeaderName, nonceErr.Nonce)
+			writeOID4VCIError(w, http.StatusBadRequest, dpop.ErrorUseDPoPNonce, "A fresh DPoP proof nonce is required; retry with the nonce from the DPoP-Nonce response header")
+			return
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Proof Rejected", map[string]interface{}{
+			"error":  dpop.ErrorInvalidDPoPProof,
+			"reason": dpopErr.Error(),
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Invalid DPoP Proof",
+			Description: "The DPoP proof JWT failed validation, so the token request was rejected before any grant was processed.",
+			Severity:    "warning",
+			Reference:   "RFC 9449 Section 4.3",
+		})
+		writeOID4VCIError(w, http.StatusBadRequest, dpop.ErrorInvalidDPoPProof, dpopErr.Error())
+		return
+	}
+	if dpopResult.Present {
+		p.emitEvent(sessionID, lookingglass.EventTypeCryptoOperation, "DPoP Proof Validated", map[string]interface{}{
+			"jkt": dpopResult.JKT,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeRFCReference,
+			Title:       "DPoP Proof-of-Possession",
+			Description: "The wallet demonstrated possession of the private key bound to this token request. The issued access token will carry a cnf.jkt claim and a DPoP token_type.",
+			Reference:   "RFC 9449 Section 4.3",
+		})
+	}
+
 	grantType := r.FormValue("grant_type")
 	switch grantType {
 	case "urn:ietf:params:oauth:grant-type:pre-authorized_code":
-		p.handlePreAuthorizedTokenGrant(w, r, sessionID, attestation, attestationUsed)
+		p.handlePreAuthorizedTokenGrant(w, r, sessionID, attestation, attestationUsed, dpopResult.JKT)
 	case "authorization_code":
-		p.handleAuthorizationCodeTokenGrant(w, r, sessionID, attestation, attestationUsed)
+		p.handleAuthorizationCodeTokenGrant(w, r, sessionID, attestation, attestationUsed, dpopResult.JKT)
 	default:
 		writeOID4VCIError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type is not supported")
 	}
 }
 
-func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool) {
+func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool, dpopJKT string) {
 	preAuthorizedCode := strings.TrimSpace(r.FormValue("pre-authorized_code"))
 	txCode := strings.TrimSpace(r.FormValue("tx_code"))
 	if preAuthorizedCode == "" {
@@ -303,15 +364,20 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 	}
 
 	scope := "vc:issue"
+	accessTokenClaims := map[string]interface{}{
+		"offer_id":                     offerID,
+		"credential_configuration_ids": record.Offer.CredentialConfigurationIDs,
+	}
+	if dpopJKT != "" {
+		// RFC 9449 Section 4.1: bind the token to the presented proof key.
+		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
+	}
 	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
 		"wallet:"+offerID,
 		"oid4vci",
 		scope,
 		tokenTTL,
-		map[string]interface{}{
-			"offer_id":                     offerID,
-			"credential_configuration_ids": record.Offer.CredentialConfigurationIDs,
-		},
+		accessTokenClaims,
 	)
 	if err != nil {
 		writeServerError(w, "issue access token", err)
@@ -348,12 +414,13 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		OfferID:                    offerID,
 		Deferred:                   record.Deferred,
 		ExpiresAt:                  time.Now().UTC().Add(tokenTTL),
+		JKT:                        dpopJKT,
 	}
 	p.mu.Unlock()
 
 	response := map[string]interface{}{
 		"access_token":       accessToken,
-		"token_type":         "Bearer",
+		"token_type":         dpop.TokenType(dpopJKT),
 		"expires_in":         int(tokenTTL.Seconds()),
 		"scope":              scope,
 		"c_nonce":            nonce.Value,
@@ -386,7 +453,7 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool) {
+func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool, dpopJKT string) {
 	if p.mockIDP == nil {
 		writeOID4VCIError(w, http.StatusServiceUnavailable, "server_error", "mock identity provider is unavailable")
 		return
@@ -449,14 +516,18 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	}
 
 	scope := "vc:issue"
+	accessTokenClaims := map[string]interface{}{
+		"credential_configuration_ids": authorizedCredentialConfigurationIDs,
+	}
+	if dpopJKT != "" {
+		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
+	}
 	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
 		authCode.UserID,
 		"oid4vci",
 		scope,
 		tokenTTL,
-		map[string]interface{}{
-			"credential_configuration_ids": authorizedCredentialConfigurationIDs,
-		},
+		accessTokenClaims,
 	)
 	if err != nil {
 		writeServerError(w, "issue access token", err)
@@ -491,6 +562,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		OfferID:                    "authorization_code",
 		Deferred:                   false,
 		ExpiresAt:                  time.Now().UTC().Add(tokenTTL),
+		JKT:                        dpopJKT,
 	}
 	p.mu.Unlock()
 
@@ -516,7 +588,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"access_token":       accessToken,
-		"token_type":         "Bearer",
+		"token_type":         dpop.TokenType(dpopJKT),
 		"expires_in":         int(tokenTTL.Seconds()),
 		"scope":              scope,
 		"c_nonce":            nonce.Value,
@@ -526,25 +598,13 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 
 func (p *Plugin) handleNonce(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	accessToken, err := parseBearerToken(r)
-	if err != nil {
-		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+	_, grant, authErr := p.authorizeResourceRequest(r)
+	if authErr != nil {
+		authErr.respond(w)
 		return
 	}
 
 	p.mu.Lock()
-	grant, ok := p.accessGrants[accessToken]
-	if !ok {
-		p.mu.Unlock()
-		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", "unknown access token")
-		return
-	}
-	if time.Now().UTC().After(grant.ExpiresAt) {
-		delete(p.accessGrants, accessToken)
-		p.mu.Unlock()
-		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", "access token expired")
-		return
-	}
 	previousNonce := grant.CNonce.Value
 	grant.CNonce = models.VCNonce{
 		Value:     p.randomValue(24),
@@ -576,17 +636,9 @@ func (p *Plugin) handleNonce(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	accessToken, err := parseBearerToken(r)
-	if err != nil {
-		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", err.Error())
-		return
-	}
-
-	p.mu.RLock()
-	grant, ok := p.accessGrants[accessToken]
-	p.mu.RUnlock()
-	if !ok || time.Now().UTC().After(grant.ExpiresAt) {
-		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", "token is unknown or expired")
+	accessToken, grant, authErr := p.authorizeResourceRequest(r)
+	if authErr != nil {
+		authErr.respond(w)
 		return
 	}
 
@@ -868,9 +920,9 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	accessToken, err := parseBearerToken(r)
-	if err != nil {
-		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_token", err.Error())
+	accessToken, _, authErr := p.authorizeResourceRequest(r)
+	if authErr != nil {
+		authErr.respond(w)
 		return
 	}
 
