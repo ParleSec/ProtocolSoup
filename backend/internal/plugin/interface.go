@@ -38,14 +38,30 @@ type PluginInfo struct {
 
 // PluginConfig provides configuration to plugins during initialization
 type PluginConfig struct {
-	Environment          string      // Runtime environment (development, demo, production)
-	BaseURL              string      // Base URL of the server
-	DataDir              string      // Optional durable state directory shared across plugins
-	OAuth2ReplayRedisURL string      // Shared private_key_jwt replay store
-	CORSOrigins          []string    // Browser origins permitted to call this deployment
-	KeySet               interface{} // Crypto key set
-	MockIdP              interface{} // Mock identity provider
-	LookingGlass         interface{} // Looking glass engine
+	Environment          string   // Runtime environment (development, demo, production)
+	BaseURL              string   // Base URL of the server
+	DataDir              string   // Optional durable state directory shared across plugins
+	OAuth2ReplayRedisURL string   // Shared private_key_jwt replay store
+	CORSOrigins          []string // Browser origins permitted to call this deployment
+
+	// DPoPNonceRequired enables the RFC 9449 Section 8 server-provided
+	// nonce challenge at authorization-server token endpoints (oauth2's
+	// /oauth2/token and oid4vci's own /oid4vci/token). Off by default:
+	// requiring a nonce unconditionally would break every existing DPoP
+	// client and interop counterparty, so this is opt-in hardening, not a
+	// baseline requirement.
+	DPoPNonceRequired bool
+	// DPoPResourceNonceRequired enables the same challenge, independently,
+	// at resource-server endpoints that accept DPoP-bound access tokens
+	// (oid4vci's credential, nonce, and deferred_credential endpoints).
+	// RFC 9449 Section 8.2 requires the AS and RS nonce spaces be
+	// independent even when they are the same plugin instance, so this is
+	// deliberately a separate switch from DPoPNonceRequired.
+	DPoPResourceNonceRequired bool
+
+	KeySet       interface{} // Crypto key set
+	MockIdP      interface{} // Mock identity provider
+	LookingGlass interface{} // Looking glass engine
 }
 
 // Inspector defines a protocol-specific inspection capability
