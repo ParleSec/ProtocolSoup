@@ -2,9 +2,11 @@ package scim
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
@@ -38,6 +40,9 @@ func NewPlugin() *Plugin {
 func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) error {
 	p.SetConfig(config)
 	p.baseURL = config.BaseURL
+	if config.Environment == "production" && strings.TrimSpace(os.Getenv("SCIM_API_TOKEN")) == "" {
+		return fmt.Errorf("SCIM_API_TOKEN is required in production")
+	}
 
 	// Set up Looking Glass
 	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
@@ -125,6 +130,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 
 	// Client provisioning endpoints (for demo)
 	router.Route("/client", func(r chi.Router) {
+		r.Use(AuthMiddleware)
 		r.Post("/provision", p.handleClientProvision)
 		r.Post("/sync", p.handleClientSync)
 	})

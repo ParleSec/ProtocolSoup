@@ -108,6 +108,13 @@ func (s *Storage) migrate() error {
 			last_sync TEXT,
 			cursor TEXT
 		)`,
+		`CREATE TABLE IF NOT EXISTS scim_sync_mappings (
+			target_url TEXT NOT NULL,
+			local_id TEXT NOT NULL,
+			remote_id TEXT NOT NULL,
+			last_synced TEXT NOT NULL,
+			PRIMARY KEY (target_url, local_id)
+		)`,
 
 		// Schema version tracking
 		`CREATE TABLE IF NOT EXISTS scim_schema_version (
@@ -377,6 +384,41 @@ func (s *Storage) ListUsers(ctx context.Context, filter string, startIndex, coun
 	}
 
 	return users, totalCount, nil
+}
+
+// ListAllUsers returns the complete local source set for outbound
+// reconciliation. Unlike the public SCIM list endpoint, this internal storage
+// operation is intentionally not paginated.
+func (s *Storage) ListAllUsers(ctx context.Context) ([]*User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx, `SELECT data, version FROM scim_users ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all users: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]*User, 0)
+	for rows.Next() {
+		var data string
+		var version int
+		if err := rows.Scan(&data, &version); err != nil {
+			return nil, fmt.Errorf("failed to scan user: %w", err)
+		}
+		var user User
+		if err := json.Unmarshal([]byte(data), &user); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal user: %w", err)
+		}
+		if user.Meta != nil {
+			user.Meta.Version = GenerateETag(version)
+		}
+		users = append(users, &user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while listing users: %w", err)
+	}
+	return users, nil
 }
 
 // ================== Group Operations ==================
@@ -767,6 +809,64 @@ func (s *Storage) UpdateSyncState(ctx context.Context, targetURL string, lastSyn
 		 ON CONFLICT(target_url) DO UPDATE SET last_sync = ?, cursor = ?`,
 		targetURL, lastSync.Format(time.RFC3339), cursor, lastSync.Format(time.RFC3339), cursor)
 	return err
+}
+
+// GetSyncMappings returns durable source-to-target user ID mappings for a
+// target SCIM service.
+func (s *Storage) GetSyncMappings(ctx context.Context, targetURL string) (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT local_id, remote_id FROM scim_sync_mappings WHERE target_url = ?`, targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sync mappings: %w", err)
+	}
+	defer rows.Close()
+
+	mappings := make(map[string]string)
+	for rows.Next() {
+		var localID, remoteID string
+		if err := rows.Scan(&localID, &remoteID); err != nil {
+			return nil, fmt.Errorf("failed to scan sync mapping: %w", err)
+		}
+		mappings[localID] = remoteID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while reading sync mappings: %w", err)
+	}
+	return mappings, nil
+}
+
+// UpsertSyncMappings persists every successful mapping atomically so a later
+// reconciliation updates the same remote resources instead of creating
+// duplicates.
+func (s *Storage) UpsertSyncMappings(ctx context.Context, targetURL string, mappings map[string]string, syncedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin sync mapping transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	for localID, remoteID := range mappings {
+		if localID == "" || remoteID == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO scim_sync_mappings (target_url, local_id, remote_id, last_synced)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(target_url, local_id) DO UPDATE SET remote_id = ?, last_synced = ?`,
+			targetURL, localID, remoteID, syncedAt.Format(time.RFC3339), remoteID, syncedAt.Format(time.RFC3339)); err != nil {
+			return fmt.Errorf("upsert sync mapping for %s: %w", localID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sync mappings: %w", err)
+	}
+	return nil
 }
 
 // ================== Helper Functions ==================

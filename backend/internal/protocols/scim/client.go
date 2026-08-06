@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,7 @@ type Client struct {
 // NewClient creates a new SCIM client
 func NewClient(baseURL, authToken string) *Client {
 	return &Client{
-		baseURL:   baseURL,
+		baseURL:   strings.TrimRight(baseURL, "/"),
 		authToken: authToken,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -31,7 +32,7 @@ func NewClient(baseURL, authToken string) *Client {
 
 // SetBaseURL sets the target SCIM server URL
 func (c *Client) SetBaseURL(baseURL string) {
-	c.baseURL = baseURL
+	c.baseURL = strings.TrimRight(baseURL, "/")
 }
 
 // SetAuthToken sets the authentication token
@@ -397,7 +398,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		bodyReader = bytes.NewReader(data)
 	}
 
-	fullURL := c.baseURL + "/scim/v2" + path
+	fullURL := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -469,30 +470,39 @@ func (c *Client) SyncUsers(ctx context.Context, localUsers []*User, existingMapp
 			LocalID: user.ID,
 		}
 
+		outboundUser := outboundUserCopy(user)
+
 		// Check if user already synced
 		if remoteID, exists := existingMappings[user.ID]; exists {
 			// Update existing user
 			detail.Operation = "update"
 			detail.RemoteID = remoteID
 
-			updated, err := c.UpdateUser(ctx, remoteID, user)
+			updated, err := c.UpdateUser(ctx, remoteID, outboundUser)
 			if err != nil {
 				detail.Status = "error"
 				detail.Error = err.Error()
 				result.Errors++
 			} else {
 				detail.Status = "success"
-				detail.RemoteID = updated.ID
+				if updated.ID != "" {
+					detail.RemoteID = updated.ID
+				}
+				result.Mappings[user.ID] = detail.RemoteID
 				result.Updated++
 			}
 		} else {
 			// Create new user
 			detail.Operation = "create"
 
-			created, err := c.CreateUser(ctx, user)
+			created, err := c.CreateUser(ctx, outboundUser)
 			if err != nil {
 				detail.Status = "error"
 				detail.Error = err.Error()
+				result.Errors++
+			} else if created.ID == "" {
+				detail.Status = "error"
+				detail.Error = "target returned a created user without the required id attribute"
 				result.Errors++
 			} else {
 				detail.Status = "success"
@@ -506,4 +516,20 @@ func (c *Client) SyncUsers(ctx context.Context, localUsers []*User, existingMapp
 	}
 
 	return result, nil
+}
+
+// outboundUserCopy removes source-server managed attributes before a resource
+// is sent to another SCIM service. RFC 7643 marks id and meta as server-assigned
+// and groups as readOnly; forwarding them would teach an invalid provisioning
+// pattern and is rejected by strict SCIM implementations.
+func outboundUserCopy(source *User) *User {
+	copy := *source
+	copy.ID = ""
+	copy.Meta = nil
+	copy.Groups = nil
+	copy.Password = ""
+	if copy.ExternalID == "" {
+		copy.ExternalID = source.ID
+	}
+	return &copy
 }

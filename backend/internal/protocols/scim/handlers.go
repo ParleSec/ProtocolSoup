@@ -3,7 +3,9 @@ package scim
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1070,7 +1072,7 @@ func (p *Plugin) handleInfo(w http.ResponseWriter, r *http.Request) {
 // ================== Client Provisioning Handlers ==================
 
 func (p *Plugin) handleClientProvision(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
@@ -1090,26 +1092,45 @@ func (p *Plugin) handleClientProvision(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, ErrInvalidValue("targetUrl and user are required"))
 		return
 	}
+	if strings.TrimSpace(req.User.UserName) == "" {
+		WriteError(w, ErrInvalidValue("user.userName is required"))
+		return
+	}
+
+	targetURL, err := normalizeSCIMTargetURL(req.TargetURL, p.Config().Environment)
+	if err != nil {
+		WriteError(w, ErrInvalidValue(err.Error()))
+		return
+	}
 
 	p.emitEvent("scim.client.request", "Outbound Provision", map[string]interface{}{
-		"target":   req.TargetURL,
+		"target":   targetURL,
 		"userName": req.User.UserName,
 	})
 
-	client := NewClient(req.TargetURL, req.AuthToken)
-	created, err := client.CreateUser(r.Context(), req.User)
+	client := NewClient(targetURL, req.AuthToken)
+	created, err := client.CreateUser(r.Context(), outboundUserCopy(req.User))
 	if err != nil {
 		p.emitEvent("scim.error", "Provision Failed", map[string]interface{}{
-			"error": err.Error(),
+			"target": targetURL,
+			"error":  err.Error(),
 		})
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM provisioning failed: " + err.Error()})
+		return
+	}
+	if created.ID == "" {
+		p.emitEvent("scim.error", "Provision Failed", map[string]interface{}{
+			"target": targetURL,
+			"error":  "target returned a created user without the required id attribute",
+		})
+		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM service returned a created user without the required id attribute"})
 		return
 	}
 
 	p.emitEvent("scim.user.created", "Outbound User Created", map[string]interface{}{
 		"localId":   req.User.ID,
 		"remoteId":  created.ID,
-		"targetUrl": req.TargetURL,
+		"targetUrl": targetURL,
 	})
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1117,7 +1138,7 @@ func (p *Plugin) handleClientProvision(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
@@ -1132,18 +1153,183 @@ func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.emitEvent("scim.client.request", "Sync Started", map[string]interface{}{
-		"target": req.TargetURL,
-	})
-
-	// TODO: Implement full sync logic
-	response := map[string]interface{}{
-		"status":  "not_implemented",
-		"message": "Full sync is not yet implemented",
+	targetURL, err := normalizeSCIMTargetURL(req.TargetURL, p.Config().Environment)
+	if err != nil {
+		WriteError(w, ErrInvalidValue(err.Error()))
+		return
 	}
 
+	startedAt := timeNow().UTC()
+	client := NewClient(targetURL, req.AuthToken)
+	capabilities, err := client.GetServiceProviderConfig(r.Context())
+	if err != nil {
+		p.emitEvent("scim.error", "Target Discovery Failed", map[string]interface{}{
+			"target": targetURL,
+			"error":  err.Error(),
+		})
+		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM discovery failed: " + err.Error()})
+		return
+	}
+
+	users, err := p.storage.ListAllUsers(r.Context())
+	if err != nil {
+		WriteError(w, ErrInternalServer(err.Error()))
+		return
+	}
+	previousSync, _, err := p.storage.GetSyncState(r.Context(), targetURL)
+	if err != nil {
+		WriteError(w, ErrInternalServer(err.Error()))
+		return
+	}
+	mappings, err := p.storage.GetSyncMappings(r.Context(), targetURL)
+	if err != nil {
+		WriteError(w, ErrInternalServer(err.Error()))
+		return
+	}
+
+	p.emitEvent("scim.client.request", "Sync Started", map[string]interface{}{
+		"target":               targetURL,
+		"sourceUserCount":      len(users),
+		"existingMappingCount": len(mappings),
+		"previousLastSync":     previousSync,
+		"capabilities":         capabilities,
+	})
+
+	result, err := client.SyncUsers(r.Context(), users, mappings)
+	if err != nil {
+		p.emitEvent("scim.error", "Sync Failed", map[string]interface{}{
+			"target": targetURL,
+			"error":  err.Error(),
+		})
+		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM sync failed: " + err.Error()})
+		return
+	}
+
+	completedAt := timeNow().UTC()
+	successfulMappings := make(map[string]string)
+	for _, detail := range result.Details {
+		if detail.Status == "success" && result.Mappings[detail.LocalID] != "" {
+			successfulMappings[detail.LocalID] = result.Mappings[detail.LocalID]
+		}
+	}
+	if err := p.storage.UpsertSyncMappings(r.Context(), targetURL, successfulMappings, completedAt); err != nil {
+		WriteError(w, ErrInternalServer(err.Error()))
+		return
+	}
+
+	usersByID := make(map[string]*User, len(users))
+	for _, user := range users {
+		usersByID[user.ID] = outboundUserCopy(user)
+	}
+	for _, detail := range result.Details {
+		p.emitEvent("scim.client.operation", "Outbound User Operation", map[string]interface{}{
+			"target":      targetURL,
+			"localId":     detail.LocalID,
+			"remoteId":    detail.RemoteID,
+			"operation":   detail.Operation,
+			"status":      detail.Status,
+			"error":       detail.Error,
+			"requestBody": usersByID[detail.LocalID],
+		})
+	}
+
+	status := "completed"
+	statusCode := http.StatusOK
+	var lastSuccessfulSync *time.Time
+	if result.Errors == 0 {
+		if err := p.storage.UpdateSyncState(r.Context(), targetURL, completedAt, ""); err != nil {
+			WriteError(w, ErrInternalServer(err.Error()))
+			return
+		}
+		lastSuccessfulSync = &completedAt
+	} else {
+		status = "partial"
+		statusCode = http.StatusMultiStatus
+		if !previousSync.IsZero() {
+			lastSuccessfulSync = &previousSync
+		}
+	}
+
+	response := ClientSyncResponse{
+		Status:             status,
+		TargetURL:          targetURL,
+		StartedAt:          startedAt,
+		CompletedAt:        completedAt,
+		SourceUserCount:    len(users),
+		LastSuccessfulSync: lastSuccessfulSync,
+		Result:             result,
+	}
+	p.emitEvent("scim.client.response", "Sync Completed", map[string]interface{}{
+		"target":   targetURL,
+		"response": response,
+	})
+
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(response)
+}
+
+// ClientSyncResponse reports the real outcome of a one-way source-to-target
+// reconciliation. Deletions are deliberately not inferred: removing a remote
+// identity requires an explicit deprovisioning policy.
+type ClientSyncResponse struct {
+	Status             string      `json:"status"`
+	TargetURL          string      `json:"targetUrl"`
+	StartedAt          time.Time   `json:"startedAt"`
+	CompletedAt        time.Time   `json:"completedAt"`
+	SourceUserCount    int         `json:"sourceUserCount"`
+	LastSuccessfulSync *time.Time  `json:"lastSuccessfulSync,omitempty"`
+	Result             *SyncResult `json:"result"`
+}
+
+func normalizeSCIMTargetURL(raw, environment string) (string, error) {
+	target := strings.TrimRight(strings.TrimSpace(raw), "/")
+	parsed, err := url.Parse(target)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("targetUrl must be an absolute SCIM base URL")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("targetUrl must not contain credentials, a query, or a fragment")
+	}
+	if parsed.Scheme != "https" && !(environment != "production" && parsed.Scheme == "http") {
+		return "", fmt.Errorf("targetUrl must use HTTPS (HTTP is allowed only outside production)")
+	}
+	if environment == "production" {
+		if err := rejectPrivateSCIMTarget(parsed.Hostname()); err != nil {
+			return "", err
+		}
+	}
+	return target, nil
+}
+
+// rejectPrivateSCIMTarget resolves the target host and rejects loopback,
+// private, link-local, unspecified, and multicast addresses. Without this,
+// an authenticated caller could point the outbound sync/provision endpoints
+// at internal infrastructure (SSRF) instead of a real external SCIM service.
+// Only enforced in production: local/demo environments intentionally target
+// docker-compose networks and local IdP emulators on private addresses.
+func rejectPrivateSCIMTarget(host string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if isDisallowedSCIMTargetIP(ip) {
+			return fmt.Errorf("targetUrl must not be a private, loopback, or link-local address")
+		}
+		return nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("targetUrl host could not be resolved: %w", err)
+	}
+	for _, ip := range ips {
+		if isDisallowedSCIMTargetIP(ip) {
+			return fmt.Errorf("targetUrl must not resolve to a private, loopback, or link-local address")
+		}
+	}
+	return nil
+}
+
+func isDisallowedSCIMTargetIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast()
 }
 
 // ================== Status & Events Handlers ==================
