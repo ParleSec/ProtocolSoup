@@ -85,6 +85,13 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     rfcReference: 'RFC 6749 Section 4.4',
     requiresUserInteraction: false,
   },
+  'client-credentials-dpop': {
+    executorClass: ClientCredentialsExecutor,
+    description: 'Machine-to-machine authentication with a DPoP-bound access token',
+    rfcReference: 'RFC 6749 Section 4.4 + RFC 9449',
+    requiresUserInteraction: false,
+    additionalConfig: { useDpop: true },
+  },
   'implicit': {
     executorClass: ImplicitExecutor,
     description: 'Legacy flow - tokens returned directly (NOT recommended)',
@@ -466,7 +473,7 @@ export function createFlowExecutor(
     (fullConfig as ResourceOwnerConfig).password = config.password
   }
 
-  if (flowId === 'client-credentials') {
+  if (flowId === 'client-credentials' || flowId === 'client-credentials-dpop') {
     (fullConfig as ClientCredentialsConfig).clientSecret = config.clientSecret
     ;(fullConfig as ClientCredentialsConfig).clientAuthMethod =
       config.clientCredentialsAuthMethod || 'client_secret_basic'

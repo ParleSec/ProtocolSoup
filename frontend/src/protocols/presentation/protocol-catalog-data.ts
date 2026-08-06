@@ -67,6 +67,17 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         ],
       },
       {
+        id: 'client-credentials-dpop',
+        backendId: 'client_credentials_dpop',
+        name: 'Client Credentials + DPoP',
+        rfc: 'RFC 9449',
+        references: [
+          { category: 'core', label: 'RFC 6749 §4.4 — Client Credentials Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.4' },
+          { category: 'core', label: 'RFC 9449 — Demonstrating Proof of Possession (DPoP)', href: 'https://datatracker.ietf.org/doc/html/rfc9449' },
+          { category: 'security', label: 'RFC 9449 §11 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc9449#section-11' },
+        ],
+      },
+      {
         id: 'refresh-token',
         backendId: 'refresh_token',
         name: 'Refresh Token',

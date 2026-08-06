@@ -42,6 +42,12 @@ export const FLOW_PRESENTATION_META: Record<string, FlowPresentationMeta> = {
     color: 'from-orange-500 to-red-600',
     features: ['Microservices', 'Background Jobs', 'No User Context'],
   },
+  client_credentials_dpop: {
+    icon: Lock,
+    color: 'from-amber-500 to-orange-600',
+    features: ['Sender-Constrained', 'cnf.jkt Binding', 'RFC 9449'],
+    recommended: true,
+  },
   refresh_token: {
     icon: Unlock,
     color: 'from-green-500 to-emerald-600',
@@ -196,6 +202,8 @@ const FEATURE_DESCRIPTIONS: Record<string, string> = {
   'Authorization Code Flow': 'Standard flow for server-side applications',
   'PKCE for Public Clients': 'Enhanced security for SPAs and mobile apps (RFC 7636)',
   'Client Credentials': 'Machine-to-machine authentication',
+  'Sender-Constrained': 'Access token is bound to a client-held private key (RFC 9449)',
+  'cnf.jkt Binding': 'Token carries a JWK thumbprint the resource server must match against a live proof',
   'Refresh Token Rotation': 'Secure token refresh with rotation',
   'Token Introspection': 'Verify token validity and metadata (RFC 7662)',
   'Token Revocation': 'Invalidate access/refresh tokens (RFC 7009)',

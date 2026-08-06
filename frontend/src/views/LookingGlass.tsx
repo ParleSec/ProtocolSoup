@@ -2036,6 +2036,14 @@ export function LookingGlass() {
                         onClick={() => setInspectedToken(realExecutor.state?.tokens.clientAssertion || '')}
                       />
                     )}
+                    {realExecutor.state?.tokens.dpopProof && (
+                      <TokenButton
+                        label="DPoP proof"
+                        color="amber"
+                        active={inspectedToken === realExecutor.state?.tokens.dpopProof}
+                        onClick={() => setInspectedToken(realExecutor.state?.tokens.dpopProof || '')}
+                      />
+                    )}
                     {realExecutor.state?.tokens.accessToken && (
                       <TokenButton
                         label="access"

@@ -49,6 +49,8 @@ export interface FlowExecutorState {
     idToken?: string
     refreshToken?: string
     clientAssertion?: string
+    /** DPoP proof JWT (RFC 9449 Section 4.2) sent alongside the token request. */
+    dpopProof?: string
     tokenType?: string
     expiresIn?: number
     scope?: string
@@ -112,7 +114,7 @@ export interface FlowEvent {
 }
 
 export interface DecodedToken {
-  type: 'access_token' | 'id_token' | 'refresh_token' | 'client_assertion'
+  type: 'access_token' | 'id_token' | 'refresh_token' | 'client_assertion' | 'dpop_proof'
   raw: string
   header?: Record<string, unknown>
   payload?: Record<string, unknown>
