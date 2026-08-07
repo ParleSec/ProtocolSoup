@@ -215,6 +215,134 @@ func TestClientCredentialsGrantBindsDPoPAccessToken(t *testing.T) {
 	}
 }
 
+// TestIntrospectionReportsDPoPBindingForBoundAccessToken verifies RFC 9449
+// Section 6.2: a DPoP-bound access token's introspection response carries a
+// top-level cnf.jkt confirmation, and if token_type is included it reads
+// DPoP rather than Bearer. The introspecting client does not present a DPoP
+// proof itself -- the AS never validates DPoP binding at this endpoint; the
+// resource server is expected to check cnf.jkt locally.
+func TestIntrospectionReportsDPoPBindingForBoundAccessToken(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "dpop-introspect-client", "dpop-introspect-secret")
+	key := newDPoPTestKey(t)
+	tokenURL := server.server.URL + "/oauth2/token"
+	proof := key.proof(t, http.MethodPost, tokenURL, nil)
+
+	form := url.Values{
+		"grant_type": {"client_credentials"},
+		"client_id":  {"dpop-introspect-client"},
+		"scope":      {"api:read"},
+	}
+	tokenRequest, err := http.NewRequest(http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenRequest.Header.Set(dpop.HeaderName, proof)
+	tokenRequest.SetBasicAuth("dpop-introspect-client", "dpop-introspect-secret")
+	tokenResponse, err := http.DefaultClient.Do(tokenRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokenResponse.Body.Close()
+	var tokenBody map[string]interface{}
+	if err := json.NewDecoder(tokenResponse.Body).Decode(&tokenBody); err != nil {
+		t.Fatal(err)
+	}
+	if tokenResponse.StatusCode != http.StatusOK {
+		t.Fatalf("token status = %d, body = %#v", tokenResponse.StatusCode, tokenBody)
+	}
+	accessToken, _ := tokenBody["access_token"].(string)
+	if accessToken == "" {
+		t.Fatal("token response missing access_token")
+	}
+
+	introspectForm := url.Values{"token": {accessToken}}
+	introspectRequest, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/introspect", strings.NewReader(introspectForm.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	introspectRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	introspectRequest.SetBasicAuth("dpop-introspect-client", "dpop-introspect-secret")
+	introspectResponse, err := http.DefaultClient.Do(introspectRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer introspectResponse.Body.Close()
+	var introspectBody map[string]interface{}
+	if err := json.NewDecoder(introspectResponse.Body).Decode(&introspectBody); err != nil {
+		t.Fatal(err)
+	}
+	if introspectResponse.StatusCode != http.StatusOK {
+		t.Fatalf("introspect status = %d, body = %#v", introspectResponse.StatusCode, introspectBody)
+	}
+	if introspectBody["active"] != true {
+		t.Fatalf("active = %v, want true", introspectBody["active"])
+	}
+	if introspectBody["token_type"] != "DPoP" {
+		t.Fatalf("token_type = %v, want DPoP", introspectBody["token_type"])
+	}
+	cnf, ok := introspectBody["cnf"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("cnf = %#v, want a cnf.jkt object", introspectBody["cnf"])
+	}
+	if jkt, _ := cnf["jkt"].(string); jkt != key.jwk.Thumbprint() {
+		t.Fatalf("cnf.jkt = %q, want %q", jkt, key.jwk.Thumbprint())
+	}
+}
+
+// TestIntrospectionOmitsCnfForBearerOnlyAccessToken guards against a
+// regression that would report every token as DPoP-bound.
+func TestIntrospectionOmitsCnfForBearerOnlyAccessToken(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "bearer-introspect-client", "bearer-introspect-secret")
+
+	form := url.Values{
+		"grant_type": {"client_credentials"},
+		"client_id":  {"bearer-introspect-client"},
+		"scope":      {"api:read"},
+	}
+	tokenRequest, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenRequest.SetBasicAuth("bearer-introspect-client", "bearer-introspect-secret")
+	tokenResponse, err := http.DefaultClient.Do(tokenRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokenResponse.Body.Close()
+	var tokenBody map[string]interface{}
+	if err := json.NewDecoder(tokenResponse.Body).Decode(&tokenBody); err != nil {
+		t.Fatal(err)
+	}
+	accessToken, _ := tokenBody["access_token"].(string)
+
+	introspectForm := url.Values{"token": {accessToken}}
+	introspectRequest, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/introspect", strings.NewReader(introspectForm.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	introspectRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	introspectRequest.SetBasicAuth("bearer-introspect-client", "bearer-introspect-secret")
+	introspectResponse, err := http.DefaultClient.Do(introspectRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer introspectResponse.Body.Close()
+	var introspectBody map[string]interface{}
+	if err := json.NewDecoder(introspectResponse.Body).Decode(&introspectBody); err != nil {
+		t.Fatal(err)
+	}
+	if introspectBody["token_type"] != "Bearer" {
+		t.Fatalf("token_type = %v, want Bearer", introspectBody["token_type"])
+	}
+	if _, exists := introspectBody["cnf"]; exists {
+		t.Fatalf("cnf = %#v, want absent for a non-DPoP-bound token", introspectBody["cnf"])
+	}
+}
+
 func TestClientCredentialsGrantWithoutDPoPStaysBearer(t *testing.T) {
 	server := newOAuthAssertionTestServer(t)
 	registerDPoPClientCredentialsClient(t, server, "bearer-cc-client", "bearer-cc-secret")

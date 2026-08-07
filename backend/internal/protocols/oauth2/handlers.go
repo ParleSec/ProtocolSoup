@@ -1143,10 +1143,20 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build introspection response
+	// Build introspection response. RFC 9449 Section 6.2: for a DPoP-bound
+	// access token, convey the cnf.jkt confirmation as a top-level member so
+	// the resource server can validate the DPoP binding itself -- the
+	// authorization server does not check a DPoP proof at this endpoint --
+	// and if token_type is included it MUST read DPoP, not Bearer.
 	response := models.IntrospectionResponse{
 		Active:    true,
 		TokenType: "Bearer",
+	}
+	if cnfClaim, ok := claims["cnf"].(map[string]interface{}); ok {
+		if jkt, ok := cnfClaim["jkt"].(string); ok && jkt != "" {
+			response.TokenType = dpop.TokenType(jkt)
+			response.Cnf = &models.IntrospectionCnf{JKT: jkt}
+		}
 	}
 
 	if scope, ok := claims["scope"].(string); ok {
@@ -1173,7 +1183,7 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Emit introspection response
-	p.emitEvent(sessionID, lookingglass.EventTypeTokenValidated, "Token Introspection Result", map[string]interface{}{
+	eventData := map[string]interface{}{
 		"active":     true,
 		"token_type": response.TokenType,
 		"sub":        response.Sub,
@@ -1187,7 +1197,11 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		"aud":        response.Aud,
 		"iss":        response.Iss,
 		"jti":        response.Jti,
-	}, lookingglass.Annotation{
+	}
+	if response.Cnf != nil {
+		eventData["cnf"] = map[string]interface{}{"jkt": response.Cnf.JKT}
+	}
+	p.emitEvent(sessionID, lookingglass.EventTypeTokenValidated, "Token Introspection Result", eventData, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeSecurityHint,
 		Title:       "Token Active",
 		Description: "The token has been validated and is currently active",
