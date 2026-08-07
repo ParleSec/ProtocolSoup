@@ -38,7 +38,12 @@ type Plugin struct {
 	// (the default) means no behavioural change from Phase 3 -- nonces are
 	// opt-in hardening, enabled via PluginConfig.DPoPNonceRequired.
 	dpopNonceIssuer *dpop.NonceIssuer
-	now             func() time.Time
+	// dpopRSNonceIssuer mirrors dpopNonceIssuer for the resource-server
+	// role (/oauth2/resource), independent of the AS-role nonce space per
+	// RFC 9449 Section 8.2 even though both roles are served by this same
+	// plugin instance. Enabled via PluginConfig.DPoPResourceNonceRequired.
+	dpopRSNonceIssuer *dpop.NonceIssuer
+	now               func() time.Time
 }
 
 // NewPlugin creates a new OAuth 2.0 plugin
@@ -114,6 +119,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if config.DPoPNonceRequired {
 		p.dpopNonceIssuer = dpop.NewNonceIssuer(5 * time.Minute)
 	}
+	if config.DPoPResourceNonceRequired {
+		p.dpopRSNonceIssuer = dpop.NewNonceIssuer(5 * time.Minute)
+	}
 
 	go p.cleanupLoginRequests()
 
@@ -150,6 +158,11 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 
 	// Token revocation (RFC 7009)
 	router.Post("/revoke", p.handleRevoke)
+
+	// Protected resource (demonstrates the RS leg of RFC 9449 Section 7 --
+	// Bearer for an unbound token, DPoP <token> + a proof carrying ath for
+	// a bound one)
+	router.Get("/resource", p.handleProtectedResource)
 
 	// Demo/utility endpoints
 	router.Get("/demo/users", p.handleListUsers)
@@ -503,7 +516,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       3,
 					Name:        "API Request",
-					Description: "A Bearer token is presented normally. A DPoP-bound token instead uses Authorization: DPoP and a fresh proof carrying ath for each protected-resource request (RFC 9449 §7).",
+					Description: "The client calls GET /oauth2/resource, a real protected resource. A Bearer token is presented normally. A DPoP-bound token instead uses Authorization: DPoP and a fresh proof carrying ath for this request (RFC 9449 §7).",
 					From:        "Client",
 					To:          "Resource Server",
 					Type:        "request",

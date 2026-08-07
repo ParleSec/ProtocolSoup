@@ -153,6 +153,21 @@ func (l *AnnotationLibrary) OAuth2Annotations() map[string][]Annotation {
 				Reference:   "RFC 9449 Section 8",
 			},
 		},
+		"dpop_ath": {
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "Access Token Hash (ath)",
+				Description: "A DPoP proof presented alongside a bound access token at a protected resource carries an ath claim: base64url(SHA-256(access_token)). This ties the specific proof to the specific token it accompanies, so a captured proof from one request cannot be replayed with a different access token.",
+				Reference:   "RFC 9449 Section 4.3 & Section 7",
+			},
+			{
+				Type:        AnnotationTypeSecurityHint,
+				Title:       "Resource Server Enforces the Binding, Not the Issuer",
+				Description: "The authorization server that issued a DPoP-bound token has already stepped out of the picture: the resource server itself checks that the presented proof's key thumbprint matches the token's cnf.jkt, and that ath matches the token actually being sent. Presenting a DPoP-bound token as a bare Bearer token is rejected outright, never silently downgraded.",
+				Reference:   "RFC 9449 Section 7.1",
+				Severity:    "warning",
+			},
+		},
 	}
 }
 
