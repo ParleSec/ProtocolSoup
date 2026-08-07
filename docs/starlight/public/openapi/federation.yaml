@@ -125,9 +125,12 @@ paths:
         not enabled for authorization_code or refresh_token in this profile.
         A request may optionally carry a DPoP proof header (RFC 9449
         Section 4.3, htm=POST against this endpoint's URL); when present and
-        valid, the issued access token (and, for authorization_code, the
-        refresh token) is bound to the proof's key and token_type becomes
-        DPoP. Absent that header, behavior is unchanged Bearer issuance.
+        valid, the issued access token (and, for authorization_code issued
+        to a public client, the refresh token) is bound to the proof's key
+        and token_type becomes DPoP. Confidential-client refresh tokens are
+        not DPoP-bound (RFC 9449 Section 5): they are already
+        sender-constrained by client authentication. Absent that header,
+        behavior is unchanged Bearer issuance.
         Only JWT access tokens can be bound this way -- opaque/reference
         token binding is out of scope. A refresh_token grant against a
         DPoP-bound refresh token must re-present a matching proof; a
@@ -763,7 +766,46 @@ paths:
     post:
       tags: [OID4VCI]
       summary: OID4VCI token exchange endpoint
+      description: >
+        Accepts grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code
+        and grant_type=authorization_code (discoverable via
+        /oid4vci/.well-known/oauth-authorization-server). Optionally accepts
+        an OAuth-Client-Attestation + OAuth-Client-Attestation-PoP header pair
+        (draft-ietf-oauth-attestation-based-client-auth) as an alternative to
+        client_secret/Basic authentication; when either header is present it
+        is the authentication verdict and a failure is never downgraded to a
+        weaker method. Also optionally accepts a DPoP proof header (RFC 9449
+        Section 4.3, htm=POST against this endpoint's URL); when present and
+        valid, the issued access token is bound to the proof's key
+        (cnf.jkt) and token_type becomes DPoP. This issuer never issues a
+        refresh token, so DPoP binding applies to the access token only.
+        Absent that header, behavior is unchanged Bearer issuance. If the
+        deployment has DPoP nonce enforcement enabled for this endpoint, a
+        proof lacking the current server nonce is rejected with
+        use_dpop_nonce and a DPoP-Nonce response header instead.
       operationId: oid4vciToken
+      parameters:
+        - in: header
+          name: OAuth-Client-Attestation
+          required: false
+          schema:
+            type: string
+          description: Client Attestation JWT (typ=oauth-client-attestation+jwt). Requires the other attestation header when present.
+        - in: header
+          name: OAuth-Client-Attestation-PoP
+          required: false
+          schema:
+            type: string
+          description: Client Attestation Proof-of-Possession JWT (typ=oauth-client-attestation-pop+jwt), signed by the Client Instance Key in the attestation's cnf.jwk.
+        - in: header
+          name: DPoP
+          required: false
+          schema:
+            type: string
+          description: >-
+            RFC 9449 DPoP proof JWT. Optional; when omitted, the issued
+            access token is a plain Bearer token exactly as before DPoP
+            existed.
       requestBody:
         required: true
         content:
@@ -778,13 +820,109 @@ paths:
       responses:
         "200":
           description: Access token and nonce payload.
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: >-
+                Present only when this deployment has DPoP nonce
+                enforcement enabled for this endpoint (off by default).
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+              examples:
+                token:
+                  value:
+                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    token_type: Bearer
+                    expires_in: 600
+                    c_nonce: "n-0S6_WzA2Mj"
+                    c_nonce_expires_in: 60
+                dpop_bound:
+                  summary: DPoP-bound response (request carried a valid DPoP proof header)
+                  value:
+                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    token_type: DPoP
+                    expires_in: 600
+                    c_nonce: "n-0S6_WzA2Mj"
+                    c_nonce_expires_in: 60
         "400":
-          description: OID4VCI contract violation.
+          description: >-
+            OID4VCI contract violation, including invalid_dpop_proof (RFC
+            9449 Section 5) and use_dpop_nonce (RFC 9449 Section 8, only
+            when nonce enforcement is enabled for this endpoint).
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: Present when error is use_dpop_nonce.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Invalid, untrusted, or replayed client attestation, or unknown/mismatched client.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store. The request fails closed and no token is issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/nonce:
+    post:
+      tags: [OID4VCI]
+      summary: Rotate c_nonce for active token
+      description: >
+        Authorization accepts Bearer <token> or, when the token carries a
+        DPoP cnf.jkt binding (RFC 9449), DPoP <token> plus a matching DPoP
+        proof header -- presenting a DPoP-bound token as bare Bearer is
+        rejected. An unbound token continues to work as Bearer exactly as
+        before DPoP existed.
+      operationId: oid4vciRotateNonce
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: DPoP
+          required: false
+          schema:
+            type: string
+          description: RFC 9449 DPoP proof JWT. Required only when the presented access token is DPoP-bound.
+      responses:
+        "200":
+          description: Nonce response.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "401":
+          description: >-
+            Invalid or missing access token, missing/mismatched DPoP proof
+            for a bound token, or (only when nonce enforcement is enabled
+            for this endpoint) use_dpop_nonce.
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: Present when error is use_dpop_nonce.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store when the presented token is DPoP-bound. The request fails
+            closed.
           content:
             application/json:
               schema:
@@ -793,7 +931,26 @@ paths:
     post:
       tags: [OID4VCI]
       summary: OID4VCI credential issuance endpoint
+      description: >
+        Optional request field credential_response_encryption ({jwk, enc})
+        requests a JWE-encrypted response (ECDH-ES; A128GCM or A256GCM); the
+        response is then returned as Content-Type application/jwt instead of
+        application/json. Credential configurations that declare
+        key_attestations_required additionally require a key_attestation JOSE
+        header on the proof JWT. Authorization accepts Bearer <token> or,
+        when the token carries a DPoP cnf.jkt binding (RFC 9449), DPoP
+        <token> plus a matching DPoP proof header -- presenting a
+        DPoP-bound token as bare Bearer is rejected outright.
       operationId: oid4vciCredential
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: DPoP
+          required: false
+          schema:
+            type: string
+          description: RFC 9449 DPoP proof JWT. Required only when the presented access token is DPoP-bound.
       requestBody:
         required: true
         content:
@@ -803,14 +960,111 @@ paths:
               additionalProperties: true
       responses:
         "200":
-          description: Issued credential response.
+          description: Issued credential response, as JSON or (when credential_response_encryption was requested) a compact JWE.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+            application/jwt:
+              schema:
+                type: string
+                description: Compact JWE-encrypted credential response.
         "400":
-          description: Invalid proof or request contract failure.
+          description: Invalid proof, nonce, key attestation, encryption parameters, or request contract.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: >-
+            Invalid or missing access token, missing/mismatched DPoP proof
+            for a bound token, or (only when nonce enforcement is enabled
+            for this endpoint) use_dpop_nonce.
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: Present when error is use_dpop_nonce.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store when the presented token is DPoP-bound. The request fails
+            closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/deferred_credential:
+    post:
+      tags: [OID4VCI]
+      summary: Poll deferred credential transaction
+      description: >
+        Optional request field credential_response_encryption ({jwk, enc})
+        requests a JWE-encrypted response for this poll, independent of what
+        (if anything) was requested on the original Credential Request.
+        Authorization accepts Bearer <token> or, when the token carries a
+        DPoP cnf.jkt binding (RFC 9449), DPoP <token> plus a matching DPoP
+        proof header -- presenting a DPoP-bound token as bare Bearer is
+        rejected outright.
+      operationId: oid4vciDeferredCredential
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: DPoP
+          required: false
+          schema:
+            type: string
+          description: RFC 9449 DPoP proof JWT. Required only when the presented access token is DPoP-bound.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Deferred credential response, as JSON or (when credential_response_encryption was requested) a compact JWE.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            application/jwt:
+              schema:
+                type: string
+                description: Compact JWE-encrypted credential response.
+        "400":
+          description: Invalid transaction request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: >-
+            Invalid or missing access token, missing/mismatched DPoP proof
+            for a bound token, or (only when nonce enforcement is enabled
+            for this endpoint) use_dpop_nonce.
+          headers:
+            DPoP-Nonce:
+              schema:
+                type: string
+              description: Present when error is use_dpop_nonce.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store when the presented token is DPoP-bound. The request fails
+            closed.
           content:
             application/json:
               schema:

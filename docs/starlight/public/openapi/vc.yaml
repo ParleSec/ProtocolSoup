@@ -335,6 +335,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store. The request fails closed and no token is issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oid4vci/nonce:
     post:
       tags: [OID4VCI]
@@ -373,6 +381,15 @@ paths:
               schema:
                 type: string
               description: Present when error is use_dpop_nonce.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store when the presented token is DPoP-bound. The request fails
+            closed.
           content:
             application/json:
               schema:
@@ -440,6 +457,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store when the presented token is DPoP-bound. The request fails
+            closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oid4vci/deferred_credential:
     post:
       tags: [OID4VCI]
@@ -497,6 +523,15 @@ paths:
               schema:
                 type: string
               description: Present when error is use_dpop_nonce.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "500":
+          description: >-
+            Server error, including failure of the shared DPoP proof replay
+            store when the presented token is DPoP-bound. The request fails
+            closed.
           content:
             application/json:
               schema:
