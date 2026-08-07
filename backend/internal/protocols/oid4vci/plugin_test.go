@@ -31,6 +31,9 @@ func TestPreAuthorizedFlowWithTxCodeAndProof(t *testing.T) {
 	})
 	assertStatus(t, offerResp, http.StatusCreated)
 	offerPayload := decodeJSONMap(t, offerResp)
+	if got := asString(t, offerPayload["credential_issuer"]); got != testIssuerAudience {
+		t.Fatalf("create-offer credential_issuer = %q, want %q", got, testIssuerAudience)
+	}
 	preAuthCode := asString(t, offerPayload["pre_authorized_code"])
 	offerURI := asString(t, offerPayload["credential_offer_uri"])
 	walletSubject := asString(t, offerPayload["wallet_subject"])

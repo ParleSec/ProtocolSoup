@@ -97,13 +97,14 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
 
     try {
       const offerData = await this.createOffer()
-      await this.resolveOfferReference(offerData)
+      const resolvedOffer = await this.resolveOfferReference(offerData)
+      const credentialIssuer = this.resolveCredentialIssuer(offerData, resolvedOffer)
       const tokenData = await this.exchangeToken(offerData)
       const walletSubject = typeof offerData.wallet_subject === 'string' ? offerData.wallet_subject.trim() : ''
       if (!walletSubject) {
         throw new Error('Offer response missing wallet_subject -- cannot create proof')
       }
-      const proofJWT = await this.createProof(tokenData.c_nonce, walletSubject)
+      const proofJWT = await this.createProof(tokenData.c_nonce, walletSubject, credentialIssuer)
       const credentialResponse = await this.requestCredential(tokenData.access_token, proofJWT)
 
       if (credentialResponse.transaction_id) {
@@ -224,15 +225,25 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return offerData
   }
 
-  private async resolveOfferReference(offerData: Record<string, unknown>): Promise<void> {
+  private async resolveOfferReference(
+    offerData: Record<string, unknown>
+  ): Promise<Record<string, unknown> | null> {
     const offerURI = offerData.credential_offer_uri
     if (typeof offerURI !== 'string' || !offerURI) {
-      return
+      const inline = offerData.credential_offer
+      return inline && typeof inline === 'object' ? (inline as Record<string, unknown>) : null
     }
 
     this.updateState({ currentStep: 'Resolving credential_offer_uri' })
+    // The offer URI is the issuer's absolute reference (SHOWCASE_BASE_URL).
+    // Fetch via the same-origin Next.js rewrite so Looking Glass stays
+    // same-origin; proof aud still uses credential_issuer, not the proxy host.
     const uri = new URL(offerURI, window.location.origin)
-    const { response, data } = await this.makeRequest('GET', uri.toString(), {
+    const fetchURL =
+      uri.origin === window.location.origin
+        ? uri.toString()
+        : `${uri.pathname}${uri.search}`
+    const { response, data } = await this.makeRequest('GET', fetchURL, {
       headers: { Accept: 'application/json' },
       step: 'Resolve credential offer reference',
       rfcReference: 'OpenID4VCI 1.0 Section 4.1',
@@ -242,16 +253,38 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       throw new Error(`Failed to resolve credential_offer_uri (${response.status})`)
     }
 
+    const resolved = data as Record<string, unknown>
     this.addVCArtifact({
       type: 'credential_offer',
       title: 'Resolved Credential Offer',
       format: 'openid4vci-offer',
       rfcReference: 'OpenID4VCI 1.0 Section 4.1',
-      json: (data as Record<string, unknown>),
+      json: resolved,
       metadata: {
         byReference: true,
+        credentialOfferURI: offerURI,
       },
     })
+    return resolved
+  }
+
+  private resolveCredentialIssuer(
+    offerData: Record<string, unknown>,
+    resolvedOffer: Record<string, unknown> | null
+  ): string {
+    const candidates = [
+      offerData.credential_issuer,
+      resolvedOffer?.credential_issuer,
+      typeof offerData.credential_offer === 'object' && offerData.credential_offer !== null
+        ? (offerData.credential_offer as Record<string, unknown>).credential_issuer
+        : undefined,
+    ]
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim()
+      }
+    }
+    throw new Error('credential_issuer is required for proof audience (OID4VCI §7.2)')
   }
 
   private async exchangeToken(offerData: Record<string, unknown>): Promise<Record<string, string>> {
@@ -293,13 +326,23 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return tokenData
   }
 
-  private async createProof(cNonce: string, walletSubject: string): Promise<string> {
+  private async createProof(
+    cNonce: string,
+    walletSubject: string,
+    credentialIssuer: string
+  ): Promise<string> {
     this.updateState({ currentStep: 'Creating nonce-bound proof JWT' })
     const normalizedSubject = walletSubject.trim()
     if (!normalizedSubject) {
       throw new Error('Wallet subject is required for proof creation but was empty')
     }
-    const audience = `${window.location.origin}${this.config.baseUrl}`
+    // OID4VCI §7.2: proof aud MUST be the Credential Issuer identifier.
+    // Looking Glass HTTP goes through the Next.js proxy (localhost:3000), but
+    // the issuer identifier is the canonical SHOWCASE_BASE_URL value.
+    const audience = credentialIssuer.trim()
+    if (!audience) {
+      throw new Error('credential_issuer is required for proof audience')
+    }
     const now = Math.floor(Date.now() / 1000)
     const expiration = now + 180
 
@@ -346,6 +389,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       metadata: {
         nonceBound: true,
         walletSubject: normalizedSubject,
+        credentialIssuer: audience,
         generatedClientSide: true,
       },
     })

@@ -163,6 +163,7 @@ func (p *Plugin) handleCreateOffer(w http.ResponseWriter, r *http.Request, byVal
 
 	data := map[string]interface{}{
 		"offer_id":                     offerID,
+		"credential_issuer":            p.issuerID(),
 		"pre_authorized_code":          preAuthorizedCode,
 		"credential_configuration_ids": credentialIDs,
 		"deferred":                     req.Deferred,
