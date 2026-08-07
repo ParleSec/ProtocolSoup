@@ -350,6 +350,14 @@ func snippetTokens(p ParsedQuery) []string {
 // runURLFor returns the Looking Glass run URL for a runnable flow. The
 // frontend POSTs to /api/protocols/{protocol}/demo/{backend_id} via the
 // Looking Glass page; the URL itself is what the palette navigates to.
+//
+// When the artefact declares RunDefaults, its client_auth/token_mode are
+// appended as extra query parameters so the flow opens pre-configured the
+// way the content wants to demonstrate it (e.g. client_credentials'
+// content defaults token_mode=dpop to show the sender-constrained path
+// instead of the plain-Bearer default). The frontend's parseFlowDeepLink
+// (frontend/src/components/palette/runDispatch.ts) is this pair's only
+// consumer and already tolerates either parameter being absent.
 func runURLFor(p ArtefactPayload) string {
 	protocol := p.Protocol
 	if protocol == "" && len(p.Protocols) == 1 {
@@ -362,7 +370,16 @@ func runURLFor(p ArtefactPayload) string {
 	if protocol == "" {
 		return ""
 	}
-	return "/looking-glass?protocol=" + protocol + "&flow=" + backend
+	url := "/looking-glass?protocol=" + protocol + "&flow=" + backend
+	if p.RunDefaults != nil {
+		if p.RunDefaults.ClientAuth != "" {
+			url += "&client_auth=" + p.RunDefaults.ClientAuth
+		}
+		if p.RunDefaults.TokenMode != "" {
+			url += "&token_mode=" + p.RunDefaults.TokenMode
+		}
+	}
+	return url
 }
 
 // refinementChipMinDistinct sets how many distinct values an axis must show

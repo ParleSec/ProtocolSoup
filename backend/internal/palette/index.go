@@ -350,6 +350,7 @@ type ArtefactPayload struct {
 	Summary          string            `json:"summary,omitempty"`
 	BackendID        string            `json:"backend_id,omitempty"`
 	Aliases          []string          `json:"aliases,omitempty"`
+	RunDefaults      *RunDefaults      `json:"run_defaults,omitempty"`
 
 	// Body holds the full markdown body of the artefact. Kept in the payload
 	// so the query service can stream the answer text inline with results
@@ -384,6 +385,7 @@ func buildPayload(a Artefact) (string, error) {
 		Summary:          a.Summary,
 		BackendID:        a.BackendID,
 		Aliases:          a.Aliases,
+		RunDefaults:      a.RunDefaults,
 		Body:             a.Body,
 		BodyPreview:      a.PlainTextPreview(280),
 	}

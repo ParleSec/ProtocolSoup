@@ -50,6 +50,26 @@ func TestRunURLForFlow_DeepLinkContract(t *testing.T) {
 			},
 			want: "",
 		},
+		{
+			name: "run_defaults token_mode is appended",
+			in: ArtefactPayload{
+				ID:          "client-credentials",
+				Protocol:    "oauth2",
+				BackendID:   "client_credentials",
+				RunDefaults: &RunDefaults{TokenMode: "dpop"},
+			},
+			want: "/looking-glass?protocol=oauth2&flow=client_credentials&token_mode=dpop",
+		},
+		{
+			name: "run_defaults client_auth and token_mode are both appended",
+			in: ArtefactPayload{
+				ID:          "client-credentials",
+				Protocol:    "oauth2",
+				BackendID:   "client_credentials",
+				RunDefaults: &RunDefaults{ClientAuth: "private_key_jwt", TokenMode: "dpop"},
+			},
+			want: "/looking-glass?protocol=oauth2&flow=client_credentials&client_auth=private_key_jwt&token_mode=dpop",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

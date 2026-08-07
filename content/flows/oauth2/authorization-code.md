@@ -14,6 +14,7 @@ patterns:
   - front-channel-redirect
   - back-channel
   - bearer
+  - key-bound
 problem_domains:
   - authorization
   - authentication
@@ -25,6 +26,8 @@ normative_anchors:
     sections: ["4.1"]
   - rfc: RFC 9700
     sections: ["2.1"]
+  - rfc: RFC 9449
+    sections: ["4", "5"]
 runnable: true
 backend_id: authorization_code
 status: live
@@ -36,4 +39,7 @@ The authorization code grant is the canonical OAuth 2.0 flow for confidential
 clients. The user agent is redirected to the authorization server to consent,
 and the resulting authorization code is exchanged at the token endpoint over
 the back channel using the client's secret. The code is single-use and short-
-lived.
+lived. The token endpoint also accepts an optional DPoP proof header (RFC
+9449); when present, the issued access token is sender-constrained to the
+proof's key (`cnf.jkt`, `token_type: DPoP`), and a public client's issued
+refresh token is bound the same way.
