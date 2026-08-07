@@ -1294,7 +1294,8 @@ func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) handleListClients(w http.ResponseWriter, r *http.Request) {
 	presets := p.mockIdP.GetDemoClientPresets()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"clients": presets,
+		"clients":        presets,
+		"token_endpoint": p.tokenEndpointURL(),
 	})
 }
 
