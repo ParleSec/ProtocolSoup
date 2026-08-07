@@ -423,7 +423,7 @@ The following events are emitted for real-time visualization:
 | Flow ID | Name | Description |
 |---------|------|-------------|
 | `authorization_code` | Authorization Code Flow | Standard web app flow with PKCE |
-| `client_credentials` | Client Credentials | Machine-to-machine authentication |
+| `client_credentials` | Client Credentials | Machine-to-machine authentication; client auth (`client_secret_basic`/`private_key_jwt`) and access-token protection (Bearer/RFC 9449 DPoP) are independent selectors |
 | `implicit` | Implicit Flow | Legacy browser flow (deprecated) |
 | `refresh_token` | Refresh Token | Token renewal |
 | `token_introspection` | Token Introspection | Validate active tokens |
@@ -444,7 +444,8 @@ The following events are emitted for real-time visualization:
 |----------|-------------|---------|
 | `SHOWCASE_BASE_URL` | Public base URL | `http://localhost:8080` |
 | `SHOWCASE_CORS_ORIGINS` | CORS allowed origins | `http://localhost:3000,http://localhost:5173` |
-| `OAUTH2_REPLAY_REDIS_URL` | Shared replay Redis URL; required in demo and reachable `rediss://` is required in production | in-memory in development/tests |
+| `OAUTH2_REPLAY_REDIS_URL` | Shared replay Redis URL for `private_key_jwt` assertion replay; required in demo and reachable `rediss://` is required in production. Also backs this plugin's RFC 9449 DPoP proof `jti` replay store (separate key prefix/instance) | in-memory in development/tests |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | Enables the RFC 9449 §8 nonce challenge at `/oauth2/token` | `false` |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | demo-app client secret | (auto-generated) |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | machine-client secret | (auto-generated) |
 
@@ -500,6 +501,7 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 | RFC 7009 | Token Revocation | ✅ Compliant |
 | RFC 7523 §2.2 | JWT client authentication | ✅ Implemented profile |
 | RFC 8414 | Authorization Server Metadata | ✅ Implemented |
+| RFC 9449 | DPoP | ✅ Implemented (opt-in per request) |
 
 ### Implemented Features
 
@@ -512,6 +514,7 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 - ✅ Token Revocation
 - ✅ State parameter CSRF protection
 - ✅ Client authentication (Basic, POST, private_key_jwt for client_credentials)
+- ✅ Sender-constrained access tokens (RFC 9449 DPoP), opt-in via a `DPoP` proof header at the token endpoint
 - ✅ `private_key_jwt` client authentication (RFC 7523 §2.2 / OIDC Core §9)
 - ✅ Client assertion replay protection (`jti`)
 - ✅ Refresh token rotation

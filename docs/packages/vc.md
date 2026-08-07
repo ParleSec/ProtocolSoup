@@ -30,6 +30,9 @@
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in mock identity data |
 | `SHOWCASE_DATA_DIR` | No | `(none)` | Durable persistence root for wallet lineage and verifier session state |
 | `VC_LOOKING_GLASS` | No | `true` | Enable Looking Glass event capture |
+| `OAUTH2_REPLAY_REDIS_URL` | No | In-memory in development/tests | Shared Redis URL backing this issuer's RFC 9449 DPoP proof `jti` replay store (falls back to in-memory when unset; no other replay use in this image) |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at `/oid4vci/token` |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at `/oid4vci/credential`, `/oid4vci/nonce`, and `/oid4vci/deferred_credential` |
 
 ### Storage And Volumes
 
@@ -61,6 +64,12 @@
 - `POST /oid4vci/nonce`
 - `POST /oid4vci/credential`
 - `POST /oid4vci/deferred_credential`
+
+`/oid4vci/token` optionally accepts a `DPoP` proof header (RFC 9449); when
+present and valid, the issued access token is bound to the proof's key
+(`cnf.jkt`, `token_type: DPoP`) and enforced at `/oid4vci/credential`,
+`/oid4vci/nonce`, and `/oid4vci/deferred_credential`. This issuer never
+issues refresh tokens, so DPoP binding applies to the access token only.
 
 ### OID4VP (Verifier)
 

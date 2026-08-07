@@ -90,11 +90,17 @@ curl -H "Authorization: Bearer <your-token>" \
 
 **Cause:** Production `private_key_jwt` replay protection requires one shared,
 TLS-protected Redis store so every service instance reserves `jti` values
-atomically.
+atomically. The same variable also backs the RFC 9449 DPoP proof `jti`
+replay stores for both oauth2 and OID4VCI (a distinct key prefix and
+instance from the `private_key_jwt` store), so a missing or unreachable
+Redis blocks DPoP-bound requests as well, not only `private_key_jwt`.
 
 **Fix:** Provision reachable Redis with TLS, set its `rediss://` URL as a
 platform secret, and verify network and certificate trust from the federation
-service. Do not downgrade production to `redis://` or an in-memory store.
+service. Do not downgrade production to `redis://` or an in-memory store. A
+runtime Redis error after startup fails the affected token or resource
+request closed with `server_error`, rather than silently accepting an
+unverified proof.
 
 ## Containers exit with OOM
 

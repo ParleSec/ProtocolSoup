@@ -164,6 +164,24 @@ func validateArtefact(a Artefact, t Taxonomy, known map[string]Artefact) []Issue
 				add("flow references unknown protocol %q (expected content/protocols/%s.md)", a.Protocol, a.Protocol)
 			}
 		}
+		if a.RunDefaults != nil {
+			if a.Runnable != nil && !*a.Runnable {
+				add("run_defaults is set but the flow is not runnable")
+			}
+			if a.RunDefaults.ClientAuth == "" && a.RunDefaults.TokenMode == "" {
+				add("run_defaults is present but sets neither client_auth nor token_mode")
+			}
+			if v := a.RunDefaults.ClientAuth; v != "" {
+				if _, ok := RunDefaultClientAuthValues[v]; !ok {
+					add("run_defaults.client_auth %q is not one of client_secret_basic, private_key_jwt", v)
+				}
+			}
+			if v := a.RunDefaults.TokenMode; v != "" {
+				if _, ok := RunDefaultTokenModeValues[v]; !ok {
+					add("run_defaults.token_mode %q is not one of bearer, dpop", v)
+				}
+			}
+		}
 
 	case ArtefactConcept:
 		if a.Runnable != nil && *a.Runnable {
@@ -187,6 +205,10 @@ func validateArtefact(a Artefact, t Taxonomy, known map[string]Artefact) []Issue
 		if strings.TrimSpace(a.AssertionText) == "" {
 			add("spec-assertion requires assertion_text describing the normative statement")
 		}
+	}
+
+	if a.Type != ArtefactFlow && a.RunDefaults != nil {
+		add("run_defaults is only valid on flow artefacts")
 	}
 
 	for _, ref := range a.Protocols {

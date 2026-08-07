@@ -82,6 +82,35 @@ type NormativeAnchor struct {
 	Sections []string `yaml:"sections" json:"sections"`
 }
 
+// RunDefaults declares optional, flow-specific Looking Glass selector
+// presets to carry through runURLFor's deep-link (`?client_auth=...
+// &token_mode=...`), so a runnable flow discovered via the palette opens
+// pre-configured the way its content wants to demonstrate -- e.g. the
+// client_credentials flow's DPoP write-up defaults token_mode to "dpop" so
+// following that flow from the palette actually shows the sender-constrained
+// path, not the plain-Bearer default. Both fields are optional and validated
+// against the same enums the frontend's parseFlowDeepLink accepts; an
+// unrecognised value is a content validation error, not a silent no-op.
+type RunDefaults struct {
+	ClientAuth string `yaml:"client_auth,omitempty" json:"client_auth,omitempty"`
+	TokenMode  string `yaml:"token_mode,omitempty"  json:"token_mode,omitempty"`
+}
+
+// RunDefaultClientAuthValues and RunDefaultTokenModeValues are the closed
+// sets accepted for RunDefaults fields, mirroring the frontend's
+// parseFlowDeepLink allow-list in
+// frontend/src/components/palette/runDispatch.ts.
+var (
+	RunDefaultClientAuthValues = map[string]struct{}{
+		"client_secret_basic": {},
+		"private_key_jwt":     {},
+	}
+	RunDefaultTokenModeValues = map[string]struct{}{
+		"bearer": {},
+		"dpop":   {},
+	}
+)
+
 // Artefact is the parsed frontmatter of a single content file plus the
 // markdown body. Type, Path, ProtocolFromDir and Body are filled in by the
 // walker and are not represented in the YAML frontmatter directly.
@@ -105,6 +134,7 @@ type Artefact struct {
 	Aliases          []string          `yaml:"aliases,omitempty"`
 	BackendID        string            `yaml:"backend_id,omitempty"`
 	AssertionText    string            `yaml:"assertion_text,omitempty"`
+	RunDefaults      *RunDefaults      `yaml:"run_defaults,omitempty"`
 
 	Type            string `yaml:"-"`
 	Path            string `yaml:"-"`
@@ -134,6 +164,7 @@ var allowedFrontmatterFields = map[string]struct{}{
 	"aliases":           {},
 	"backend_id":        {},
 	"assertion_text":    {},
+	"run_defaults":      {},
 }
 
 // IsRunnable reports whether the artefact is runnable, applying the type

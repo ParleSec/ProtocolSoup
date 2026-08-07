@@ -23,6 +23,9 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
   `DPoP` proof header at the token endpoint, enforced on the credential,
   nonce, and deferred_credential endpoints when a token is bound, with an
   independent, off-by-default `DPoP-Nonce` challenge per role
+  (`SHOWCASE_DPOP_NONCE_REQUIRED` at the token endpoint,
+  `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` at the resource endpoints); this
+  issuer's RFC 8414 metadata advertises `dpop_signing_alg_values_supported`
 - Deferred issuance with `transaction_id`
 - Replay/freshness denial handling
 
@@ -30,7 +33,10 @@ The attestation, encryption, and DPoP items are HAIP-related API building
 blocks, not a complete HAIP conformance claim: the current Looking
 Glass/wallet flows do not drive them together end to end, and no external
 conformance suite run has been recorded. Only JWT access tokens can be
-DPoP-bound; opaque/reference token binding is out of scope.
+DPoP-bound; opaque/reference token binding is out of scope. This issuer
+never issues refresh tokens, so DPoP binding here applies only to the access
+token (unlike the oauth2 protocol's `authorization_code` grant, which does
+bind a refresh token for public clients per RFC 9449 Section 5).
 
 ## Default credential configuration
 

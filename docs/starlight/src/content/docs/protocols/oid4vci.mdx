@@ -96,17 +96,22 @@ The unattested Final flow remains unaffected by default.
 
 - **Sender-constrained access tokens (RFC 9449 DPoP).** The token endpoint
   accepts an optional `DPoP` proof header; when present, the issued access
-  token (and, for the authorization_code grant, the refresh token) is bound
-  to the proof's key via a `cnf.jkt` claim, with `token_type: DPoP` in the
-  response instead of `Bearer`. A token bound this way is then rejected at
-  the credential, nonce, and deferred_credential endpoints unless presented
-  as `Authorization: DPoP <token>` with a matching, unreplayed DPoP proof —
-  presenting it as a bare bearer token fails outright, never silently
-  downgrades. A server-provided nonce challenge (`DPoP-Nonce` response
-  header, `use_dpop_nonce` error) is available independently at the token
-  endpoint and at the resource endpoints, off by default and enabled per
-  role by deployment configuration. Only JWT access tokens can be bound;
-  opaque/reference token binding is out of scope.
+  token is bound to the proof's key via a `cnf.jkt` claim, with
+  `token_type: DPoP` in the response instead of `Bearer`. This issuer does
+  not issue refresh tokens for any grant, so DPoP binding applies only to the
+  access token here (the oauth2 protocol's `authorization_code` grant does
+  bind a refresh token for public clients, per RFC 9449 Section 5). A token
+  bound this way is then rejected at the credential, nonce, and
+  deferred_credential endpoints unless presented as `Authorization: DPoP
+  <token>` with a matching, unreplayed DPoP proof — presenting it as a bare
+  bearer token fails outright, never silently downgrades. A server-provided
+  nonce challenge (`DPoP-Nonce` response header, `use_dpop_nonce` error) is
+  available independently at the token endpoint (`SHOWCASE_DPOP_NONCE_REQUIRED`)
+  and at the resource endpoints (`SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED`), off
+  by default. This issuer's own RFC 8414 metadata advertises
+  `dpop_signing_alg_values_supported` for the accepted proof algorithms. Only
+  JWT access tokens can be bound; opaque/reference token binding is out of
+  scope.
 - **Client attestation (OAuth 2.0 Attestation-Based Client Authentication).**
   The token endpoint accepts an `OAuth-Client-Attestation` +
   `OAuth-Client-Attestation-PoP` header pair as an alternative to

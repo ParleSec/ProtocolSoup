@@ -145,6 +145,18 @@ type IntrospectionResponse struct {
 	Aud       string `json:"aud,omitempty"`
 	Iss       string `json:"iss,omitempty"`
 	Jti       string `json:"jti,omitempty"`
+	// Cnf conveys the RFC 7800 confirmation method for a DPoP-bound token
+	// (RFC 9449 Section 6.2): the resource server uses this JWK thumbprint
+	// to validate the DPoP binding itself, since the authorization server
+	// does not check a DPoP proof at the introspection endpoint. Omitted
+	// entirely for tokens that are not DPoP-bound.
+	Cnf *IntrospectionCnf `json:"cnf,omitempty"`
+}
+
+// IntrospectionCnf is the RFC 7800 confirmation-method object carried on an
+// introspection response for a DPoP-bound token (RFC 9449 Section 6.2).
+type IntrospectionCnf struct {
+	JKT string `json:"jkt"`
 }
 
 // OIDCClaims represents standard OIDC claims

@@ -260,6 +260,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       }
       dpopProof = await this.attachDpopProof(headers, proofTarget)
     }
+    const canonicalTokenEndpoint = acceptedAssertion?.tokenEndpoint || this.flowConfig.tokenEndpoint
 
     let { response, data } = await this.makeRequest(
       'POST',
@@ -297,7 +298,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
         if (!proofTarget) {
           throw new Error('DPoP nonce retry requires the authorization server canonical token endpoint')
         }
-        dpopProof = await this.attachDpopProof(headers, proofTarget, serverNonce)
+        dpopProof = await this.attachDpopProof(headers, proofTarget, { nonce: serverNonce })
         ;({ response, data } = await this.makeRequest(
           'POST',
           tokenRequestURL,
@@ -424,6 +425,11 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
         },
       })
     }
+
+    const accessToken = responseBody.access_token
+    if (typeof accessToken === 'string' && accessToken.length > 0) {
+      await this.accessProtectedResource(accessToken, accessTokenMode, canonicalTokenEndpoint)
+    }
   }
 
   /**
@@ -432,8 +438,18 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
    * outgoing request via the `DPoP` header. The proof itself is published
    * as a Looking Glass event/token so it can be inspected -- only the
    * public JWK ever leaves the browser; the private key stays in WebCrypto.
+   *
+   * The same memoized key is reused across every proof this execution
+   * mints (token-endpoint proof, resource-endpoint proof, nonce retries):
+   * the access token's cnf.jkt is bound to whichever key signed the
+   * token-request proof, so a resource-endpoint proof from a different key
+   * would be rejected as a jkt mismatch (RFC 9449 Section 7.1).
    */
-  private async attachDpopProof(headers: Record<string, string>, endpoint: string, nonce?: string): Promise<string> {
+  private async attachDpopProof(
+    headers: Record<string, string>,
+    endpoint: string,
+    options: { method?: string; nonce?: string; accessToken?: string } = {},
+  ): Promise<string> {
     if (!this.dpopSigningMaterialPromise) {
       this.dpopSigningMaterialPromise = generateES256SigningMaterial('dpop-client')
     }
@@ -450,7 +466,12 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       },
     })
 
-    const proof = await generateDPoPProof(signingMaterial, { htm: 'POST', htu: endpoint, nonce })
+    const proof = await generateDPoPProof(signingMaterial, {
+      htm: options.method || 'POST',
+      htu: endpoint,
+      nonce: options.nonce,
+      accessToken: options.accessToken,
+    })
     headers.DPoP = proof
     const decodedProof = this.decodeJwt(proof, 'dpop_proof')
     this.updateState({
@@ -460,16 +481,112 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
     this.addEvent({
       type: 'crypto',
       title: 'DPoP Proof Generated',
-      description: 'A fresh proof-of-possession JWT is minted for this specific request: bound to the HTTP method and URI (htm/htu), with a single-use jti.',
-      rfcReference: 'RFC 9449 Section 4.2',
+      description: options.accessToken
+        ? 'A fresh proof-of-possession JWT is minted for this specific resource request: bound to the HTTP method and URI (htm/htu), the access token being presented (ath), and a single-use jti.'
+        : 'A fresh proof-of-possession JWT is minted for this specific request: bound to the HTTP method and URI (htm/htu), with a single-use jti.',
+      rfcReference: options.accessToken ? 'RFC 9449 Sections 4.2 and 4.3' : 'RFC 9449 Section 4.2',
       data: {
         from: 'Client',
-        to: 'Authorization Server',
+        to: options.accessToken ? 'Resource Server' : 'Authorization Server',
         header: decodedProof.header,
         claims: decodedProof.payload,
       },
     })
     return proof
+  }
+
+  /**
+   * deriveResourceEndpoint turns the canonical AS token endpoint
+   * (`{base}/oauth2/token`) into the canonical resource endpoint
+   * (`{base}/oauth2/resource`) this same demo server exposes, per
+   * backend Plugin.resourceURL(). Both are always derived from the same
+   * base URL server-side, so this is an exact mapping, not a guess.
+   */
+  private deriveResourceEndpoint(canonicalTokenEndpoint: string): string {
+    return canonicalTokenEndpoint.replace(/\/token$/, '/resource')
+  }
+
+  /**
+   * Calls GET /oauth2/resource with the access token this execution just
+   * received -- the resource-server leg of RFC 9449 Section 7 that the
+   * flow previously only described. A Bearer token is presented normally;
+   * a DPoP-bound token is presented as `Authorization: DPoP <token>`
+   * alongside a fresh proof carrying `ath` over this exact request,
+   * signed by the same key the token is bound to.
+   */
+  private async accessProtectedResource(
+    accessToken: string,
+    accessTokenMode: ClientCredentialsAccessTokenMode,
+    canonicalTokenEndpoint: string | undefined,
+  ): Promise<void> {
+    this.updateState({ currentStep: 'Calling protected resource' })
+    const resourceRequestURL = `${this.config.baseUrl}/resource`
+    const headers: Record<string, string> = {}
+
+    if (accessTokenMode === 'dpop') {
+      if (!canonicalTokenEndpoint) {
+        throw new Error('DPoP resource access requires the authorization server canonical token endpoint')
+      }
+      const resourceEndpoint = this.deriveResourceEndpoint(canonicalTokenEndpoint)
+      headers.Authorization = `DPoP ${accessToken}`
+      await this.attachDpopProof(headers, resourceEndpoint, { method: 'GET', accessToken })
+    } else {
+      headers.Authorization = `Bearer ${accessToken}`
+    }
+
+    let { response, data } = await this.makeRequest('GET', resourceRequestURL, {
+      headers,
+      step: 'Protected Resource Request',
+      rfcReference: 'RFC 9449 Section 7',
+    })
+
+    if (!response.ok && accessTokenMode === 'dpop') {
+      const challengeBody = data as Record<string, unknown>
+      const serverNonce = response.headers.get('DPoP-Nonce')
+      if (challengeBody.error === 'use_dpop_nonce' && serverNonce) {
+        this.addEvent({
+          type: 'security',
+          title: 'DPoP Nonce Challenge at Resource Server (RFC 9449 Section 8)',
+          description: 'The resource server rejected the proof for lacking its current server-provided nonce -- a nonce space independent of the authorization server\'s (Section 8.2) even though this demo serves both roles. Retrying once with a fresh proof echoing the supplied nonce.',
+          rfcReference: 'RFC 9449 Section 8',
+          data: { from: 'Resource Server', to: 'Client', error: challengeBody.error, nonce: serverNonce },
+        })
+        const resourceEndpoint = this.deriveResourceEndpoint(canonicalTokenEndpoint as string)
+        await this.attachDpopProof(headers, resourceEndpoint, { method: 'GET', accessToken, nonce: serverNonce })
+        ;({ response, data } = await this.makeRequest('GET', resourceRequestURL, {
+          headers,
+          step: 'Protected Resource Request (DPoP-Nonce Retry)',
+          rfcReference: 'RFC 9449 Section 8',
+        }))
+      }
+    }
+
+    if (!response.ok) {
+      const errorData = data as Record<string, unknown>
+      this.addEvent({
+        type: 'error',
+        title: 'Protected Resource Access Denied',
+        description: (errorData.error_description as string) || 'The resource server rejected the access token',
+        rfcReference: 'RFC 9449 Section 7.1',
+        data: errorData,
+      })
+      throw new Error((errorData.error_description as string) || 'Protected resource request failed')
+    }
+
+    const resourceBody = data as Record<string, unknown>
+    this.addEvent({
+      type: 'info',
+      title: 'Protected Resource Response',
+      description: accessTokenMode === 'dpop'
+        ? 'The resource server validated the DPoP proof\'s key against the token\'s cnf.jkt and its ath against the presented token before returning data.'
+        : 'The resource server validated the Bearer token before returning data.',
+      rfcReference: 'RFC 6750 Section 2.1; RFC 9449 Section 7.1',
+      data: {
+        from: 'Resource Server',
+        to: 'Client',
+        ...resourceBody,
+      },
+    })
   }
 
   private getSigningMaterial(): Promise<RS256SigningMaterial> {

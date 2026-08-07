@@ -259,6 +259,10 @@ jobs:
         working-directory: frontend
         run: npm run verify-jwk-thumbprint
 
+      - name: Verify DPoP proof generation and deep-links (RFC 9449)
+        working-directory: frontend
+        run: npm run verify-dpop
+
   # Job 5: Backend Linting and Vet
   backend-lint:
     name: Backend Lint & Vet

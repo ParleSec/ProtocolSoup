@@ -286,6 +286,115 @@ problem_domains:
 	}
 }
 
+func TestValidateContentRunDefaultsValid(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "flows/oauth2/dpop-run-default.md", `---
+id: dpop-run-default
+name: DPoP-preset flow
+protocol: oauth2
+use_cases:
+  - service-to-service-auth
+actors:
+  - authorization-server
+problem_domains:
+  - authorization
+runnable: true
+backend_id: dpop_run_default
+run_defaults:
+  client_auth: private_key_jwt
+  token_mode: dpop
+---
+`)
+	_, _, _, issues, err := ValidateContent(dir)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if containsIssue(issues, "flows/oauth2/dpop-run-default.md", "run_defaults") {
+		t.Fatalf("expected no run_defaults issue, got: %v", issues)
+	}
+}
+
+func TestValidateContentRunDefaultsRejectsUnknownValues(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "flows/oauth2/bad-run-default.md", `---
+id: bad-run-default
+name: Bad run default
+protocol: oauth2
+use_cases:
+  - service-to-service-auth
+actors:
+  - authorization-server
+problem_domains:
+  - authorization
+runnable: true
+backend_id: bad_run_default
+run_defaults:
+  client_auth: shared-secret
+  token_mode: mac
+---
+`)
+	_, _, _, issues, err := ValidateContent(dir)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "flows/oauth2/bad-run-default.md", "run_defaults.client_auth \"shared-secret\"") {
+		t.Fatalf("expected client_auth issue, got: %v", issues)
+	}
+	if !containsIssue(issues, "flows/oauth2/bad-run-default.md", "run_defaults.token_mode \"mac\"") {
+		t.Fatalf("expected token_mode issue, got: %v", issues)
+	}
+}
+
+func TestValidateContentRunDefaultsRejectedOnNonRunnableFlow(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "flows/oauth2/non-runnable-run-default.md", `---
+id: non-runnable-run-default
+name: Non-runnable with run_defaults
+protocol: oauth2
+use_cases:
+  - service-to-service-auth
+actors:
+  - authorization-server
+problem_domains:
+  - authorization
+runnable: false
+run_defaults:
+  token_mode: dpop
+---
+`)
+	_, _, _, issues, err := ValidateContent(dir)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "flows/oauth2/non-runnable-run-default.md", "run_defaults is set but the flow is not runnable") {
+		t.Fatalf("expected non-runnable issue, got: %v", issues)
+	}
+}
+
+func TestValidateContentRunDefaultsRejectedOnNonFlowArtefact(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "concepts/run-default-on-concept.md", `---
+id: run-default-on-concept
+name: run_defaults on a concept
+use_cases:
+  - user-login-via-own-idp
+actors:
+  - public-client
+problem_domains:
+  - authorization
+run_defaults:
+  token_mode: dpop
+---
+`)
+	_, _, _, issues, err := ValidateContent(dir)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "concepts/run-default-on-concept.md", "run_defaults is only valid on flow artefacts") {
+		t.Fatalf("expected flow-only issue, got: %v", issues)
+	}
+}
+
 func containsIssue(issues []Issue, path, needle string) bool {
 	for _, i := range issues {
 		if i.Path == path && strings.Contains(i.Message, needle) {

@@ -188,6 +188,15 @@ Client authentication at the OAuth 2.0 token endpoint supports
 \`refresh_token\`, and \`client_credentials\`. PKCE is supported with \`S256\`
 and required for public clients.
 
+The token endpoint also accepts an optional \`DPoP\` proof header (RFC 9449).
+When present and valid, the issued access token is bound to the proof's key
+via a \`cnf.jkt\` claim and \`token_type\` becomes \`DPoP\` instead of
+\`Bearer\`; a public client's refresh token issued alongside it is bound the
+same way. Absent that header, every flow behaves exactly as if DPoP did not
+exist. The OID4VCI token endpoint (\`/oid4vci/token\`) accepts the same
+header and binds its own issued access token identically, though it never
+issues a refresh token.
+
 ## Sandbox notice
 
 Every token, credential, and user record here is issued by a mock identity
