@@ -23,6 +23,8 @@ import {
   useLookingGlassSession,
   ProtocolSelector,
   RealFlowPanel,
+  type ClientCredentialsAccessTokenMode,
+  type ClientCredentialsAuthMethod,
   type LookingGlassProtocol,
   type LookingGlassFlow,
 } from '../lookingglass'
@@ -123,7 +125,8 @@ export function LookingGlass() {
   const [refreshTokenInput, setRefreshTokenInput] = useState('')
   const [storedRefreshToken, setStoredRefreshToken] = useState<string | null>(null)
   const [storedAccessToken, setStoredAccessToken] = useState<string | null>(null)
-  const [clientCredentialsAuthMethod, setClientCredentialsAuthMethod] = useState<'client_secret_basic' | 'private_key_jwt'>('client_secret_basic')
+  const [clientCredentialsAuthMethod, setClientCredentialsAuthMethod] = useState<ClientCredentialsAuthMethod>('client_secret_basic')
+  const [clientCredentialsAccessTokenMode, setClientCredentialsAccessTokenMode] = useState<ClientCredentialsAccessTokenMode>('bearer')
   // Token input for introspection/revocation/userinfo flows
   const [tokenInput, setTokenInput] = useState('')
   const [scimBearerToken, setScimBearerToken] = useState('')
@@ -188,8 +191,10 @@ export function LookingGlass() {
   }, [selectedProtocol?.id, scimBearerToken])
 
   const scopes = useMemo(() => {
-    // Client credentials flow uses machine-client scopes (api:read, api:write)
-    if (selectedFlow?.id?.toLowerCase().replace(/_/g, '-') === 'client-credentials') {
+    // Client Credentials uses machine-client scopes regardless of the
+    // independently selected authentication and access-token modes.
+    const normalizedId = selectedFlow?.id?.toLowerCase().replace(/_/g, '-')
+    if (normalizedId === 'client-credentials') {
       return ['api:read', 'api:write']
     }
     return selectedProtocol?.id === 'oidc' 
@@ -255,10 +260,12 @@ export function LookingGlass() {
   const activeToken = tokenInput || storedAccessToken || ''
 
   const [machineClientSecret, setMachineClientSecret] = useState<string | null>(null)
+  const [machineTokenEndpoint, setMachineTokenEndpoint] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isClientCredentialsFlow || clientCredentialsAuthMethod !== 'client_secret_basic') {
       setMachineClientSecret(null)
+      setMachineTokenEndpoint(null)
       return
     }
 
@@ -275,10 +282,16 @@ export function LookingGlass() {
         const clients = Array.isArray(data?.clients) ? data.clients : []
         const machineClient = clients.find((client: { id?: string }) => client?.id === 'machine-client')
         setMachineClientSecret(machineClient?.secret || null)
+        setMachineTokenEndpoint(
+          typeof data?.token_endpoint === 'string' && data.token_endpoint.length > 0
+            ? data.token_endpoint
+            : null,
+        )
       })
       .catch(() => {
         if (!cancelled) {
           setMachineClientSecret(null)
+          setMachineTokenEndpoint(null)
         }
       })
 
@@ -356,6 +369,8 @@ export function LookingGlass() {
     clientId: clientConfig.clientId,
     clientSecret: clientConfig.clientSecret,
     clientCredentialsAuthMethod: isClientCredentialsFlow ? clientCredentialsAuthMethod : undefined,
+    clientCredentialsAccessTokenMode: isClientCredentialsFlow ? clientCredentialsAccessTokenMode : undefined,
+    clientCredentialsTokenEndpoint: isClientCredentialsFlow ? machineTokenEndpoint || undefined : undefined,
     redirectUri: `${window.location.origin}/callback`,
     scopes,
     refreshToken: isRefreshTokenFlow ? activeRefreshToken : undefined,
@@ -897,6 +912,34 @@ export function LookingGlass() {
     router.replace(pathname || '/looking-glass', { scroll: false })
   }, [router, pathname])
 
+  const resetClientCredentialsCapture = useCallback(() => {
+    resetFlow()
+    setWireSessionId(null)
+    setWireSessionToken(null)
+    clearWireEvents()
+    setWireSessionError(null)
+    setPendingExecute(false)
+    setInspectedToken('')
+  }, [resetFlow, clearWireEvents])
+
+  const handleClientCredentialsAuthMethodChange = useCallback(
+    (method: ClientCredentialsAuthMethod) => {
+      if (method === clientCredentialsAuthMethod) return
+      resetClientCredentialsCapture()
+      setClientCredentialsAuthMethod(method)
+    },
+    [clientCredentialsAuthMethod, resetClientCredentialsCapture],
+  )
+
+  const handleClientCredentialsAccessTokenModeChange = useCallback(
+    (mode: ClientCredentialsAccessTokenMode) => {
+      if (mode === clientCredentialsAccessTokenMode) return
+      resetClientCredentialsCapture()
+      setClientCredentialsAccessTokenMode(mode)
+    },
+    [clientCredentialsAccessTokenMode, resetClientCredentialsCapture],
+  )
+
   const handleClearAll = useCallback(() => {
     setSelectedProtocol(null)
     setSelectedFlow(null)
@@ -909,6 +952,8 @@ export function LookingGlass() {
     setInspectedToken('')
     setStoredRefreshToken(null)
     setStoredAccessToken(null)
+    setClientCredentialsAuthMethod('client_secret_basic')
+    setClientCredentialsAccessTokenMode('bearer')
     setRefreshTokenInput('')
     setTokenInput('')
     setScimBearerToken('')
@@ -1056,6 +1101,19 @@ export function LookingGlass() {
       setOID4VPWalletSubmitError(message)
       return
     }
+    // Client Credentials private-key registration is intentionally one-shot
+    // per owned Looking Glass session. Start every execution in a fresh
+    // session so reruns and all four auth/token-mode combinations remain
+    // isolated and reproducible without weakening that registration guard.
+    if (isClientCredentialsFlow) {
+      resetClientCredentialsCapture()
+      setPendingExecute(true)
+      const created = await startWireSession()
+      if (!created) {
+        setPendingExecute(false)
+      }
+      return
+    }
     if (!wireSessionId) {
       setPendingExecute(true)
       const created = await startWireSession()
@@ -1070,7 +1128,9 @@ export function LookingGlass() {
     canExecuteOID4VPRequest,
     oid4vpDCQLValidationError,
     oid4vpScopeAliasValidationError,
+    isClientCredentialsFlow,
     wireSessionId,
+    resetClientCredentialsCapture,
     startWireSession,
     executeFlow,
   ])
@@ -1125,9 +1185,21 @@ export function LookingGlass() {
     if (protocolsLoading || protocols.length === 0) return
     const pair = parseFlowDeepLink(searchParams)
     if (!pair) return
-    const key = `${pair.protocolId}\u0000${pair.flowId}`
+    const key = [
+      pair.protocolId,
+      pair.flowId,
+      pair.clientAuth || '',
+      pair.accessTokenMode || '',
+    ].join('\u0000')
     if (lastHandledPairRef.current === key) return
     lastHandledPairRef.current = key
+    if (
+      pair.protocolId === 'oauth2' &&
+      pair.flowId.toLowerCase().replace(/_/g, '-') === 'client-credentials'
+    ) {
+      setClientCredentialsAuthMethod(pair.clientAuth || 'client_secret_basic')
+      setClientCredentialsAccessTokenMode(pair.accessTokenMode || 'bearer')
+    }
     handleQuickSelect(pair.protocolId, pair.flowId)
 
     // Consume-and-clear: strip the deep-link params so they don't
@@ -1140,13 +1212,21 @@ export function LookingGlass() {
     const deepLink = buildLookingGlassPath({
       protocolId: selectedProtocol.id,
       flowId: selectedFlow.id,
+      clientAuth: isClientCredentialsFlow ? clientCredentialsAuthMethod : undefined,
+      accessTokenMode: isClientCredentialsFlow ? clientCredentialsAccessTokenMode : undefined,
     })
     const url = `${window.location.origin}${deepLink}`
     navigator.clipboard.writeText(url).then(() => {
       setShareCopied(true)
       setTimeout(() => setShareCopied(false), 1500)
     })
-  }, [selectedProtocol, selectedFlow])
+  }, [
+    selectedProtocol,
+    selectedFlow,
+    isClientCredentialsFlow,
+    clientCredentialsAuthMethod,
+    clientCredentialsAccessTokenMode,
+  ])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
   const quickStartFlows = [
@@ -1337,23 +1417,25 @@ export function LookingGlass() {
               <span className="text-xs sm:text-sm font-medium text-surface-300">Client authentication</span>
             </div>
             <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-              Compare a shared client secret with RFC 7523 public/private-key authentication.
+              Choose how the confidential client authenticates to the token endpoint.
             </p>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setClientCredentialsAuthMethod('client_secret_basic')}
+                onClick={() => handleClientCredentialsAuthMethodChange('client_secret_basic')}
+                aria-pressed={clientCredentialsAuthMethod === 'client_secret_basic'}
                 className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
                   clientCredentialsAuthMethod === 'client_secret_basic'
                     ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
                     : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
                 }`}
               >
-                client_secret
+                client_secret_basic
               </button>
               <button
                 type="button"
-                onClick={() => setClientCredentialsAuthMethod('private_key_jwt')}
+                onClick={() => handleClientCredentialsAuthMethodChange('private_key_jwt')}
+                aria-pressed={clientCredentialsAuthMethod === 'private_key_jwt'}
                 className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
                   clientCredentialsAuthMethod === 'private_key_jwt'
                     ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
@@ -1368,6 +1450,47 @@ export function LookingGlass() {
                 ? 'A non-extractable WebCrypto private key signs the assertion in this browser. An owned session registration assigns the real client ID after its public JWK is accepted.'
                 : 'The demo client authenticates with an HTTP Basic client secret.'}
             </p>
+
+            <div className="mt-4 pt-4 border-t border-white/10">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+                <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                <span className="text-xs sm:text-sm font-medium text-surface-300">Access-token protection</span>
+              </div>
+              <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+                Choose whether the issued access token is a regular Bearer token or sender-constrained with DPoP.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleClientCredentialsAccessTokenModeChange('bearer')}
+                  aria-pressed={clientCredentialsAccessTokenMode === 'bearer'}
+                  className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
+                    clientCredentialsAccessTokenMode === 'bearer'
+                      ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
+                      : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
+                  }`}
+                >
+                  Bearer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleClientCredentialsAccessTokenModeChange('dpop')}
+                  aria-pressed={clientCredentialsAccessTokenMode === 'dpop'}
+                  className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
+                    clientCredentialsAccessTokenMode === 'dpop'
+                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
+                      : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
+                  }`}
+                >
+                  DPoP
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+                {clientCredentialsAccessTokenMode === 'dpop'
+                  ? 'A separate non-extractable ES256 key signs a fresh RFC 9449 proof. The resulting token carries cnf.jkt and is returned with token_type=DPoP.'
+                  : 'No DPoP proof is sent. The authorization server returns the standard token_type=Bearer response.'}
+              </p>
+            </div>
           </motion.div>
         )}
 

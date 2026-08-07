@@ -23,8 +23,7 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 |---------|------|-------------|
 | `authorization_code` | Authorization Code | Standard redirect-based authorization |
 | `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
-| `client_credentials` | Client Credentials | Machine-to-machine token issuance |
-| `client_credentials_dpop` | Client Credentials (DPoP) | Same grant with a sender-constrained, DPoP-bound access token (RFC 9449) |
+| `client_credentials` | Client Credentials | Machine-to-machine issuance with independent selectors for `client_secret_basic` or `private_key_jwt` authentication and Bearer or DPoP access-token protection |
 | `refresh_token` | Refresh Token | Token renewal without re-authorization |
 | `token_introspection` | Token Introspection | Validate and inspect active tokens (RFC 7662) |
 | `token_revocation` | Token Revocation | Invalidate tokens (RFC 7009) |
@@ -36,7 +35,7 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 
 - **Authorization Code Flow Demo** -- Complete redirect flow with consent
 - **PKCE Flow Demo** -- PKCE challenge/verifier exchange
-- **Client Credentials Demo** -- Toggle between a shared secret and browser-held `private_key_jwt`
+- **Client Credentials Demo** -- Independently select shared-secret or browser-held `private_key_jwt` authentication and Bearer or DPoP token protection
 - **Token Refresh Demo** -- Refresh grant with token rotation
 
 ## Endpoints
@@ -147,10 +146,12 @@ Bearer flow is unchanged -- DPoP is opt-in, never mandatory, on this endpoint.
 - The RFC 8414 metadata endpoint lists the accepted DPoP proof algorithms
   under `dpop_signing_alg_values_supported` (RFC 9449 Section 5.1).
 
-Run the **Client Credentials (DPoP)** flow in Looking Glass to see a real
-browser-generated ES256 key produce a proof, and the resulting bound token
-rendered distinctly (amber, lock icon) from a plain Bearer token in the token
-inspector.
+Run the **Client Credentials** flow in Looking Glass and select **DPoP** under
+**Access-token protection** to see a real browser-generated ES256 key produce a
+proof. The resulting bound token is rendered distinctly (amber, lock icon) from
+a plain Bearer token in the token inspector. Client authentication is a separate
+selector, so all four real combinations of `client_secret_basic` or
+`private_key_jwt` with Bearer or DPoP can be inspected without switching flows.
 
 RFC 8414 requires an HTTPS issuer. Because protocol routes are mounted at the
 origin root, `SHOWCASE_BASE_URL` must be a pathless HTTPS origin in production

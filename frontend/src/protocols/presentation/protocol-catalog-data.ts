@@ -59,21 +59,12 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         id: 'client-credentials',
         backendId: 'client_credentials',
         name: 'Client Credentials',
-        rfc: '§4.4',
+        rfc: 'RFC 6749 §4.4 + RFC 9449',
         references: [
           { category: 'core', label: 'RFC 6749 §4.4 — Client Credentials Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.4' },
           { category: 'core', label: 'RFC 7523 §2.2 — JWT Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc7523#section-2.2' },
-          { category: 'security', label: 'RFC 9700 §2.5 — Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.5' },
-        ],
-      },
-      {
-        id: 'client-credentials-dpop',
-        backendId: 'client_credentials_dpop',
-        name: 'Client Credentials + DPoP',
-        rfc: 'RFC 9449',
-        references: [
-          { category: 'core', label: 'RFC 6749 §4.4 — Client Credentials Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.4' },
           { category: 'core', label: 'RFC 9449 — Demonstrating Proof of Possession (DPoP)', href: 'https://datatracker.ietf.org/doc/html/rfc9449' },
+          { category: 'security', label: 'RFC 9700 §2.5 — Client Authentication', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.5' },
           { category: 'security', label: 'RFC 9449 §11 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc9449#section-11' },
         ],
       },

@@ -25,6 +25,7 @@ export {
 export { AuthorizationCodeExecutor, type AuthorizationCodeConfig } from './authorization-code'
 export {
   ClientCredentialsExecutor,
+  type ClientCredentialsAccessTokenMode,
   type ClientCredentialsAuthMethod,
   type ClientCredentialsConfig,
 } from './client-credentials'

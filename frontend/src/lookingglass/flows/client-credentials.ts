@@ -24,10 +24,13 @@ import {
 } from '../../utils/crypto'
 
 export type ClientCredentialsAuthMethod = 'client_secret_basic' | 'private_key_jwt'
+export type ClientCredentialsAccessTokenMode = 'bearer' | 'dpop'
 
 export interface ClientCredentialsConfig extends FlowExecutorConfig {
   clientSecret?: string
   clientAuthMethod?: ClientCredentialsAuthMethod
+  /** Canonical absolute AS token endpoint used for DPoP htu binding. */
+  tokenEndpoint?: string
   /**
    * Bind the issued access token to a client-held ES256 key via a DPoP
    * proof (RFC 9449), instead of leaving it an unconstrained Bearer token.
@@ -35,7 +38,7 @@ export interface ClientCredentialsConfig extends FlowExecutorConfig {
    * to the *token*, client_secret_basic/private_key_jwt authenticate the
    * *client* -- both can be used together on the same request.
    */
-  useDpop?: boolean
+  accessTokenMode?: ClientCredentialsAccessTokenMode
 }
 
 interface PrivateKeyJWTRegistration {
@@ -45,8 +48,8 @@ interface PrivateKeyJWTRegistration {
 
 export class ClientCredentialsExecutor extends FlowExecutorBase {
   readonly flowType = 'client_credentials'
-  readonly flowName = 'Client Credentials Grant'
-  readonly rfcReference = 'RFC 6749 Section 4.4'
+  readonly flowName: string
+  readonly rfcReference: string
 
   private flowConfig: ClientCredentialsConfig
   private signingMaterialPromise?: Promise<RS256SigningMaterial>
@@ -55,11 +58,18 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
   constructor(config: ClientCredentialsConfig) {
     super(config)
     this.flowConfig = config
-
+    const usesDPoP = config.accessTokenMode === 'dpop'
+    this.flowName = usesDPoP
+      ? 'Client Credentials Grant with DPoP'
+      : 'Client Credentials Grant'
+    this.rfcReference = usesDPoP
+      ? 'RFC 6749 Section 4.4 + RFC 9449'
+      : 'RFC 6749 Section 4.4'
   }
 
   async execute(): Promise<void> {
     const authMethod = this.flowConfig.clientAuthMethod || 'client_secret_basic'
+    const accessTokenMode = this.flowConfig.accessTokenMode || 'bearer'
     if (authMethod === 'client_secret_basic' && !this.flowConfig.clientSecret) {
       this.updateState({
         status: 'error',
@@ -96,6 +106,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
           : this.config.clientId,
         scopes: this.config.scopes,
         clientAuthenticationMethod: authMethod,
+        accessTokenMode,
         note: 'This flow is for confidential clients only',
       },
     })
@@ -109,6 +120,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
         useCase: 'Machine-to-machine, backend services, APIs',
         noUserInvolved: true,
         clientAuthenticationMethod: authMethod,
+        accessTokenMode,
       },
     })
 
@@ -147,6 +159,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
 
   private async requestToken(): Promise<void> {
     const authMethod = this.flowConfig.clientAuthMethod || 'client_secret_basic'
+    const accessTokenMode = this.flowConfig.accessTokenMode || 'bearer'
     this.addEvent({
       type: 'rfc',
       title: 'RFC 6749 Section 4.4.2',
@@ -155,6 +168,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       data: {
         grant_type: 'client_credentials',
         authentication: authMethod,
+        accessTokenMode,
       },
     })
 
@@ -232,15 +246,24 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       })
     }
 
-    const tokenEndpoint = `${this.config.baseUrl}/token`
+    const tokenRequestURL = `${this.config.baseUrl}/token`
     let dpopProof: string | undefined
-    if (this.flowConfig.useDpop) {
-      dpopProof = await this.attachDpopProof(headers, tokenEndpoint)
+    if (accessTokenMode === 'dpop') {
+      // RFC 9449 Section 4.2 requires htu to be an absolute URI. The
+      // browser sends the HTTP request through the same-origin Next.js
+      // proxy, but the proof binds to the authorization server's canonical
+      // endpoint returned by the backend. For private_key_jwt, registration
+      // returns that same endpoint as the assertion audience.
+      const proofTarget = acceptedAssertion?.tokenEndpoint || this.flowConfig.tokenEndpoint
+      if (!proofTarget) {
+        throw new Error('DPoP requires the authorization server canonical token endpoint')
+      }
+      dpopProof = await this.attachDpopProof(headers, proofTarget)
     }
 
     let { response, data } = await this.makeRequest(
       'POST',
-      tokenEndpoint,
+      tokenRequestURL,
       {
         headers,
         body,
@@ -270,10 +293,14 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
             nonce: serverNonce,
           },
         })
-        dpopProof = await this.attachDpopProof(headers, tokenEndpoint, serverNonce)
+        const proofTarget = acceptedAssertion?.tokenEndpoint || this.flowConfig.tokenEndpoint
+        if (!proofTarget) {
+          throw new Error('DPoP nonce retry requires the authorization server canonical token endpoint')
+        }
+        dpopProof = await this.attachDpopProof(headers, proofTarget, serverNonce)
         ;({ response, data } = await this.makeRequest(
           'POST',
-          tokenEndpoint,
+          tokenRequestURL,
           {
             headers,
             body,
@@ -364,23 +391,36 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       },
     })
 
-    this.processTokenResponse(data as Record<string, unknown>)
-
-    if (dpopProof) {
-      const responseBody = data as Record<string, unknown>
-      const boundTokenType = responseBody.token_type === 'DPoP'
+    const responseBody = data as Record<string, unknown>
+    if (dpopProof && responseBody.token_type !== 'DPoP') {
       this.addEvent({
-        type: 'security',
-        title: boundTokenType ? 'Access Token Sender-Constrained (DPoP)' : 'DPoP Proof Sent, Token Not Bound',
-        description: boundTokenType
-          ? 'The authorization server bound the access token to this proof\'s key via cnf.jkt and returned token_type=DPoP. Presenting this token without a matching proof will be rejected.'
-          : 'The authorization server issued a plain Bearer token despite the DPoP proof -- DPoP is opt-in per endpoint (RFC 9449), so this can happen if the endpoint has not enabled it.',
-        rfcReference: 'RFC 9449 Section 4 & Section 5',
+        type: 'error',
+        title: 'DPoP Protection Not Granted',
+        description: 'The client explicitly requested DPoP protection, but the authorization server did not return token_type=DPoP. The response is discarded rather than treating the access token as a Bearer token.',
+        rfcReference: 'RFC 9449 Section 5',
         data: {
           from: 'Authorization Server',
           to: 'Client',
           token_type: responseBody.token_type,
-          dpopBound: boundTokenType,
+          discarded: true,
+        },
+      })
+      throw new Error('Authorization server did not return the requested DPoP-bound access token')
+    }
+
+    this.processTokenResponse(responseBody)
+
+    if (dpopProof) {
+      this.addEvent({
+        type: 'security',
+        title: 'Access Token Sender-Constrained (DPoP)',
+        description: 'The authorization server bound the access token to this proof\'s key via cnf.jkt and returned token_type=DPoP. Presenting this token without a matching proof will be rejected.',
+        rfcReference: 'RFC 9449 Sections 5 and 7',
+        data: {
+          from: 'Authorization Server',
+          to: 'Client',
+          token_type: responseBody.token_type,
+          dpopBound: true,
         },
       })
     }

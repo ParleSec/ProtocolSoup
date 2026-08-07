@@ -4,7 +4,10 @@
  * by a navigation to the Looking Glass page with the flow pre-selected;
  * the Looking Glass page wires the rest of the dispatch.
  *
- * The Looking Glass deep-link contract is `?protocol=X&flow=Y`. The
+ * The Looking Glass deep-link contract starts with `?protocol=X&flow=Y`.
+ * Flow-specific selectors may add optional parameters; Client Credentials
+ * uses `client_auth` and `token_mode` so shared demonstrations reproduce
+ * both independent choices. The
  * backend's runURLFor (backend/internal/palette/rank.go) emits exactly
  * this shape on PaletteResult.run_url. Both the palette handoff and the
  * `/looking-glass` page parse it through `parseFlowDeepLink` below so the
@@ -16,6 +19,10 @@ import type { PaletteResult } from './types'
 export interface FlowDeepLink {
   protocolId: string
   flowId: string
+  /** Optional Client Credentials authentication selection. */
+  clientAuth?: 'client_secret_basic' | 'private_key_jwt'
+  /** Optional Client Credentials access-token protection selection. */
+  accessTokenMode?: 'bearer' | 'dpop'
 }
 
 export interface FlowRunHandoff extends FlowDeepLink {
@@ -33,10 +40,10 @@ export interface ReadableSearchParams {
 }
 
 /**
- * parseFlowDeepLink reads `?protocol=X&flow=Y` from a search-params
- * surface and returns the pair, or null when either parameter is missing
- * or empty. Trimming + empty-string rejection is centralised here so
- * callers don't accidentally treat `?protocol=&flow=` as a valid deep-link.
+ * parseFlowDeepLink reads the required `?protocol=X&flow=Y` pair plus
+ * recognized optional flow configuration. Unknown selector values are
+ * ignored so a malformed optional parameter cannot create an unsupported
+ * executor configuration.
  */
 export function parseFlowDeepLink(params: ReadableSearchParams): FlowDeepLink | null {
   const protocolId = (params.get('protocol') ?? '').trim()
@@ -44,7 +51,15 @@ export function parseFlowDeepLink(params: ReadableSearchParams): FlowDeepLink | 
   if (!protocolId || !flowId) {
     return null
   }
-  return { protocolId, flowId }
+  const clientAuthValue = (params.get('client_auth') ?? '').trim()
+  const tokenModeValue = (params.get('token_mode') ?? '').trim()
+  const clientAuth = clientAuthValue === 'client_secret_basic' || clientAuthValue === 'private_key_jwt'
+    ? clientAuthValue
+    : undefined
+  const accessTokenMode = tokenModeValue === 'bearer' || tokenModeValue === 'dpop'
+    ? tokenModeValue
+    : undefined
+  return { protocolId, flowId, clientAuth, accessTokenMode }
 }
 
 /**
@@ -77,11 +92,23 @@ export function resolveFlowHandoff(result: PaletteResult): FlowRunHandoff | null
 
 /**
  * buildLookingGlassPath constructs the canonical deep-link path for a
- * (protocol, flow) pair. Exported so callers that already have the pair
- * (e.g. tests, alternative entry points) can produce a consistent URL.
+ * flow selection and any recognized reproducibility options. Exported so
+ * callers that already have the selection can produce a consistent URL.
  */
-export function buildLookingGlassPath({ protocolId, flowId }: FlowDeepLink): string {
-  return `/looking-glass?protocol=${encodeURIComponent(protocolId)}&flow=${encodeURIComponent(flowId)}`
+export function buildLookingGlassPath({
+  protocolId,
+  flowId,
+  clientAuth,
+  accessTokenMode,
+}: FlowDeepLink): string {
+  const params = new URLSearchParams({ protocol: protocolId, flow: flowId })
+  if (clientAuth) {
+    params.set('client_auth', clientAuth)
+  }
+  if (accessTokenMode) {
+    params.set('token_mode', accessTokenMode)
+  }
+  return `/looking-glass?${params.toString()}`
 }
 
 /**

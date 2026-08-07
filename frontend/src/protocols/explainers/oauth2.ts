@@ -703,8 +703,10 @@ export const OAUTH2_EXPLAINERS: Record<string, ParameterExplainer> = {
           'per-client key pair, so a stolen token is unusable without the ' +
           'matching private key. This platform implements DPoP binding on ' +
           'the token endpoint (opt-in per request via a `DPoP` proof ' +
-          'header) — run the "Client Credentials (DPoP)" flow in Looking ' +
-          'Glass to see a real bound token and its `cnf.jkt` claim. Only ' +
+          'header) — run the "Client Credentials" flow in Looking Glass and ' +
+          'select DPoP under access-token protection to see a real bound ' +
+          'token and its `cnf.jkt` claim. Client authentication remains an ' +
+          'independent selector. Only ' +
           'JWT access tokens can be bound this way; opaque/reference token ' +
           'binding is a separate mechanism this platform does not ' +
           'implement.',

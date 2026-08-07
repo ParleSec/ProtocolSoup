@@ -14,6 +14,7 @@ import (
 
 	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
+	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -794,5 +795,60 @@ func TestTokenEndpointDPoPProofHTUMismatchRejected(t *testing.T) {
 	status, body := postTokenRequest(t, server.server.URL, form, proof)
 	if status != http.StatusBadRequest || body["error"] != dpop.ErrorInvalidDPoPProof {
 		t.Fatalf("status = %d, body = %#v, want 400 %s", status, body, dpop.ErrorInvalidDPoPProof)
+	}
+}
+
+func TestClientCredentialsFlowDefinitionCombinesBearerAndDPoP(t *testing.T) {
+	flows := NewPlugin().GetFlowDefinitions()
+	var clientCredentials *plugin.FlowDefinition
+	for i := range flows {
+		switch flows[i].ID {
+		case "client_credentials":
+			clientCredentials = &flows[i]
+		case "client_credentials_dpop":
+			t.Fatal("client_credentials_dpop must not be exposed as a duplicate selectable flow")
+		}
+	}
+	if clientCredentials == nil {
+		t.Fatal("client_credentials flow definition is missing")
+	}
+
+	serialized, err := json.Marshal(clientCredentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := string(serialized)
+	for _, required := range []string{
+		"client_secret_basic",
+		"private_key_jwt",
+		"Bearer",
+		"DPoP",
+		"cnf.jkt",
+		"RFC 9449",
+	} {
+		if !strings.Contains(definition, required) {
+			t.Fatalf("combined client_credentials definition does not describe %q", required)
+		}
+	}
+}
+
+func TestDemoClientsPublishesCanonicalTokenEndpointForDPoP(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	response, err := http.Get(server.server.URL + "/oauth2/demo/clients")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+
+	var body map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	want := server.server.URL + "/oauth2/token"
+	if got, _ := body["token_endpoint"].(string); got != want {
+		t.Fatalf("token_endpoint = %q, want %q", got, want)
 	}
 }

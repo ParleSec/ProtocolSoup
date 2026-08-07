@@ -9,6 +9,7 @@ import type { FlowExecutorBase, FlowExecutorConfig } from './base'
 import { AuthorizationCodeExecutor } from './authorization-code'
 import {
   ClientCredentialsExecutor,
+  type ClientCredentialsAccessTokenMode,
   type ClientCredentialsAuthMethod,
   type ClientCredentialsConfig,
 } from './client-credentials'
@@ -81,16 +82,9 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
   },
   'client-credentials': {
     executorClass: ClientCredentialsExecutor,
-    description: 'Machine-to-machine authentication',
+    description: 'Machine-to-machine authentication with independently selectable client authentication and Bearer or DPoP access-token protection',
     rfcReference: 'RFC 6749 Section 4.4',
     requiresUserInteraction: false,
-  },
-  'client-credentials-dpop': {
-    executorClass: ClientCredentialsExecutor,
-    description: 'Machine-to-machine authentication with a DPoP-bound access token',
-    rfcReference: 'RFC 6749 Section 4.4 + RFC 9449',
-    requiresUserInteraction: false,
-    additionalConfig: { useDpop: true },
   },
   'implicit': {
     executorClass: ImplicitExecutor,
@@ -376,6 +370,10 @@ export interface ExecutorFactoryConfig {
   clientSecret?: string
   /** Client authentication method for the client_credentials flow */
   clientCredentialsAuthMethod?: ClientCredentialsAuthMethod
+  /** Access-token protection selected for the client_credentials flow */
+  clientCredentialsAccessTokenMode?: ClientCredentialsAccessTokenMode
+  /** Canonical absolute AS token endpoint used for DPoP htu binding */
+  clientCredentialsTokenEndpoint?: string
   /** Redirect URI */
   redirectUri?: string
   /** Scopes to request */
@@ -473,10 +471,14 @@ export function createFlowExecutor(
     (fullConfig as ResourceOwnerConfig).password = config.password
   }
 
-  if (flowId === 'client-credentials' || flowId === 'client-credentials-dpop') {
+  if (flowId === 'client-credentials') {
     (fullConfig as ClientCredentialsConfig).clientSecret = config.clientSecret
     ;(fullConfig as ClientCredentialsConfig).clientAuthMethod =
       config.clientCredentialsAuthMethod || 'client_secret_basic'
+    ;(fullConfig as ClientCredentialsConfig).accessTokenMode =
+      config.clientCredentialsAccessTokenMode || 'bearer'
+    ;(fullConfig as ClientCredentialsConfig).tokenEndpoint =
+      config.clientCredentialsTokenEndpoint
   }
 
   // Handle Interaction Code flow
