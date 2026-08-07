@@ -59,6 +59,24 @@ func TestAuthorizationServerMetadataDiscoverable(t *testing.T) {
 			t.Fatalf("attest_jwt_client_auth must not be advertised without a configured trust anchor")
 		}
 	}
+
+	// RFC 9449 Section 5.1: a wallet discovering DPoP support via this
+	// issuer's own RFC 8414 metadata must see the accepted proof algorithms.
+	dpopAlgs, ok := payload["dpop_signing_alg_values_supported"].([]interface{})
+	if !ok {
+		t.Fatalf("expected dpop_signing_alg_values_supported array, got %#v", payload["dpop_signing_alg_values_supported"])
+	}
+	for _, want := range []string{"RS256", "ES256", "EdDSA"} {
+		found := false
+		for _, got := range dpopAlgs {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("dpop_signing_alg_values_supported = %v, missing %q", dpopAlgs, want)
+		}
+	}
 }
 
 func TestAuthorizationServerMetadataAdvertisesAttestationWhenConfigured(t *testing.T) {

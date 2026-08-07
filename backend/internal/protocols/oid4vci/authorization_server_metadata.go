@@ -3,6 +3,7 @@ package oid4vci
 import (
 	"net/http"
 
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
@@ -45,6 +46,14 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": tokenEndpointAuthMethods,
+		// RFC 9449 Section 5.1: signals DPoP support and the acceptable
+		// proof JWS algorithms at this issuer's own token endpoint. DPoP is
+		// opt-in per request (no separate on/off switch to reflect here);
+		// this only advertises which algorithms a proof may use. Matches
+		// the oauth2 plugin's equivalent field so a wallet that discovers
+		// DPoP support via either issuer's RFC 8414 metadata sees the same
+		// accepted algorithms.
+		"dpop_signing_alg_values_supported": dpop.AllowedAlgorithmsList,
 	}
 
 	p.emitEvent(
