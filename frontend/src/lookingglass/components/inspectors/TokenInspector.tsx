@@ -263,7 +263,16 @@ export function TokenInspector({ token, tokenType }: TokenInspectorProps) {
         </div>
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
           {tokenType && (
-            <span className="px-2 sm:px-3 py-1 rounded-full bg-indigo-500/20 text-xs font-medium text-indigo-300">
+            // DPoP (RFC 9449) is sender-constrained -- a stolen token is
+            // useless without the matching private key -- while Bearer
+            // (RFC 6750) is not. That distinction must be visible at a
+            // glance, not just present as differing text in the same pill.
+            <span className={`flex items-center gap-1 px-2 sm:px-3 py-1 rounded-full text-xs font-medium ${
+              tokenType.toLowerCase() === 'dpop'
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-indigo-500/20 text-indigo-300'
+            }`}>
+              {tokenType.toLowerCase() === 'dpop' && <Lock className="w-3 h-3" />}
               {tokenType}
             </span>
           )}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
@@ -26,7 +27,18 @@ type Plugin struct {
 	loginRequestTTL       time.Duration
 	clientKeyResolver     *clientJWKSResolver
 	clientAssertionReplay clientAssertionReplayStore
-	now                   func() time.Time
+	// dpopReplay tracks DPoP proof jti values (RFC 9449 Section 11.1),
+	// scoped by jkt rather than by client -- a DPoP proof is bound to a
+	// key, not a registered client. Distinct store instance and Redis key
+	// prefix from clientAssertionReplay so the two replay spaces cannot
+	// collide.
+	dpopReplay dpop.ReplayStore
+	// dpopNonceIssuer, when non-nil, puts the RFC 9449 Section 8
+	// server-provided nonce challenge in force at the token endpoint. Nil
+	// (the default) means no behavioural change from Phase 3 -- nonces are
+	// opt-in hardening, enabled via PluginConfig.DPoPNonceRequired.
+	dpopNonceIssuer *dpop.NonceIssuer
+	now             func() time.Time
 }
 
 // NewPlugin creates a new OAuth 2.0 plugin
@@ -38,12 +50,13 @@ func NewPlugin() *Plugin {
 			Version:     "1.0.0",
 			Description: "OAuth 2.0 Authorization Framework implementation with PKCE support",
 			Tags:        []string{"authorization", "tokens", "pkce"},
-			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414"},
+			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414", "RFC 9449"},
 		}),
 		loginRequests:         make(map[string]loginRequestInfo),
 		loginRequestTTL:       10 * time.Minute,
 		clientKeyResolver:     newClientJWKSResolver(),
 		clientAssertionReplay: newMemoryClientAssertionReplayStore(),
+		dpopReplay:            dpop.NewMemoryReplayStore(),
 		now:                   time.Now,
 	}
 }
@@ -78,11 +91,28 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 			_ = p.clientAssertionReplay.Close()
 		}
 		p.clientAssertionReplay = store
+
+		dpopStore, err := dpop.NewRedisReplayStore(
+			ctx,
+			config.OAuth2ReplayRedisURL,
+			config.Environment == "production",
+		)
+		if err != nil {
+			return err
+		}
+		if p.dpopReplay != nil {
+			_ = p.dpopReplay.Close()
+		}
+		p.dpopReplay = dpopStore
 	} else {
 		environment := strings.ToLower(strings.TrimSpace(config.Environment))
 		if environment != "" && environment != "development" && environment != "test" {
 			return errors.New("OAUTH2_REPLAY_REDIS_URL is required outside development and tests")
 		}
+	}
+
+	if config.DPoPNonceRequired {
+		p.dpopNonceIssuer = dpop.NewNonceIssuer(5 * time.Minute)
 	}
 
 	go p.cleanupLoginRequests()
@@ -92,10 +122,16 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 
 // Shutdown shuts down the plugin
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	var err error
 	if p.clientAssertionReplay != nil {
-		return p.clientAssertionReplay.Close()
+		err = p.clientAssertionReplay.Close()
 	}
-	return nil
+	if p.dpopReplay != nil {
+		if closeErr := p.dpopReplay.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 // RegisterRoutes registers the plugin's HTTP routes
@@ -414,14 +450,14 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "client_credentials",
 			Name:        "Client Credentials Grant",
-			Description: "Machine-to-machine (M2M) authentication for server-side applications (RFC 6749 §4.4). The client authenticates with a secret or an RFC 7523 private_key_jwt assertion to access resources it owns. No user interaction required.",
+			Description: "Machine-to-machine (M2M) authentication for confidential clients (RFC 6749 §4.4). Client authentication (client_secret_basic or RFC 7523 private_key_jwt) and access-token protection (Bearer or RFC 9449 DPoP) are independent choices exposed in one executable flow.",
 			Executable:  true,
 			Category:    "authorization",
 			Steps: []plugin.FlowStep{
 				{
 					Order:       1,
-					Name:        "Token Request",
-					Description: "Client authenticates directly to the token endpoint using client_secret_basic or a private_key_jwt assertion. This is a confidential client flow.",
+					Name:        "Prepare Token Request",
+					Description: "The client selects client_secret_basic or private_key_jwt authentication. When DPoP protection is selected independently, it also generates a client-held ES256 key and signs a fresh proof JWT for the token endpoint (RFC 9449 §4.2).",
 					From:        "Client",
 					To:          "Authorization Server",
 					Type:        "request",
@@ -431,47 +467,53 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"client_secret":         "Client secret when client_secret_basic is selected",
 						"client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer when private_key_jwt is selected",
 						"client_assertion":      "Signed JWT when private_key_jwt is selected (RFC 7523 §2.2)",
+						"DPoP":                  "Valid DPoP proof JWT when sender-constrained access-token protection is selected (RFC 9449 §5)",
 						"scope":                 "Requested permissions (OPTIONAL)",
 					},
 					Security: []string{
 						"ONLY for confidential clients (server-side) - never SPAs/mobile",
 						"Shared secrets belong in environment variables or a vault",
 						"private_key_jwt private keys remain client-held; only signed assertions cross the boundary",
+						"The DPoP key is separate from client authentication and binds the issued token, not the client identity",
 						"Assertions are single-use and expire within 300 seconds",
+						"DPoP proof jti values are single-use and replay protected",
 						"Content-Type MUST be application/x-www-form-urlencoded",
 					},
 				},
 				{
 					Order:       2,
 					Name:        "Access Token Response",
-					Description: "Authorization Server validates client credentials and issues access token. No refresh token is issued since the client can always re-authenticate with its credentials.",
+					Description: "After authenticating the client, the Authorization Server returns a Bearer token when no DPoP proof was requested, or binds the token to the proof key via cnf.jkt and returns token_type=DPoP (RFC 9449 §5). No refresh token is issued.",
 					From:        "Authorization Server",
 					To:          "Client",
 					Type:        "response",
 					Parameters: map[string]string{
-						"access_token": "Bearer token for API access (REQUIRED)",
-						"token_type":   "Bearer (REQUIRED)",
+						"access_token": "JWT access token; includes cnf.jkt when DPoP protection was selected",
+						"token_type":   "Bearer without DPoP, or DPoP when the token is sender-constrained",
 						"expires_in":   "Token lifetime in seconds (RECOMMENDED)",
 						"scope":        "Granted scopes if different from requested",
 					},
 					Security: []string{
 						"No refresh token issued - client can re-request with credentials",
 						"Token represents client identity, not a user",
+						"A client that requires DPoP discards a response whose token_type is not DPoP",
 						"Implement token caching to avoid excessive token requests",
 					},
 				},
 				{
 					Order:       3,
 					Name:        "API Request",
-					Description: "Client uses the access token to authenticate API requests. The token represents the client application, not an end user.",
+					Description: "A Bearer token is presented normally. A DPoP-bound token instead uses Authorization: DPoP and a fresh proof carrying ath for each protected-resource request (RFC 9449 §7).",
 					From:        "Client",
 					To:          "Resource Server",
 					Type:        "request",
 					Parameters: map[string]string{
-						"Authorization": "Bearer {access_token}",
+						"Authorization": "Bearer {access_token}, or DPoP {access_token} for a bound token",
+						"DPoP":          "Fresh proof with ath when the access token is DPoP-bound",
 					},
 					Security: []string{
 						"Resource Server validates token before processing request",
+						"A resource server MUST reject a DPoP-bound token without a matching proof",
 						"Check 'sub' claim identifies the client, not a user",
 					},
 				},

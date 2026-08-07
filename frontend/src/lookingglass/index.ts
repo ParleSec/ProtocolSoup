@@ -39,6 +39,8 @@ export {
   type FlowEvent,
   type CapturedExchange,
   type ExecutorFactoryConfig,
+  type ClientCredentialsAccessTokenMode,
+  type ClientCredentialsAuthMethod,
   // Individual executors
   AuthorizationCodeExecutor,
   ClientCredentialsExecutor,

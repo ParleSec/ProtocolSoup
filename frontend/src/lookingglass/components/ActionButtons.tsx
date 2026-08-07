@@ -45,7 +45,7 @@ export function FlowButton({ icon: Icon, label, sublabel, color, compact = false
 
 interface TokenButtonProps {
   label: string
-  color: 'green' | 'orange' | 'blue' | 'cyan'
+  color: 'green' | 'orange' | 'blue' | 'cyan' | 'amber'
   active: boolean
   onClick: () => void
 }
@@ -56,6 +56,7 @@ export function TokenButton({ label, color, active, onClick }: TokenButtonProps)
     orange: active ? 'bg-orange-500/20 text-orange-400 border-orange-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-orange-400',
     blue: active ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-blue-400',
     cyan: active ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-cyan-400',
+    amber: active ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-surface-800 text-surface-400 border-transparent hover:text-amber-400',
   }
 
   return (

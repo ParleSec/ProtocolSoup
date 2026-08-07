@@ -15,6 +15,7 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 - RFC 7523 §2.2 -- JWT Profile for OAuth 2.0 Client Authentication
 - RFC 7517 -- JSON Web Key Sets
 - RFC 8414 -- Authorization Server Metadata
+- RFC 9449 -- OAuth 2.0 Demonstrating Proof of Possession (DPoP), opt-in
 
 ## Available Flows
 
@@ -22,7 +23,7 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 |---------|------|-------------|
 | `authorization_code` | Authorization Code | Standard redirect-based authorization |
 | `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
-| `client_credentials` | Client Credentials | Machine-to-machine token issuance |
+| `client_credentials` | Client Credentials | Machine-to-machine issuance with independent selectors for `client_secret_basic` or `private_key_jwt` authentication and Bearer or DPoP access-token protection |
 | `refresh_token` | Refresh Token | Token renewal without re-authorization |
 | `token_introspection` | Token Introspection | Validate and inspect active tokens (RFC 7662) |
 | `token_revocation` | Token Revocation | Invalidate tokens (RFC 7009) |
@@ -34,7 +35,7 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 
 - **Authorization Code Flow Demo** -- Complete redirect flow with consent
 - **PKCE Flow Demo** -- PKCE challenge/verifier exchange
-- **Client Credentials Demo** -- Toggle between a shared secret and browser-held `private_key_jwt`
+- **Client Credentials Demo** -- Independently select shared-secret or browser-held `private_key_jwt` authentication and Bearer or DPoP token protection
 - **Token Refresh Demo** -- Refresh grant with token rotation
 
 ## Endpoints
@@ -110,6 +111,48 @@ authorization grants (RFC 7523 §2.1), `client_secret_jwt`, mTLS, and
 certificate-in-header key delivery are separate mechanisms and are not enabled
 by this flow.
 
+## Sender-constrained tokens (RFC 9449 DPoP)
+
+The token endpoint accepts an optional `DPoP` proof header
+(`htm=POST`, `htu` the exact `/oauth2/token` URL). When present and valid,
+the issued access token is bound to the proof's key: it carries a `cnf.jkt`
+claim (the RFC 7638 thumbprint of the proof's public key) and the response's
+`token_type` is `DPoP` instead of `Bearer`. Absent that header, every existing
+Bearer flow is unchanged -- DPoP is opt-in, never mandatory, on this endpoint.
+
+- For the `authorization_code` grant, a DPoP-bound access token issued to a
+  **public** client also binds the issued refresh token to the same key
+  (RFC 9449 Section 5). A subsequent `refresh_token` request from that
+  client must re-present a matching proof; a mismatched or missing proof is
+  rejected with `invalid_grant`. A refresh token issued without DPoP does
+  not gain binding on refresh even if a proof is later presented. A
+  **confidential** client's refresh token is never bound this way, even
+  when the token request that issued it carried a valid proof: it is
+  already sender-constrained by its client authentication credentials, per
+  the spec's own carve-out -- only its *access* token gets `cnf.jkt`.
+- The `DPoP` header field itself must not repeat: a request carrying more
+  than one is rejected outright rather than silently using the first one
+  and ignoring the rest.
+- Proof validation rejects `alg: none`, symmetric algorithms, a `jwk` header
+  carrying private key material, an `htu`/`htm` mismatch, a stale or future
+  `iat` (60-second window), and a replayed `jti` -- replay-store outages fail
+  the request closed with `server_error`, never open.
+- A server-provided nonce challenge (`DPoP-Nonce` response header,
+  `use_dpop_nonce` error) is available but off by default, enabled via
+  `SHOWCASE_DPOP_NONCE_REQUIRED`. See [Environment
+  Variables](/deploy/environment-variables/).
+- Only JWT access tokens can be bound. Opaque/reference access token binding
+  is a separate mechanism this platform does not implement.
+- The RFC 8414 metadata endpoint lists the accepted DPoP proof algorithms
+  under `dpop_signing_alg_values_supported` (RFC 9449 Section 5.1).
+
+Run the **Client Credentials** flow in Looking Glass and select **DPoP** under
+**Access-token protection** to see a real browser-generated ES256 key produce a
+proof. The resulting bound token is rendered distinctly (amber, lock icon) from
+a plain Bearer token in the token inspector. Client authentication is a separate
+selector, so all four real combinations of `client_secret_basic` or
+`private_key_jwt` with Bearer or DPoP can be inspected without switching flows.
+
 RFC 8414 requires an HTTPS issuer. Because protocol routes are mounted at the
 origin root, `SHOWCASE_BASE_URL` must be a pathless HTTPS origin in production
 (for example `https://as.example`, not `https://as.example/base` or a trailing
@@ -126,3 +169,5 @@ published as RFC 8414 metadata.
 - Device code: polling interval, `authorization_pending` vs `slow_down`
 - private_key_jwt: assertion claims, signature algorithm/key binding, and the
   replay-protection event
+- DPoP: proof claims (`htm`, `htu`, `iat`, `jti`), bound token's `cnf.jkt`,
+  `token_type: DPoP`, and refresh-token binding surviving rotation

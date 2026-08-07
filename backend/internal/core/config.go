@@ -35,6 +35,17 @@ type Config struct {
 	// private_key_jwt assertion IDs atomically across processes.
 	OAuth2ReplayRedisURL string
 
+	// DPoPNonceRequired enables the RFC 9449 Section 8 server-provided
+	// nonce challenge at authorization-server token endpoints (oauth2 and
+	// oid4vci's own token endpoint). Off by default (RFC 9449 treats
+	// nonces as optional hardening, not a baseline requirement).
+	DPoPNonceRequired bool
+
+	// DPoPResourceNonceRequired enables the same challenge, independently,
+	// at oid4vci's resource-server endpoints (credential, nonce,
+	// deferred_credential). Off by default.
+	DPoPResourceNonceRequired bool
+
 	// PaletteDBPath points at the prebuilt palette SQLite index. Empty
 	// disables the palette query service (and the /api/palette/query route).
 	PaletteDBPath string
@@ -72,6 +83,9 @@ func LoadConfig() *Config {
 		OAuth2ReplayRedisURL: getEnv("OAUTH2_REPLAY_REDIS_URL", ""),
 		PaletteDBPath:        getEnv("SHOWCASE_PALETTE_DB", ""),
 		KeyStorePath:         getEnv("SHOWCASE_KEY_STORE_PATH", ""),
+
+		DPoPNonceRequired:         getEnvBool("SHOWCASE_DPOP_NONCE_REQUIRED", false),
+		DPoPResourceNonceRequired: getEnvBool("SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED", false),
 
 		ConformanceRedirectURIs:  getEnvList("OIDC_CONFORMANCE_REDIRECT_URIS", nil),
 		ConformanceClientID:      getEnv("OIDC_CONFORMANCE_CLIENT_ID", "conformance-client"),

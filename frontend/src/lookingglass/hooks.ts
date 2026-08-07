@@ -460,6 +460,7 @@ import {
   type FlowExecutorBase,
   type FlowExecutorState,
   type ExecutorFactoryConfig,
+  type ClientCredentialsAccessTokenMode,
   type ClientCredentialsAuthMethod,
   type VCArtifact,
 } from './flows'
@@ -475,6 +476,10 @@ export interface UseRealFlowExecutorOptions {
   clientSecret?: string
   /** Authentication method for the client_credentials flow */
   clientCredentialsAuthMethod?: ClientCredentialsAuthMethod
+  /** Bearer or DPoP access-token protection for the client_credentials flow */
+  clientCredentialsAccessTokenMode?: ClientCredentialsAccessTokenMode
+  /** Canonical absolute AS token endpoint for DPoP htu binding */
+  clientCredentialsTokenEndpoint?: string
   /** Redirect URI */
   redirectUri: string
   /** Scopes */
@@ -713,10 +718,24 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
   )
 
   // Get flow info and requirements
-  const flowInfo = useMemo(() => 
-    executorFlowId ? getFlowInfo(executorFlowId) : null,
-    [executorFlowId]
-  )
+  const flowInfo = useMemo(() => {
+    if (!executorFlowId) {
+      return null
+    }
+    const info = getFlowInfo(executorFlowId)
+    if (
+      info &&
+      executorFlowId === 'client-credentials' &&
+      options.clientCredentialsAccessTokenMode === 'dpop'
+    ) {
+      return {
+        ...info,
+        description: 'Machine-to-machine authentication with a DPoP sender-constrained access token',
+        rfcReference: 'RFC 6749 Section 4.4 + RFC 9449',
+      }
+    }
+    return info
+  }, [executorFlowId, options.clientCredentialsAccessTokenMode])
 
   const requirements = useMemo(() => 
     executorFlowId ? getFlowRequirements(executorFlowId) : {
@@ -756,6 +775,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       clientId: options.clientId,
       clientSecret: options.clientSecret,
       clientCredentialsAuthMethod: options.clientCredentialsAuthMethod,
+      clientCredentialsAccessTokenMode: options.clientCredentialsAccessTokenMode,
+      clientCredentialsTokenEndpoint: options.clientCredentialsTokenEndpoint,
       redirectUri: options.redirectUri,
       scopes: options.scopes,
       refreshToken: options.refreshToken,
@@ -806,6 +827,8 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.clientId,
     options.clientSecret,
     options.clientCredentialsAuthMethod,
+    options.clientCredentialsAccessTokenMode,
+    options.clientCredentialsTokenEndpoint,
     options.redirectUri,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(options.scopes),

@@ -713,6 +713,7 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
     id_token: { label: 'ID Token (OIDC)', shortLabel: 'ID Token', color: 'text-orange-400', icon: Fingerprint },
     refresh_token: { label: 'Refresh Token', shortLabel: 'Refresh', color: 'text-blue-400', icon: RotateCcw },
     client_assertion: { label: 'Client Assertion', shortLabel: 'Assertion', color: 'text-cyan-400', icon: FileText },
+    dpop_proof: { label: 'DPoP Proof (RFC 9449)', shortLabel: 'DPoP Proof', color: 'text-amber-400', icon: Lock },
   }
 
   return (

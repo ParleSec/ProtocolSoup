@@ -264,6 +264,104 @@ export async function signRS256JWT(
   return `${signingInput}.${base64URLEncode(new Uint8Array(signature))}`
 }
 
+export interface ES256SigningMaterial {
+  privateKey: CryptoKey
+  publicJWK: JsonWebKey & { alg: 'ES256'; use: 'sig'; kid: string }
+  kid: string
+  alg: 'ES256'
+}
+
+/**
+ * Generate client-held ES256 (ECDSA P-256) signing material. The private
+ * CryptoKey is non-extractable; only the public JWK can leave the browser.
+ * This is the key material used for DPoP proofs (RFC 9449) -- a fresh key
+ * pair per Looking Glass execution, never persisted or transmitted.
+ */
+export async function generateES256SigningMaterial(kidPrefix: string): Promise<ES256SigningMaterial> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign', 'verify'],
+  ) as CryptoKeyPair
+  const exported = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+  const kid = `${kidPrefix}-${(exported.x || '').slice(0, 12)}`
+  return {
+    privateKey: keyPair.privateKey,
+    publicJWK: {
+      kty: exported.kty,
+      crv: exported.crv,
+      x: exported.x,
+      y: exported.y,
+      alg: 'ES256',
+      use: 'sig',
+      key_ops: ['verify'],
+      kid,
+    },
+    kid,
+    alg: 'ES256',
+  }
+}
+
+/**
+ * Sign a compact JWT with ECDSA P-256 and SHA-256 (ES256). WebCrypto's
+ * ECDSA signature is already the raw (r||s) concatenation JOSE expects --
+ * no ASN.1 DER conversion is needed, unlike Node's crypto.sign default.
+ */
+export async function signES256JWT(
+  header: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  privateKey: CryptoKey,
+): Promise<string> {
+  const encodedHeader = base64URLEncode(new TextEncoder().encode(JSON.stringify(header)))
+  const encodedPayload = base64URLEncode(new TextEncoder().encode(JSON.stringify(payload)))
+  const signingInput = `${encodedHeader}.${encodedPayload}`
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: { name: 'SHA-256' } },
+    privateKey,
+    new TextEncoder().encode(signingInput),
+  )
+  return `${signingInput}.${base64URLEncode(new Uint8Array(signature))}`
+}
+
+/**
+ * Build a DPoP proof JWT (RFC 9449 Section 4.2) bound to the given HTTP
+ * method and target URI. When `accessToken` is supplied, the mandatory
+ * `ath` claim (Section 4.3 step 11) is included so the same helper covers
+ * both the token-endpoint proof (no access token yet) and a subsequent
+ * resource-endpoint proof (access token already issued). When `nonce` is
+ * supplied, it is echoed into the proof's `nonce` claim -- the server's
+ * required response to an RFC 9449 Section 8 `use_dpop_nonce` challenge.
+ */
+export async function generateDPoPProof(
+  signingMaterial: ES256SigningMaterial,
+  options: { htm: string; htu: string; accessToken?: string; nonce?: string },
+): Promise<string> {
+  const header: Record<string, unknown> = {
+    typ: 'dpop+jwt',
+    alg: 'ES256',
+    jwk: {
+      kty: signingMaterial.publicJWK.kty,
+      crv: signingMaterial.publicJWK.crv,
+      x: signingMaterial.publicJWK.x,
+      y: signingMaterial.publicJWK.y,
+    },
+  }
+  const claims: Record<string, unknown> = {
+    jti: crypto.randomUUID(),
+    htm: options.htm,
+    htu: options.htu,
+    iat: Math.floor(Date.now() / 1000),
+  }
+  if (options.accessToken) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(options.accessToken))
+    claims.ath = base64URLEncode(new Uint8Array(digest))
+  }
+  if (options.nonce) {
+    claims.nonce = options.nonce
+  }
+  return signES256JWT(header, claims, signingMaterial.privateKey)
+}
+
 /**
  * OAuth state storage helpers
  * Store and retrieve OAuth parameters in sessionStorage

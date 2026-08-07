@@ -583,6 +583,24 @@ func (idp *MockIdP) StoreRefreshToken(token, clientID, userID, scope string, aut
 	}
 }
 
+// BindRefreshTokenKey associates a DPoP jkt with an already-stored refresh
+// token (RFC 9449 Section 5: a refresh token issued alongside a DPoP-bound
+// access token remains bound to that same key on later redemptions). Callers
+// invoke this immediately after StoreRefreshToken rather than threading a
+// jkt parameter through it, so every existing StoreRefreshToken call site
+// (including outside the oauth2 plugin) is unaffected. A no-op if jkt is
+// empty or the token is no longer present.
+func (idp *MockIdP) BindRefreshTokenKey(token, jkt string) {
+	if jkt == "" {
+		return
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	if rt, exists := idp.refreshTokens[token]; exists {
+		rt.JKT = jkt
+	}
+}
+
 // ValidateRefreshToken validates a refresh token
 func (idp *MockIdP) ValidateRefreshToken(token, clientID string) (*models.RefreshToken, error) {
 	idp.mu.Lock()

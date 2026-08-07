@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
@@ -34,6 +35,17 @@ func (p *Plugin) emitEvent(sessionID string, eventType lookingglass.EventType, t
 
 	broadcaster := p.lookingGlass.NewEventBroadcaster(sessionID)
 	broadcaster.Emit(eventType, title, data, annotations...)
+}
+
+// oauth2Annotation looks up a keyed set of pre-defined annotations from the
+// shared library (mirrors oid4vci's Plugin.vcAnnotation), for RFC citations
+// that are stable regardless of which handler is emitting the event.
+func (p *Plugin) oauth2Annotation(key string) []lookingglass.Annotation {
+	annotationSet := lookingglass.NewAnnotationLibrary().OAuth2Annotations()
+	if items, ok := annotationSet[key]; ok {
+		return items
+	}
+	return nil
 }
 
 // Authorization endpoint - GET
@@ -416,21 +428,79 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		Reference:   "RFC 6749 Section 3.2",
 	})
 
+	// RFC 9449 (DPoP): validate an optional proof once, up front, since htm
+	// and htu are identical across every grant type at this single token
+	// endpoint. Absent header -> zero-value result, no behavioural change.
+	dpopResult, dpopErr := p.validateTokenEndpointDPoP(r)
+	if dpopErr != nil {
+		var infrastructureErr *dpop.InfrastructureError
+		if errors.As(dpopErr, &infrastructureErr) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Replay Store Unavailable", map[string]interface{}{
+				"error":  "server_error",
+				"reason": "dpop_replay_store_unavailable",
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "DPoP Replay Protection Unavailable",
+				Description: "The authorization server failed closed because it could not reserve the proof's jti atomically.",
+				Severity:    "warning",
+				Reference:   "RFC 9449 Section 11.1",
+			})
+			writeOAuth2ErrorStatus(w, http.StatusInternalServerError, "server_error", "DPoP validation is temporarily unavailable", "")
+			return
+		}
+		var nonceErr *dpop.NonceRequiredError
+		if errors.As(dpopErr, &nonceErr) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Nonce Challenge", map[string]interface{}{
+				"error":  dpop.ErrorUseDPoPNonce,
+				"reason": "server_requires_fresh_nonce",
+			}, p.oauth2Annotation("dpop_nonce")...)
+			w.Header().Set(dpop.NonceHeaderName, nonceErr.Nonce)
+			writeOAuth2Error(w, dpop.ErrorUseDPoPNonce, "A fresh DPoP proof nonce is required; retry with the nonce from the DPoP-Nonce response header", "")
+			return
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Proof Rejected", map[string]interface{}{
+			"error":  dpop.ErrorInvalidDPoPProof,
+			"reason": dpopErr.Error(),
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Invalid DPoP Proof",
+			Description: "The DPoP proof JWT failed validation, so the token request was rejected before any grant was processed. Specific validation reasons remain internal; the OAuth response is deliberately generic, matching this endpoint's private_key_jwt error convention.",
+			Severity:    "warning",
+			Reference:   "RFC 9449 Section 4.3",
+		})
+		writeOAuth2Error(w, dpop.ErrorInvalidDPoPProof, "DPoP proof validation failed", "")
+		return
+	}
+	if dpopResult.Present {
+		dpopAnnotations := append(
+			[]lookingglass.Annotation{{
+				Type:        lookingglass.AnnotationTypeRFCReference,
+				Title:       "DPoP Proof-of-Possession",
+				Description: "The client demonstrated possession of the private key bound to this token request. The issued access token will carry a cnf.jkt claim and a DPoP token_type.",
+				Reference:   "RFC 9449 Section 4.3",
+			}},
+			append(p.oauth2Annotation("dpop_proof"), p.oauth2Annotation("dpop_cnf_jkt")...)...,
+		)
+		p.emitEvent(sessionID, lookingglass.EventTypeCryptoOperation, "DPoP Proof Validated", map[string]interface{}{
+			"jkt": dpopResult.JKT,
+		}, dpopAnnotations...)
+	}
+
 	switch grantType {
 	case "authorization_code":
 		if assertionPresent {
 			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
 			return
 		}
-		p.handleAuthorizationCodeGrant(w, r, sessionID)
+		p.handleAuthorizationCodeGrant(w, r, sessionID, dpopResult.JKT)
 	case "refresh_token":
 		if assertionPresent {
 			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
 			return
 		}
-		p.handleRefreshTokenGrant(w, r, sessionID)
+		p.handleRefreshTokenGrant(w, r, sessionID, dpopResult.JKT)
 	case "client_credentials":
-		p.handleClientCredentialsGrant(w, r, sessionID)
+		p.handleClientCredentialsGrant(w, r, sessionID, dpopResult.JKT)
 	default:
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported Grant Type", map[string]interface{}{
 			"grant_type": grantType,
@@ -440,7 +510,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
+func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Request, sessionID string, dpopJKT string) {
 	code := r.FormValue("code")
 	redirectURI := r.FormValue("redirect_uri")
 	clientID := r.FormValue("client_id")
@@ -536,8 +606,11 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		})
 	}
 
-	// Generate tokens
-	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope)
+	// Generate tokens. Refresh-token DPoP binding is restricted to public
+	// clients per RFC 9449 Section 5 -- a confidential client's refresh
+	// token is already sender-constrained via its authentication
+	// credentials, so it is not additionally bound to the proof key.
+	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope, dpopJKT, client.Public)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
 			"error": err.Error(),
@@ -586,7 +659,7 @@ func (p *Plugin) rejectClientAssertionForUnsupportedGrant(
 	writeOAuth2Error(w, "invalid_client", "Client authentication method is not supported for this grant type", "")
 }
 
-func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
+func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, dpopJKT string) {
 	refreshToken := r.FormValue("refresh_token")
 	clientID := r.FormValue("client_id")
 	clientSecret := r.FormValue("client_secret")
@@ -658,8 +731,33 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		scope = rt.Scope
 	}
 
-	// Generate new tokens
-	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope)
+	// RFC 9449 Section 5: a refresh token issued alongside a DPoP-bound
+	// access token remains bound to that same key. The proof presented on
+	// this refresh request must demonstrate possession of that same key --
+	// a missing proof or a proof for a different key is rejected exactly
+	// like any other invalid_grant, not silently downgraded to bearer.
+	boundJKT := rt.JKT
+	if boundJKT != "" && dpopJKT != boundJKT {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Key Mismatch On Refresh", map[string]interface{}{
+			"error":  "invalid_grant",
+			"reason": "dpop_proof_key_mismatch",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "DPoP-Bound Refresh Token",
+			Description: "This refresh token is bound to a DPoP key. The refresh request must present a valid proof for that same key.",
+			Severity:    "warning",
+			Reference:   "RFC 9449 Section 5",
+		})
+		writeOAuth2Error(w, "invalid_grant", "Refresh token is bound to a different DPoP key", "")
+		return
+	}
+
+	// Generate new tokens. boundJKT is only ever non-empty for a refresh
+	// token that was itself bound at issuance, which -- per the same
+	// public-client restriction applied there -- only happens for a
+	// public client; client.Public is re-checked here too so the
+	// invariant holds even if that upstream guarantee ever changes.
+	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope, boundJKT, client.Public)
 	if err != nil {
 		writeOAuth2Error(w, "server_error", "Failed to issue tokens", "")
 		return
@@ -685,7 +783,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, tokenResponse)
 }
 
-func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
+func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Request, sessionID string, dpopJKT string) {
 	scope := r.FormValue("scope")
 
 	// Determine client authentication method
@@ -917,14 +1015,19 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 
 	// Issue access token (no refresh token for client credentials)
 	jwtService := p.mockIdP.JWTService()
+	accessTokenClaims := map[string]interface{}{
+		"client_name": client.Name,
+	}
+	if dpopJKT != "" {
+		// RFC 9449 Section 4.1: bind the token to the presented proof key.
+		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
+	}
 	accessToken, err := jwtService.CreateAccessToken(
 		clientID, // Subject is the client itself
 		clientID,
 		scope,
 		time.Hour,
-		map[string]interface{}{
-			"client_name": client.Name,
-		},
+		accessTokenClaims,
 	)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
@@ -935,9 +1038,10 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	tokenType := dpop.TokenType(dpopJKT)
 	tokenResponse := models.TokenResponse{
 		AccessToken: accessToken,
-		TokenType:   "Bearer",
+		TokenType:   tokenType,
 		ExpiresIn:   3600,
 		Scope:       scope,
 	}
@@ -948,7 +1052,7 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		"from":              "Authorization Server",
 		"to":                "Client",
 		"access_token":      tokenResponse.AccessToken,
-		"token_type":        "Bearer",
+		"token_type":        tokenType,
 		"expires_in":        3600,
 		"scope":             scope,
 		"scopes":            strings.Fields(scope),
@@ -1190,17 +1294,33 @@ func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) handleListClients(w http.ResponseWriter, r *http.Request) {
 	presets := p.mockIdP.GetDemoClientPresets()
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"clients": presets,
+		"clients":        presets,
+		"token_endpoint": p.tokenEndpointURL(),
 	})
 }
 
-// issueTokens creates access token and refresh token
-func (p *Plugin) issueTokens(userID, clientID, scope string) (*models.TokenResponse, error) {
+// issueTokens creates access token and refresh token. dpopJKT, when
+// non-empty, binds the access token to that DPoP key (RFC 9449 Sections 4.1
+// and 5): it carries a cnf.jkt claim and the response's token_type is DPoP.
+//
+// bindRefreshToken additionally binds the refresh token to the same key.
+// Callers MUST pass true only for a public client: RFC 9449 Section 5 draws
+// this distinction explicitly -- "Refresh tokens issued to confidential
+// clients ... are not bound to the DPoP proof public key because they are
+// already sender-constrained with a different existing mechanism" (client
+// authentication). Binding a confidential client's refresh token anyway
+// would remove that mechanism's documented benefit (client credential
+// rotation without invalidating the refresh token) for no security gain,
+// since the token is already sender-constrained.
+func (p *Plugin) issueTokens(userID, clientID, scope, dpopJKT string, bindRefreshToken bool) (*models.TokenResponse, error) {
 	jwtService := p.mockIdP.JWTService()
 
 	// Get user claims
 	scopes := strings.Split(scope, " ")
 	userClaims := p.mockIdP.UserClaims(userID, scopes)
+	if dpopJKT != "" {
+		userClaims = dpop.WithCnfJKT(userClaims, dpopJKT)
+	}
 
 	// Create access token
 	accessToken, err := jwtService.CreateAccessToken(
@@ -1227,10 +1347,13 @@ func (p *Plugin) issueTokens(userID, clientID, scope string) (*models.TokenRespo
 
 	// Store refresh token
 	p.mockIdP.StoreRefreshToken(refreshToken, clientID, userID, scope, time.Now(), time.Now().Add(7*24*time.Hour))
+	if dpopJKT != "" && bindRefreshToken {
+		p.mockIdP.BindRefreshTokenKey(refreshToken, dpopJKT)
+	}
 
 	response := &models.TokenResponse{
 		AccessToken:  accessToken,
-		TokenType:    "Bearer",
+		TokenType:    dpop.TokenType(dpopJKT),
 		ExpiresIn:    3600,
 		RefreshToken: refreshToken,
 		Scope:        scope,
@@ -1261,6 +1384,8 @@ var oauth2ErrorURIs = map[string]string{
 	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	"server_error":              "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	"temporarily_unavailable":   "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	dpop.ErrorInvalidDPoPProof:  "https://datatracker.ietf.org/doc/html/rfc9449#section-5",
+	dpop.ErrorUseDPoPNonce:      "https://datatracker.ietf.org/doc/html/rfc9449#section-8",
 }
 
 // writeOAuth2Error writes an OAuth2-compliant error response per RFC 6749 Section 5.2

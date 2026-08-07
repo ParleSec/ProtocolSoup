@@ -74,8 +74,15 @@ token in memory and do not put it in URLs, logs, or shared links.
 - Owner-only action headers are redacted from captured traffic before session
   persistence.
 
-The OAuth `private_key_jwt` demo also requires the owner capability to register
-its public JWK Set. Registration is accepted only while the matching
+The OAuth Client Credentials interface exposes client authentication and
+access-token protection as independent selectors. Choose
+`client_secret_basic` or `private_key_jwt`, then choose Bearer or DPoP. Looking
+Glass captures the real operations for the selected combination, including
+public JWK registration and client assertions for `private_key_jwt`, and key
+generation, proof JWTs, nonce retries, and `cnf.jkt` binding for DPoP.
+
+The `private_key_jwt` option requires the owner capability to register its
+public JWK Set. Registration is accepted only while the matching
 `client_credentials` session is active and can succeed only once.
 
 ## Token Inspector

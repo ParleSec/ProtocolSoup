@@ -40,7 +40,8 @@ export const FLOW_PRESENTATION_META: Record<string, FlowPresentationMeta> = {
   client_credentials: {
     icon: Key,
     color: 'from-orange-500 to-red-600',
-    features: ['Microservices', 'Background Jobs', 'No User Context'],
+    features: ['Client Auth Choice', 'Bearer or DPoP', 'No User Context'],
+    recommended: true,
   },
   refresh_token: {
     icon: Unlock,
@@ -196,6 +197,8 @@ const FEATURE_DESCRIPTIONS: Record<string, string> = {
   'Authorization Code Flow': 'Standard flow for server-side applications',
   'PKCE for Public Clients': 'Enhanced security for SPAs and mobile apps (RFC 7636)',
   'Client Credentials': 'Machine-to-machine authentication',
+  'Client Auth Choice': 'Compare client_secret_basic with RFC 7523 private_key_jwt authentication',
+  'Bearer or DPoP': 'Compare an unconstrained Bearer token with RFC 9449 sender-constraining',
   'Refresh Token Rotation': 'Secure token refresh with rotation',
   'Token Introspection': 'Verify token validity and metadata (RFC 7662)',
   'Token Revocation': 'Invalidate access/refresh tokens (RFC 7009)',

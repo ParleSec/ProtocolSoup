@@ -17,14 +17,28 @@ import { FlowExecutorBase, type DecodedToken, type FlowExecutorConfig } from './
 import {
   generateRS256SigningMaterial,
   signRS256JWT,
+  generateES256SigningMaterial,
+  generateDPoPProof,
   type RS256SigningMaterial,
+  type ES256SigningMaterial,
 } from '../../utils/crypto'
 
 export type ClientCredentialsAuthMethod = 'client_secret_basic' | 'private_key_jwt'
+export type ClientCredentialsAccessTokenMode = 'bearer' | 'dpop'
 
 export interface ClientCredentialsConfig extends FlowExecutorConfig {
   clientSecret?: string
   clientAuthMethod?: ClientCredentialsAuthMethod
+  /** Canonical absolute AS token endpoint used for DPoP htu binding. */
+  tokenEndpoint?: string
+  /**
+   * Bind the issued access token to a client-held ES256 key via a DPoP
+   * proof (RFC 9449), instead of leaving it an unconstrained Bearer token.
+   * Orthogonal to clientAuthMethod: DPoP proves possession of a key bound
+   * to the *token*, client_secret_basic/private_key_jwt authenticate the
+   * *client* -- both can be used together on the same request.
+   */
+  accessTokenMode?: ClientCredentialsAccessTokenMode
 }
 
 interface PrivateKeyJWTRegistration {
@@ -34,20 +48,28 @@ interface PrivateKeyJWTRegistration {
 
 export class ClientCredentialsExecutor extends FlowExecutorBase {
   readonly flowType = 'client_credentials'
-  readonly flowName = 'Client Credentials Grant'
-  readonly rfcReference = 'RFC 6749 Section 4.4'
+  readonly flowName: string
+  readonly rfcReference: string
 
   private flowConfig: ClientCredentialsConfig
   private signingMaterialPromise?: Promise<RS256SigningMaterial>
+  private dpopSigningMaterialPromise?: Promise<ES256SigningMaterial>
 
   constructor(config: ClientCredentialsConfig) {
     super(config)
     this.flowConfig = config
-
+    const usesDPoP = config.accessTokenMode === 'dpop'
+    this.flowName = usesDPoP
+      ? 'Client Credentials Grant with DPoP'
+      : 'Client Credentials Grant'
+    this.rfcReference = usesDPoP
+      ? 'RFC 6749 Section 4.4 + RFC 9449'
+      : 'RFC 6749 Section 4.4'
   }
 
   async execute(): Promise<void> {
     const authMethod = this.flowConfig.clientAuthMethod || 'client_secret_basic'
+    const accessTokenMode = this.flowConfig.accessTokenMode || 'bearer'
     if (authMethod === 'client_secret_basic' && !this.flowConfig.clientSecret) {
       this.updateState({
         status: 'error',
@@ -84,6 +106,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
           : this.config.clientId,
         scopes: this.config.scopes,
         clientAuthenticationMethod: authMethod,
+        accessTokenMode,
         note: 'This flow is for confidential clients only',
       },
     })
@@ -97,6 +120,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
         useCase: 'Machine-to-machine, backend services, APIs',
         noUserInvolved: true,
         clientAuthenticationMethod: authMethod,
+        accessTokenMode,
       },
     })
 
@@ -135,6 +159,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
 
   private async requestToken(): Promise<void> {
     const authMethod = this.flowConfig.clientAuthMethod || 'client_secret_basic'
+    const accessTokenMode = this.flowConfig.accessTokenMode || 'bearer'
     this.addEvent({
       type: 'rfc',
       title: 'RFC 6749 Section 4.4.2',
@@ -143,6 +168,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       data: {
         grant_type: 'client_credentials',
         authentication: authMethod,
+        accessTokenMode,
       },
     })
 
@@ -220,9 +246,24 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       })
     }
 
-    const { response, data } = await this.makeRequest(
+    const tokenRequestURL = `${this.config.baseUrl}/token`
+    let dpopProof: string | undefined
+    if (accessTokenMode === 'dpop') {
+      // RFC 9449 Section 4.2 requires htu to be an absolute URI. The
+      // browser sends the HTTP request through the same-origin Next.js
+      // proxy, but the proof binds to the authorization server's canonical
+      // endpoint returned by the backend. For private_key_jwt, registration
+      // returns that same endpoint as the assertion audience.
+      const proofTarget = acceptedAssertion?.tokenEndpoint || this.flowConfig.tokenEndpoint
+      if (!proofTarget) {
+        throw new Error('DPoP requires the authorization server canonical token endpoint')
+      }
+      dpopProof = await this.attachDpopProof(headers, proofTarget)
+    }
+
+    let { response, data } = await this.makeRequest(
       'POST',
-      `${this.config.baseUrl}/token`,
+      tokenRequestURL,
       {
         headers,
         body,
@@ -230,6 +271,45 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
         rfcReference: tokenRequestReference,
       }
     )
+
+    // RFC 9449 Section 8: the authorization server may reject an otherwise
+    // valid proof for lacking its current server-provided nonce, returning
+    // use_dpop_nonce plus a DPoP-Nonce header. This is the protocol's
+    // defined recovery path -- retry exactly once with a fresh proof that
+    // echoes the supplied nonce, not a generic retry loop.
+    if (!response.ok && dpopProof) {
+      const challengeBody = data as Record<string, unknown>
+      const serverNonce = response.headers.get('DPoP-Nonce')
+      if (challengeBody.error === 'use_dpop_nonce' && serverNonce) {
+        this.addEvent({
+          type: 'security',
+          title: 'DPoP Nonce Challenge (RFC 9449 Section 8)',
+          description: 'The authorization server rejected the proof for lacking its current server-provided nonce and returned a fresh one via the DPoP-Nonce header. Retrying once with the nonce echoed into a new proof.',
+          rfcReference: 'RFC 9449 Section 8',
+          data: {
+            from: 'Authorization Server',
+            to: 'Client',
+            error: challengeBody.error,
+            nonce: serverNonce,
+          },
+        })
+        const proofTarget = acceptedAssertion?.tokenEndpoint || this.flowConfig.tokenEndpoint
+        if (!proofTarget) {
+          throw new Error('DPoP nonce retry requires the authorization server canonical token endpoint')
+        }
+        dpopProof = await this.attachDpopProof(headers, proofTarget, serverNonce)
+        ;({ response, data } = await this.makeRequest(
+          'POST',
+          tokenRequestURL,
+          {
+            headers,
+            body,
+            step: 'Token Request (Client Credentials, DPoP-Nonce Retry)',
+            rfcReference: 'RFC 9449 Section 8',
+          }
+        ))
+      }
+    }
 
     if (!response.ok) {
       const errorData = data as Record<string, unknown>
@@ -311,7 +391,85 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
       },
     })
 
-    this.processTokenResponse(data as Record<string, unknown>)
+    const responseBody = data as Record<string, unknown>
+    if (dpopProof && responseBody.token_type !== 'DPoP') {
+      this.addEvent({
+        type: 'error',
+        title: 'DPoP Protection Not Granted',
+        description: 'The client explicitly requested DPoP protection, but the authorization server did not return token_type=DPoP. The response is discarded rather than treating the access token as a Bearer token.',
+        rfcReference: 'RFC 9449 Section 5',
+        data: {
+          from: 'Authorization Server',
+          to: 'Client',
+          token_type: responseBody.token_type,
+          discarded: true,
+        },
+      })
+      throw new Error('Authorization server did not return the requested DPoP-bound access token')
+    }
+
+    this.processTokenResponse(responseBody)
+
+    if (dpopProof) {
+      this.addEvent({
+        type: 'security',
+        title: 'Access Token Sender-Constrained (DPoP)',
+        description: 'The authorization server bound the access token to this proof\'s key via cnf.jkt and returned token_type=DPoP. Presenting this token without a matching proof will be rejected.',
+        rfcReference: 'RFC 9449 Sections 5 and 7',
+        data: {
+          from: 'Authorization Server',
+          to: 'Client',
+          token_type: responseBody.token_type,
+          dpopBound: true,
+        },
+      })
+    }
+  }
+
+  /**
+   * Generates a client-held ES256 key (once per execution) and a DPoP proof
+   * (RFC 9449 Section 4.2) over the given endpoint, then attaches it to the
+   * outgoing request via the `DPoP` header. The proof itself is published
+   * as a Looking Glass event/token so it can be inspected -- only the
+   * public JWK ever leaves the browser; the private key stays in WebCrypto.
+   */
+  private async attachDpopProof(headers: Record<string, string>, endpoint: string, nonce?: string): Promise<string> {
+    if (!this.dpopSigningMaterialPromise) {
+      this.dpopSigningMaterialPromise = generateES256SigningMaterial('dpop-client')
+    }
+    const signingMaterial = await this.dpopSigningMaterialPromise
+    this.addEvent({
+      type: 'crypto',
+      title: 'DPoP Key Pair Generated (RFC 9449)',
+      description: 'A fresh ES256 key pair is generated in WebCrypto for this execution. Only the public JWK is ever transmitted.',
+      rfcReference: 'RFC 9449 Section 4.2',
+      data: {
+        kty: signingMaterial.publicJWK.kty,
+        crv: signingMaterial.publicJWK.crv,
+        privateKeyExtractable: signingMaterial.privateKey.extractable,
+      },
+    })
+
+    const proof = await generateDPoPProof(signingMaterial, { htm: 'POST', htu: endpoint, nonce })
+    headers.DPoP = proof
+    const decodedProof = this.decodeJwt(proof, 'dpop_proof')
+    this.updateState({
+      tokens: { ...this.state.tokens, dpopProof: proof },
+      decodedTokens: [...this.state.decodedTokens, decodedProof],
+    })
+    this.addEvent({
+      type: 'crypto',
+      title: 'DPoP Proof Generated',
+      description: 'A fresh proof-of-possession JWT is minted for this specific request: bound to the HTTP method and URI (htm/htu), with a single-use jti.',
+      rfcReference: 'RFC 9449 Section 4.2',
+      data: {
+        from: 'Client',
+        to: 'Authorization Server',
+        header: decodedProof.header,
+        claims: decodedProof.payload,
+      },
+    })
+    return proof
   }
 
   private getSigningMaterial(): Promise<RS256SigningMaterial> {
