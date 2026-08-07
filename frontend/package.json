@@ -15,6 +15,7 @@
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
     "verify-refs": "node scripts/verify-references.mjs",
     "verify-jwk-thumbprint": "node --experimental-strip-types scripts/verify-jwk-thumbprint.mjs",
+    "verify-dpop": "node --experimental-strip-types scripts/verify-dpop.mjs",
     "generate-og-image": "node scripts/generate-og-image.mjs"
   },
   "dependencies": {
