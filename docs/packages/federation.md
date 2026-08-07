@@ -31,7 +31,9 @@
 | `SHOWCASE_ENV` | No | `development` | Runtime environment label |
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in mock identity provider |
 | `SHOWCASE_DATA_DIR` | No | `(none)` | Enables durable VC wallet-credential and verifier-session persistence |
-| `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared Redis URL for atomic client-assertion replay protection. Production requires `rediss://`; demo and production fail startup if the store is missing or unreachable. |
+| `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared Redis URL for atomic client-assertion replay protection. Production requires `rediss://`; demo and production fail startup if the store is missing or unreachable. Also backs the RFC 9449 DPoP proof `jti` replay stores for both oauth2 and OID4VCI (distinct key prefix and instance from the `private_key_jwt` store). |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 server-provided nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints (`/oid4vci/credential`, `/oid4vci/nonce`, `/oid4vci/deferred_credential`). |
 | `MOCKIDP_ALICE_PASSWORD` | No | `(auto-generated)` | Demo user password override |
 | `MOCKIDP_BOB_PASSWORD` | No | `(auto-generated)` | Demo user password override |
 | `MOCKIDP_ADMIN_PASSWORD` | No | `(auto-generated)` | Demo user password override |
@@ -78,6 +80,14 @@ Production replay reservations are globally atomic in Redis through the
 assertion's `exp` plus skew; store outages fail closed. Authorization server
 metadata is emitted only when `SHOWCASE_BASE_URL` is a pathless HTTPS origin,
 as RFC 8414 and the root-mounted route topology require.
+
+The token endpoint also accepts an optional `DPoP` proof header (RFC 9449).
+When present and valid, the issued access token is bound to the proof's key
+via a `cnf.jkt` claim and the response's `token_type` is `DPoP` instead of
+`Bearer`; for the `authorization_code` grant, a DPoP-bound token issued to a
+public client also binds the issued refresh token to the same key. Absent
+that header, every Bearer flow is unchanged. Metadata advertises the
+accepted proof algorithms under `dpop_signing_alg_values_supported`.
 
 ### OpenID Connect
 

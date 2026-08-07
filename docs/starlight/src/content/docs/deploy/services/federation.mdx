@@ -29,6 +29,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 - `POST /oauth2/introspect`, `POST /oauth2/revoke`
 - `GET /oauth2/demo/users`, `GET /oauth2/demo/clients`
 - `POST /oauth2/demo/clients/machine-client-pkjwt/jwks` (owned, active-session, one-shot public-key registration)
+- `/oauth2/token` optionally accepts a `DPoP` proof header (RFC 9449), binding the issued access token (and, for `authorization_code` public clients, the refresh token) to the proof's key
 
 ### OIDC
 
@@ -45,6 +46,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 - `GET /oid4vci/.well-known/openid-credential-issuer`
 - `POST /oid4vci/offers/pre-authorized`, `POST /oid4vci/token`
 - `POST /oid4vci/credential`, `POST /oid4vci/deferred_credential`
+- `/oid4vci/token` optionally accepts a `DPoP` proof header (RFC 9449), enforced at `/oid4vci/credential`, `/oid4vci/nonce`, and `/oid4vci/deferred_credential` when a token is bound
 
 ### OID4VP
 
@@ -61,7 +63,9 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in identity provider |
 | `SHOWCASE_DATA_DIR` | No | - | Persistent storage for VC/session state |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
-| `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared replay store. Production requires a reachable `rediss://` secret; demo may use `redis://` on a private local network. |
+| `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared replay store. Production requires a reachable `rediss://` secret; demo may use `redis://` on a private local network. Also backs the RFC 9449 DPoP proof `jti` replay stores for both oauth2 and OID4VCI. |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints. |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |
