@@ -61,18 +61,19 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// level is advertised because none is performed.
 		ACRValuesSupported:            []string{acrSingleFactorLogin},
 		CodeChallengeMethodsSupported: []string{"S256", "plain"},
-		// The OP supports neither the request nor request_uri parameter; an
-		// authorization request carrying either is rejected with
-		// request_not_supported / request_uri_not_supported (OIDC Core 1.0
-		// Section 6.2.1). request_uri_parameter_supported defaults to true, so it
-		// must be advertised false explicitly to stay accurate.
+		// By-value request objects remain unsupported. request_uri is supported for
+		// Dynamic OP certification (OIDC Core 1.0 Section 15.2) and is advertised
+		// true only when Dynamic Registration is enabled, matching live behaviour.
 		RequestParameterSupported:    false,
-		RequestURIParameterSupported: false,
+		RequestURIParameterSupported: p.registrationEnabled(),
 		// The OP honours the claims request parameter (OIDC Core 1.0 Section 5.5):
 		// individually requested claims are returned from UserInfo (or the ID
 		// Token for the id_token response type). claims_parameter_supported
 		// defaults to false, so it is advertised true explicitly.
 		ClaimsParameterSupported: true,
+	}
+	if p.registrationEnabled() {
+		discovery.RegistrationEndpoint = issuer + "/oidc/register"
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -80,9 +81,21 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(discovery)
 }
 
-// handleJWKS returns the JSON Web Key Set
+// handleJWKS returns the JSON Web Key Set used to verify OP-issued JWTs.
+// Only RSA and EC keys are published here: OIDC discovery advertises RS256 for
+// ID Tokens, and the OIDF suite JWKS validator does not accept OKP/Ed25519 keys
+// (it fails oidcc-server-rotate-keys with "unknown key type 'OKP'"). Ed25519
+// material remains available in the KeySet for other ProtocolSoup surfaces.
 func (p *Plugin) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	jwks := p.keySet.PublicJWKS()
+	filtered := make([]crypto.JWK, 0, len(jwks.Keys))
+	for _, key := range jwks.Keys {
+		if key.Kty == "OKP" {
+			continue
+		}
+		filtered = append(filtered, key)
+	}
+	jwks.Keys = filtered
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=3600")

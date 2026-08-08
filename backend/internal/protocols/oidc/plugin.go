@@ -61,6 +61,21 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.lookingGlass = lg
 	}
 
+	p.dynamicRegistrationEnabled = config.OIDCDynamicRegistrationEnabled
+	p.dynamicRegistrationTTL = config.OIDCDynamicRegistrationTTL
+	if p.dynamicRegistrationTTL <= 0 {
+		p.dynamicRegistrationTTL = defaultRegistrationTTL
+	}
+	p.maxDynamicClients = config.OIDCDynamicRegistrationMaxClients
+	if p.maxDynamicClients <= 0 {
+		p.maxDynamicClients = defaultMaxDynamicClients
+	}
+	p.registrationLimiter = newRegistrationRateLimiter(
+		config.OIDCDynamicRegistrationRateLimit,
+		config.OIDCDynamicRegistrationRateWindow,
+	)
+	p.keyRotationToken = config.OIDCKeyRotationToken
+
 	go p.cleanupLoginRequests()
 
 	return nil
@@ -100,6 +115,21 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 
 	// Token endpoint (extends OAuth2 to include ID token)
 	router.Post("/token", p.handleToken)
+
+	// Dynamic Client Registration (OIDC Dynamic Client Registration 1.0 / RFC 7591)
+	// and client management (RFC 7592).
+	// Handlers refuse requests when disabled so discovery advertising stays truthful.
+	router.Post("/register", p.handleRegister)
+	router.Get("/register/{client_id}", p.handleRegisterClient)
+	router.Put("/register/{client_id}", p.handleRegisterClient)
+	router.Delete("/register/{client_id}", p.handleRegisterClient)
+
+	// ProtocolSoup third-party login initiator (not a standardized OP endpoint).
+	router.Get("/third-party/initiate", p.handleThirdPartyInitiate)
+	router.Post("/third-party/initiate", p.handleThirdPartyInitiate)
+
+	// Operator-only OP signing-key rotation for OIDF OP-Rotation-OP-Sig.
+	router.Post("/admin/rotate-keys", p.handleRotateKeys)
 }
 
 // GetInspectors returns the protocol's inspectors
