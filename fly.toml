@@ -75,6 +75,10 @@ primary_region = 'syd'
 #   client; defaults to OIDC_CONFORMANCE_CLIENT_SECRET when unset.
 # - The conformance end user (alice@example.com) password used by the suite is the
 #   demo user's password; align OIDC_CONFORMANCE_PASSWORD in the harness with it.
+# - OIDC_KEY_ROTATION_TOKEN (optional): enables POST /oidc/admin/rotate-keys for
+#   the OIDF OP-rotation module. Leave unset in normal production.
+# - OIDC_PAIRWISE_SUBJECT_SALT: durable random secret that keeps pairwise
+#   subjects stable across restarts. Required when advertising pairwise subjects.
 #
 # Optional OID4VP verifier_attestation secrets:
 # - OID4VP_VERIFIER_ATTESTATION_ISSUER: override attestation issuer URL (defaults to <SHOWCASE_BASE_URL>/oid4vp/verifier-attestation)

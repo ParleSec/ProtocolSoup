@@ -25,6 +25,12 @@ type Plugin struct {
 	loginRequests   map[string]loginRequestInfo
 	loginRequestsMu sync.RWMutex
 	loginRequestTTL time.Duration
+
+	dynamicRegistrationEnabled bool
+	dynamicRegistrationTTL     time.Duration
+	maxDynamicClients          int
+	registrationLimiter        *registrationRateLimiter
+	keyRotationToken           string
 }
 
 // NewPlugin creates a new OIDC plugin
@@ -36,7 +42,7 @@ func NewPlugin(oauth2Plugin *oauth2.Plugin) *Plugin {
 			Version:     "1.0.0",
 			Description: "OpenID Connect 1.0 identity layer on top of OAuth 2.0",
 			Tags:        []string{"identity", "authentication", "id-token", "userinfo"},
-			RFCs:        []string{"OpenID Connect Core 1.0", "OpenID Connect Discovery 1.0"},
+			RFCs:        []string{"OpenID Connect Core 1.0", "OpenID Connect Discovery 1.0", "OpenID Connect Dynamic Client Registration 1.0", "RFC 7591", "RFC 7592"},
 		}),
 		oauth2Plugin:    oauth2Plugin,
 		loginRequests:   make(map[string]loginRequestInfo),
@@ -51,6 +57,7 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 
 	if idp, ok := config.MockIdP.(*mockidp.MockIdP); ok {
 		p.mockIdP = idp
+		p.mockIdP.SetPairwiseSubjectSalt(config.OIDCPairwiseSubjectSalt)
 	}
 
 	if ks, ok := config.KeySet.(*crypto.KeySet); ok {

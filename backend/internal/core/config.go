@@ -69,6 +69,18 @@ type Config struct {
 	ConformanceClientSecret  string
 	ConformanceClient2ID     string
 	ConformanceClient2Secret string
+
+	// OIDC Dynamic Client Registration (open, ephemeral by default).
+	OIDCDynamicRegistrationEnabled    bool
+	OIDCDynamicRegistrationTTL        time.Duration
+	OIDCDynamicRegistrationMaxClients int
+	OIDCDynamicRegistrationRateLimit  int
+	OIDCDynamicRegistrationRateWindow time.Duration
+	// OIDCPairwiseSubjectSalt persists the secret used for OIDC pairwise
+	// subject derivation across process restarts.
+	OIDCPairwiseSubjectSalt string
+	// OIDCKeyRotationToken enables bearer-protected OP signing-key rotation.
+	OIDCKeyRotationToken string
 }
 
 // LoadConfig loads configuration from environment variables with sensible defaults
@@ -94,6 +106,14 @@ func LoadConfig() *Config {
 		ConformanceClientSecret:  getEnv("OIDC_CONFORMANCE_CLIENT_SECRET", ""),
 		ConformanceClient2ID:     getEnv("OIDC_CONFORMANCE_CLIENT2_ID", "conformance-client-2"),
 		ConformanceClient2Secret: getEnv("OIDC_CONFORMANCE_CLIENT2_SECRET", ""),
+
+		OIDCDynamicRegistrationEnabled:    getEnvBool("OIDC_DYNAMIC_REGISTRATION_ENABLED", true),
+		OIDCDynamicRegistrationTTL:        getEnvDuration("OIDC_DYNAMIC_REGISTRATION_TTL", 2*time.Hour),
+		OIDCDynamicRegistrationMaxClients: getEnvInt("OIDC_DYNAMIC_REGISTRATION_MAX_CLIENTS", 200),
+		OIDCDynamicRegistrationRateLimit:  getEnvInt("OIDC_DYNAMIC_REGISTRATION_RATE_LIMIT", 30),
+		OIDCDynamicRegistrationRateWindow: getEnvDuration("OIDC_DYNAMIC_REGISTRATION_RATE_WINDOW", time.Minute),
+		OIDCPairwiseSubjectSalt:           getEnv("OIDC_PAIRWISE_SUBJECT_SALT", ""),
+		OIDCKeyRotationToken:              getEnv("OIDC_KEY_ROTATION_TOKEN", ""),
 	}
 
 	return cfg
