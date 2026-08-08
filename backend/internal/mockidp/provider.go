@@ -577,6 +577,23 @@ func (idp *MockIdP) CreateAuthorizationCode(
 	return authCode, nil
 }
 
+// BindCredentialAuthorizationDetails records the OID4VCI authorization details
+// that were approved with an authorization code. The binding is made while the
+// code is still live so the OID4VCI token endpoint can issue access-token-bound
+// credential_identifiers for exactly those Credential Configurations.
+func (idp *MockIdP) BindCredentialAuthorizationDetails(code string, credentialConfigurationIDs []string) error {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+
+	authCode, exists := idp.authCodes[code]
+	if !exists {
+		return errors.New("authorization code not found")
+	}
+	authCode.CredentialConfigurationIDs = append([]string(nil), credentialConfigurationIDs...)
+	authCode.CredentialAuthorizationDetailsUsed = true
+	return nil
+}
+
 // ValidateAuthorizationCode validates and consumes an authorization code
 func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeVerifier string) (*models.AuthorizationCode, error) {
 	idp.mu.Lock()

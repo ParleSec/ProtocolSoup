@@ -16,6 +16,25 @@ import (
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
+func TestParseOID4VCIAuthorizationDetails(t *testing.T) {
+	issuer := "https://issuer.example/oid4vci"
+	raw := `[{"type":"openid_credential","credential_configuration_id":"UniversityDegreeCredential","locations":["https://issuer.example/oid4vci"],"extension":"ignored"}]`
+	configurationIDs, err := parseOID4VCIAuthorizationDetails(raw, issuer)
+	if err != nil {
+		t.Fatalf("parse authorization_details: %v", err)
+	}
+	if len(configurationIDs) != 1 || configurationIDs[0] != "UniversityDegreeCredential" {
+		t.Fatalf("configuration IDs = %v", configurationIDs)
+	}
+}
+
+func TestParseOID4VCIAuthorizationDetailsRejectsMissingIssuerLocation(t *testing.T) {
+	raw := `[{"type":"openid_credential","credential_configuration_id":"UniversityDegreeCredential"}]`
+	if _, err := parseOID4VCIAuthorizationDetails(raw, "https://issuer.example/oid4vci"); err == nil {
+		t.Fatal("expected missing locations to be rejected")
+	}
+}
+
 // These tests pin the authorization-endpoint enforcement rules to their
 // normative sources independently of the OIDF conformance suite. They are the
 // regression net required by the "resilient, spec-compliant fixes only"

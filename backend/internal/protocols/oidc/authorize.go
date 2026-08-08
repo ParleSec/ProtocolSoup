@@ -3,6 +3,7 @@ package oidc
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -50,8 +51,56 @@ type authParams struct {
 	// Claims is the raw OIDC claims request parameter (OpenID Connect Core 1.0
 	// Section 5.5), carried through issuance so individually requested claims are
 	// honoured.
-	Claims string
-	LoginHint string
+	Claims                     string
+	LoginHint                  string
+	CredentialConfigurationIDs []string
+}
+
+type oid4vciAuthorizationDetail struct {
+	Type                      string   `json:"type"`
+	CredentialConfigurationID string   `json:"credential_configuration_id"`
+	Locations                 []string `json:"locations,omitempty"`
+}
+
+// parseOID4VCIAuthorizationDetails validates the OpenID4VCI Final §5.1.1
+// authorization_details profile used by the shared authorization endpoint.
+func parseOID4VCIAuthorizationDetails(raw string, credentialIssuer string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+
+	var details []oid4vciAuthorizationDetail
+	if err := json.Unmarshal([]byte(raw), &details); err != nil || len(details) == 0 {
+		return nil, fmt.Errorf("authorization_details must be a non-empty JSON array")
+	}
+
+	seen := make(map[string]struct{}, len(details))
+	configurationIDs := make([]string, 0, len(details))
+	for _, detail := range details {
+		if detail.Type != "openid_credential" {
+			return nil, fmt.Errorf("authorization_details type must be openid_credential")
+		}
+		configurationID := strings.TrimSpace(detail.CredentialConfigurationID)
+		if configurationID == "" {
+			return nil, fmt.Errorf("credential_configuration_id is required")
+		}
+		locationMatched := false
+		for _, location := range detail.Locations {
+			if strings.TrimSpace(location) == credentialIssuer {
+				locationMatched = true
+				break
+			}
+		}
+		if !locationMatched {
+			return nil, fmt.Errorf("locations must contain the Credential Issuer identifier")
+		}
+		if _, duplicate := seen[configurationID]; duplicate {
+			continue
+		}
+		seen[configurationID] = struct{}{}
+		configurationIDs = append(configurationIDs, configurationID)
+	}
+	return configurationIDs, nil
 }
 
 // defaultResponseMode returns the default response mode for a response type per
