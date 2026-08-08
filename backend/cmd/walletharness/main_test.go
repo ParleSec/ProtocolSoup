@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,23 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+func TestHealthReportsDeployedCommit(t *testing.T) {
+	t.Setenv("BUILD_COMMIT", "0123456789abcdef")
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	response := httptest.NewRecorder()
+	(&walletHarnessServer{}).handleHealth(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200", response.Code)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if payload["commit"] != "0123456789abcdef" {
+		t.Fatalf("health commit = %q", payload["commit"])
+	}
+}
 
 func TestResolveWalletScopeKeyPrecedence(t *testing.T) {
 	server := &walletHarnessServer{strictIsolation: true}
@@ -44,6 +62,56 @@ func TestResolveWalletScopeKeyPrecedence(t *testing.T) {
 	}
 	if scope != "req:req-123" {
 		t.Fatalf("unexpected scope %q", scope)
+	}
+}
+
+func TestCredentialResponseValueRequiresFinalCredentialsArray(t *testing.T) {
+	value, err := credentialResponseValue(map[string]interface{}{
+		"credentials": []interface{}{
+			map[string]interface{}{"credential": "signed-credential"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("credentialResponseValue returned error: %v", err)
+	}
+	if value != "signed-credential" {
+		t.Fatalf("credentialResponseValue = %v, want signed-credential", value)
+	}
+	if _, err := credentialResponseValue(map[string]interface{}{
+		"credential": "removed-draft-shape",
+	}); err == nil {
+		t.Fatal("expected singular credential response shape to be rejected")
+	}
+}
+
+func TestNotifyCredentialAcceptedUsesNotificationBinding(t *testing.T) {
+	var gotAuthorization string
+	var gotPayload map[string]string
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("decode notification: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer issuer.Close()
+
+	server := &walletHarnessServer{httpClient: issuer.Client(), issuerBaseURL: issuer.URL}
+	err := server.notifyCredentialAccepted(context.Background(), &issuedWalletCredential{
+		NotificationID:  "notification-1",
+		NotificationURL: issuer.URL,
+		AccessToken:     "access-1",
+		TokenType:       "Bearer",
+	}, "session-1")
+	if err != nil {
+		t.Fatalf("notifyCredentialAccepted returned error: %v", err)
+	}
+	if gotAuthorization != "Bearer access-1" {
+		t.Fatalf("Authorization = %q, want Bearer access-1", gotAuthorization)
+	}
+	if gotPayload["notification_id"] != "notification-1" ||
+		gotPayload["event"] != "credential_accepted" {
+		t.Fatalf("unexpected notification payload: %#v", gotPayload)
 	}
 }
 
@@ -86,7 +154,7 @@ func TestBuildOID4VCIOfferRequestDoesNotDeriveUserIDFromHolderDID(t *testing.T) 
 	}
 }
 
-func TestCreateCredentialProofJWTUsesIssuerAuthorizedSubject(t *testing.T) {
+func TestCreateCredentialProofJWTUsesFinalAnonymousProofShape(t *testing.T) {
 	keySet, err := intcrypto.NewKeySet()
 	if err != nil {
 		t.Fatalf("create wallet keyset: %v", err)
@@ -116,11 +184,17 @@ func TestCreateCredentialProofJWTUsesIssuerAuthorizedSubject(t *testing.T) {
 	if !ok {
 		t.Fatalf("proof claims type = %T", parsed.Claims)
 	}
-	if got := strings.TrimSpace(asString(claims["iss"])); got != authorizedSubject {
-		t.Fatalf("proof iss = %q, want %q", got, authorizedSubject)
+	if _, exists := claims["iss"]; exists {
+		t.Fatal("anonymous pre-authorized proof must omit iss")
 	}
-	if got := strings.TrimSpace(asString(claims["sub"])); got != authorizedSubject {
-		t.Fatalf("proof sub = %q, want %q", got, authorizedSubject)
+	if _, exists := claims["sub"]; exists {
+		t.Fatal("OID4VCI Final proof must not use a sub claim for key binding")
+	}
+	if _, exists := parsed.Header["jwk"]; !exists {
+		t.Fatal("proof JOSE header must carry jwk")
+	}
+	if _, exists := claims["cnf"]; exists {
+		t.Fatal("proof key must not be carried in payload cnf")
 	}
 }
 
@@ -613,6 +687,37 @@ func TestParseOpenID4VPURIExtractsRequestURI(t *testing.T) {
 	}
 }
 
+func TestParseOpenID4VPURIRejectsRequestURIMethodPost(t *testing.T) {
+	_, _, _, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123&request_uri_method=post")
+	if err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("expected explicit request_uri_method=post rejection, got %v", err)
+	}
+}
+
+func TestFetchRequestObjectConsumesFinalCompactJWTBody(t *testing.T) {
+	requestJWT := buildTestRequestJWT(t, "https://protocolsoup.com/oid4vp/response")
+	requestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected request method %s", r.Method)
+		}
+		if got := r.Header.Get("Accept"); got != "application/oauth-authz-req+jwt" {
+			t.Fatalf("unexpected Accept header %q", got)
+		}
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+		_, _ = w.Write([]byte(requestJWT))
+	}))
+	defer requestServer.Close()
+
+	server := &walletHarnessServer{httpClient: requestServer.Client()}
+	gotJWT, requestID, err := server.fetchRequestObject(context.Background(), requestServer.URL)
+	if err != nil {
+		t.Fatalf("fetchRequestObject: %v", err)
+	}
+	if gotJWT != requestJWT || requestID != "" {
+		t.Fatalf("unexpected request object result jwt=%q requestID=%q", gotJWT, requestID)
+	}
+}
+
 func TestResolveRequestContextWithOptionsRejectsExternalByDefault(t *testing.T) {
 	server := &walletHarnessServer{
 		targetHost:        "protocolsoup.com",
@@ -641,6 +746,72 @@ func TestResolveRequestContextWithOptionsAllowsExternalWhenEnabled(t *testing.T)
 	}
 	if context.ResponseURI != "https://wallet.example.org/oid4vp/response" {
 		t.Fatalf("unexpected response URI %q", context.ResponseURI)
+	}
+}
+
+func TestResolveRequestContextRequiresFinalRequestContract(t *testing.T) {
+	responseURI := "https://protocolsoup.com/oid4vp/response"
+	server := &walletHarnessServer{
+		targetResponseURI: responseURI,
+	}
+	validClaims := jwt.MapClaims{
+		"jti":           "req-123",
+		"state":         "state-123",
+		"nonce":         "nonce-123",
+		"client_id":     "redirect_uri:" + responseURI,
+		"response_type": "vp_token",
+		"response_mode": "direct_post",
+		"response_uri":  responseURI,
+		"dcql_query": map[string]interface{}{
+			"credentials": []interface{}{map[string]interface{}{"id": "credential-query"}},
+		},
+	}
+	testCases := []struct {
+		name   string
+		mutate func(jwt.MapClaims)
+	}{
+		{
+			name: "missing response_type",
+			mutate: func(claims jwt.MapClaims) {
+				delete(claims, "response_type")
+			},
+		},
+		{
+			name: "unsupported response_mode",
+			mutate: func(claims jwt.MapClaims) {
+				claims["response_mode"] = "fragment"
+			},
+		},
+		{
+			name: "both dcql_query and scope",
+			mutate: func(claims jwt.MapClaims) {
+				claims["scope"] = "mdl"
+			},
+		},
+		{
+			name: "neither dcql_query nor scope",
+			mutate: func(claims jwt.MapClaims) {
+				delete(claims, "dcql_query")
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			claims := jwt.MapClaims{}
+			for key, value := range validClaims {
+				claims[key] = value
+			}
+			testCase.mutate(claims)
+			token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+			token.Header["typ"] = "oauth-authz-req+jwt"
+			requestJWT, err := token.SignedString([]byte("wallet-harness-test-secret"))
+			if err != nil {
+				t.Fatalf("sign request jwt: %v", err)
+			}
+			if _, err := server.resolveRequestContextWithOptions("req-123", requestJWT, false); err == nil {
+				t.Fatal("expected invalid Final request contract to be rejected")
+			}
+		})
 	}
 }
 
@@ -736,8 +907,12 @@ func buildTestRequestJWT(t *testing.T, responseURI string) string {
 		"state":         "state-123",
 		"nonce":         "nonce-123",
 		"client_id":     "did:example:verifier",
+		"response_type": "vp_token",
 		"response_mode": "direct_post",
 		"response_uri":  responseURI,
+		"dcql_query": map[string]interface{}{
+			"credentials": []interface{}{map[string]interface{}{"id": "credential-query"}},
+		},
 	})
 	token.Header["typ"] = "oauth-authz-req+jwt"
 	signed, err := token.SignedString([]byte("wallet-harness-test-secret"))
@@ -747,17 +922,147 @@ func buildTestRequestJWT(t *testing.T, responseURI string) string {
 	return signed
 }
 
-func TestInferClientIDSchemeRecognizesPhase3Prefixes(t *testing.T) {
+func TestPresentationAPIsRejectUnsupportedTransactionData(t *testing.T) {
+	unknownType := base64.RawURLEncoding.EncodeToString([]byte(
+		`{"type":"https://example.com/transaction","credential_ids":["degree"]}`,
+	))
+	testCases := []struct {
+		name            string
+		transactionData interface{}
+		wantDescription string
+	}{
+		{
+			name:            "unknown type",
+			transactionData: []string{unknownType},
+			wantDescription: `transaction data type "https://example.com/transaction" is not supported`,
+		},
+		{
+			name:            "malformed content",
+			transactionData: []string{"%%%"},
+			wantDescription: "is not valid base64url",
+		},
+	}
+	apiPaths := []struct {
+		name    string
+		handler http.HandlerFunc
+		body    func(string) string
+	}{
+		{
+			name:    "resolve",
+			handler: nil,
+			body:    func(requestJWT string) string { return fmt.Sprintf(`{"request":%q}`, requestJWT) },
+		},
+		{
+			name:    "preview",
+			handler: nil,
+			body:    func(requestJWT string) string { return fmt.Sprintf(`{"request":%q}`, requestJWT) },
+		},
+		{
+			name:    "present",
+			handler: nil,
+			body:    func(requestJWT string) string { return fmt.Sprintf(`{"request":%q}`, requestJWT) },
+		},
+		{
+			name:    "submit",
+			handler: nil,
+			body: func(requestJWT string) string {
+				return fmt.Sprintf(`{"mode":"one_click","request_id":"req-123","request":%q}`, requestJWT)
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			requestJWT := buildTestRequestJWTWithTransactionData(t, testCase.transactionData)
+			server := &walletHarnessServer{
+				targetHost:           "verifier.example",
+				targetResponseURI:    "https://verifier.example/oid4vp/response",
+				defaultWalletSubject: "did:key:z6Mktest",
+				walletSessionTTL:     10 * time.Minute,
+				wallets:              make(map[string]*walletMaterial),
+			}
+			apiPaths[0].handler = server.handleAPIResolve
+			apiPaths[1].handler = server.handleAPIPreview
+			apiPaths[2].handler = server.handleAPIPresent
+			apiPaths[3].handler = server.handleSubmit
+
+			for _, apiPath := range apiPaths {
+				t.Run(apiPath.name, func(t *testing.T) {
+					request := httptest.NewRequest(
+						http.MethodPost,
+						"https://wallet.example/"+apiPath.name,
+						strings.NewReader(apiPath.body(requestJWT)),
+					)
+					recorder := httptest.NewRecorder()
+					apiPath.handler(recorder, request)
+
+					if recorder.Code != http.StatusBadRequest {
+						t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+					}
+					var response map[string]interface{}
+					if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+						t.Fatalf("decode error response: %v", err)
+					}
+					if response["error"] != "invalid_transaction_data" {
+						t.Fatalf("error = %q, want invalid_transaction_data", response["error"])
+					}
+					if description := fmt.Sprint(response["error_description"]); !strings.Contains(description, testCase.wantDescription) {
+						t.Fatalf("error_description = %q, want substring %q", description, testCase.wantDescription)
+					}
+				})
+			}
+		})
+	}
+}
+
+func buildTestRequestJWTWithTransactionData(t *testing.T, transactionData interface{}) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"jti":              "req-123",
+		"nonce":            "nonce-123",
+		"client_id":        "redirect_uri:https://verifier.example/oid4vp/response",
+		"response_type":    "vp_token",
+		"response_mode":    "direct_post",
+		"response_uri":     "https://verifier.example/oid4vp/response",
+		"dcql_query":       map[string]interface{}{"credentials": []interface{}{map[string]interface{}{"id": "credential-query"}}},
+		"transaction_data": transactionData,
+	})
+	token.Header["typ"] = "oauth-authz-req+jwt"
+	signed, err := token.SignedString([]byte("wallet-harness-test-secret"))
+	if err != nil {
+		t.Fatalf("sign request jwt: %v", err)
+	}
+	return signed
+}
+
+func TestInferClientIDSchemeUsesClientIDPrefixOnly(t *testing.T) {
 	testCases := []struct {
 		clientID string
+		payload  map[string]interface{}
 		want     string
 	}{
 		{clientID: "x509_san_dns:verifier.example", want: "x509_san_dns"},
 		{clientID: "verifier_attestation:verifier.example", want: "verifier_attestation"},
+		{
+			clientID: "x509_hash:thumbprint",
+			payload:  map[string]interface{}{"client_id_scheme": "redirect_uri"},
+			want:     "x509_hash",
+		},
+		{
+			clientID: "https://verifier.example/callback",
+			payload:  map[string]interface{}{"client_id_scheme": "verifier_attestation"},
+			want:     "pre_registered",
+		},
+		{
+			clientID: "did:web:verifier.example",
+			payload:  map[string]interface{}{"client_id_scheme": "decentralized_identifier"},
+			want:     "pre_registered",
+		},
+		{clientID: "example-client", want: "pre_registered"},
 	}
 
 	for _, testCase := range testCases {
-		if got := inferClientIDScheme(testCase.clientID, nil); got != testCase.want {
+		if got := inferClientIDScheme(testCase.clientID, testCase.payload); got != testCase.want {
 			t.Fatalf("inferClientIDScheme(%q) = %q, want %q", testCase.clientID, got, testCase.want)
 		}
 	}

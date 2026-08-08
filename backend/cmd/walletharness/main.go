@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -162,6 +163,8 @@ type resolvedRequestEnvelope struct {
 	RequestURISource string
 }
 
+var errInvalidTransactionData = errors.New("invalid_transaction_data")
+
 type apiResolveRequest struct {
 	RequestURI  string `json:"request_uri,omitempty"`
 	OpenID4VP   string `json:"openid4vp_uri,omitempty"`
@@ -199,6 +202,10 @@ type issuedWalletCredential struct {
 	CredentialJWT      string
 	CredentialFormat   string
 	CredentialConfigID string
+	NotificationID     string
+	NotificationURL    string
+	AccessToken        string
+	TokenType          string
 }
 
 type didWebResolutionResult struct {
@@ -406,7 +413,11 @@ func (s *walletHarnessServer) handleHealth(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	response := map[string]string{"status": "ok"}
+	if commit := strings.TrimSpace(os.Getenv("BUILD_COMMIT")); commit != "" {
+		response["commit"] = commit
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *walletHarnessServer) handleWalletApp(w http.ResponseWriter, r *http.Request) {
@@ -526,10 +537,7 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 		RequestID:  req.RequestID,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":             "invalid_request",
-			"error_description": err.Error(),
-		})
+		writePresentationRequestError(w, err)
 		return
 	}
 	matchSummary := walletRequestMatchSummary{}
@@ -703,6 +711,13 @@ func (s *walletHarnessServer) handleAPIIssue(w http.ResponseWriter, r *http.Requ
 			})
 			return
 		}
+		if notifyErr := s.notifyCredentialAccepted(r.Context(), issuedCredential, options.LookingGlassSessionID); notifyErr != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{
+				"error":             "wallet_submission_failed",
+				"error_description": notifyErr.Error(),
+			})
+			return
+		}
 		credentialSource = "forced_oid4vci"
 	} else {
 		credentialSource, err = s.ensureWalletCredential(r.Context(), wallet, options)
@@ -766,10 +781,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":             "invalid_request",
-			"error_description": err.Error(),
-		})
+		writePresentationRequestError(w, err)
 		return
 	}
 	if err := s.ensurePresentationRequestTrust(trust, false, false); err != nil {
@@ -948,10 +960,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":             "invalid_request",
-			"error_description": err.Error(),
-		})
+		writePresentationRequestError(w, err)
 		return
 	}
 	if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
@@ -1162,10 +1171,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		RequestJWT: req.Request,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error":             "invalid_request",
-			"error_description": err.Error(),
-		})
+		writePresentationRequestError(w, err)
 		return
 	}
 	if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
@@ -1297,6 +1303,17 @@ func decodeJSONBody(r *http.Request, target interface{}) error {
 		return fmt.Errorf("request body must contain a single JSON object")
 	}
 	return nil
+}
+
+func writePresentationRequestError(w http.ResponseWriter, err error) {
+	errorCode := "invalid_request"
+	if errors.Is(err, errInvalidTransactionData) {
+		errorCode = "invalid_transaction_data"
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{
+		"error":             errorCode,
+		"error_description": err.Error(),
+	})
 }
 
 func (s *walletHarnessServer) resolveAPIScopeKey(w http.ResponseWriter, r *http.Request) (string, string, error) {
@@ -1484,6 +1501,9 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 	for key, value := range decodedRequest.Payload {
 		payload[key] = value
 	}
+	if err := rejectUnsupportedTransactionData(payload); err != nil {
+		return nil, err
+	}
 	return &resolvedRequestEnvelope{
 		RequestJWT:       requestJWT,
 		RequestURI:       requestURI,
@@ -1493,6 +1513,37 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 		DecodedPayload:   payload,
 		RequestURISource: requestSource,
 	}, nil
+}
+
+// rejectUnsupportedTransactionData enforces OID4VP 1.0 Final Sections 5.1,
+// 8.4, and 8.5. ProtocolSoup implements no transaction-data type, so every
+// request containing transaction_data is rejected instead of being ignored.
+func rejectUnsupportedTransactionData(payload map[string]interface{}) error {
+	rawTransactionData, present := payload["transaction_data"]
+	if !present {
+		return nil
+	}
+	transactionData, ok := rawTransactionData.([]interface{})
+	if !ok || len(transactionData) == 0 {
+		return fmt.Errorf("%w: transaction_data must be a non-empty array of base64url-encoded JSON objects", errInvalidTransactionData)
+	}
+	encodedEntry, ok := transactionData[0].(string)
+	if !ok || strings.TrimSpace(encodedEntry) == "" {
+		return fmt.Errorf("%w: transaction_data[0] must be a non-empty base64url-encoded string", errInvalidTransactionData)
+	}
+	decodedEntry, err := base64.RawURLEncoding.DecodeString(encodedEntry)
+	if err != nil {
+		return fmt.Errorf("%w: transaction_data[0] is not valid base64url: %v", errInvalidTransactionData, err)
+	}
+	var transactionObject map[string]interface{}
+	if err := json.Unmarshal(decodedEntry, &transactionObject); err != nil || transactionObject == nil {
+		return fmt.Errorf("%w: transaction_data[0] is not a JSON object", errInvalidTransactionData)
+	}
+	transactionType, ok := transactionObject["type"].(string)
+	if !ok || strings.TrimSpace(transactionType) == "" {
+		return fmt.Errorf("%w: transaction_data[0] is missing a valid type", errInvalidTransactionData)
+	}
+	return fmt.Errorf("%w: transaction data type %q is not supported", errInvalidTransactionData, transactionType)
 }
 
 func parseOpenID4VPURI(raw string) (requestURI string, requestJWT string, clientID string, err error) {
@@ -1511,6 +1562,10 @@ func parseOpenID4VPURI(raw string) (requestURI string, requestJWT string, client
 	requestURI = strings.TrimSpace(query.Get("request_uri"))
 	requestJWT = strings.TrimSpace(query.Get("request"))
 	clientID = strings.TrimSpace(query.Get("client_id"))
+	requestURIMethod := strings.ToLower(strings.TrimSpace(query.Get("request_uri_method")))
+	if requestURIMethod != "" && requestURIMethod != "get" {
+		return "", "", "", fmt.Errorf("request_uri_method %q is not supported", requestURIMethod)
+	}
 	if requestURI == "" && requestJWT == "" {
 		return "", "", "", fmt.Errorf("openid4vp_uri must include request_uri or request parameter")
 	}
@@ -1530,8 +1585,14 @@ func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
 	if hostWithPort == "" {
 		return "", fmt.Errorf("URL host is required")
 	}
-	if hostWithPort == s.targetHost {
-		return parsed.String(), nil
+	trustedHosts := []string{strings.ToLower(strings.TrimSpace(s.targetHost))}
+	if issuerURL, parseErr := url.Parse(strings.TrimSpace(s.issuerBaseURL)); parseErr == nil {
+		trustedHosts = append(trustedHosts, strings.ToLower(strings.TrimSpace(issuerURL.Host)))
+	}
+	for _, trustedHost := range trustedHosts {
+		if trustedHost != "" && hostWithPort == trustedHost {
+			return parsed.String(), nil
+		}
 	}
 	if !s.allowExternal {
 		return "", fmt.Errorf("URL host %q is not allowed", hostWithPort)
@@ -1559,58 +1620,32 @@ func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
 }
 
 func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI string) (string, string, error) {
-	methods := []string{http.MethodGet, http.MethodPost}
-	var methodErrors []string
-	for _, method := range methods {
-		var bodyReader io.Reader
-		if method == http.MethodPost {
-			bodyReader = strings.NewReader(url.Values{}.Encode())
-		}
-		req, err := http.NewRequestWithContext(ctx, method, requestURI, bodyReader)
-		if err != nil {
-			methodErrors = append(methodErrors, fmt.Sprintf("%s: build failed: %v", method, err))
-			continue
-		}
-		req.Header.Set("Accept", "application/oauth-authz-req+jwt, application/jwt, application/json, */*")
-		if method == http.MethodPost {
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		}
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			methodErrors = append(methodErrors, fmt.Sprintf("%s: fetch failed: %v", method, err))
-			continue
-		}
-		responseBytes, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			methodErrors = append(methodErrors, fmt.Sprintf("%s: %d %s", method, resp.StatusCode, oneLine(string(responseBytes))))
-			continue
-		}
-		trimmedBody := strings.TrimSpace(string(responseBytes))
-		if trimmedBody == "" {
-			methodErrors = append(methodErrors, fmt.Sprintf("%s: empty response body", method))
-			continue
-		}
-
-		var payload map[string]interface{}
-		if err := json.Unmarshal(responseBytes, &payload); err == nil {
-			if parsedRequest := strings.TrimSpace(asString(payload["request"])); parsedRequest != "" {
-				return parsedRequest, strings.TrimSpace(asString(payload["request_id"])), nil
-			}
-		}
-		var directJWT string
-		if err := json.Unmarshal(responseBytes, &directJWT); err == nil {
-			directJWT = strings.TrimSpace(directJWT)
-			if directJWT != "" {
-				return directJWT, "", nil
-			}
-		}
-		if strings.Count(trimmedBody, ".") >= 2 {
-			return trimmedBody, "", nil
-		}
-		methodErrors = append(methodErrors, fmt.Sprintf("%s: response did not contain a request object JWT", method))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURI, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("request_uri GET build failed: %w", err)
 	}
-	return "", "", fmt.Errorf("request_uri fetch failed: %s", strings.Join(methodErrors, "; "))
+	req.Header.Set("Accept", "application/oauth-authz-req+jwt")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("request_uri GET failed: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBytes, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return "", "", fmt.Errorf("read request_uri response: %w", readErr)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", "", fmt.Errorf("request_uri GET returned %d: %s", resp.StatusCode, oneLine(string(responseBytes)))
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	if contentType != "application/oauth-authz-req+jwt" {
+		return "", "", fmt.Errorf("request_uri GET returned unsupported Content-Type %q", resp.Header.Get("Content-Type"))
+	}
+	requestJWT := strings.TrimSpace(string(responseBytes))
+	if strings.Count(requestJWT, ".") != 2 {
+		return "", "", fmt.Errorf("request_uri GET body is not a compact signed JWT")
+	}
+	return requestJWT, "", nil
 }
 
 func (s *walletHarnessServer) evaluateTrust(requestContext *resolvedRequestContext, requestPayload map[string]interface{}) trustEvaluation {
@@ -1629,11 +1664,7 @@ func (s *walletHarnessServer) evaluateTrust(requestContext *resolvedRequestConte
 	return trust
 }
 
-func inferClientIDScheme(clientID string, requestPayload map[string]interface{}) string {
-	claimedScheme := strings.TrimSpace(asString(requestPayload["client_id_scheme"]))
-	if claimedScheme != "" {
-		return claimedScheme
-	}
+func inferClientIDScheme(clientID string, _ map[string]interface{}) string {
 	normalizedClientID := strings.TrimSpace(clientID)
 	switch {
 	case strings.HasPrefix(normalizedClientID, "verifier_attestation:"):
@@ -1646,12 +1677,14 @@ func inferClientIDScheme(clientID string, requestPayload map[string]interface{})
 		return "openid_federation"
 	case strings.HasPrefix(normalizedClientID, "decentralized_identifier:"):
 		return "decentralized_identifier"
-	case strings.HasPrefix(normalizedClientID, "did:"):
-		return "decentralized_identifier"
 	case strings.HasPrefix(normalizedClientID, "redirect_uri:"):
 		return "redirect_uri"
 	default:
-		return "redirect_uri"
+		// OID4VP 1.0 Final §5.9.2 allows unknown prefixes (including the
+		// "https" portion of a URL-shaped identifier) to fall back to a
+		// pre-registered client. Trust is derived exclusively from client_id;
+		// the removed client_id_scheme request claim cannot override it.
+		return "pre_registered"
 	}
 }
 
@@ -1755,7 +1788,7 @@ func (s *walletHarnessServer) verifyRequestObjectSignature(
 	trust trustEvaluation,
 ) (string, error) {
 	switch trust.ClientIDScheme {
-	case "", "redirect_uri":
+	case "", "pre_registered", "redirect_uri":
 		return "", nil
 	case "x509_san_dns":
 		return s.verifyX509SANDNSRequestObjectSignature(envelope, requestContext)
@@ -2490,10 +2523,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			RequestJWT: req.Request,
 		})
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":             "invalid_request",
-				"error_description": err.Error(),
-			})
+			writePresentationRequestError(w, err)
 			return
 		}
 		if err := s.ensurePresentationRequestTrust(trust, false, false); err != nil {
@@ -2603,10 +2633,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			RequestJWT: req.Request,
 		})
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error":             "invalid_request",
-				"error_description": err.Error(),
-			})
+			writePresentationRequestError(w, err)
 			return
 		}
 		if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
@@ -2774,6 +2801,9 @@ func (s *walletHarnessServer) ensureWalletCredential(
 		}
 		if err := s.bindCredential(wallet, autoIssuedCredential.CredentialJWT, autoIssuedCredential.CredentialConfigID, autoIssuedCredential.CredentialFormat); err != nil {
 			return "", fmt.Errorf("bind auto-issued credential: %w", err)
+		}
+		if err := s.notifyCredentialAccepted(ctx, autoIssuedCredential, options.LookingGlassSessionID); err != nil {
+			return "", fmt.Errorf("notify auto-issued credential acceptance: %w", err)
 		}
 		if needsCredentialBootstrap {
 			credentialSource = "auto_issued_oid4vci"
@@ -3313,10 +3343,11 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		return nil, fmt.Errorf("request_id does not match request object jti")
 	}
 
-	responseMode := strings.TrimSpace(asString(decodedRequest.Payload["response_mode"]))
-	if responseMode == "" {
-		responseMode = "direct_post"
+	responseType := strings.TrimSpace(asString(decodedRequest.Payload["response_type"]))
+	if responseType != "vp_token" {
+		return nil, fmt.Errorf("request object response_type must be vp_token, got %q", responseType)
 	}
+	responseMode := strings.TrimSpace(asString(decodedRequest.Payload["response_mode"]))
 	if responseMode != "direct_post" && responseMode != "direct_post.jwt" {
 		return nil, fmt.Errorf("unsupported response_mode %q", responseMode)
 	}
@@ -3390,7 +3421,13 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 	}
 
 	dcqlQuery := ""
-	if rawDCQL, ok := decodedRequest.Payload["dcql_query"]; ok && rawDCQL != nil {
+	rawDCQL, dcqlPresent := decodedRequest.Payload["dcql_query"]
+	hasDCQL := dcqlPresent && rawDCQL != nil
+	scopeAlias := strings.TrimSpace(asString(decodedRequest.Payload["scope"]))
+	if hasDCQL == (scopeAlias != "") {
+		return nil, fmt.Errorf("request object must contain exactly one of dcql_query or scope")
+	}
+	if hasDCQL && rawDCQL != nil {
 		if encoded, merr := json.Marshal(rawDCQL); merr == nil {
 			dcqlQuery = string(encoded)
 		}
@@ -3781,9 +3818,17 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	}
 
 	accessToken := asString(tokenPayload["access_token"])
-	cNonce := asString(tokenPayload["c_nonce"])
-	if accessToken == "" || cNonce == "" {
-		return nil, fmt.Errorf("token response missing access_token or c_nonce")
+	if accessToken == "" {
+		return nil, fmt.Errorf("token response missing access_token")
+	}
+	cNonce, err := s.fetchExternalNonce(
+		ctx,
+		s.issuerBaseURL+"/oid4vci/nonce",
+		accessToken,
+		options.LookingGlassSessionID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("nonce request failed: %w", err)
 	}
 
 	var proofJWT string
@@ -3802,12 +3847,8 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	credentialURL := s.issuerBaseURL + "/oid4vci/credential"
 	credentialRequestBody := map[string]interface{}{
 		"credential_configuration_id": credentialConfigID,
-		"format":                      strings.TrimSpace(options.CredentialFormat),
-		"proofs": []map[string]interface{}{
-			{
-				"proof_type": "jwt",
-				"jwt":        proofJWT,
-			},
+		"proofs": map[string]interface{}{
+			"jwt": []string{proofJWT},
 		},
 	}
 	rawCredentialBody, err := json.Marshal(credentialRequestBody)
@@ -3846,7 +3887,11 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		credentialPayload = deferredPayload
 	}
 
-	credentialJWT, err := credentialPayloadToString(credentialPayload["credential"])
+	rawCredential, err := credentialResponseValue(credentialPayload)
+	if err != nil {
+		return nil, err
+	}
+	credentialJWT, err := credentialPayloadToString(rawCredential)
 	if err != nil {
 		return nil, err
 	}
@@ -3864,6 +3909,10 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		CredentialJWT:      credentialJWT,
 		CredentialFormat:   credentialFormat,
 		CredentialConfigID: credentialConfigID,
+		NotificationID:     strings.TrimSpace(asString(credentialPayload["notification_id"])),
+		NotificationURL:    s.issuerBaseURL + "/oid4vci/notification",
+		AccessToken:        accessToken,
+		TokenType:          firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer"),
 	}, nil
 }
 
@@ -4006,18 +4055,85 @@ func credentialPayloadToString(raw interface{}) (string, error) {
 	}
 }
 
-func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, walletSubject string, cNonce string, audience string) (string, error) {
-	// The issuer-authorized subject comes from the credential offer and is
-	// distinct from the wallet's cryptographic holder DID. The proof is signed
-	// by the wallet key and carries cnf.jwk, but its subject must remain bound to
-	// the identity record authorized by the issuer.
-	subject := strings.TrimSpace(walletSubject)
-	if subject == "" {
-		subject = strings.TrimSpace(wallet.Subject)
+func credentialResponseValue(payload map[string]interface{}) (interface{}, error) {
+	rawCredentials, ok := payload["credentials"]
+	if !ok {
+		return nil, fmt.Errorf("credential response missing credentials")
 	}
-	if subject == "" {
-		return "", fmt.Errorf("wallet subject is required for proof")
+	credentials, ok := rawCredentials.([]interface{})
+	if !ok || len(credentials) == 0 {
+		return nil, fmt.Errorf("credential response credentials must be a non-empty array")
 	}
+	entry, ok := credentials[0].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("credential response credentials[0] must be an object")
+	}
+	credential, ok := entry["credential"]
+	if !ok {
+		return nil, fmt.Errorf("credential response credentials[0] missing credential")
+	}
+	return credential, nil
+}
+
+func (s *walletHarnessServer) notifyCredentialAccepted(
+	ctx context.Context,
+	credential *issuedWalletCredential,
+	lookingGlassSessionID string,
+) error {
+	if credential == nil ||
+		strings.TrimSpace(credential.NotificationID) == "" ||
+		strings.TrimSpace(credential.NotificationURL) == "" {
+		return nil
+	}
+	notificationURL, err := s.validateExternalURL(credential.NotificationURL)
+	if err != nil {
+		return fmt.Errorf("validate credential notification URL: %w", err)
+	}
+	body, err := json.Marshal(map[string]string{
+		"notification_id": credential.NotificationID,
+		"event":           "credential_accepted",
+	})
+	if err != nil {
+		return fmt.Errorf("marshal credential notification: %w", err)
+	}
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		notificationURL,
+		strings.NewReader(string(body)),
+	)
+	if err != nil {
+		return fmt.Errorf("build credential notification: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(
+		"Authorization",
+		firstNonEmpty(strings.TrimSpace(credential.TokenType), "Bearer")+" "+credential.AccessToken,
+	)
+	if sessionID := strings.TrimSpace(lookingGlassSessionID); sessionID != "" {
+		req.Header.Set("X-Looking-Glass-Session", sessionID)
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("credential notification failed: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf(
+			"credential notification returned %d: %s",
+			resp.StatusCode,
+			oneLine(string(responseBody)),
+		)
+	}
+	return nil
+}
+
+func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, _ string, cNonce string, audience string) (string, error) {
+	// OID4VCI 1.0 Appendix F.1 carries the proof key in the JOSE header.
+	// This pre-authorized wallet deliberately omits iss because its access is
+	// anonymous at the OAuth client layer.
 	if strings.TrimSpace(cNonce) == "" {
 		return "", fmt.Errorf("c_nonce is required for proof")
 	}
@@ -4027,18 +4143,15 @@ func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, w
 	}
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   subject,
-		"sub":   subject,
 		"aud":   firstNonEmpty(strings.TrimSpace(audience), s.issuerBaseURL+"/oid4vci"),
 		"nonce": cNonce,
 		"iat":   now.Unix(),
-		"exp":   now.Add(3 * time.Minute).Unix(),
 		"jti":   randomValue(20),
-		"cnf": map[string]interface{}{
-			"jwk": pubJWK,
-		},
 	}
-	return walletSignToken(wallet, claims, map[string]interface{}{"typ": "openid4vci-proof+jwt"})
+	return walletSignToken(wallet, claims, map[string]interface{}{
+		"typ": "openid4vci-proof+jwt",
+		"jwk": pubJWK,
+	})
 }
 
 func (s *walletHarnessServer) createDirectPostResponseJWT(wallet *walletMaterial, requestContext *resolvedRequestContext, vpToken string) (string, error) {

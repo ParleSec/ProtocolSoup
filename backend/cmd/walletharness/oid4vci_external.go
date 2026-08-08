@@ -55,6 +55,7 @@ type resolvedExternalIssuerMetadata struct {
 	CredentialIssuer                  string
 	CredentialEndpoint                string
 	NonceEndpoint                     string
+	NotificationEndpoint              string
 	JWKSURI                           string
 	AuthorizationServers              []string
 	CredentialConfigurationsSupported map[string]map[string]interface{}
@@ -260,6 +261,13 @@ func (s *walletHarnessServer) handleAPIImport(w http.ResponseWriter, r *http.Req
 		})
 		return
 	}
+	if err := s.notifyCredentialAccepted(r.Context(), importResult.IssuedCredential, req.LookingGlassSessionID); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error":             "wallet_import_failed",
+			"error_description": err.Error(),
+		})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"wallet_subject":                wallet.Subject,
@@ -377,6 +385,10 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		importResult.IssuedCredential.CredentialConfigID,
 		importResult.IssuedCredential.CredentialFormat,
 	); err != nil {
+		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		return
+	}
+	if err := s.notifyCredentialAccepted(r.Context(), importResult.IssuedCredential, pending.LookingGlassSessionID); err != nil {
 		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
 		return
 	}
@@ -731,19 +743,16 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 	proofJWT := ""
 	var err error
 	if jwtProofRequired {
-		cNonce := strings.TrimSpace(asString(tokenPayload["c_nonce"]))
-		if cNonce == "" && strings.TrimSpace(issuerMetadata.NonceEndpoint) != "" {
-			cNonce, err = s.fetchExternalNonce(ctx, issuerMetadata.NonceEndpoint, accessToken, input.LookingGlassSessionID)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if cNonce == "" {
+		if strings.TrimSpace(issuerMetadata.NonceEndpoint) == "" {
 			return nil, &walletAPIError{
 				Status:      http.StatusBadGateway,
 				Code:        "wallet_import_failed",
-				Description: "issuer requires jwt proof but no c_nonce was provided",
+				Description: "issuer requires jwt proof but does not advertise nonce_endpoint",
 			}
+		}
+		cNonce, nonceErr := s.fetchExternalNonce(ctx, issuerMetadata.NonceEndpoint, accessToken, input.LookingGlassSessionID)
+		if nonceErr != nil {
+			return nil, nonceErr
 		}
 		proofJWT, err = s.createCredentialProofJWT(wallet, wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
 		if err != nil {
@@ -764,7 +773,11 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 		return nil, err
 	}
 
-	credentialJWT, err := credentialPayloadToString(credentialPayload["credential"])
+	rawCredential, err := credentialResponseValue(credentialPayload)
+	if err != nil {
+		return nil, err
+	}
+	credentialJWT, err := credentialPayloadToString(rawCredential)
 	if err != nil {
 		return nil, err
 	}
@@ -803,6 +816,10 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 			CredentialJWT:      credentialJWT,
 			CredentialFormat:   credentialFormat,
 			CredentialConfigID: selectedConfigurationID,
+			NotificationID:     strings.TrimSpace(asString(credentialPayload["notification_id"])),
+			NotificationURL:    issuerMetadata.NotificationEndpoint,
+			AccessToken:        accessToken,
+			TokenType:          firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer"),
 		},
 		CredentialIssuer:            issuerMetadata.CredentialIssuer,
 		IssuerMetadata:              issuerMetadata.Raw,
@@ -1002,6 +1019,7 @@ func (s *walletHarnessServer) resolveExternalIssuerMetadata(
 			CredentialIssuer:                  metadataIssuer,
 			CredentialEndpoint:                credentialEndpoint,
 			NonceEndpoint:                     strings.TrimSpace(asString(payload["nonce_endpoint"])),
+			NotificationEndpoint:              strings.TrimSpace(asString(payload["notification_endpoint"])),
 			JWKSURI:                           strings.TrimSpace(asString(payload["jwks_uri"])),
 			AuthorizationServers:              stringSliceFromValue(payload["authorization_servers"]),
 			CredentialConfigurationsSupported: configurationMap,
@@ -1022,16 +1040,6 @@ func (s *walletHarnessServer) resolveExternalAuthorizationServerMetadata(
 ) (*resolvedAuthorizationServerMetadata, error) {
 	if issuerMetadata == nil {
 		return nil, fmt.Errorf("issuer metadata is required")
-	}
-	if tokenEndpoint := strings.TrimSpace(asString(issuerMetadata.Raw["token_endpoint"])); tokenEndpoint != "" {
-		return &resolvedAuthorizationServerMetadata{
-			Raw:                           issuerMetadata.Raw,
-			AuthorizationServer:           issuerMetadata.CredentialIssuer,
-			AuthorizationEndpoint:         strings.TrimSpace(asString(issuerMetadata.Raw["authorization_endpoint"])),
-			TokenEndpoint:                 tokenEndpoint,
-			JWKSURI:                       strings.TrimSpace(asString(issuerMetadata.Raw["jwks_uri"])),
-			CodeChallengeMethodsSupported: stringSliceFromValue(issuerMetadata.Raw["code_challenge_methods_supported"]),
-		}, nil
 	}
 
 	candidates := dedupeStringList(issuerMetadata.AuthorizationServers)
@@ -1089,6 +1097,11 @@ func (s *walletHarnessServer) exchangeExternalPreAuthorizedToken(
 	txCode string,
 	lookingGlassSessionID string,
 ) (map[string]interface{}, error) {
+	validatedEndpoint, err := s.validateExternalURL(tokenEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("validate token endpoint: %w", err)
+	}
+	tokenEndpoint = validatedEndpoint
 	form := url.Values{}
 	form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
 	form.Set("pre-authorized_code", strings.TrimSpace(preAuthorizedCode))
@@ -1134,6 +1147,11 @@ func (s *walletHarnessServer) exchangeExternalAuthorizationCodeToken(
 	codeVerifier string,
 	lookingGlassSessionID string,
 ) (map[string]interface{}, error) {
+	validatedEndpoint, err := s.validateExternalURL(tokenEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("validate token endpoint: %w", err)
+	}
+	tokenEndpoint = validatedEndpoint
 	form := url.Values{}
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", strings.TrimSpace(code))
@@ -1177,15 +1195,19 @@ func (s *walletHarnessServer) exchangeExternalAuthorizationCodeToken(
 func (s *walletHarnessServer) fetchExternalNonce(
 	ctx context.Context,
 	nonceEndpoint string,
-	accessToken string,
+	_ string,
 	lookingGlassSessionID string,
 ) (string, error) {
+	validatedEndpoint, err := s.validateExternalURL(nonceEndpoint)
+	if err != nil {
+		return "", fmt.Errorf("validate nonce endpoint: %w", err)
+	}
+	nonceEndpoint = validatedEndpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, nonceEndpoint, nil)
 	if err != nil {
 		return "", fmt.Errorf("build nonce request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
 	if strings.TrimSpace(lookingGlassSessionID) != "" {
 		req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
 	}
@@ -1216,23 +1238,22 @@ func (s *walletHarnessServer) requestExternalCredential(
 	ctx context.Context,
 	credentialEndpoint string,
 	credentialConfigurationID string,
-	credentialFormat string,
+	_ string,
 	accessToken string,
 	proofJWT string,
 	lookingGlassSessionID string,
 ) (map[string]interface{}, error) {
+	validatedEndpoint, err := s.validateExternalURL(credentialEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("validate credential endpoint: %w", err)
+	}
+	credentialEndpoint = validatedEndpoint
 	requestBody := map[string]interface{}{
 		"credential_configuration_id": strings.TrimSpace(credentialConfigurationID),
 	}
-	if strings.TrimSpace(credentialFormat) != "" {
-		requestBody["format"] = strings.TrimSpace(credentialFormat)
-	}
 	if strings.TrimSpace(proofJWT) != "" {
-		requestBody["proofs"] = []map[string]interface{}{
-			{
-				"proof_type": "jwt",
-				"jwt":        strings.TrimSpace(proofJWT),
-			},
+		requestBody["proofs"] = map[string]interface{}{
+			"jwt": []string{strings.TrimSpace(proofJWT)},
 		}
 	}
 
@@ -1476,6 +1497,11 @@ func (s *walletHarnessServer) fetchJSONDocument(
 	acceptHeader string,
 	lookingGlassSessionID string,
 ) (map[string]interface{}, error) {
+	validatedURL, err := s.validateExternalURL(targetURL)
+	if err != nil {
+		return nil, fmt.Errorf("validate request URL: %w", err)
+	}
+	targetURL = validatedURL
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
