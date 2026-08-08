@@ -59,10 +59,13 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"scopes_supported":                      scopesSupported,
 		"response_types_supported":              []string{"code", "token", "id_token", "code id_token", "code token", "id_token token", "code id_token token"},
 		"response_modes_supported":              []string{"query", "fragment", "form_post"},
-		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "none"},
+		"grant_types_supported":                 []string{"authorization_code", "implicit", "refresh_token"},
+		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"service_documentation":                 issuer + "/auth.md",
+	}
+	if p.registrationEnabled() {
+		metadata["registration_endpoint"] = issuer + "/oidc/register"
 	}
 
 	// auth.md profile extension. RFC 8414 Section 2 allows additional

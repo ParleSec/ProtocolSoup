@@ -278,6 +278,27 @@ func TestPrivateKeyJWTRoundTripForEverySupportedAlgorithm(t *testing.T) {
 	}
 }
 
+// TestPrivateKeyJWTAllowsOmittedRequestClientID pins RFC 7523 / OIDC Core
+// Section 9 behaviour: the token request may omit client_id when the
+// client_assertion carries matching iss and sub values.
+func TestPrivateKeyJWTAllowsOmittedRequestClientID(t *testing.T) {
+	testServer := newOAuthAssertionTestServer(t)
+	signer := newAssertionSigner(t, "RS256", "omit-client-id")
+	testServer.registerSigner(signer)
+	audience := testServer.server.URL + "/oauth2/token"
+	assertion := signer.sign(t, validAssertionClaims(*testServer.now, "machine-client-pkjwt", audience, "omit-client-id-jti"), "")
+
+	form := assertionForm("", assertion)
+	form.Del("client_id")
+	status, response := postClientAssertion(t, testServer.server.URL, form, "", "", "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, response = %#v", status, response)
+	}
+	if response["access_token"] == "" {
+		t.Fatalf("access_token missing from %#v", response)
+	}
+}
+
 func TestClientAssertionClaimAndHeaderValidationReasons(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	clientID := "machine-client-pkjwt"
@@ -698,9 +719,13 @@ func TestEveryClientAssertionValidationFailureIsGenericExternally(t *testing.T) 
 			},
 		},
 		{
-			name: "missing request client id",
+			name: "missing request client id and assertion issuer",
 			prepare: func(t *testing.T, server *oauthAssertionTestServer, signer assertionSigner) url.Values {
+				// Omitting request client_id is allowed when iss/sub identify the
+				// client. This case still fails because the assertion itself has
+				// no issuer to fall back to.
 				claims := validAssertionClaims(*server.now, "machine-client-pkjwt", server.server.URL+"/oauth2/token", "no-client")
+				delete(claims, "iss")
 				form := assertionForm("", signer.sign(t, claims, ""))
 				form.Del("client_id")
 				return form

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"html"
 	"net/http"
 	"net/url"
@@ -61,6 +62,35 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	query := r.Form
 	sessionID := p.getSessionFromRequest(r)
 
+	// Dynamic OPs MUST support Request Objects by reference (OIDC Core §15.2).
+	if merged, errCode, errDesc := p.applyRequestURI(query); errCode != "" {
+		// client_id/redirect_uri may still be usable for error delivery.
+		clientID := query.Get("client_id")
+		redirectURI := query.Get("redirect_uri")
+		state := query.Get("state")
+		responseType := query.Get("response_type")
+		if clientID != "" && redirectURI != "" {
+			if normalized, err := p.mockIdP.NormalizeRedirectURI(clientID, redirectURI); err == nil {
+				mode := defaultResponseMode(responseType)
+				if responseType == "" {
+					mode = errorResponseModeForMissingType(query.Get("response_mode"))
+				} else if m, ec, _ := resolveResponseMode(responseType, query.Get("response_mode")); ec == "" {
+					mode = m
+				}
+				p.redirectAuthError(w, r, normalized, responseType, mode, state, errCode, errDesc)
+				return
+			}
+		}
+		if errCode == "request_uri_not_supported" || errCode == "request_not_supported" {
+			p.writeAuthorizationErrorPage(w, http.StatusBadRequest, errCode, errDesc)
+			return
+		}
+		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, errCode, errDesc)
+		return
+	} else {
+		query = merged
+	}
+
 	responseType := query.Get("response_type")
 	clientID := query.Get("client_id")
 	redirectURI := query.Get("redirect_uri")
@@ -73,6 +103,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	maxAgeRaw := query.Get("max_age")
 	responseModeRaw := query.Get("response_mode")
 	claimsParam := query.Get("claims")
+	loginHint := query.Get("login_hint")
 
 	// Emit OIDC authorization request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authentication Request", map[string]interface{}{
@@ -153,17 +184,8 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Step 3: every remaining request error redirects to redirect_uri.
 
-	// request and request_uri are not supported by this OP. They are rejected
-	// before any other request validation so a request object can never mask the
-	// rejection, and with the dedicated error codes the spec defines rather than
-	// being silently ignored (OIDC Core 1.0 Section 6.2.1, 6.3.1). The discovery
-	// metadata advertises request_parameter_supported and
-	// request_uri_parameter_supported as false to match.
-	if query.Get("request_uri") != "" {
-		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"request_uri_not_supported", "The request_uri parameter is not supported (OIDC Core 1.0 Section 6.3.1)")
-		return
-	}
+	// request (by value) remains unsupported. request_uri is handled by
+	// applyRequestURI above when Dynamic Registration is enabled (OIDC Core §15.2).
 	if rawRequestObject := query.Get("request"); rawRequestObject != "" {
 		// The OP does not support request objects and rejects them with
 		// request_not_supported (OIDC Core 1.0 Section 6.2). The rejection is an
@@ -242,6 +264,27 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce registered response_types for dynamically registered clients
+	// (OIDC Dynamic Client Registration 1.0 Section 2).
+	if len(client.ResponseTypes) > 0 {
+		allowed := false
+		canonicalRT, ok := canonicalizeResponseType(responseType)
+		if !ok {
+			canonicalRT = responseType
+		}
+		for _, registered := range client.ResponseTypes {
+			if registered == canonicalRT || registered == responseType {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+				"unauthorized_client", "response_type is not registered for this client")
+			return
+		}
+	}
+
 	params := authParams{
 		ClientID:            clientID,
 		RedirectURI:         redirectURI,
@@ -253,6 +296,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		ResponseType:        responseType,
 		ResponseMode:        responseMode,
 		Claims:              claimsParam,
+		LoginHint:           loginHint,
 	}
 
 	// Interaction decision (OIDC Core 1.0 Section 3.1.2.1).
@@ -298,18 +342,21 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		ResponseType:        responseType,
 		ResponseMode:        responseMode,
 		Claims:              claimsParam,
+		LoginHint:           loginHint,
 	})
 
 	// Generate login page with HTML-escaped values to prevent XSS
 	loginPage := p.generateOIDCLoginPage(
-		htmlEscape(clientID),
-		htmlEscape(scope),
-		htmlEscape(sessionID),
-		htmlEscape(client.Name),
-		htmlEscape(loginRequestID),
+		html.EscapeString(clientID),
+		html.EscapeString(scope),
+		html.EscapeString(sessionID),
+		html.EscapeString(client.Name),
+		html.EscapeString(loginRequestID),
+		html.EscapeString(loginHint),
+		client,
 	)
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(loginPage))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = fmt.Fprint(w, loginPage)
 }
 
 // containsScope reports whether scope (a space-delimited list) contains target
@@ -388,15 +435,17 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			clientName = client.Name
 		}
 		loginPage := p.generateOIDCLoginPage(
-			htmlEscape(clientID),
-			htmlEscape(scope),
-			htmlEscape(sessionID),
-			htmlEscape(clientName),
-			htmlEscape(loginRequestID),
+			html.EscapeString(clientID),
+			html.EscapeString(scope),
+			html.EscapeString(sessionID),
+			html.EscapeString(clientName),
+			html.EscapeString(requestInfo.ID),
+			html.EscapeString(requestInfo.LoginHint),
+			nil, // omit branding on the error redisplay; values are already escaped above
 		)
 		loginPage = strings.Replace(loginPage, "<!-- ERROR -->", `<div class="error">Invalid email or password</div>`, 1)
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(loginPage))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, loginPage)
 		return
 	}
 
@@ -451,6 +500,12 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 	hasIDToken := strings.Contains(params.ResponseType, "id_token")
 
 	jwtService := p.mockIdP.JWTService()
+	subject, subjectErr := p.outwardSubject(params.ClientID, userID)
+	if subjectErr != nil {
+		p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+			"server_error", "Failed to resolve subject identifier")
+		return
+	}
 	var authorizationCode string
 	var accessToken string
 
@@ -474,7 +529,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		// Requested UserInfo claims (OIDC Core 1.0 Section 5.5) travel with the
 		// access token so the UserInfo endpoint knows which extra claims to
 		// return; identity claim values are not embedded (Section 5.4).
-		accessToken, err = jwtService.CreateAccessToken(userID, params.ClientID, params.Scope, time.Hour, requestedUserInfoClaimNames(params.Claims))
+		accessToken, err = jwtService.CreateAccessToken(subject, params.ClientID, params.Scope, time.Hour, requestedUserInfoClaimNames(params.Claims))
 		if err != nil {
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
 				"server_error", "Failed to create access token")
@@ -493,6 +548,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		var idClaims map[string]interface{}
 		if !hasCode && !hasToken {
 			idClaims = p.mockIdP.UserClaims(userID, strings.Fields(params.Scope))
+			idClaims["sub"] = subject
 		}
 
 		// Claims the client requested specifically for the ID Token via the
@@ -522,7 +578,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		}
 
 		idToken, err = jwtService.CreateIDTokenWithOptions(
-			userID, params.ClientID, params.Nonce, authTime, time.Hour, idClaims, idTokenOptions,
+			subject, params.ClientID, params.Nonce, authTime, time.Hour, idClaims, idTokenOptions,
 		)
 		if err != nil {
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
@@ -668,19 +724,33 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
 	code := r.FormValue("code")
 	redirectURI := r.FormValue("redirect_uri")
-	clientID := r.FormValue("client_id")
-	clientSecret := r.FormValue("client_secret")
 	codeVerifier := r.FormValue("code_verifier")
 
-	// Try to get client credentials from Authorization header
-	if clientID == "" {
-		clientID, clientSecret, _ = r.BasicAuth()
+	client, clientAuthMethod, err := p.authenticateOIDCClient(r)
+	if err != nil {
+		errorCode := clientAuthMethod
+		if errorCode == "" {
+			errorCode = "invalid_client"
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Auth Failed", map[string]interface{}{
+			"error":              err.Error(),
+			"client_auth_method": errorCode,
+		})
+		status := http.StatusUnauthorized
+		if errorCode == "invalid_request" {
+			status = http.StatusBadRequest
+		}
+		challenge := ""
+		if _, _, ok := r.BasicAuth(); ok {
+			challenge = basicChallenge("basic")
+		}
+		writeOIDCTokenError(w, status, errorCode, err.Error(), challenge)
+		return
 	}
-	clientAuthMethod := "none"
-	if _, _, ok := r.BasicAuth(); ok {
-		clientAuthMethod = "basic"
-	} else if clientSecret != "" {
-		clientAuthMethod = "post"
+	clientID := client.ID
+	if !clientSupportsGrant(client, "authorization_code") {
+		writeOIDCTokenError(w, http.StatusBadRequest, "unauthorized_client", "Client is not authorized for authorization_code", "")
+		return
 	}
 
 	// Emit token exchange request
@@ -695,35 +765,12 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		"code_verifier":         codeVerifier,
 		"code_verifier_present": codeVerifier != "",
 		"client_auth_method":    clientAuthMethod,
-		"client_secret_present": clientSecret != "",
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "OIDC Token Request",
 		Description: "The client exchanges the authorization code for tokens, including the ID token with identity claims",
 		Reference:   "OpenID Connect Core 1.0 Section 3.1.3",
 	})
-
-	// Validate client
-	client, exists := p.mockIdP.GetClient(clientID)
-	if !exists {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unknown Client", map[string]interface{}{
-			"client_id":          clientID,
-			"client_auth_method": clientAuthMethod,
-		})
-		writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Unknown client", basicChallenge(clientAuthMethod))
-		return
-	}
-
-	if !client.Public {
-		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
-			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Auth Failed", map[string]interface{}{
-				"client_id":          clientID,
-				"client_auth_method": clientAuthMethod,
-			})
-			writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", basicChallenge(clientAuthMethod))
-			return
-		}
-	}
 
 	// Validate authorization code
 	authCode, err := p.mockIdP.ValidateAuthorizationCode(code, clientID, redirectURI, codeVerifier)
@@ -792,19 +839,29 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 
 func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string) {
 	refreshToken := r.FormValue("refresh_token")
-	clientID := r.FormValue("client_id")
-	clientSecret := r.FormValue("client_secret")
 	scope := r.FormValue("scope")
 
-	// Try to get client credentials from Authorization header
-	if clientID == "" {
-		clientID, clientSecret, _ = r.BasicAuth()
+	client, clientAuthMethod, err := p.authenticateOIDCClient(r)
+	if err != nil {
+		errorCode := clientAuthMethod
+		if errorCode == "" {
+			errorCode = "invalid_client"
+		}
+		status := http.StatusUnauthorized
+		if errorCode == "invalid_request" {
+			status = http.StatusBadRequest
+		}
+		challenge := ""
+		if _, _, ok := r.BasicAuth(); ok {
+			challenge = basicChallenge("basic")
+		}
+		writeOIDCTokenError(w, status, errorCode, err.Error(), challenge)
+		return
 	}
-	clientAuthMethod := "none"
-	if _, _, ok := r.BasicAuth(); ok {
-		clientAuthMethod = "basic"
-	} else if clientSecret != "" {
-		clientAuthMethod = "post"
+	clientID := client.ID
+	if !clientSupportsGrant(client, "refresh_token") {
+		writeOIDCTokenError(w, http.StatusBadRequest, "unauthorized_client", "Client is not authorized for refresh_token", "")
+		return
 	}
 
 	// Emit refresh request
@@ -823,20 +880,6 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		Description: "Refreshing tokens in OIDC can also issue a new ID token if openid scope is present",
 		Reference:   "OpenID Connect Core 1.0 Section 12",
 	})
-
-	// Validate client
-	client, exists := p.mockIdP.GetClient(clientID)
-	if !exists {
-		writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Unknown client", basicChallenge(clientAuthMethod))
-		return
-	}
-
-	if !client.Public {
-		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
-			writeOIDCTokenError(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", basicChallenge(clientAuthMethod))
-			return
-		}
-	}
 
 	// Validate refresh token
 	rt, err := p.mockIdP.ValidateRefreshToken(refreshToken, clientID)
@@ -859,12 +902,17 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	// Generate new tokens (including new ID token if openid scope)
 	jwtService := p.mockIdP.JWTService()
 	scopes := strings.Split(scope, " ")
+	subject, err := p.outwardSubject(clientID, rt.UserID)
+	if err != nil {
+		writeOIDCTokenError(w, http.StatusInternalServerError, "server_error", "Failed to resolve subject identifier", "")
+		return
+	}
 
 	// As with the code flow, the access token carries the granted scope and the
 	// UserInfo endpoint serves the scope-requested claims; the token does not
 	// embed identity claims (OIDC Core 1.0 Section 5.4).
 	accessToken, err := jwtService.CreateAccessToken(
-		rt.UserID,
+		subject,
 		clientID,
 		scope,
 		time.Hour,
@@ -877,7 +925,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 
 	// Create new refresh token (rotation)
 	newRefreshToken, err := jwtService.CreateRefreshToken(
-		rt.UserID,
+		subject,
 		clientID,
 		scope,
 		7*24*time.Hour,
@@ -917,7 +965,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		// acr/amr describe the original authentication context, which persists
 		// across refresh (the session was established by a password login).
 		idToken, err := jwtService.CreateIDTokenWithOptions(
-			rt.UserID,
+			subject,
 			clientID,
 			"", // No nonce for refresh
 			rt.AuthTime,
@@ -955,9 +1003,40 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	json.NewEncoder(w).Encode(response)
 }
 
+func clientSupportsGrant(client *models.Client, grant string) bool {
+	if client == nil {
+		return false
+	}
+	if len(client.GrantTypes) == 0 {
+		// Static demo clients historically omit an explicit grant list; treat
+		// authorization_code and refresh_token as available for those records.
+		return grant == "authorization_code" || grant == "refresh_token"
+	}
+	for _, g := range client.GrantTypes {
+		if g == grant {
+			return true
+		}
+	}
+	return false
+}
+
+// outwardSubject derives the client-visible subject while canonical local user
+// IDs remain in authorization-code, refresh-token, and session storage.
+func (p *Plugin) outwardSubject(clientID, userID string) (string, error) {
+	client, exists := p.mockIdP.GetClient(clientID)
+	if !exists {
+		return "", fmt.Errorf("unknown client %q", clientID)
+	}
+	return p.mockIdP.SubjectForClient(client, userID)
+}
+
 // issueOIDCTokens creates access token, refresh token, and ID token
 func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.TokenResponse, error) {
 	jwtService := p.mockIdP.JWTService()
+	subject, err := p.outwardSubject(authCode.ClientID, authCode.UserID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Parse scopes
 	scopes := strings.Split(authCode.Scope, " ")
@@ -968,7 +1047,7 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	// claims the client requested via the claims parameter (Section 5.5) ride
 	// along as claim names so UserInfo can return them.
 	accessToken, err := jwtService.CreateAccessToken(
-		authCode.UserID,
+		subject,
 		authCode.ClientID,
 		authCode.Scope,
 		time.Hour,
@@ -980,7 +1059,7 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 
 	// Create refresh token
 	refreshToken, err := jwtService.CreateRefreshToken(
-		authCode.UserID,
+		subject,
 		authCode.ClientID,
 		authCode.Scope,
 		7*24*time.Hour,
@@ -1023,7 +1102,7 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 		// acr/amr reflect the password authentication performed at the
 		// authorization endpoint (OIDC Core 1.0 Section 2, RFC 8176).
 		idToken, err := jwtService.CreateIDTokenWithOptions(
-			authCode.UserID,
+			subject,
 			authCode.ClientID,
 			authCode.Nonce,
 			authCode.AuthTime,
@@ -1040,10 +1119,15 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	return response, nil
 }
 
-func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
+func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, loginRequestID, loginHint string, client *models.Client) string {
+	// All string arguments except those derived below must already be HTML-escaped.
 	if clientName == "" {
-		if client, exists := p.mockIdP.GetClient(clientID); exists {
-			clientName = client.Name
+		if client != nil && client.Name != "" {
+			clientName = html.EscapeString(client.Name)
+		} else if found, exists := p.mockIdP.GetClient(clientID); exists {
+			// clientID is escaped; GetClient may miss. Fall back carefully.
+			clientName = html.EscapeString(found.Name)
+			client = found
 		} else {
 			clientName = clientID
 		}
@@ -1054,6 +1138,9 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
 	}
 
 	demoUsersHTML := buildDemoUsersHTML(p.mockIdP.GetDemoUserPresets())
+	metadataHTML := buildClientMetadataHTML(client)
+	// Arguments are expected to already be HTML-escaped by the caller.
+	emailValue := loginHint
 
 	return `<!DOCTYPE html>
 <html>
@@ -1121,6 +1208,10 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
         .client-info strong {
             color: #fff;
         }
+        .client-branding { text-align: center; margin-bottom: 16px; }
+        .client-branding img { max-height: 64px; max-width: 100%; border-radius: 8px; }
+        .client-links { margin-top: 8px; font-size: 0.8rem; text-align: center; }
+        .client-links a { color: #93c5fd; margin: 0 8px; }
         .form-group {
             margin-bottom: 20px;
         }
@@ -1221,6 +1312,7 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
         <div class="client-info">
             <span>Signing in to <strong>` + clientName + `</strong></span>
         </div>
+        ` + metadataHTML + `
 
         <!-- ERROR -->
 
@@ -1229,7 +1321,7 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
             
             <div class="form-group">
                 <label for="email">Email</label>
-                <input type="email" id="email" name="email" placeholder="alice@example.com" required>
+                <input type="email" id="email" name="email" value="` + emailValue + `" placeholder="alice@example.com" required>
             </div>
             
             <div class="form-group">
@@ -1255,6 +1347,30 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
     </script>
 </body>
 </html>`
+}
+
+func buildClientMetadataHTML(client *models.Client) string {
+	if client == nil {
+		return ""
+	}
+	var parts []string
+	if client.LogoURI != "" {
+		parts = append(parts, `<div class="client-branding"><img src="`+html.EscapeString(client.LogoURI)+`" alt="Client logo"/></div>`)
+	}
+	var links []string
+	if client.PolicyURI != "" {
+		links = append(links, `<a href="`+html.EscapeString(client.PolicyURI)+`" target="_blank" rel="noopener noreferrer">Privacy Policy</a>`)
+	}
+	if client.TosURI != "" {
+		links = append(links, `<a href="`+html.EscapeString(client.TosURI)+`" target="_blank" rel="noopener noreferrer">Terms of Service</a>`)
+	}
+	if client.ClientURI != "" {
+		links = append(links, `<a href="`+html.EscapeString(client.ClientURI)+`" target="_blank" rel="noopener noreferrer">Client Home</a>`)
+	}
+	if len(links) > 0 {
+		parts = append(parts, `<div class="client-links">`+strings.Join(links, "")+`</div>`)
+	}
+	return strings.Join(parts, "")
 }
 
 func buildDemoUsersHTML(presets []mockidp.DemoUserPreset) string {
@@ -1288,6 +1404,7 @@ func buildDemoUsersHTML(presets []mockidp.DemoUserPreset) string {
 }
 
 type loginRequestInfo struct {
+	ID                  string
 	ClientID            string
 	RedirectURI         string
 	Scope               string
@@ -1298,11 +1415,13 @@ type loginRequestInfo struct {
 	ResponseType        string
 	ResponseMode        string
 	Claims              string
+	LoginHint           string
 	CreatedAt           time.Time
 }
 
 func (p *Plugin) storeLoginRequest(info loginRequestInfo) string {
 	loginRequestID := newLoginRequestID()
+	info.ID = loginRequestID
 	info.CreatedAt = time.Now()
 
 	p.loginRequestsMu.Lock()

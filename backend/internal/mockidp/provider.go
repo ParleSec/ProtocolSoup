@@ -2,9 +2,13 @@ package mockidp
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +29,7 @@ type MockIdP struct {
 	jwtService    *crypto.JWTService
 	issuer        string
 	defaultUserID string
+	pairwiseSalt  []byte
 	mu            sync.RWMutex
 }
 
@@ -46,6 +51,10 @@ const usedCodeRetention = time.Hour
 
 // NewMockIdP creates a new mock identity provider
 func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
+	pairwiseSalt := make([]byte, 32)
+	if _, err := rand.Read(pairwiseSalt); err != nil {
+		panic("generate pairwise subject salt: " + err.Error())
+	}
 	idp := &MockIdP{
 		users:         make(map[string]*models.User),
 		clients:       make(map[string]*models.Client),
@@ -56,6 +65,7 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		usedCodes:     make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
 		keySet:        keySet,
 		issuer:        "http://localhost:8080",
+		pairwiseSalt:  pairwiseSalt,
 	}
 
 	idp.jwtService = crypto.NewJWTService(keySet, idp.issuer)
@@ -79,6 +89,89 @@ func (idp *MockIdP) GetIssuer() string {
 	idp.mu.RLock()
 	defer idp.mu.RUnlock()
 	return idp.issuer
+}
+
+// SetPairwiseSubjectSalt installs the durable provider secret used to derive
+// pairwise subject identifiers. Callers must supply a stable secret for a
+// production deployment so subject values survive process restarts.
+func (idp *MockIdP) SetPairwiseSubjectSalt(salt string) {
+	if strings.TrimSpace(salt) == "" {
+		return
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	idp.pairwiseSalt = []byte(salt)
+}
+
+// SubjectForClient returns the public or pairwise subject identifier visible to
+// a client. Pairwise identifiers follow OIDC Core Section 8.1's salted
+// SHA-256 construction and are deterministic for a user and sector.
+func (idp *MockIdP) SubjectForClient(client *models.Client, userID string) (string, error) {
+	if client == nil || client.SubjectType != "pairwise" {
+		return userID, nil
+	}
+	sector, err := sectorIdentifier(client)
+	if err != nil {
+		return "", err
+	}
+	idp.mu.RLock()
+	salt := append([]byte(nil), idp.pairwiseSalt...)
+	idp.mu.RUnlock()
+	hash := sha256.Sum256([]byte(sector + "\x00" + userID + "\x00" + string(salt)))
+	return base64.RawURLEncoding.EncodeToString(hash[:]), nil
+}
+
+// ResolveUserIDForSubject maps a public or pairwise access-token subject back
+// to the canonical local user identifier for UserInfo claim lookup.
+func (idp *MockIdP) ResolveUserIDForSubject(client *models.Client, subject string) (string, bool) {
+	if client == nil {
+		return "", false
+	}
+	if client.SubjectType != "pairwise" {
+		_, exists := idp.GetUser(subject)
+		return subject, exists
+	}
+	idp.mu.RLock()
+	userIDs := make([]string, 0, len(idp.users))
+	for userID := range idp.users {
+		userIDs = append(userIDs, userID)
+	}
+	idp.mu.RUnlock()
+	for _, userID := range userIDs {
+		candidate, err := idp.SubjectForClient(client, userID)
+		if err == nil && subtle.ConstantTimeCompare([]byte(candidate), []byte(subject)) == 1 {
+			return userID, true
+		}
+	}
+	return "", false
+}
+
+func sectorIdentifier(client *models.Client) (string, error) {
+	if client == nil {
+		return "", errors.New("client is required")
+	}
+	if client.SectorIdentifierURI != "" {
+		parsed, err := url.Parse(client.SectorIdentifierURI)
+		if err != nil || parsed.Hostname() == "" {
+			return "", errors.New("invalid sector_identifier_uri")
+		}
+		return strings.ToLower(parsed.Hostname()), nil
+	}
+	if len(client.RedirectURIs) == 0 {
+		return "", errors.New("pairwise client has no redirect_uris")
+	}
+	parsed, err := url.Parse(client.RedirectURIs[0])
+	if err != nil || parsed.Hostname() == "" {
+		return "", errors.New("invalid redirect_uri for pairwise subject")
+	}
+	sector := strings.ToLower(parsed.Hostname())
+	for _, raw := range client.RedirectURIs[1:] {
+		parsed, err := url.Parse(raw)
+		if err != nil || !strings.EqualFold(parsed.Hostname(), sector) {
+			return "", errors.New("pairwise client has multiple redirect URI hosts without sector_identifier_uri")
+		}
+	}
+	return sector, nil
 }
 
 // initDemoData initializes demo users and clients
@@ -336,6 +429,63 @@ func (idp *MockIdP) RegisterClient(client *models.Client) {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 	idp.clients[client.ID] = client
+}
+
+// DeleteClient removes a client registration. It is used by dynamic-registration
+// cleanup and does not affect other stores.
+func (idp *MockIdP) DeleteClient(id string) bool {
+	if id == "" {
+		return false
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	if _, exists := idp.clients[id]; !exists {
+		return false
+	}
+	delete(idp.clients, id)
+	return true
+}
+
+// CountDynamicClients returns the number of non-expired dynamically registered
+// clients currently held in memory.
+func (idp *MockIdP) CountDynamicClients() int {
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	now := time.Now()
+	count := 0
+	for _, client := range idp.clients {
+		if client == nil || !client.Dynamic {
+			continue
+		}
+		if clientRegistrationExpired(client, now) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// FindClientByRegistrationAccessTokenHash returns the dynamic client whose
+// hashed registration access token matches the supplied hash.
+func (idp *MockIdP) FindClientByRegistrationAccessTokenHash(tokenHash string) (*models.Client, bool) {
+	if tokenHash == "" {
+		return nil, false
+	}
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	now := time.Now()
+	for _, client := range idp.clients {
+		if client == nil || client.RegistrationAccessTokenHash == "" {
+			continue
+		}
+		if clientRegistrationExpired(client, now) {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(client.RegistrationAccessTokenHash), []byte(tokenHash)) == 1 {
+			return client, true
+		}
+	}
+	return nil, false
 }
 
 // ValidateClient validates client credentials

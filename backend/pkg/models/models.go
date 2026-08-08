@@ -57,17 +57,45 @@ type Client struct {
 	Secret                  string   `json:"-"` // Never serialized in responses
 	Name                    string   `json:"name"`
 	RedirectURIs            []string `json:"redirect_uris"`
+	ResponseTypes           []string `json:"response_types,omitempty"`
 	GrantTypes              []string `json:"grant_types"`
 	Scopes                  []string `json:"scopes"`
 	Public                  bool     `json:"public"` // Public clients (no secret)
+	ApplicationType         string   `json:"application_type,omitempty"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method,omitempty"`
 	// JWKS and JWKSURI are the client's registered public verification keys.
-	// When both are present, RFC 7523 client authentication resolves the static
-	// set first and uses the URI only when the requested kid is absent.
-	JWKS      *crypto.JWKS `json:"jwks,omitempty"`
-	JWKSURI   string       `json:"jwks_uri,omitempty"`
-	CreatedAt time.Time    `json:"created_at"`
-	ExpiresAt *time.Time   `json:"expires_at,omitempty"`
+	// Dynamic Client Registration rejects simultaneous use (OIDCR §2); static
+	// OAuth demos may still provision either or both for Looking Glass flows.
+	JWKS    *crypto.JWKS `json:"jwks,omitempty"`
+	JWKSURI string       `json:"jwks_uri,omitempty"`
+
+	Contacts    []string `json:"contacts,omitempty"`
+	ClientURI   string   `json:"client_uri,omitempty"`
+	LogoURI     string   `json:"logo_uri,omitempty"`
+	PolicyURI   string   `json:"policy_uri,omitempty"`
+	TosURI      string   `json:"tos_uri,omitempty"`
+	SubjectType string   `json:"subject_type,omitempty"`
+	// SectorIdentifierURI determines the sector used for pairwise subject
+	// calculation (OpenID Connect Core 1.0 Section 8.1).
+	SectorIdentifierURI string `json:"sector_identifier_uri,omitempty"`
+
+	IDTokenSignedResponseAlg    string `json:"id_token_signed_response_alg,omitempty"`
+	UserinfoSignedResponseAlg   string `json:"userinfo_signed_response_alg,omitempty"`
+	RequestObjectSigningAlg     string `json:"request_object_signing_alg,omitempty"`
+	TokenEndpointAuthSigningAlg string `json:"token_endpoint_auth_signing_alg,omitempty"`
+	InitiateLoginURI            string `json:"initiate_login_uri,omitempty"`
+	RequireAuthTime             bool   `json:"require_auth_time,omitempty"`
+	DefaultMaxAge               *int64 `json:"default_max_age,omitempty"`
+
+	// Registration management (OIDC Dynamic Client Registration §3.2 / §4).
+	// RegistrationAccessToken is stored hashed; the plaintext is returned once.
+	RegistrationAccessTokenHash string     `json:"-"`
+	RegistrationClientURI       string     `json:"registration_client_uri,omitempty"`
+	ClientIDIssuedAt            int64      `json:"client_id_issued_at,omitempty"`
+	ClientSecretExpiresAt       *int64     `json:"client_secret_expires_at,omitempty"`
+	Dynamic                     bool       `json:"-"`
+	CreatedAt                   time.Time  `json:"created_at"`
+	ExpiresAt                   *time.Time `json:"expires_at,omitempty"`
 }
 
 // AuthorizationCode represents an OAuth authorization code
@@ -185,28 +213,29 @@ type OIDCClaims struct {
 
 // DiscoveryDocument represents OIDC discovery document
 type DiscoveryDocument struct {
-	Issuer                            string   `json:"issuer"`
-	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
-	TokenEndpoint                     string   `json:"token_endpoint"`
-	UserinfoEndpoint                  string   `json:"userinfo_endpoint"`
-	JwksURI                           string   `json:"jwks_uri"`
-	RegistrationEndpoint              string   `json:"registration_endpoint,omitempty"`
-	RevocationEndpoint                string   `json:"revocation_endpoint,omitempty"`
-	IntrospectionEndpoint             string   `json:"introspection_endpoint,omitempty"`
-	ScopesSupported                   []string `json:"scopes_supported"`
-	ResponseTypesSupported            []string `json:"response_types_supported"`
-	ResponseModesSupported            []string `json:"response_modes_supported,omitempty"`
-	GrantTypesSupported               []string `json:"grant_types_supported"`
-	SubjectTypesSupported             []string `json:"subject_types_supported"`
-	IDTokenSigningAlgValuesSupported  []string `json:"id_token_signing_alg_values_supported"`
-	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
-	ClaimsSupported                   []string `json:"claims_supported,omitempty"`
-	ACRValuesSupported                []string `json:"acr_values_supported,omitempty"`
-	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
+	Issuer                                 string   `json:"issuer"`
+	AuthorizationEndpoint                  string   `json:"authorization_endpoint"`
+	TokenEndpoint                          string   `json:"token_endpoint"`
+	UserinfoEndpoint                       string   `json:"userinfo_endpoint"`
+	JwksURI                                string   `json:"jwks_uri"`
+	RegistrationEndpoint                   string   `json:"registration_endpoint,omitempty"`
+	RevocationEndpoint                     string   `json:"revocation_endpoint,omitempty"`
+	IntrospectionEndpoint                  string   `json:"introspection_endpoint,omitempty"`
+	ScopesSupported                        []string `json:"scopes_supported"`
+	ResponseTypesSupported                 []string `json:"response_types_supported"`
+	ResponseModesSupported                 []string `json:"response_modes_supported,omitempty"`
+	GrantTypesSupported                    []string `json:"grant_types_supported"`
+	SubjectTypesSupported                  []string `json:"subject_types_supported"`
+	IDTokenSigningAlgValuesSupported       []string `json:"id_token_signing_alg_values_supported"`
+	UserinfoSigningAlgValuesSupported      []string `json:"userinfo_signing_alg_values_supported,omitempty"`
+	RequestObjectSigningAlgValuesSupported []string `json:"request_object_signing_alg_values_supported,omitempty"`
+	TokenEndpointAuthMethodsSupported      []string `json:"token_endpoint_auth_methods_supported"`
+	ClaimsSupported                        []string `json:"claims_supported,omitempty"`
+	ACRValuesSupported                     []string `json:"acr_values_supported,omitempty"`
+	CodeChallengeMethodsSupported          []string `json:"code_challenge_methods_supported,omitempty"`
 	// request_parameter_supported defaults to false and request_uri_parameter_supported
 	// defaults to true (OpenID Connect Discovery 1.0 Section 3). Both are emitted
-	// explicitly (no omitempty) so the false values are advertised accurately,
-	// since this OP supports neither the request nor request_uri parameter.
+	// explicitly (no omitempty) so the false values are advertised accurately.
 	RequestParameterSupported    bool `json:"request_parameter_supported"`
 	RequestURIParameterSupported bool `json:"request_uri_parameter_supported"`
 	// claims_parameter_supported defaults to false (OpenID Connect Discovery 1.0

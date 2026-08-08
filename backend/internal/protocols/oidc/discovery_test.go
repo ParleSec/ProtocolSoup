@@ -110,14 +110,16 @@ func TestDiscoveryMetadataIsAccurate(t *testing.T) {
 		}
 	}
 
-	// The OP supports neither request nor request_uri, so both must be advertised
-	// false. request_uri_parameter_supported defaults to true, so emitting it as
-	// false is required for accuracy (OIDC Discovery 1.0 Section 3).
+	// When Dynamic Registration is disabled, request_uri remains unsupported and
+	// must be advertised false. request_uri_parameter_supported defaults to true,
+	// so emitting false is required for accuracy (OIDC Discovery 1.0 Section 3).
+	// When Dynamic Registration is enabled, discovery advertises true and the
+	// authorization endpoint fetches signed Request Objects by reference.
 	if doc.RequestParameterSupported {
 		t.Errorf("request_parameter_supported must be false: the OP rejects the request parameter")
 	}
 	if doc.RequestURIParameterSupported {
-		t.Errorf("request_uri_parameter_supported must be false: the OP rejects the request_uri parameter")
+		t.Errorf("request_uri_parameter_supported must be false when Dynamic Registration is disabled, got true")
 	}
 	// request_uri_parameter_supported defaults to true, so the false value must
 	// be present in the emitted document, not merely absent.
@@ -133,5 +135,43 @@ func TestDiscoveryMetadataIsAccurate(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"claims_parameter_supported":true`) {
 		t.Errorf("discovery document must emit claims_parameter_supported:true explicitly; body=%s", rr.Body.String())
+	}
+}
+
+// TestOIDCJWKSOmitsOKP pins that the OIDC jwks_uri publishes only RSA/EC keys.
+// The KeySet still holds Ed25519 material, but OIDF's JWKS validator rejects OKP
+// and OIDC discovery only advertises RS256 for ID Tokens.
+func TestOIDCJWKSOmitsOKP(t *testing.T) {
+	p := newTestPlugin(t)
+	if err := p.keySet.Rotate(); err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/jwks.json", nil)
+	rr := httptest.NewRecorder()
+	p.handleJWKS(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("jwks status = %d, want 200", rr.Code)
+	}
+
+	var jwks struct {
+		Keys []struct {
+			Kty string `json:"kty"`
+			Kid string `json:"kid"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &jwks); err != nil {
+		t.Fatalf("decode jwks: %v", err)
+	}
+	if len(jwks.Keys) == 0 {
+		t.Fatal("jwks has no keys")
+	}
+	for _, key := range jwks.Keys {
+		if key.Kty == "OKP" {
+			t.Fatalf("OIDC JWKS must not publish OKP keys, found kid=%s", key.Kid)
+		}
+		if key.Kty != "RSA" && key.Kty != "EC" {
+			t.Fatalf("unexpected kty %q for kid %s", key.Kty, key.Kid)
+		}
 	}
 }

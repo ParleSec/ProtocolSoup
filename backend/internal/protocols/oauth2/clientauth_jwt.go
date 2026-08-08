@@ -75,16 +75,38 @@ type validatedClientAssertion struct {
 // authenticatePrivateKeyJWT validates the RFC 7523 Section 2.2 assertion and
 // returns the same client model used by password-based client authentication.
 func (p *Plugin) authenticatePrivateKeyJWT(clientID, assertion string) (*models.Client, *validatedClientAssertion, error) {
-	return p.authenticatePrivateKeyJWTContext(context.Background(), clientID, assertion)
+	return p.AuthenticatePrivateKeyJWTWithAudiences(
+		context.Background(),
+		clientID,
+		assertion,
+		[]string{strings.TrimRight(p.baseURL, "/") + "/oauth2/token"},
+	)
 }
 
-func (p *Plugin) authenticatePrivateKeyJWTContext(
+// AuthenticatePrivateKeyJWTWithAudiences validates a private_key_jwt client
+// assertion against any of the allowed audience values. OIDC Core Section 9
+// permits the token endpoint URL or the issuer identifier.
+func (p *Plugin) AuthenticatePrivateKeyJWTWithAudiences(
 	ctx context.Context,
 	clientID string,
 	assertion string,
+	audiences []string,
 ) (*models.Client, *validatedClientAssertion, error) {
+	// RFC 7523 / OIDC Core Section 9: client_id may be omitted from the token
+	// request when using private_key_jwt; the identifier is carried as iss/sub
+	// in the client_assertion JWT. OIDF Dynamic OP token requests omit it.
+	if clientID == "" {
+		extracted, err := clientIDFromClientAssertion(assertion)
+		if err != nil {
+			return nil, nil, err
+		}
+		clientID = extracted
+	}
 	if clientID == "" {
 		return nil, nil, assertionError("missing_client_id")
+	}
+	if len(audiences) == 0 {
+		return nil, nil, assertionError("missing_audience")
 	}
 
 	client, exists := p.mockIdP.GetClient(clientID)
@@ -96,12 +118,14 @@ func (p *Plugin) authenticatePrivateKeyJWTContext(
 	}
 
 	now := p.now()
-	_, validated, err := parseAndValidateClientAssertion(
-		assertion,
-		clientID,
-		strings.TrimRight(p.baseURL, "/")+"/oauth2/token",
-		now,
-	)
+	var validated *validatedClientAssertion
+	var err error
+	for _, audience := range audiences {
+		_, validated, err = parseAndValidateClientAssertion(assertion, clientID, audience, now)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -138,6 +162,27 @@ func (p *Plugin) authenticatePrivateKeyJWTContext(
 	}
 
 	return client, validated, nil
+}
+
+// clientIDFromClientAssertion reads the client identifier from an unverified
+// client_assertion JWT. Signature and claim validation still happen later.
+func clientIDFromClientAssertion(assertion string) (string, error) {
+	if assertion == "" {
+		return "", assertionError("missing_client_assertion")
+	}
+	decoded, err := internalcrypto.DecodeTokenWithoutValidation(assertion)
+	if err != nil {
+		return "", assertionError("malformed_client_assertion", err)
+	}
+	issuer, issuerOK := nonEmptyStringClaim(decoded.Payload, "iss")
+	subject, subjectOK := nonEmptyStringClaim(decoded.Payload, "sub")
+	if !issuerOK || !subjectOK {
+		return "", assertionError("missing_client_id")
+	}
+	if issuer != subject {
+		return "", assertionError("iss_sub_mismatch")
+	}
+	return issuer, nil
 }
 
 func parseAndValidateClientAssertion(

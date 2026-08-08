@@ -39,6 +39,22 @@ type StandardClaims struct {
 	Custom map[string]interface{} `json:"-"`
 }
 
+// SignClaimsRS256 signs an arbitrary claim set as a compact JWS using the OP's
+// current RSA signing key (RS256). Used for signed UserInfo responses
+// (OpenID Connect Core 1.0 Section 5.3.2).
+func (s *JWTService) SignClaimsRS256(claims map[string]interface{}) (string, error) {
+	if claims == nil {
+		claims = map[string]interface{}{}
+	}
+	copied := make(jwt.MapClaims, len(claims))
+	for k, v := range claims {
+		copied[k] = v
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, copied)
+	token.Header["kid"] = s.keySet.RSAKeyID()
+	return token.SignedString(s.keySet.RSAPrivateKey())
+}
+
 // CreateAccessToken creates a new access token
 func (s *JWTService) CreateAccessToken(subject string, audience string, scope string, duration time.Duration, customClaims map[string]interface{}) (string, error) {
 	now := time.Now()

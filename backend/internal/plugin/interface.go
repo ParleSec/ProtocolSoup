@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -62,6 +63,16 @@ type PluginConfig struct {
 	KeySet       interface{} // Crypto key set
 	MockIdP      interface{} // Mock identity provider
 	LookingGlass interface{} // Looking glass engine
+
+	// OIDC Dynamic Client Registration controls (RFC 7591 / OIDCR).
+	OIDCDynamicRegistrationEnabled    bool
+	OIDCDynamicRegistrationTTL        time.Duration
+	OIDCDynamicRegistrationMaxClients int
+	OIDCDynamicRegistrationRateLimit  int
+	OIDCDynamicRegistrationRateWindow time.Duration
+	OIDCPairwiseSubjectSalt           string
+	// OIDCKeyRotationToken protects POST /oidc/admin/rotate-keys. Empty disables.
+	OIDCKeyRotationToken string
 }
 
 // Inspector defines a protocol-specific inspection capability
