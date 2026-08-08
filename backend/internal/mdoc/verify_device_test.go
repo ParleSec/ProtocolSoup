@@ -58,7 +58,7 @@ func issueTestCredential(t *testing.T, deviceKey *ecdsa.PrivateKey, validity Val
 
 func validNow() ValidityInfo {
 	now := time.Now().Truncate(time.Second).UTC()
-	return ValidityInfo{Signed: now, ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(48 * time.Hour)}
+	return ValidityInfo{Signed: now.Add(-2 * time.Hour), ValidFrom: now.Add(-time.Hour), ValidUntil: now.Add(48 * time.Hour)}
 }
 
 // TestVerifyDeviceResponseRoundTrip verifies that the wallet
@@ -130,6 +130,22 @@ func TestVerifyDeviceResponseRoundTrip(t *testing.T) {
 	}
 	if _, leaked := elements["given_name"]; leaked {
 		t.Fatal("given_name was not requested and must not be disclosed")
+	}
+}
+
+func TestDeviceResponseRejectsUnsupportedVersion(t *testing.T) {
+	if _, err := EncodeDeviceResponse(DeviceResponse{Version: "2.0"}); err == nil {
+		t.Fatal("expected encoding to reject unsupported DeviceResponse version")
+	}
+	wire, err := intcose.MarshalDeterministic(deviceResponseWire{Version: "2.0", Status: DeviceResponseStatusOK})
+	if err != nil {
+		t.Fatalf("encode test DeviceResponse: %v", err)
+	}
+	if _, err := DecodeDeviceResponse(wire); err == nil {
+		t.Fatal("expected decoding to reject unsupported DeviceResponse version")
+	}
+	if _, err := VerifyDeviceResponse(DeviceResponse{Version: "2.0"}, nil, nil, time.Now()); err == nil {
+		t.Fatal("expected verification to reject unsupported DeviceResponse version")
 	}
 }
 

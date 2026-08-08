@@ -96,6 +96,20 @@ func TestCOSEKeyPrivateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCOSEKeyToECPublicKeyRejectsPrivateMaterial(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	key, err := ECPrivateKeyToCOSEKey(priv)
+	if err != nil {
+		t.Fatalf("ECPrivateKeyToCOSEKey: %v", err)
+	}
+	if _, err := COSEKeyToECPublicKey(key); err == nil {
+		t.Fatal("expected public COSE_Key conversion to reject private scalar d")
+	}
+}
+
 // TestCOSEKeyDecodesUnderExternalLibrary cross-checks our COSE_Key encoding
 // against an independent implementation (veraison/go-cose Key): the library
 // must decode our bytes and reconstruct the same public key. This is the

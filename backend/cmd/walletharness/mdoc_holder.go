@@ -39,17 +39,13 @@ const (
 const credentialFormatMsoMdoc = "mso_mdoc"
 
 // createMdocDeviceProofJWT builds an OID4VCI proof JWT (OID4VCI Section 8.2.1)
-// that carries the persistent device key in cnf.jwk and is signed by that key
+// that carries the persistent device key in the JOSE jwk header and is signed by that key
 // with ES256. The issuer binds the proof key into the MSO deviceKeyInfo.deviceKey
 // (ISO/IEC 18013-5 clause 9.1.2), so the holder can later authenticate the
 // device with the same persistent key.
-func (s *walletHarnessServer) createMdocDeviceProofJWT(subject, cNonce, audience string) (string, error) {
+func (s *walletHarnessServer) createMdocDeviceProofJWT(_ string, cNonce, audience string) (string, error) {
 	if s.deviceKey == nil {
 		return "", fmt.Errorf("wallet device key is unavailable")
-	}
-	normalizedSubject := strings.TrimSpace(subject)
-	if normalizedSubject == "" {
-		return "", fmt.Errorf("wallet subject is required for mso_mdoc proof")
 	}
 	if strings.TrimSpace(cNonce) == "" {
 		return "", fmt.Errorf("c_nonce is required for mso_mdoc proof")
@@ -57,22 +53,14 @@ func (s *walletHarnessServer) createMdocDeviceProofJWT(subject, cNonce, audience
 	publicJWK := intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID)
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   normalizedSubject,
-		"sub":   normalizedSubject,
 		"aud":   firstNonEmpty(strings.TrimSpace(audience), s.issuerBaseURL+"/oid4vci"),
 		"nonce": cNonce,
 		"iat":   now.Unix(),
-		"exp":   now.Add(3 * time.Minute).Unix(),
 		"jti":   randomValue(20),
-		"cnf": map[string]interface{}{
-			"jwk": publicJWK,
-		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
-	if s.deviceKeyID != "" {
-		token.Header["kid"] = s.deviceKeyID
-	}
+	token.Header["jwk"] = publicJWK
 	signed, err := token.SignedString(s.deviceKey)
 	if err != nil {
 		return "", fmt.Errorf("sign mso_mdoc device proof: %w", err)
