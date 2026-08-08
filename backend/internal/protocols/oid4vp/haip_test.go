@@ -312,6 +312,7 @@ func TestHAIPMdocRequestAdvertisesAKITrustedAuthority(t *testing.T) {
 	p.mu.RUnlock()
 	if session == nil {
 		t.Fatal("no session recorded for the created request")
+		return
 	}
 
 	requirements := vc.ParseDCQLCredentialRequirements(session.DCQLQuery)

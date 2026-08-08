@@ -262,6 +262,7 @@ func TestBuildCredentialEvidenceForMdocReportsExactCommittedCount(t *testing.T) 
 	sd := evidence.SelectiveDisclosure
 	if sd == nil {
 		t.Fatalf("evidence.SelectiveDisclosure is nil for mso_mdoc; mdoc always has a selective-disclosure mechanism")
+		return
 	}
 	if sd.Mechanism != "mso_valuedigests" {
 		t.Fatalf("sd.Mechanism = %q, want mso_valuedigests", sd.Mechanism)
@@ -360,6 +361,7 @@ func TestBuildCredentialEvidenceForSDJWTCommittedCountIsNeverExact(t *testing.T)
 	sd := evidence.SelectiveDisclosure
 	if sd == nil {
 		t.Fatalf("evidence.SelectiveDisclosure is nil for dc+sd-jwt")
+		return
 	}
 	if sd.Mechanism != "sd_jwt_disclosures" {
 		t.Fatalf("sd.Mechanism = %q, want sd_jwt_disclosures", sd.Mechanism)

@@ -990,39 +990,6 @@ func nestedPresentationFormatsPE(parsed *ParsedCredential) []string {
 	}
 }
 
-func mergeDisclosedClaimsPE(fullClaims map[string]interface{}, disclosedClaims map[string]interface{}) {
-	if len(fullClaims) == 0 {
-		return
-	}
-	for claimName, claimValue := range disclosedClaims {
-		if _, exists := fullClaims[claimName]; !exists {
-			fullClaims[claimName] = deepCopyJSONValuePE(claimValue)
-		}
-	}
-	if vcObject, ok := fullClaims["vc"].(map[string]interface{}); ok {
-		credentialSubject := map[string]interface{}{}
-		if existingSubject, ok := vcObject["credentialSubject"].(map[string]interface{}); ok {
-			credentialSubject = deepCopyMapPE(existingSubject)
-		}
-		for claimName, claimValue := range disclosedClaims {
-			if _, exists := credentialSubject[claimName]; !exists {
-				credentialSubject[claimName] = deepCopyJSONValuePE(claimValue)
-			}
-		}
-		vcObject["credentialSubject"] = credentialSubject
-		fullClaims["vc"] = vcObject
-	}
-	if credentialSubject, ok := fullClaims["credentialSubject"].(map[string]interface{}); ok {
-		copiedSubject := deepCopyMapPE(credentialSubject)
-		for claimName, claimValue := range disclosedClaims {
-			if _, exists := copiedSubject[claimName]; !exists {
-				copiedSubject[claimName] = deepCopyJSONValuePE(claimValue)
-			}
-		}
-		fullClaims["credentialSubject"] = copiedSubject
-	}
-}
-
 func aliasVerifiableCredentialClaimsPE(fullClaims map[string]interface{}, vcClaims map[string]interface{}) {
 	if len(fullClaims) == 0 || len(vcClaims) == 0 {
 		return

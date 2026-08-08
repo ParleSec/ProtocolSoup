@@ -590,6 +590,7 @@ func TestPersistedX509SignerStableAcrossRestart(t *testing.T) {
 	}
 	if first == nil {
 		t.Fatal("expected a signer for a DNS-name host")
+		return
 	}
 	id1, err := first.x509HashClientID()
 	if err != nil {
@@ -1424,11 +1425,12 @@ func createProofJWT(t *testing.T, keySet *crypto.KeySet, subject string, nonce s
 	keyID := keySet.RSAKeyID()
 	var method jwt.SigningMethod = jwt.SigningMethodRS256
 	var signingKey interface{} = keySet.RSAPrivateKey()
-	if algorithm == "ES256" {
+	switch algorithm {
+	case "ES256":
 		keyID = keySet.ECKeyID()
 		method = jwt.SigningMethodES256
 		signingKey = keySet.ECPrivateKey()
-	} else if algorithm == "EdDSA" {
+	case "EdDSA":
 		keyID = keySet.Ed25519KeyID()
 		method = jwt.SigningMethodEdDSA
 		signingKey = keySet.Ed25519PrivateKey()

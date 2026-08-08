@@ -440,6 +440,7 @@ func TestSummarizeCredentialNormalizesNestedClaimsForJWTAndLDPFormats(t *testing
 			summary := summarizeCredential(testCase.raw)
 			if summary == nil {
 				t.Fatalf("summarizeCredential() returned nil")
+				return
 			}
 			if summary.Format != testCase.format {
 				t.Fatalf("unexpected format %q", summary.Format)

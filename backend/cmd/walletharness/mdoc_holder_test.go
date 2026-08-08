@@ -563,6 +563,7 @@ func TestSummarizeCredentialMdoc(t *testing.T) {
 	summary := summarizeCredential(credential)
 	if summary == nil {
 		t.Fatal("summarizeCredential returned nil for an mso_mdoc credential")
+		return
 	}
 	if summary.Format != credentialFormatMsoMdoc {
 		t.Fatalf("summary.Format = %q, want %q", summary.Format, credentialFormatMsoMdoc)
