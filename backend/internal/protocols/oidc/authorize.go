@@ -51,6 +51,7 @@ type authParams struct {
 	// Section 5.5), carried through issuance so individually requested claims are
 	// honoured.
 	Claims string
+	LoginHint string
 }
 
 // defaultResponseMode returns the default response mode for a response type per

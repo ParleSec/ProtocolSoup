@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
 // scopesSupported are the scope values the OP honours. UserInfo derives the
 // claims it returns from the scopes granted to the presented access token, so
 // the protected resource metadata (RFC 9728) advertises the same list.
-var scopesSupported = []string{"openid", "profile", "email", "address", "phone", "roles"}
+var scopesSupported = []string{"openid", "profile", "email", "address", "phone", "roles", "offline_access"}
 
 // handleDiscovery returns the OpenID Connect discovery document
 func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
