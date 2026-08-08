@@ -2,9 +2,13 @@ package mockidp
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -336,6 +340,63 @@ func (idp *MockIdP) RegisterClient(client *models.Client) {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 	idp.clients[client.ID] = client
+}
+
+// DeleteClient removes a client registration. It is used by dynamic-registration
+// cleanup and does not affect other stores.
+func (idp *MockIdP) DeleteClient(id string) bool {
+	if id == "" {
+		return false
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	if _, exists := idp.clients[id]; !exists {
+		return false
+	}
+	delete(idp.clients, id)
+	return true
+}
+
+// CountDynamicClients returns the number of non-expired dynamically registered
+// clients currently held in memory.
+func (idp *MockIdP) CountDynamicClients() int {
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	now := time.Now()
+	count := 0
+	for _, client := range idp.clients {
+		if client == nil || !client.Dynamic {
+			continue
+		}
+		if clientRegistrationExpired(client, now) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+// FindClientByRegistrationAccessTokenHash returns the dynamic client whose
+// hashed registration access token matches the supplied hash.
+func (idp *MockIdP) FindClientByRegistrationAccessTokenHash(tokenHash string) (*models.Client, bool) {
+	if tokenHash == "" {
+		return nil, false
+	}
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	now := time.Now()
+	for _, client := range idp.clients {
+		if client == nil || client.RegistrationAccessTokenHash == "" {
+			continue
+		}
+		if clientRegistrationExpired(client, now) {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(client.RegistrationAccessTokenHash), []byte(tokenHash)) == 1 {
+			return client, true
+		}
+	}
+	return nil, false
 }
 
 // ValidateClient validates client credentials
