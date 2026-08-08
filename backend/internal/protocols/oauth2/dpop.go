@@ -59,8 +59,18 @@ func (p *Plugin) validateTokenEndpointDPoP(r *http.Request) (dpopValidation, err
 	// outcome of any other check, and before the replay reservation so a
 	// challenged proof's jti is not consumed (the client mints an entirely
 	// new proof, with a new jti, on retry).
-	if p.dpopNonceIssuer != nil && !p.dpopNonceIssuer.Valid(proof.Nonce) {
-		return dpopValidation{}, &dpop.NonceRequiredError{Nonce: p.dpopNonceIssuer.Issue()}
+	if p.dpopNonceIssuer != nil {
+		valid, nonceErr := p.dpopNonceIssuer.Valid(proof.Nonce)
+		if nonceErr != nil {
+			return dpopValidation{}, dpop.NewInfrastructureError(nonceErr)
+		}
+		if !valid {
+			nonce, issueErr := p.dpopNonceIssuer.Issue()
+			if issueErr != nil {
+				return dpopValidation{}, dpop.NewInfrastructureError(issueErr)
+			}
+			return dpopValidation{}, &dpop.NonceRequiredError{Nonce: nonce}
+		}
 	}
 
 	now := p.now()
