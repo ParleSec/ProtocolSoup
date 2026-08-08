@@ -104,6 +104,12 @@ The OIDC plugin extends the OAuth 2.0 plugin, sharing the Mock IdP and key manag
 | `userinfo.go` | Authorization and token endpoints, login request handling, ID Token issuance |
 | `claims.go` | UserInfo endpoint, standard OIDC claims definitions, scope-to-claims mapping |
 | `discovery.go` | OpenID Provider discovery document and JWKS endpoint |
+| `registration.go` | Open Dynamic Client Registration and RFC 7592 client configuration management |
+| `registration_validate.go` | Registration metadata validation and defaults |
+| `clientauth.go` | OIDC token-endpoint client authentication (`private_key_jwt`, secrets, none) |
+| `request_uri.go` | Signed Request Object fetch/verify/merge with SSRF controls |
+| `third_party.go` | ProtocolSoup third-party login initiator |
+| `rotate.go` | Operator-only OP signing-key rotation |
 
 ### OAuth 2.0 Plugin (Shared)
 
@@ -131,6 +137,10 @@ The OIDC plugin extends the OAuth 2.0 plugin, sharing the Mock IdP and key manag
 | POST | `/oidc/token` | Token endpoint (code exchange) | OIDC Core §3.1.3 |
 | GET | `/oidc/userinfo` | UserInfo endpoint (Bearer token) | OIDC Core §5.3 |
 | POST | `/oidc/userinfo` | UserInfo endpoint (POST variant) | OIDC Core §5.3 |
+| POST | `/oidc/register` | Open Dynamic Client Registration | OIDCR §3 |
+| GET, PUT, DELETE | `/oidc/register/{client_id}` | Client Configuration Endpoint | RFC 7592 §2 |
+| GET/POST | `/oidc/third-party/initiate` | ProtocolSoup RP initiation helper | OIDC Core §4 |
+| POST | `/oidc/admin/rotate-keys` | Operator OP key rotation | OIDC Core §10.1.1 |
 
 ### OAuth 2.0 Endpoints
 
@@ -399,7 +409,7 @@ The OpenID Provider Configuration is available at `/.well-known/openid-configura
   "scopes_supported": ["openid", "profile", "email", "address", "phone"],
   "response_types_supported": ["code", "id_token", "token", "code id_token", "code token", "id_token token", "code id_token token"],
   "grant_types_supported": ["authorization_code", "implicit", "refresh_token", "client_credentials"],
-  "subject_types_supported": ["public"],
+  "subject_types_supported": ["public", "pairwise"],
   "id_token_signing_alg_values_supported": ["RS256", "ES256"],
   "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
   "code_challenge_methods_supported": ["S256", "plain"],
@@ -500,13 +510,30 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 - ✅ Nonce validation
 - ✅ State parameter CSRF protection
 
+- ✅ Dynamic Client Registration (OIDC Dynamic Client Registration 1.0 / RFC 7591)
+- ✅ Client Configuration Endpoint (RFC 7592 GET, full-replacement PUT, and DELETE with registration access token)
+- ✅ Request Objects by reference (`request_uri`, RS256)
+- ✅ `private_key_jwt` client authentication at the OIDC token endpoint
+- ✅ Signed UserInfo (`userinfo_signed_response_alg=RS256`)
+- ✅ Pairwise subject identifiers and `sector_identifier_uri` validation
+- ✅ Third-party login initiator (`/oidc/third-party/initiate` → RP `initiate_login_uri`)
+- ✅ Operator-triggered OP signing-key rotation (`/oidc/admin/rotate-keys`)
+
 ### Not Implemented
 
-- ❌ Dynamic Client Registration (RFC 7591)
 - ❌ Session Management (OIDC Session Management)
 - ❌ Front-Channel/Back-Channel Logout
 - ❌ Pushed Authorization Requests (PAR)
-- ❌ JWT-Secured Authorization Request (JAR)
+- ❌ JWT-Secured Authorization Request by value (`request` parameter)
+
+## Dynamic Registration Notes
+
+- Open registration is the selected mode; no Initial Access Token is required.
+- Dynamic clients are ephemeral: TTL, max live clients, and per-source rate limits apply.
+- In-memory mode requires a single backend instance (or a shared store before horizontal scale).
+- Set `OIDC_PAIRWISE_SUBJECT_SALT` to a durable secret in production so pairwise subject identifiers remain stable across process restarts.
+- Production advertising and `registration_client_uri` generation expect an HTTPS issuer.
+- Configuration `PUT` fully replaces metadata, preserves server-controlled identity fields, and rotates the registration access token. `DELETE` removes the client registration.
 
 ## License
 

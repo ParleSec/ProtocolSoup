@@ -9,6 +9,8 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 
 - OpenID Connect Core 1.0
 - OpenID Connect Discovery 1.0
+- OpenID Connect Dynamic Client Registration 1.0
+- RFC 7591 / RFC 6750 / RFC 7523 (as used by registration and `private_key_jwt`)
 
 ## Available Flows
 
@@ -33,18 +35,22 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 |------|---------|---------|
 | `/.well-known/openid-configuration` | GET | Discovery document at the issuer root (canonical path a Relying Party derives from the issuer, OIDC Discovery 1.0 Section 4) |
 | `/oidc/.well-known/openid-configuration` | GET | Discovery document (prefixed alias, same content) |
-| `/oidc/.well-known/jwks.json` | GET | JSON Web Key Set |
+| `/oidc/.well-known/jwks.json` | GET | JSON Web Key Set (RSA and EC signing keys; OKP/Ed25519 is held in the OP key set but not published here because discovery only advertises RS256 for ID Tokens) |
 | `/oidc/jwks` | GET | JWKS alias |
 | `/oidc/authorize` | GET, POST | Authorization endpoint |
 | `/oidc/token` | POST | Token endpoint (returns ID token) |
 | `/oidc/userinfo` | GET, POST | UserInfo endpoint |
+| `/oidc/register` | POST | Open Dynamic Client Registration (OIDC Dynamic Client Registration 1.0) |
+| `/oidc/register/{client_id}` | GET, PUT, DELETE | RFC 7592 Client Configuration Endpoint (Bearer registration access token) |
+| `/oidc/third-party/initiate` | GET, POST | ProtocolSoup initiator that redirects to an RP `initiate_login_uri` (not a standardized OP endpoint) |
+| `/oidc/admin/rotate-keys` | POST | Operator-only OP signing-key rotation (disabled unless `OIDC_KEY_ROTATION_TOKEN` is set) |
 
 ## What To Validate
 
 - ID token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `auth_time`, `nonce`, `at_hash`, `c_hash`, `acr`, `amr`
 - Discovery fields: `issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`
-- JWKS: key type, algorithm, key ID alignment with token header
-- UserInfo: scope-dependent claims, subject consistency with ID token
+- JWKS: RSA/EC key type, algorithm, and key ID alignment with the token header (`kid`)
+- UserInfo: scope-dependent claims, subject consistency with ID token; signed responses include `iss` (OP issuer) and `aud` (RP client ID)
 - Hybrid: multiple response types in a single authorization request
 
 ## Request Handling Notes
@@ -125,3 +131,71 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
   that it did not satisfy.
 - ID tokens are signed with RS256 only; the discovery metadata advertises only
   what the OP delivers.
+
+## Dynamic Client Registration
+
+Open Dynamic Client Registration is enabled by default
+(`OIDC_DYNAMIC_REGISTRATION_ENABLED=true`). Registrations are ephemeral ordinary
+clients: TTL-bounded, capacity-capped, and rate-limited. They receive no
+privileges beyond a normal client registration.
+
+```http
+POST /oidc/register
+Content-Type: application/json
+
+{
+  "redirect_uris": ["https://rp.example.com/callback"],
+  "client_name": "Example RP",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "jwks_uri": "https://rp.example.com/jwks.json",
+  "initiate_login_uri": "https://rp.example.com/login",
+  "userinfo_signed_response_alg": "RS256",
+  "logo_uri": "https://rp.example.com/logo.png",
+  "policy_uri": "https://rp.example.com/policy",
+  "tos_uri": "https://rp.example.com/tos"
+}
+```
+
+Successful responses are `201 application/json` with `Cache-Control: no-store`,
+the registered/defaulted metadata, a unique `client_id`, credentials when
+required, HTTPS `registration_client_uri`, and an opaque
+`registration_access_token`. Unknown metadata is ignored. Invalid understood
+metadata returns `400` with `invalid_client_metadata` or `invalid_redirect_uri`.
+
+`GET /oidc/register/{client_id}` with `Authorization: Bearer
+<registration_access_token>` returns the current registration (`200`).
+`PUT` accepts a complete replacement registration: it must contain the same
+`client_id`, may not contain response-only management fields, and must include
+the current `client_secret` for confidential clients. A successful update
+returns `200` and rotates the registration access token. `DELETE` deprovisions
+the client and returns `204 No Content`; its client ID, secret, and registration
+access token are no longer usable. These management operations follow RFC 7592
+Section 2.
+
+Supported token authentication methods include `client_secret_basic`,
+`client_secret_post`, `private_key_jwt`, and `none`. Dynamically registered
+clients may request signed UserInfo (`userinfo_signed_response_alg=RS256`) and
+signed Request Objects by reference (`request_uri`) verified against
+`jwks`/`jwks_uri`. They may request `subject_type: "pairwise"`; the OP derives
+the subject deterministically from the user and sector, and returns that same
+subject in ID Tokens, access tokens, refresh tokens, and UserInfo. For multiple
+redirect URI hosts, a pairwise client must supply an HTTPS
+`sector_identifier_uri`. At registration time the OP fetches its JSON array
+without following redirects, rejects private-network addresses, and requires it
+to contain every registered redirect URI (OIDC Core §8.1; OIDC Registration
+§5). Unsigned ID Tokens, unsigned Request Objects, and by-value `request`
+objects are not advertised and are rejected when explicitly requested.
+
+## Third-Party Initiated Login
+
+OIDC Core §4 sends `iss` (required, HTTPS), optional `login_hint`, and optional
+`target_link_uri` from an initiating party to the **RP's registered
+`initiate_login_uri`**. Those parameters are not authorization-request parameters
+for the OP, so `/oidc/authorize` does not validate `iss` or `target_link_uri`.
+
+ProtocolSoup exposes `/oidc/third-party/initiate` as a demonstration initiator.
+It selects a registered client, redirects only to that client's HTTPS
+`initiate_login_uri`, and appends the Core §4 parameters. Non-HTTPS
+`initiate_login_uri` values are rejected at registration with
+`invalid_client_metadata`. The RP remains responsible for accepting the request
+and starting its own Authentication Request.

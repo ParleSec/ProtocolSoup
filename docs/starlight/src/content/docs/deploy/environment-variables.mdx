@@ -27,6 +27,19 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `SHOWCASE_DPOP_NONCE_REQUIRED` | `false` | Enables the RFC 9449 §8 server-provided nonce challenge at authorization-server token endpoints -- oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. Off by default: DPoP itself remains fully functional without it, since RFC 9449 treats the nonce as optional hardening, not a baseline requirement. When enabled, a proof lacking the current nonce is rejected with `use_dpop_nonce` and a `DPoP-Nonce` response header; the client retries with a fresh proof echoing that value. |
 | `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints (`/oid4vci/credential`, `/oid4vci/nonce`, `/oid4vci/deferred_credential`) for tokens bound via DPoP. Kept as a separate switch from `SHOWCASE_DPOP_NONCE_REQUIRED` because RFC 9449 §8.2 requires the AS and RS nonce spaces to be independent, even where -- as with OID4VCI issuing and validating its own tokens -- both roles run in the same process. |
 
+## OpenID Connect (Federation / Showcase)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OIDC_DYNAMIC_REGISTRATION_ENABLED` | `true` | Enables open Dynamic Client Registration at `POST /oidc/register` and advertises `registration_endpoint` / `request_uri_parameter_supported` only when true. |
+| `OIDC_DYNAMIC_REGISTRATION_TTL` | `2h` | Lifetime of dynamically registered clients. Expired clients are removed from the in-memory store. |
+| `OIDC_DYNAMIC_REGISTRATION_MAX_CLIENTS` | `200` | Maximum number of live dynamic clients. Further registrations return `invalid_client_metadata`. |
+| `OIDC_DYNAMIC_REGISTRATION_RATE_LIMIT` | `30` | Maximum registration attempts per source key within the rate window. |
+| `OIDC_DYNAMIC_REGISTRATION_RATE_WINDOW` | `1m` | Sliding window used by the registration rate limiter. |
+| `OIDC_PAIRWISE_SUBJECT_SALT` | *(generated in-memory when empty)* | Durable secret used to derive deterministic OIDC pairwise subjects. Set a platform secret in production so pairwise `sub` values remain stable across restarts. |
+| `OIDC_KEY_ROTATION_TOKEN` | *(empty — disabled)* | Bearer token required for `POST /oidc/admin/rotate-keys`. Leave empty to keep the rotation endpoint disabled. Store as a platform secret when running the OIDF OP-rotation module. |
+| `OIDC_CONFORMANCE_REDIRECT_URIS` | *(empty)* | Comma-separated static redirect URIs for pre-registered OIDF Basic/Implicit/Hybrid/Form-Post clients only. Do **not** add Dynamic OP or Third-Party Initiated Login callbacks here; those profiles register their callback URI dynamically. |
+
 ## Gateway
 
 | Variable | Default | Description |
