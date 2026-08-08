@@ -6,7 +6,6 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"math/big"
 	"testing"
 	"time"
 
@@ -98,32 +97,10 @@ func TestIssuerAuthRoundTrip(t *testing.T) {
 }
 
 func TestVerifyIssuerSignedWithX5Chain(t *testing.T) {
-	// Generate CA.
-	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	caTemplate := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Test mdoc CA"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
+	pki, err := GenerateIssuerPKI(testPKIParams())
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI: %v", err)
 	}
-	caDER, _ := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
-	caCert, _ := x509.ParseCertificate(caDER)
-
-	// Generate DS leaf signed by CA.
-	dsKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	dsTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		Subject:      pkix.Name{CommonName: "Test mdoc DS"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}
-	dsDER, _ := x509.CreateCertificate(rand.Reader, dsTemplate, caCert, &dsKey.PublicKey, caKey)
-	dsCert, _ := x509.ParseCertificate(dsDER)
 
 	// Device key.
 	devKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -131,7 +108,7 @@ func TestVerifyIssuerSignedWithX5Chain(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	validity := ValidityInfo{
-		Signed:     now,
+		Signed:     now.Add(-2 * time.Hour),
 		ValidFrom:  now.Add(-time.Hour),
 		ValidUntil: now.Add(24 * time.Hour),
 	}
@@ -142,23 +119,191 @@ func TestVerifyIssuerSignedWithX5Chain(t *testing.T) {
 	mso := BuildMSO(vd, deviceCOSEKey, DocTypeMDL, validity)
 	msoBytes, _ := EncodeMSOBytes(mso)
 
-	issuerAuth, err := BuildIssuerAuth(msoBytes, dsKey, []*x509.Certificate{dsCert, caCert})
+	issuerAuth, err := BuildIssuerAuth(msoBytes, pki.DocumentSignerKey(), pki.DocumentSignerChain())
 	if err != nil {
 		t.Fatalf("BuildIssuerAuth with chain: %v", err)
 	}
 
 	cred := IssuerSigned{NameSpaces: ns, IssuerAuth: issuerAuth}
 
-	// Build trusted roots pool.
-	roots := x509.NewCertPool()
-	roots.AddCert(caCert)
-
-	verifiedMSO, err := VerifyIssuerSigned(cred, roots, now)
+	verifiedMSO, err := VerifyIssuerSigned(cred, pki.TrustAnchors(), now)
 	if err != nil {
 		t.Fatalf("VerifyIssuerSigned with x5chain: %v", err)
 	}
 	if verifiedMSO.DocType != DocTypeMDL {
 		t.Errorf("docType = %q, want %q", verifiedMSO.DocType, DocTypeMDL)
+	}
+}
+
+func TestVerifyIssuerSignedRejectsNilRoots(t *testing.T) {
+	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	credential, _ := issueTestCredential(t, deviceKey, validNow())
+	if _, err := VerifyIssuerSigned(credential, nil, time.Now()); err == nil {
+		t.Fatal("expected verification to fail closed when issuer roots are nil")
+	}
+}
+
+func TestVerifyIssuerSignedRejectsBareMSOPayload(t *testing.T) {
+	dsKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceCOSEKey, _ := intcose.ECPublicKeyToCOSEKey(&deviceKey.PublicKey)
+	now := time.Now().Truncate(time.Second).UTC()
+	mso := BuildMSO(
+		ValueDigests{NameSpaceMDL: {0: make([]byte, 32)}},
+		deviceCOSEKey,
+		DocTypeMDL,
+		ValidityInfo{Signed: now, ValidFrom: now, ValidUntil: now.Add(time.Hour)},
+	)
+	bare, err := intcose.MarshalDeterministic(mso)
+	if err != nil {
+		t.Fatalf("encode bare MSO: %v", err)
+	}
+	issuerAuth, err := BuildIssuerAuth(bare, dsKey, nil)
+	if err != nil {
+		t.Fatalf("BuildIssuerAuth: %v", err)
+	}
+	if _, err := VerifyIssuerSignedWithKey(IssuerSigned{IssuerAuth: issuerAuth}, &dsKey.PublicKey, now); err == nil {
+		t.Fatal("expected bare MobileSecurityObject payload to be rejected")
+	}
+}
+
+func TestVerifyIssuerSignedRejectsInvalidMSOFields(t *testing.T) {
+	dsKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceCOSEKey, _ := intcose.ECPublicKeyToCOSEKey(&deviceKey.PublicKey)
+	now := time.Now().Truncate(time.Second).UTC()
+
+	newValidMSO := func() MobileSecurityObject {
+		return BuildMSO(
+			ValueDigests{NameSpaceMDL: {0: make([]byte, 32)}},
+			deviceCOSEKey,
+			DocTypeMDL,
+			ValidityInfo{Signed: now, ValidFrom: now, ValidUntil: now.Add(2 * time.Hour)},
+		)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*MobileSecurityObject)
+	}{
+		{"version", func(m *MobileSecurityObject) { m.Version = "2.0" }},
+		{"digest algorithm", func(m *MobileSecurityObject) { m.DigestAlgorithm = "SHA-384" }},
+		{"empty docType", func(m *MobileSecurityObject) { m.DocType = "" }},
+		{"empty device key", func(m *MobileSecurityObject) { m.DeviceKeyInfo.DeviceKey = nil }},
+		{"private device key material", func(m *MobileSecurityObject) {
+			m.DeviceKeyInfo.DeviceKey, _ = intcose.ECPrivateKeyToCOSEKey(deviceKey)
+		}},
+		{"empty valueDigests", func(m *MobileSecurityObject) { m.ValueDigests = nil }},
+		{"empty namespace", func(m *MobileSecurityObject) {
+			m.ValueDigests = ValueDigests{"": {0: make([]byte, 32)}}
+		}},
+		{"empty namespace digests", func(m *MobileSecurityObject) {
+			m.ValueDigests = ValueDigests{NameSpaceMDL: {}}
+		}},
+		{"wrong digest length", func(m *MobileSecurityObject) {
+			m.ValueDigests = ValueDigests{NameSpaceMDL: {0: []byte{0x01}}}
+		}},
+		{"signed after validFrom", func(m *MobileSecurityObject) { m.ValidityInfo.Signed = now.Add(time.Second) }},
+		{"validFrom equals validUntil", func(m *MobileSecurityObject) { m.ValidityInfo.ValidUntil = now }},
+		{"expectedUpdate at signed", func(m *MobileSecurityObject) {
+			update := now
+			m.ValidityInfo.ExpectedUpdate = &update
+		}},
+		{"expectedUpdate at validUntil", func(m *MobileSecurityObject) {
+			update := now.Add(2 * time.Hour)
+			m.ValidityInfo.ExpectedUpdate = &update
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mso := newValidMSO()
+			tt.mutate(&mso)
+			msoBytes, err := EncodeMSOBytes(mso)
+			if err != nil {
+				t.Fatalf("EncodeMSOBytes: %v", err)
+			}
+			issuerAuth, err := BuildIssuerAuth(msoBytes, dsKey, nil)
+			if err != nil {
+				t.Fatalf("BuildIssuerAuth: %v", err)
+			}
+			if _, err := VerifyIssuerSignedWithKey(IssuerSigned{IssuerAuth: issuerAuth}, &dsKey.PublicKey, now); err == nil {
+				t.Fatal("expected invalid MSO to be rejected")
+			}
+		})
+	}
+}
+
+func TestDocumentSignerCertificateProfileRejectsInvalidFields(t *testing.T) {
+	pki, err := GenerateIssuerPKI(testPKIParams())
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI: %v", err)
+	}
+	valid := pki.DocumentSignerCertificate()
+	tests := []struct {
+		name   string
+		mutate func(*x509.Certificate)
+	}{
+		{"missing mDL DS EKU", func(c *x509.Certificate) { c.UnknownExtKeyUsage = nil }},
+		{"wrong key usage", func(c *x509.Certificate) { c.KeyUsage = x509.KeyUsageKeyEncipherment }},
+		{"CA true", func(c *x509.Certificate) { c.IsCA = true }},
+		{"missing basic constraints", func(c *x509.Certificate) { c.BasicConstraintsValid = false }},
+		{"overlong validity", func(c *x509.Certificate) { c.NotAfter = c.NotBefore.Add(dsMaxValidity + time.Second) }},
+		{"missing country", func(c *x509.Certificate) { c.Subject.Country = nil }},
+		{"missing organization", func(c *x509.Certificate) { c.Subject.Organization = nil }},
+		{"missing subject key identifier", func(c *x509.Certificate) { c.SubjectKeyId = nil }},
+		{"missing authority key identifier", func(c *x509.Certificate) { c.AuthorityKeyId = nil }},
+		{"missing CRL distribution point", func(c *x509.Certificate) { c.CRLDistributionPoints = nil }},
+		{"missing issuerAltName", func(c *x509.Certificate) {
+			filtered := c.Extensions[:0]
+			for _, ext := range c.Extensions {
+				if !ext.Id.Equal(oidIssuerAltName) {
+					filtered = append(filtered, ext)
+				}
+			}
+			c.Extensions = filtered
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cert := *valid
+			cert.Extensions = append([]pkix.Extension(nil), valid.Extensions...)
+			tt.mutate(&cert)
+			if err := validateDocumentSignerCertificate(&cert); err == nil {
+				t.Fatal("expected invalid document-signer certificate profile to be rejected")
+			}
+		})
+	}
+}
+
+func TestIssuerAuthSignatureBindsRFC9360X5ChainLeaf(t *testing.T) {
+	signerPKI, err := GenerateIssuerPKI(testPKIParams())
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI signer: %v", err)
+	}
+	otherPKI, err := GenerateIssuerPKI(testPKIParams())
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI other: %v", err)
+	}
+	deviceKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceCOSEKey, _ := intcose.ECPublicKeyToCOSEKey(&deviceKey.PublicKey)
+	now := time.Now().Truncate(time.Second).UTC()
+	mso := BuildMSO(
+		ValueDigests{NameSpaceMDL: {0: make([]byte, 32)}},
+		deviceCOSEKey,
+		DocTypeMDL,
+		ValidityInfo{Signed: now, ValidFrom: now, ValidUntil: now.Add(time.Hour)},
+	)
+	msoBytes, _ := EncodeMSOBytes(mso)
+	issuerAuth, err := BuildIssuerAuth(msoBytes, signerPKI.DocumentSignerKey(), otherPKI.DocumentSignerChain())
+	if err != nil {
+		t.Fatalf("BuildIssuerAuth: %v", err)
+	}
+	if _, err := VerifyIssuerSigned(
+		IssuerSigned{IssuerAuth: issuerAuth},
+		otherPKI.TrustAnchors(),
+		now,
+	); err == nil {
+		t.Fatal("expected COSE signature verification to reject an x5chain leaf that does not own the signing key")
 	}
 }
 

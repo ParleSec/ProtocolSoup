@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,129 @@ type walletFixture struct {
 
 const testIssuerAudience = "http://localhost:8080/oid4vci"
 const testCredentialVCT = "https://protocolsoup.com/credentials/university_degree"
+
+func TestParseClientIDSchemeUsesFinalPrefixFallback(t *testing.T) {
+	testCases := []struct {
+		name     string
+		clientID string
+		want     ClientIDScheme
+		wantErr  bool
+	}{
+		{name: "bare identifier", clientID: "example-client", want: ClientIDSchemePreRegistered},
+		{name: "URL-shaped identifier", clientID: "https://verifier.example/callback", want: ClientIDSchemePreRegistered},
+		{name: "supported prefix", clientID: "redirect_uri:https://verifier.example/callback", want: ClientIDSchemeRedirectURI},
+		{name: "known but disabled prefix", clientID: "x509_hash:thumbprint", want: ClientIDSchemeX509Hash},
+		{name: "unsupported prefix", clientID: "origin:https://verifier.example", want: ClientIDSchemePreRegistered},
+		{name: "malformed empty prefix", clientID: ":example-client", want: ClientIDSchemePreRegistered},
+		{name: "malformed spaced prefix", clientID: "redirect_uri :https://verifier.example", want: ClientIDSchemePreRegistered},
+		{name: "known prefix with empty value", clientID: "redirect_uri:", want: ClientIDSchemeRedirectURI},
+		{name: "empty identifier", clientID: " ", want: ClientIDSchemeUnknown, wantErr: true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := ParseClientIDScheme(testCase.clientID)
+			if (err != nil) != testCase.wantErr {
+				t.Fatalf("ParseClientIDScheme(%q) error = %v, wantErr %v", testCase.clientID, err, testCase.wantErr)
+			}
+			if got != testCase.want {
+				t.Fatalf("ParseClientIDScheme(%q) = %q, want %q", testCase.clientID, got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestValidateSupportedClientIDSchemeUsesConfiguredAllowlist(t *testing.T) {
+	supported := DefaultClientIDSchemeSet()
+	if err := ValidateSupportedClientIDScheme("redirect_uri:https://verifier.example/callback", supported); err != nil {
+		t.Fatalf("expected redirect_uri prefix to be allowed: %v", err)
+	}
+	if err := ValidateSupportedClientIDScheme("x509_hash:thumbprint", supported); err == nil {
+		t.Fatal("expected known but disabled x509_hash prefix to be rejected")
+	}
+	if err := ValidateSupportedClientIDScheme("https://verifier.example/callback", supported); err == nil {
+		t.Fatal("expected URL-shaped pre-registered identifier to be rejected")
+	}
+
+	supported[ClientIDSchemePreRegistered] = struct{}{}
+	if err := ValidateSupportedClientIDScheme("custom:https://verifier.example", supported); err != nil {
+		t.Fatalf("expected unknown prefix fallback to follow pre_registered allowlist: %v", err)
+	}
+}
+
+func TestDefaultClientIDSchemeSetContainsOnlyOperationalUnprovisionedSchemes(t *testing.T) {
+	supported := DefaultClientIDSchemeSet()
+	if len(supported) != 1 {
+		t.Fatalf("default client_id prefix count = %d, want 1: %#v", len(supported), supported)
+	}
+	if _, ok := supported[ClientIDSchemeRedirectURI]; !ok {
+		t.Fatal("redirect_uri must be enabled by default")
+	}
+	for _, scheme := range []ClientIDScheme{
+		ClientIDSchemePreRegistered,
+		ClientIDSchemeDecentralizedIdentifier,
+		ClientIDSchemeOpenIDFederation,
+		ClientIDSchemeX509SANDNS,
+		ClientIDSchemeX509Hash,
+		ClientIDSchemeVerifierAttestation,
+	} {
+		if _, ok := supported[scheme]; ok {
+			t.Fatalf("%s must not be enabled by default", scheme)
+		}
+	}
+}
+
+func TestConfigureVerifierIdentitiesConditionallyEnablesProvisionedSchemes(t *testing.T) {
+	for _, envName := range []string{
+		verifierAttestationClientIDEnv,
+		verifierAttestationIssuerEnv,
+		verifierAttestationPrivateKeyEnv,
+		x509SANDNSClientIDEnv,
+		x509SANDNSCertificateChainPEMEnv,
+		x509SANDNSPrivateKeyPEMEnv,
+	} {
+		t.Setenv(envName, "")
+	}
+
+	withoutProvisioning := NewPlugin()
+	if err := withoutProvisioning.configureVerifierIdentities(); err != nil {
+		t.Fatalf("configure verifier identities without keyset: %v", err)
+	}
+	if len(withoutProvisioning.supportedClientIDSchemes) != 1 {
+		t.Fatalf("unprovisioned schemes = %#v, want redirect_uri only", withoutProvisioning.supportedClientIDSchemes)
+	}
+
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("create verifier keyset: %v", err)
+	}
+	withProvisioning := NewPlugin()
+	withProvisioning.baseURL = "https://verifier.example"
+	withProvisioning.dataDir = t.TempDir()
+	withProvisioning.keySet = keySet
+	if err := withProvisioning.configureVerifierIdentities(); err != nil {
+		t.Fatalf("configure provisioned verifier identities: %v", err)
+	}
+	for _, scheme := range []ClientIDScheme{
+		ClientIDSchemeRedirectURI,
+		ClientIDSchemeVerifierAttestation,
+		ClientIDSchemeX509SANDNS,
+		ClientIDSchemeX509Hash,
+	} {
+		if _, ok := withProvisioning.supportedClientIDSchemes[scheme]; !ok {
+			t.Fatalf("%s must be enabled when its signing material is provisioned", scheme)
+		}
+	}
+	for _, scheme := range []ClientIDScheme{
+		ClientIDSchemePreRegistered,
+		ClientIDSchemeDecentralizedIdentifier,
+		ClientIDSchemeOpenIDFederation,
+	} {
+		if _, ok := withProvisioning.supportedClientIDSchemes[scheme]; ok {
+			t.Fatalf("%s must remain disabled without registration or trust support", scheme)
+		}
+	}
+}
 
 func TestDirectPostFlowEndToEnd(t *testing.T) {
 	env := newCombinedVCServer(t)
@@ -177,6 +301,23 @@ func TestCreateAuthorizationRequestRejectsDCQLAndScopeTogether(t *testing.T) {
 	}
 }
 
+func TestCreateAuthorizationRequestRejectsUnsupportedResponseMode(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createResp := postVPJSON(t, env.Server.URL+"/oid4vp/request/create", map[string]interface{}{
+		"response_mode": "fragment",
+		"dcql_query": map[string]interface{}{
+			"credentials": []map[string]interface{}{{"id": "credential_query"}},
+		},
+	})
+	assertVPStatus(t, createResp, http.StatusBadRequest)
+	errorPayload := decodeVPJSONMap(t, createResp)
+	if asVPString(errorPayload["error"]) != "invalid_request" {
+		t.Fatalf("expected invalid_request error")
+	}
+}
+
 func TestCreateAuthorizationRequestBuildsVerifierAttestationRequestObject(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -186,14 +327,17 @@ func TestCreateAuthorizationRequestBuildsVerifierAttestationRequestObject(t *tes
 		"response_mode":    "direct_post",
 		"response_uri":     env.Server.URL + "/oid4vp/response",
 	})
-	if asVPString(createPayload["client_id_scheme"]) != "verifier_attestation" {
-		t.Fatalf("expected verifier_attestation client_id_scheme, got %q", asVPString(createPayload["client_id_scheme"]))
+	if _, ok := createPayload["client_id_scheme"]; ok {
+		t.Fatal("create response must not expose obsolete client_id_scheme")
 	}
 
 	requestJWT := asVPString(createPayload["request"])
 	decodedRequest, err := crypto.DecodeTokenWithoutValidation(requestJWT)
 	if err != nil {
 		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
+	}
+	if _, ok := decodedRequest.Payload["client_id_scheme"]; ok {
+		t.Fatal("request object must not contain obsolete client_id_scheme claim")
 	}
 	attestationJWT := asVPString(decodedRequest.Header["jwt"])
 	if attestationJWT == "" {
@@ -364,8 +508,15 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSRequestObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseX5CCertificateChain: %v", err)
 	}
+	if len(certificates) != 1 {
+		t.Fatalf("x5c must omit the trust anchor, got %d certificates", len(certificates))
+	}
 	roots := x509.NewCertPool()
-	roots.AddCert(certificates[len(certificates)-1])
+	rootCertificate, err := x509.ParseCertificate(certificateChain[len(certificateChain)-1])
+	if err != nil {
+		t.Fatalf("ParseCertificate(root): %v", err)
+	}
+	roots.AddCert(rootCertificate)
 	leaf, err := crypto.ValidateCertificateChainAgainstRoots(certificates, roots, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("ValidateCertificateChain: %v", err)
@@ -439,6 +590,7 @@ func TestPersistedX509SignerStableAcrossRestart(t *testing.T) {
 	}
 	if first == nil {
 		t.Fatal("expected a signer for a DNS-name host")
+		return
 	}
 	id1, err := first.x509HashClientID()
 	if err != nil {
@@ -498,8 +650,8 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSEphemeralChain(t *testing.T) 
 		t.Fatalf("DecodeTokenWithoutValidation(request): %v", err)
 	}
 	rawX5C, ok := decodedRequest.Header["x5c"].([]interface{})
-	if !ok || len(rawX5C) != 2 {
-		t.Fatalf("expected x5c header with 2 certificates, got %v", decodedRequest.Header["x5c"])
+	if !ok || len(rawX5C) != 1 {
+		t.Fatalf("expected x5c header with leaf only, got %v", decodedRequest.Header["x5c"])
 	}
 
 	parsedCerts, err := crypto.ParseX5CCertificateChain(decodedRequest.Header["x5c"])
@@ -507,7 +659,7 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSEphemeralChain(t *testing.T) 
 		t.Fatalf("ParseX5CCertificateChain: %v", err)
 	}
 	roots := x509.NewCertPool()
-	roots.AddCert(parsedCerts[len(parsedCerts)-1])
+	roots.AddCert(certificates[len(certificates)-1])
 	leaf, err := crypto.ValidateCertificateChainAgainstRoots(parsedCerts, roots, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("ValidateCertificateChain: %v", err)
@@ -516,9 +668,8 @@ func TestCreateAuthorizationRequestBuildsX509SANDNSEphemeralChain(t *testing.T) 
 		t.Fatalf("VerifyHostname(verifier.example): %v", err)
 	}
 
-	clientIDScheme := asVPString(decodedRequest.Payload["client_id_scheme"])
-	if clientIDScheme != "x509_san_dns" {
-		t.Fatalf("expected client_id_scheme=x509_san_dns in JWT claims, got %q", clientIDScheme)
+	if _, ok := decodedRequest.Payload["client_id_scheme"]; ok {
+		t.Fatal("request object must not contain obsolete client_id_scheme claim")
 	}
 }
 
@@ -989,6 +1140,25 @@ func TestWalletResponseRejectsUnknownState(t *testing.T) {
 	}
 }
 
+func TestRedirectWalletResponseRequiresExactStateEvenWithRequestID(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	formResp, err := http.PostForm(env.Server.URL+"/oid4vp/response", url.Values{
+		"request_id": {asVPString(createPayload["request_id"])},
+		"vp_token":   {"placeholder-token"},
+	})
+	if err != nil {
+		t.Fatalf("post wallet response failed: %v", err)
+	}
+	assertVPStatus(t, formResp, http.StatusBadRequest)
+	errorPayload := decodeVPJSONMap(t, formResp)
+	if asVPString(errorPayload["error"]) != "invalid_request" {
+		t.Fatalf("expected invalid_request error")
+	}
+}
+
 func TestExternalInteropConformance(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("RUN_EXTERNAL_INTEROP_CONFORMANCE")) != "1" {
 		t.Skip("set RUN_EXTERNAL_INTEROP_CONFORMANCE=1 to execute external interop conformance")
@@ -1091,32 +1261,30 @@ func issueCredentialForExternalWallet(t *testing.T, baseURL string, walletUserID
 	}
 	assertVPStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeVPJSONMap(t, tokenResp)
+	accessToken := asVPString(tokenPayload["access_token"])
 
 	walletKeySet, err := crypto.NewKeySet()
 	if err != nil {
 		t.Fatalf("new wallet key set: %v", err)
 	}
-	proofJWT := createProofJWT(t, walletKeySet, walletSubject, asVPString(tokenPayload["c_nonce"]), issuerID)
+	proofJWT := createProofJWT(t, walletKeySet, walletSubject, fetchVPNonce(t, baseURL, accessToken), issuerID, "RS256")
 
 	credentialResp := postVPJSONWithHeaders(
 		t,
 		baseURL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": []map[string]interface{}{
-				{
-					"proof_type": "jwt",
-					"jwt":        proofJWT,
-				},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{
-			"Authorization": "Bearer " + asVPString(tokenPayload["access_token"]),
+			"Authorization": "Bearer " + accessToken,
 		},
 	)
 	assertVPStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeVPJSONMap(t, credentialResp)
-	credentialJWT := asVPString(credentialPayload["credential"])
+	credentialJWT := firstVPCredential(credentialPayload)
 	if credentialJWT == "" {
 		t.Fatalf("credential response missing credential")
 	}
@@ -1170,12 +1338,17 @@ func issueCredentialForWalletWithSelection(
 	}
 	assertVPStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeVPJSONMap(t, tokenResp)
+	accessToken := asVPString(tokenPayload["access_token"])
 
 	walletKeySet, err := crypto.NewKeySet()
 	if err != nil {
 		t.Fatalf("new wallet key set: %v", err)
 	}
-	proofJWT := createProofJWT(t, walletKeySet, walletSubject, asVPString(tokenPayload["c_nonce"]), testIssuerAudience)
+	proofAlgorithm := "RS256"
+	if credentialConfigurationID == "UniversityDegreeCredentialLDP" {
+		proofAlgorithm = "ES256"
+	}
+	proofJWT := createProofJWT(t, walletKeySet, walletSubject, fetchVPNonce(t, serverURL, accessToken), testIssuerAudience, proofAlgorithm)
 
 	credentialResp := postVPJSONWithHeaders(
 		t,
@@ -1183,11 +1356,8 @@ func issueCredentialForWalletWithSelection(
 		func() map[string]interface{} {
 			payload := map[string]interface{}{
 				"credential_configuration_id": credentialConfigurationID,
-				"proofs": []map[string]interface{}{
-					{
-						"proof_type": "jwt",
-						"jwt":        proofJWT,
-					},
+				"proofs": map[string]interface{}{
+					"jwt": []string{proofJWT},
 				},
 			}
 			if credentialFormat != "" {
@@ -1196,12 +1366,12 @@ func issueCredentialForWalletWithSelection(
 			return payload
 		}(),
 		map[string]string{
-			"Authorization": "Bearer " + asVPString(tokenPayload["access_token"]),
+			"Authorization": "Bearer " + accessToken,
 		},
 	)
 	assertVPStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeVPJSONMap(t, credentialResp)
-	credentialJWT := asVPString(credentialPayload["credential"])
+	credentialJWT := firstVPCredential(credentialPayload)
 	if credentialJWT == "" {
 		t.Fatalf("credential response missing credential")
 	}
@@ -1250,29 +1420,36 @@ func runExternalWalletFlow(
 	assertPolicyAllowed(t, resultPayload)
 }
 
-func createProofJWT(t *testing.T, keySet *crypto.KeySet, subject string, nonce string, audience string) string {
+func createProofJWT(t *testing.T, keySet *crypto.KeySet, subject string, nonce string, audience string, algorithm string) string {
 	t.Helper()
-	pubJWK, found := keySet.GetJWKByID(keySet.RSAKeyID())
+	keyID := keySet.RSAKeyID()
+	var method jwt.SigningMethod = jwt.SigningMethodRS256
+	var signingKey interface{} = keySet.RSAPrivateKey()
+	switch algorithm {
+	case "ES256":
+		keyID = keySet.ECKeyID()
+		method = jwt.SigningMethodES256
+		signingKey = keySet.ECPrivateKey()
+	case "EdDSA":
+		keyID = keySet.Ed25519KeyID()
+		method = jwt.SigningMethodEdDSA
+		signingKey = keySet.Ed25519PrivateKey()
+	}
+	pubJWK, found := keySet.GetJWKByID(keyID)
 	if !found {
 		t.Fatalf("wallet rsa jwk is unavailable")
 	}
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   subject,
-		"sub":   subject,
 		"aud":   audience,
 		"nonce": nonce,
 		"iat":   now.Unix(),
-		"exp":   now.Add(3 * time.Minute).Unix(),
 		"jti":   "proof-" + subject,
-		"cnf": map[string]interface{}{
-			"jwk": pubJWK,
-		},
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token := jwt.NewWithClaims(method, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
-	token.Header["kid"] = keySet.RSAKeyID()
-	signed, err := token.SignedString(keySet.RSAPrivateKey())
+	token.Header["jwk"] = pubJWK
+	signed, err := token.SignedString(signingKey)
 	if err != nil {
 		t.Fatalf("sign proof jwt: %v", err)
 	}
@@ -1393,7 +1570,26 @@ func buildRawSDJWTKBVPToken(t *testing.T, createPayload map[string]interface{}, 
 	if err != nil {
 		t.Fatalf("parse sd-jwt envelope: %v", err)
 	}
-	sdJWTWithoutKB := vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, "")
+	return buildRawSDJWTKBVPTokenFromParts(
+		t,
+		createPayload,
+		wallet,
+		kbIssuedAt,
+		envelope.IssuerSignedJWT,
+		envelope.Disclosures,
+	)
+}
+
+func buildRawSDJWTKBVPTokenFromParts(
+	t *testing.T,
+	createPayload map[string]interface{},
+	wallet *walletFixture,
+	kbIssuedAt time.Time,
+	issuerSignedJWT string,
+	disclosures []string,
+) string {
+	t.Helper()
+	sdJWTWithoutKB := vc.BuildSDJWTSerialization(issuerSignedJWT, disclosures, "")
 	if !strings.HasSuffix(sdJWTWithoutKB, "~") {
 		sdJWTWithoutKB += "~"
 	}
@@ -1412,7 +1608,7 @@ func buildRawSDJWTKBVPToken(t *testing.T, createPayload map[string]interface{}, 
 	if err != nil {
 		t.Fatalf("sign kb-jwt: %v", err)
 	}
-	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, signedKB)
+	return vc.BuildSDJWTSerialization(issuerSignedJWT, disclosures, signedKB)
 }
 
 func postRawSDJWTKBResponse(t *testing.T, serverURL string, createPayload map[string]interface{}, vpToken string) {
@@ -1441,6 +1637,42 @@ func TestDirectPostPolicyAllowsFreshKBJWTIat(t *testing.T) {
 
 	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
 	assertPolicyAllowed(t, resultPayload)
+}
+
+func TestDirectPostPolicyRejectsUncommittedSDJWTDisclosure(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	envelope, err := vc.ParseSDJWTEnvelope(wallet.CredentialJWT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uncommitted, err := vc.CreateSDJWTDisclosure("uncommitted", "attacker", "test-salt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disclosures := append(append([]string(nil), envelope.Disclosures...), uncommitted.Encoded)
+	vpToken := buildRawSDJWTKBVPTokenFromParts(
+		t,
+		createPayload,
+		wallet,
+		time.Now().UTC(),
+		envelope.IssuerSignedJWT,
+		disclosures,
+	)
+	postRawSDJWTKBResponse(t, env.Server.URL, createPayload, vpToken)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatal("expected uncommitted disclosure to be rejected")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "disclosure_invalid") {
+		t.Fatalf("expected disclosure_invalid reason code, got %v", reasonCodes)
+	}
 }
 
 // TestDirectPostPolicyDeniesStaleKBJWTIat proves a KB-JWT whose iat is further
@@ -1779,7 +2011,7 @@ func createUntrackedCredentialJWT(t *testing.T, wallet *walletFixture) string {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["typ"] = "vc+sd-jwt"
+	token.Header["typ"] = "dc+sd-jwt"
 	token.Header["kid"] = wallet.KeySet.RSAKeyID()
 	signed, err := token.SignedString(wallet.KeySet.RSAPrivateKey())
 	if err != nil {
@@ -1939,10 +2171,45 @@ func postVPJSONWithHeaders(t *testing.T, endpoint string, payload map[string]int
 	return resp
 }
 
+func fetchVPNonce(t *testing.T, serverURL string, accessToken string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, serverURL+"/oid4vci/nonce", nil)
+	if err != nil {
+		t.Fatalf("build nonce request: %v", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("nonce request failed: %v", err)
+	}
+	assertVPStatus(t, resp, http.StatusOK)
+	payload := decodeVPJSONMap(t, resp)
+	cNonce := asVPString(payload["c_nonce"])
+	if cNonce == "" {
+		t.Fatal("nonce response missing c_nonce")
+	}
+	return cNonce
+}
+
+func firstVPCredential(payload map[string]interface{}) string {
+	credentials, ok := payload["credentials"].([]interface{})
+	if !ok || len(credentials) == 0 {
+		return ""
+	}
+	credential, ok := credentials[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	return asVPString(credential["credential"])
+}
+
 func assertVPStatus(t *testing.T, resp *http.Response, status int) {
 	t.Helper()
 	if resp.StatusCode != status {
-		t.Fatalf("expected status %d, got %d", status, resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		t.Fatalf("expected status %d, got %d: %s", status, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 }
 
@@ -2032,8 +2299,34 @@ func TestExpiredRequestObjectServedReturnsError(t *testing.T) {
 		t.Fatalf("POST request object failed: %v", err)
 	}
 	defer postResp.Body.Close()
-	if postResp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("expected 400 for expired POST request, got %d", postResp.StatusCode)
+	if postResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for unsupported request_uri_method=post, got %d", postResp.StatusCode)
+	}
+}
+
+func TestAuthorizationRequestGETReturnsCompactJWTBody(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	requestID := asVPString(createPayload["request_id"])
+	resp, err := http.Get(env.Server.URL + "/oid4vp/request/" + requestID)
+	if err != nil {
+		t.Fatalf("GET request object failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/oauth-authz-req+jwt" {
+		t.Fatalf("unexpected Content-Type %q", got)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read request object: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(body)), asVPString(createPayload["request"]); got != want {
+		t.Fatalf("GET body does not equal compact request JWT")
 	}
 }
 
@@ -2104,6 +2397,16 @@ func TestRequestObjectContainsClientMetadataWithVPFormats(t *testing.T) {
 	for _, format := range []string{"dc+sd-jwt", "jwt_vc_json", "jwt_vc_json-ld", "ldp_vc"} {
 		if _, ok := vpFormats[format]; !ok {
 			t.Fatalf("expected %q in vp_formats_supported", format)
+		}
+	}
+	mdocMetadata, ok := vpFormats["mso_mdoc"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected mso_mdoc metadata")
+	}
+	for _, field := range []string{"issuerauth_alg_values", "deviceauth_alg_values"} {
+		values, ok := mdocMetadata[field].([]interface{})
+		if !ok || len(values) != 1 || values[0] != float64(-7) {
+			t.Fatalf("%s must contain numeric COSE ES256 identifier -7, got %v", field, mdocMetadata[field])
 		}
 	}
 }

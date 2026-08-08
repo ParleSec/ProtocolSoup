@@ -305,16 +305,12 @@ paths:
                     access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
                     token_type: Bearer
                     expires_in: 600
-                    c_nonce: "n-0S6_WzA2Mj"
-                    c_nonce_expires_in: 60
                 dpop_bound:
                   summary: DPoP-bound response (request carried a valid DPoP proof header)
                   value:
                     access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
                     token_type: DPoP
                     expires_in: 600
-                    c_nonce: "n-0S6_WzA2Mj"
-                    c_nonce_expires_in: 60
         "400":
           description: >-
             Invalid grant or request, including invalid_dpop_proof (RFC
@@ -346,23 +342,13 @@ paths:
   /oid4vci/nonce:
     post:
       tags: [OID4VCI]
-      summary: Rotate c_nonce for active token
+      summary: Acquire a fresh credential proof nonce
       description: >
-        Authorization accepts Bearer <token> or, when the token carries a
-        DPoP cnf.jkt binding (RFC 9449), DPoP <token> plus a matching DPoP
-        proof header -- presenting a DPoP-bound token as bare Bearer is
-        rejected. An unbound token continues to work as Bearer exactly as
-        before DPoP existed.
-      operationId: vcRotateNonce
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: header
-          name: DPoP
-          required: false
-          schema:
-            type: string
-          description: RFC 9449 DPoP proof JWT. Required only when the presented access token is DPoP-bound.
+        Public OID4VCI 1.0 Nonce Endpoint. No access token or other
+        authorization is required. The returned c_nonce is single-use and
+        expires after c_nonce_expires_in seconds.
+      operationId: vcIssueCredentialNonce
+      security: []
       responses:
         "200":
           description: Nonce response.
@@ -371,29 +357,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-        "401":
-          description: >-
-            Invalid or missing access token, missing/mismatched DPoP proof
-            for a bound token, or (only when nonce enforcement is enabled
-            for this endpoint) use_dpop_nonce.
-          headers:
-            DPoP-Nonce:
-              schema:
-                type: string
-              description: Present when error is use_dpop_nonce.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OAuthError"
-        "500":
-          description: >-
-            Server error, including failure of the shared DPoP proof replay
-            store when the presented token is DPoP-bound. The request fails
-            closed.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OAuthError"
   /oid4vci/credential:
     post:
       tags: [OID4VCI]
@@ -423,16 +386,14 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: "#/components/schemas/CredentialRequest"
       responses:
         "200":
           description: Credential issued or deferred transaction created, as JSON or (when credential_response_encryption was requested) a compact JWE.
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/CredentialResponse"
             application/jwt:
               schema:
                 type: string
@@ -501,8 +462,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/CredentialResponse"
             application/jwt:
               schema:
                 type: string
@@ -532,6 +492,45 @@ paths:
             Server error, including failure of the shared DPoP proof replay
             store when the presented token is DPoP-bound. The request fails
             closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/notification:
+    post:
+      tags: [OID4VCI]
+      summary: Report the outcome of credential storage
+      operationId: vcNotifyCredentialOutcome
+      description: >-
+        Accepts an OID4VCI 1.0 credential status notification for a
+        notification_id returned by this issuer. The identifier is bound to
+        the issuing access token; DPoP-bound tokens require a matching proof.
+        Repeating the same event and description is idempotent.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialNotificationRequest"
+      responses:
+        "204":
+          description: Notification accepted, including an idempotent retry.
+        "400":
+          description: Invalid notification request or notification identifier.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "409":
+          description: Notification conflicts with an already accepted lifecycle event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Invalid access token or DPoP proof.
           content:
             application/json:
               schema:
@@ -597,7 +596,10 @@ paths:
       operationId: vcCreateOid4vpRequest
       description: |
         Creates a signed authorization request object (`typ=oauth-authz-req+jwt`).
-        The verifier signs the request using the key material associated with the chosen `client_id_scheme`.
+        The verifier signs the request using the key material associated with
+        the server-side `client_id_scheme` selection. The resulting OpenID4VP
+        request communicates the scheme only through the `client_id` prefix;
+        it does not emit the removed draft `client_id_scheme` parameter.
         For `x509_san_dns`, the `x5c` JOSE header carries the certificate chain.
         For `verifier_attestation`, the verifier attestation JWT is included.
       requestBody:
@@ -651,12 +653,11 @@ paths:
             type: string
       responses:
         "200":
-          description: Request object payload.
+          description: Compact signed Authorization Request JWT.
           content:
-            application/json:
+            application/oauth-authz-req+jwt:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
         "404":
           description: Request not found.
           content:
@@ -665,7 +666,7 @@ paths:
                 $ref: "#/components/schemas/OAuthError"
     post:
       tags: [OID4VP]
-      summary: Get OID4VP request object (POST)
+      summary: Unsupported request_uri POST retrieval
       operationId: vcPostOid4vpRequest
       parameters:
         - in: path
@@ -674,15 +675,8 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: Request object payload.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-        "404":
-          description: Request not found.
+        "405":
+          description: request_uri_method=post is not supported.
           content:
             application/json:
               schema:
@@ -690,14 +684,14 @@ paths:
   /oid4vp/response:
     post:
       tags: [OID4VP]
-      summary: Wallet response endpoint (direct_post / direct_post.jwt / dc_api.jwt)
+      summary: Wallet response endpoint (direct_post / direct_post.jwt)
       operationId: vcHandleWalletResponse
       description: |
         Accepts wallet VP submissions. For `direct_post`, the wallet sends `vp_token` and `state`.
         For legacy `direct_post.jwt`, the wallet sends an encrypted `response` JWE containing a signed inner JWT.
         ECDH-ES mso_mdoc and HAIP responses carry the Authorization Response directly in the JWE payload.
-        Both variants are correlated by `state`. For `dc_api.jwt` backend processing, the wallet sends an
-        encrypted `response` JWE correlated by `request_id` (there is no `state`).
+        Both variants require exact correlation by `state`. DC API-shaped
+        backend scaffolding is not a browser-mediated conformance surface.
         Accepts both `application/json` and `application/x-www-form-urlencoded`.
       requestBody:
         required: true
@@ -770,6 +764,68 @@ components:
           type: string
         error_uri:
           type: string
+    CredentialRequest:
+      type: object
+      oneOf:
+        - required: [credential_configuration_id]
+        - required: [credential_identifier]
+      properties:
+        credential_configuration_id:
+          type: string
+          description: Identifier authorized for the presented access token.
+        credential_identifier:
+          type: string
+          description: >-
+            Authorization-details credential identifier authorized for the
+            presented access token. It is mutually exclusive with
+            credential_configuration_id.
+        proofs:
+          type: object
+          description: OID4VCI 1.0 proof sets keyed by proof type.
+          properties:
+            jwt:
+              type: array
+              minItems: 1
+              maxItems: 1
+              items:
+                type: string
+          additionalProperties: false
+        credential_response_encryption:
+          type: object
+          additionalProperties: true
+    CredentialResponse:
+      type: object
+      properties:
+        credentials:
+          type: array
+          items:
+            type: object
+            required: [credential]
+            properties:
+              credential:
+                description: Issued credential in its configured format.
+        notification_id:
+          type: string
+          description: Identifier for reporting the credential storage outcome.
+        transaction_id:
+          type: string
+          description: Identifier returned for deferred issuance.
+        interval:
+          type: integer
+          minimum: 1
+          description: Minimum polling interval in seconds for deferred issuance.
+    CredentialNotificationRequest:
+      type: object
+      required: [notification_id, event]
+      properties:
+        notification_id:
+          type: string
+        event:
+          type: string
+          enum: [credential_accepted, credential_failure, credential_deleted]
+        event_description:
+          type: string
+          description: Optional printable US-ASCII event detail.
     HealthResponse:
       type: object
       required: [status, version, protocols, plugins]
@@ -811,7 +867,7 @@ components:
         client_id_scheme:
           type: string
           enum: [redirect_uri, decentralized_identifier, verifier_attestation, x509_san_dns, x509_hash]
-          description: Client identification scheme per OpenID4VP Section 5. Determines how the request object is signed and how the wallet validates verifier identity. HAIP 1.0 mandates x509_hash for signed requests.
+          description: Server-side selector for the OpenID4VP Client Identifier Prefix. Determines how the request object is signed and how the wallet validates verifier identity; it is not serialized as a request-object claim. HAIP 1.0 mandates x509_hash for signed requests.
         response_mode:
           type: string
           enum: [direct_post, direct_post.jwt, dc_api, dc_api.jwt]
@@ -882,8 +938,6 @@ components:
         nonce:
           type: string
         client_id:
-          type: string
-        client_id_scheme:
           type: string
         expires_in_seconds:
           type: integer

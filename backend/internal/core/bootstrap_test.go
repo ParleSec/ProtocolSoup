@@ -55,6 +55,21 @@ func TestProductionBaseURLRequiresHTTPSIssuer(t *testing.T) {
 	}
 }
 
+func TestProductionSigningKeysRequirePersistentStore(t *testing.T) {
+	if err := validateProductionKeyStorage(&Config{Environment: "production"}, true); err == nil {
+		t.Fatal("production key set without persistent storage must fail closed")
+	}
+	if err := validateProductionKeyStorage(&Config{
+		Environment:  "production",
+		KeyStorePath: "/data/keys",
+	}, true); err != nil {
+		t.Fatalf("persistent production key store rejected: %v", err)
+	}
+	if err := validateProductionKeyStorage(&Config{Environment: "development"}, true); err != nil {
+		t.Fatalf("ephemeral development key set rejected: %v", err)
+	}
+}
+
 func TestRegisterConformanceClientsRegistersTwoConfidentialClients(t *testing.T) {
 	idp := newProvisioningIdP(t)
 	uris := []string{

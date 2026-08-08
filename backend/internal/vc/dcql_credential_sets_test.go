@@ -9,8 +9,8 @@ func TestParseDCQLQueryCredentialSets(t *testing.T) {
 	dcql := `{
 		"credentials": [
 			{"id": "pid", "format": "dc+sd-jwt", "meta": {"vct_values": ["urn:eudi:pid:1"]}},
-			{"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]}},
-			{"id": "photo_id", "format": "mso_mdoc", "meta": {"doctype_values": ["org.iso.23220.photoid.1"]}}
+			{"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"}},
+			{"id": "photo_id", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.23220.photoid.1"}}
 		],
 		"credential_sets": [
 			{"options": [["pid"], ["mdl"]]},

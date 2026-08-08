@@ -141,6 +141,7 @@ func TestIssueFromExternalIssuerImportsCredential(t *testing.T) {
 				credentialIssuer,
 			},
 			"credential_endpoint": credentialIssuer + "/credential",
+			"nonce_endpoint":      credentialIssuer + "/nonce",
 			"jwks_uri":            testServer.URL + "/.well-known/jwks.json",
 			"credential_configurations_supported": map[string]interface{}{
 				credentialConfigurationID: map[string]interface{}{
@@ -193,8 +194,14 @@ func TestIssueFromExternalIssuerImportsCredential(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": accessToken,
-			"c_nonce":      cNonce,
 		})
+	})
+	mux.HandleFunc(issuerPath+"/nonce", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			http.Error(w, "nonce endpoint must not receive an Authorization header", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"c_nonce": cNonce})
 	})
 
 	mux.HandleFunc(issuerPath+"/credential", func(w http.ResponseWriter, r *http.Request) {
@@ -212,18 +219,11 @@ func TestIssueFromExternalIssuerImportsCredential(t *testing.T) {
 			http.Error(w, "unexpected credential_configuration_id", http.StatusBadRequest)
 			return
 		}
-		if got := strings.TrimSpace(asString(payload["format"])); got != "jwt_vc_json" {
-			http.Error(w, "unexpected credential format", http.StatusBadRequest)
-			return
-		}
-
 		var proofJWT string
-		if proofsArr, ok := payload["proofs"].([]interface{}); ok && len(proofsArr) > 0 {
-			if first, ok := proofsArr[0].(map[string]interface{}); ok {
-				proofJWT = strings.TrimSpace(asString(first["jwt"]))
+		if proofs, ok := payload["proofs"].(map[string]interface{}); ok {
+			if jwtProofs, ok := proofs["jwt"].([]interface{}); ok && len(jwtProofs) > 0 {
+				proofJWT = strings.TrimSpace(asString(jwtProofs[0]))
 			}
-		} else if singleProof, ok := payload["proof"].(map[string]interface{}); ok {
-			proofJWT = strings.TrimSpace(asString(singleProof["jwt"]))
 		}
 		if proofJWT == "" {
 			http.Error(w, "missing proof jwt", http.StatusBadRequest)
@@ -238,21 +238,17 @@ func TestIssueFromExternalIssuerImportsCredential(t *testing.T) {
 			http.Error(w, "unexpected proof audience", http.StatusBadRequest)
 			return
 		}
-		holderSubject := strings.TrimSpace(asString(decodedProof.Payload["sub"]))
-		if holderSubject == "" {
-			http.Error(w, "missing proof subject", http.StatusBadRequest)
-			return
-		}
-
-		credential := signedCredentialJWT(t, credentialIssuer, jwt.SigningMethodRS256, issuerKeySet.RSAPrivateKey(), issuerKeySet.RSAKeyID(), holderSubject)
+		credential := signedCredentialJWT(t, credentialIssuer, jwt.SigningMethodRS256, issuerKeySet.RSAPrivateKey(), issuerKeySet.RSAKeyID(), "did:example:wallet:holder")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"format":     "jwt_vc_json",
-			"credential": credential,
+			"credentials": []map[string]interface{}{
+				{"credential": credential},
+			},
 		})
 	})
 
 	server := &walletHarnessServer{
 		httpClient:       testServer.Client(),
+		issuerBaseURL:    testServer.URL,
 		walletSessionTTL: 10 * time.Minute,
 		wallets:          make(map[string]*walletMaterial),
 	}
@@ -328,6 +324,7 @@ func TestImportDirectCredentialValidatesIssuerJWKS(t *testing.T) {
 
 	server := &walletHarnessServer{
 		httpClient:       testServer.Client(),
+		issuerBaseURL:    testServer.URL,
 		walletSessionTTL: 10 * time.Minute,
 		wallets:          make(map[string]*walletMaterial),
 	}
@@ -381,6 +378,7 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 				credentialIssuer,
 			},
 			"credential_endpoint": credentialIssuer + "/credential",
+			"nonce_endpoint":      credentialIssuer + "/nonce",
 			"jwks_uri":            testServer.URL + "/.well-known/jwks.json",
 			"credential_configurations_supported": map[string]interface{}{
 				credentialConfigurationID: map[string]interface{}{
@@ -434,8 +432,14 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"access_token": "auth-access-token",
-			"c_nonce":      "auth-c-nonce",
 		})
+	})
+	mux.HandleFunc("/issuer/nonce", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			http.Error(w, "nonce endpoint must not receive an Authorization header", http.StatusBadRequest)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"c_nonce": "auth-c-nonce"})
 	})
 	mux.HandleFunc("/issuer/credential", func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer auth-access-token" {
@@ -448,12 +452,10 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 			return
 		}
 		var proofJWT string
-		if proofsArr, ok := payload["proofs"].([]interface{}); ok && len(proofsArr) > 0 {
-			if first, ok := proofsArr[0].(map[string]interface{}); ok {
-				proofJWT = strings.TrimSpace(asString(first["jwt"]))
+		if proofs, ok := payload["proofs"].(map[string]interface{}); ok {
+			if jwtProofs, ok := proofs["jwt"].([]interface{}); ok && len(jwtProofs) > 0 {
+				proofJWT = strings.TrimSpace(asString(jwtProofs[0]))
 			}
-		} else if singleProof, ok := payload["proof"].(map[string]interface{}); ok {
-			proofJWT = strings.TrimSpace(asString(singleProof["jwt"]))
 		}
 		if proofJWT == "" {
 			http.Error(w, "missing proof jwt", http.StatusBadRequest)
@@ -468,20 +470,17 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 			http.Error(w, "unexpected proof audience", http.StatusBadRequest)
 			return
 		}
-		holderSubject := strings.TrimSpace(asString(decodedProof.Payload["sub"]))
-		if holderSubject == "" {
-			http.Error(w, "missing proof subject", http.StatusBadRequest)
-			return
-		}
-		credential := signedCredentialJWT(t, credentialIssuer, jwt.SigningMethodRS256, issuerKeySet.RSAPrivateKey(), issuerKeySet.RSAKeyID(), holderSubject)
+		credential := signedCredentialJWT(t, credentialIssuer, jwt.SigningMethodRS256, issuerKeySet.RSAPrivateKey(), issuerKeySet.RSAKeyID(), "did:example:wallet:holder")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"format":     "jwt_vc_json",
-			"credential": credential,
+			"credentials": []map[string]interface{}{
+				{"credential": credential},
+			},
 		})
 	})
 
 	server := &walletHarnessServer{
 		httpClient:        testServer.Client(),
+		issuerBaseURL:     testServer.URL,
 		oid4vciClientID:   "public-app",
 		walletSessionTTL:  10 * time.Minute,
 		wallets:           make(map[string]*walletMaterial),

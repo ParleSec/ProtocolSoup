@@ -102,7 +102,7 @@ func TestHarnessCreateMdocDeviceProof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("createMdocDeviceProofJWT: %v", err)
 	}
-	// The proof must be signed by the device key and self-describe it in cnf.jwk.
+	// The proof must be signed by the device key and self-describe it in the JOSE jwk header.
 	parsed, err := jwt.Parse(proof, func(token *jwt.Token) (interface{}, error) {
 		return &s.deviceKey.PublicKey, nil
 	}, jwt.WithValidMethods([]string{"ES256"}))
@@ -112,13 +112,11 @@ func TestHarnessCreateMdocDeviceProof(t *testing.T) {
 	if parsed.Header["typ"] != "openid4vci-proof+jwt" {
 		t.Fatalf("unexpected proof typ header: %v", parsed.Header["typ"])
 	}
-	claims := parsed.Claims.(jwt.MapClaims)
-	cnf, ok := claims["cnf"].(map[string]interface{})
-	if !ok {
-		t.Fatal("proof is missing cnf claim")
+	if _, ok := parsed.Header["jwk"].(map[string]interface{}); !ok {
+		t.Fatal("proof JOSE header is missing jwk")
 	}
-	if _, ok := cnf["jwk"].(map[string]interface{}); !ok {
-		t.Fatal("proof cnf is missing jwk")
+	if _, ok := parsed.Claims.(jwt.MapClaims)["cnf"]; ok {
+		t.Fatal("proof payload must not carry cnf")
 	}
 }
 
@@ -212,7 +210,7 @@ func TestHarnessBuildMdocDeviceResponse(t *testing.T) {
 	}
 }
 
-const mdocMDLFamilyNameDCQL = `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_values":["org.iso.18013.5.1.mDL"]},"claims":[{"path":["org.iso.18013.5.1","family_name"]}]}]}`
+const mdocMDLFamilyNameDCQL = `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claims":[{"path":["org.iso.18013.5.1","family_name"]}]}]}`
 
 func decodeMdocDCQLVPToken(t *testing.T, vpToken string) []byte {
 	t.Helper()
@@ -256,13 +254,13 @@ func TestHarnessMatchWalletCredentialsToDCQLMdoc(t *testing.T) {
 	}
 
 	// A DCQL whose doctype does not match the credential must not match.
-	mismatchDCQL := `{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{"doctype_values":["eu.europa.ec.eudi.pid.1"]},"claims":[{"path":["org.iso.18013.5.1","family_name"]}]}]}`
+	mismatchDCQL := `{"credentials":[{"id":"pid","format":"mso_mdoc","meta":{"doctype_value":"eu.europa.ec.eudi.pid.1"},"claims":[{"path":["org.iso.18013.5.1","family_name"]}]}]}`
 	if matched, _ := matchWalletCredentialsToDCQL(wallet.Credentials, mismatchDCQL); len(matched) != 0 {
 		t.Fatalf("expected no match for a mismatched doctype, got %d", len(matched))
 	}
 
 	// A DCQL requiring an element the credential does not carry must not match.
-	missingElementDCQL := `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_values":["org.iso.18013.5.1.mDL"]},"claims":[{"path":["org.iso.18013.5.1","portrait"]}]}]}`
+	missingElementDCQL := `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claims":[{"path":["org.iso.18013.5.1","portrait"]}]}]}`
 	if matched, _ := matchWalletCredentialsToDCQL(wallet.Credentials, missingElementDCQL); len(matched) != 0 {
 		t.Fatalf("expected no match when a required element is absent, got %d", len(matched))
 	}
@@ -565,6 +563,7 @@ func TestSummarizeCredentialMdoc(t *testing.T) {
 	summary := summarizeCredential(credential)
 	if summary == nil {
 		t.Fatal("summarizeCredential returned nil for an mso_mdoc credential")
+		return
 	}
 	if summary.Format != credentialFormatMsoMdoc {
 		t.Fatalf("summary.Format = %q, want %q", summary.Format, credentialFormatMsoMdoc)

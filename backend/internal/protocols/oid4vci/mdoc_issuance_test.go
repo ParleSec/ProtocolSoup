@@ -55,7 +55,7 @@ func newMdocTestEnv(t *testing.T) (*httptest.Server, *Plugin, *mockidp.MockIdP) 
 }
 
 // createECDeviceProof builds an OID4VCI proof JWT signed by an EC P-256 device
-// key, carrying the public key in cnf.jwk. This is the holder device key the
+// key, carrying the public key in the JOSE jwk header. This is the holder device key the
 // mso_mdoc issuer binds into the MSO.
 func createECDeviceProof(t *testing.T, deviceKey *ecdsa.PrivateKey, nonce, subject, audience string) string {
 	t.Helper()
@@ -69,13 +69,10 @@ func createECDeviceProof(t *testing.T, deviceKey *ecdsa.PrivateKey, nonce, subje
 		"iat":   now.Unix(),
 		"exp":   now.Add(3 * time.Minute).Unix(),
 		"jti":   "proof-" + subject,
-		"cnf": map[string]interface{}{
-			"jwk": publicJWK,
-		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
-	token.Header["kid"] = "device-key-1"
+	token.Header["jwk"] = publicJWK
 	signed, err := token.SignedString(deviceKey)
 	if err != nil {
 		t.Fatalf("sign device proof: %v", err)
@@ -126,7 +123,7 @@ func TestMsoMdocPreAuthorizedIssuance(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -140,19 +137,15 @@ func TestMsoMdocPreAuthorizedIssuance(t *testing.T) {
 		map[string]interface{}{
 			"credential_configuration_id": mdocConfigurationID,
 			"format":                      "mso_mdoc",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
 	)
 	assertStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeJSONMap(t, credentialResp)
-
-	if asString(t, credentialPayload["format"]) != "mso_mdoc" {
-		t.Fatalf("expected format mso_mdoc, got %q", asString(t, credentialPayload["format"]))
-	}
-	credential := asString(t, credentialPayload["credential"])
+	credential := asString(t, firstCredential(t, credentialPayload))
 	if credential == "" {
 		t.Fatal("expected non-empty mso_mdoc credential")
 	}
@@ -245,10 +238,11 @@ func TestMsoMdocAuthorizationCodeIssuance(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
-	if accessToken == "" || cNonce == "" {
-		t.Fatal("expected access token and c_nonce from authorization code grant")
+	assertTokenResponseHasNoCredentialNonce(t, tokenPayload)
+	if accessToken == "" {
+		t.Fatal("expected access token from authorization code grant")
 	}
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -265,18 +259,15 @@ func TestMsoMdocAuthorizationCodeIssuance(t *testing.T) {
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": mdocConfigurationID,
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
 	)
 	assertStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeJSONMap(t, credentialResp)
-	if asString(t, credentialPayload["format"]) != "mso_mdoc" {
-		t.Fatalf("expected format mso_mdoc, got %q", asString(t, credentialPayload["format"]))
-	}
-	credential := asString(t, credentialPayload["credential"])
+	credential := asString(t, firstCredential(t, credentialPayload))
 	if credential == "" {
 		t.Fatal("expected non-empty mso_mdoc credential from authorization code flow")
 	}
@@ -323,7 +314,7 @@ func TestMsoMdocIssuedCredentialNestingDepthWithinHardenedCeiling(t *testing.T) 
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -337,15 +328,15 @@ func TestMsoMdocIssuedCredentialNestingDepthWithinHardenedCeiling(t *testing.T) 
 		map[string]interface{}{
 			"credential_configuration_id": mdocConfigurationID,
 			"format":                      "mso_mdoc",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
 	)
 	assertStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeJSONMap(t, credentialResp)
-	credential := asString(t, credentialPayload["credential"])
+	credential := asString(t, firstCredential(t, credentialPayload))
 	if credential == "" {
 		t.Fatal("expected non-empty mso_mdoc credential")
 	}
@@ -404,7 +395,7 @@ func TestMsoMdocIssuedCredentialValidateIssuerSignatureTriState(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -418,15 +409,15 @@ func TestMsoMdocIssuedCredentialValidateIssuerSignatureTriState(t *testing.T) {
 		map[string]interface{}{
 			"credential_configuration_id": mdocConfigurationID,
 			"format":                      "mso_mdoc",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
 	)
 	assertStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeJSONMap(t, credentialResp)
-	credential := asString(t, credentialPayload["credential"])
+	credential := asString(t, firstCredential(t, credentialPayload))
 	if credential == "" {
 		t.Fatal("expected non-empty mso_mdoc credential")
 	}
@@ -503,7 +494,7 @@ func TestMsoMdocRejectsNonECDeviceKey(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	// An RSA-backed proof carries an RSA cnf.jwk, which is invalid for mdoc.
 	rsaProof := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
@@ -512,8 +503,8 @@ func TestMsoMdocRejectsNonECDeviceKey(t *testing.T) {
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": mdocConfigurationID,
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": rsaProof},
+			"proofs": map[string]interface{}{
+				"jwt": []string{rsaProof},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},

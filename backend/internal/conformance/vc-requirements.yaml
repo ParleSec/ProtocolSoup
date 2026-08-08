@@ -1,0 +1,856 @@
+schema_version: 1
+
+suite:
+  release: release-v5.2.2
+  commit: 321bc5bc53601b9690b54c023c0cbfac0f0230f2
+  url: https://gitlab.com/openid/conformance-suite/-/releases/release-v5.2.2
+
+specifications:
+  - id: oid4vp
+    title: OpenID for Verifiable Presentations
+    version: 1.0 Final
+    url: https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html
+  - id: oid4vci
+    title: OpenID for Verifiable Credential Issuance
+    version: 1.0 Final
+    url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html
+  - id: haip
+    title: OpenID4VC High Assurance Interoperability Profile
+    version: 1.0 Final
+    url: https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0-final.html
+  - id: rfc9449
+    title: OAuth 2.0 Demonstrating Proof of Possession
+    version: RFC 9449
+    url: https://www.rfc-editor.org/rfc/rfc9449.html
+  - id: rfc9901
+    title: Selective Disclosure for JSON Web Tokens
+    version: RFC 9901
+    url: https://www.rfc-editor.org/rfc/rfc9901.html
+  - id: iso18013-5
+    title: Personal identification — ISO-compliant driving licence — Part 5
+    version: ISO/IEC 18013-5
+    url: https://www.iso.org/standard/69084.html
+  - id: iso18013-7
+    title: Personal identification — ISO-compliant driving licence — Part 7
+    version: ISO/IEC 18013-7
+    url: https://www.iso.org/standard/82772.html
+
+requirements:
+  - id: VP-001
+    specification: oid4vp
+    section: "5.9.1"
+    level: MUST
+    statement: >-
+      Wallets MUST use the presence of a ":" (colon) character and the content
+      preceding it to determine whether a Client Identifier Prefix is used.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/contracts.go
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestParseClientIDSchemeUsesFinalPrefixFallback
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestInferClientIDSchemeUsesClientIDPrefixOnly
+
+  - id: VP-002
+    specification: oid4vp
+    section: "5.9.2"
+    level: MAY
+    statement: >-
+      If a ":" character is present in the Client Identifier but the value
+      preceding it is not a recognized and supported Client Identifier Prefix
+      value, the Wallet can treat the Client Identifier as referring to a
+      pre-registered client or it may refuse the request.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/contracts.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestParseClientIDSchemeUsesFinalPrefixFallback
+
+  - id: VP-003
+    specification: oid4vp
+    section: "5"
+    level: MUST
+    statement: >-
+      The Wallet MUST ignore any unrecognized parameters, other than the
+      transaction_data parameter.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestInferClientIDSchemeUsesClientIDPrefixOnly
+    notes: The removed draft client_id_scheme parameter is treated as unrecognized.
+
+  - id: VP-004
+    specification: oid4vp
+    section: "5.10"
+    level: MUST
+    statement: >-
+      GET request_uri retrieval returns the compact signed Authorization
+      Request directly with media type application/oauth-authz-req+jwt.
+    roles: [verifier, wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/handlers.go
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestAuthorizationRequestGETReturnsCompactJWTBody
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestFetchRequestObjectConsumesFinalCompactJWTBody
+
+  - id: VP-006
+    specification: oid4vp
+    section: "8.3"
+    level: MUST
+    statement: >-
+      Redirect response modes require exact correlation to the state issued in
+      the Authorization Request; a private request_id cannot bypass it.
+    roles: [verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestRedirectWalletResponseRequiresExactStateEvenWithRequestID
+
+  - id: VP-007
+    specification: oid4vp
+    section: "11.1"
+    level: MUST
+    statement: >-
+      Verifier metadata uses the Final per-format fields and numeric COSE
+      algorithm identifiers for mso_mdoc.
+    roles: [verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestRequestObjectContainsClientMetadataWithVPFormats
+
+  - id: HAIP-VP-001
+    specification: haip
+    section: "5"
+    level: MUST
+    statement: >-
+      The x5c request-object certificate chain excludes the root trust anchor.
+    roles: [verifier, wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/verifier_identity.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestCreateAuthorizationRequestBuildsX509SANDNSRequestObject
+
+  - id: VP-011
+    specification: oid4vp
+    section: "8.4"
+    level: MUST
+    statement: >-
+      If the Wallet does not support transaction_data parameter, it MUST return
+      an error upon receiving a request that includes it.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestPresentationAPIsRejectUnsupportedTransactionData
+
+  - id: CI-005
+    specification: oid4vci
+    section: "8.2"
+    level: OPTIONAL
+    statement: >-
+      The proofs parameter contains exactly one parameter named as the proof
+      type in Appendix F, the value set for this parameter is a non-empty array
+      containing parameters as defined by the corresponding proof type.
+    roles: [issuer, wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialRequestRejectsArrayProofsShape
+
+  - id: CI-009
+    specification: oid4vci
+    section: "7"
+    level: MUST
+    statement: >-
+      A Credential Issuer that requires c_nonce values to be incorporated into
+      proofs in the Credential Request MUST offer a Nonce Endpoint.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+      - backend/internal/protocols/oid4vci/plugin.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialIssuerMetadataWellKnown
+
+  - id: CI-006
+    specification: oid4vci
+    section: "8.2"
+    level: MUST
+    statement: The Credential Issuer MUST ignore any unrecognized parameters.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialRequestIgnoresUnknownSingularProofWhenProofsPresent
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialRequestIgnoresUnknownSingularProofWithoutProofs
+
+  - id: CI-007
+    specification: oid4vci
+    section: "6.3 and 8.2"
+    level: MUST
+    statement: >-
+      When authorization_details are used, the Authorization Server returns
+      credential_identifiers for the authorized Credential Configurations and
+      the Credential Issuer authorizes requests by those bound identifiers.
+    roles: [authorization_server, issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestAuthorizationDetailsIssuesTokenBoundCredentialIdentifiers
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialIdentifierRejectsMixedUnknownAndCrossTokenValues
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestAuthorizationCodeGrantReturnsCredentialIdentifiers
+
+  - id: CI-008
+    specification: oid4vci
+    section: "11"
+    level: MUST
+    statement: >-
+      The Credential Issuer validates the notification_id and event, accepts
+      an exact retry idempotently, and binds the notification to the access
+      token used for issuance.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestNotificationEndpointMutatesStateAndIsIdempotent
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestNotificationEndpointRejectsInvalidRequestsAndCrossTokenID
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestNotificationRejectsConflictingTerminalEvent
+
+  - id: CI-010
+    specification: oid4vci
+    section: "8.3"
+    level: MUST
+    statement: >-
+      An immediate Credential Response contains a non-empty credentials array
+      whose entries contain the issued Credential.
+    roles: [issuer, wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestCredentialResponseValueRequiresFinalCredentialsArray
+
+  - id: CI-011
+    specification: oid4vci
+    section: "11"
+    level: SHOULD
+    statement: >-
+      When a Credential Response contains a notification_id and the issuer
+      advertises a Notification Endpoint, the Wallet reports the outcome of
+      storing the Credential.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/main.go
+      - backend/cmd/walletharness/oid4vci_external.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestNotifyCredentialAcceptedUsesNotificationBinding
+
+  - id: CI-012
+    specification: oid4vci
+    section: "7"
+    level: MUST
+    statement: >-
+      The Nonce Endpoint MUST issue a fresh c_nonce without requiring an access
+      token or other authorization.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/dpop_test.go
+        name: TestNonceEndpointIsPublicWithIrrelevantAuthHeaders
+
+  - id: CI-013
+    specification: oid4vci
+    section: "Appendix F.1"
+    level: MUST
+    statement: >-
+      A JWT proof carries exactly one of kid, jwk, or x5c in its JOSE header;
+      anonymous pre-authorized clients omit iss and do not use payload cnf for
+      the proof key.
+    roles: [issuer, wallet]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+      - backend/cmd/walletharness/main.go
+      - backend/cmd/walletharness/mdoc_holder.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestCreateCredentialProofJWTUsesFinalAnonymousProofShape
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/mdoc_holder_test.go
+        name: TestHarnessCreateMdocDeviceProof
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestProofJWKRejectsAllPrivateMaterial
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestProofJOSEHeaderRequiresExactlyOneSupportedKeyReference
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestProofAlgorithmMustBeAdvertisedForConfiguration
+
+  - id: CI-014
+    specification: oid4vci
+    section: "6.1"
+    level: MUST
+    statement: >-
+      A pre-authorized code is accepted at most once under concurrent exchange,
+      a required missing tx_code is invalid_request, an unexpected tx_code is
+      invalid_request, and a wrong required tx_code is invalid_grant.
+    roles: [authorization_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestPreAuthorizedGrantRejectsUnexpectedTxCode
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestPreAuthorizedGrantDistinguishesMissingAndWrongTxCode
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestPreAuthorizedGrantExchangeIsAtomic
+
+  - id: CI-015
+    specification: oid4vci
+    section: "7 and 8.2"
+    level: MUST
+    statement: >-
+      A credential proof nonce is short-lived and single-use, including when
+      two Credential Requests attempt to consume it concurrently.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialNonceConsumptionIsAtomic
+
+  - id: CI-016
+    specification: oid4vci
+    section: "6.2 and 9"
+    level: MUST
+    statement: >-
+      Authorization codes and deferred transaction identifiers are accepted at
+      most once, including concurrent redemption attempts.
+    roles: [authorization_server, issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestAuthorizationCodeRedemptionIsAtomic
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestDeferredIssuanceFlow
+
+  - id: CI-017
+    specification: oid4vci
+    section: "8.2"
+    level: MUST
+    statement: >-
+      The issuer rejects multiple JWT proofs because batch issuance is not
+      advertised, and rejects duplicate known request parameters while
+      ignoring unknown extensions.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialRejectsUnadvertisedMultipleProofs
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestDeferredRequestIgnoresUnknownParametersAndRejectsDuplicates
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestDecodeNotificationRequestRejectsDuplicatesAndIgnoresUnknownParameters
+
+  - id: CI-018
+    specification: oid4vci
+    section: "12.2.4"
+    level: MUST
+    statement: >-
+      mso_mdoc Credential Configurations advertise credential signing
+      algorithms as numeric COSE algorithm identifiers.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/registry.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialIssuerMetadataIncludesMultiFormatConfigurations
+
+  - id: DP-001
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: There is not more than one DPoP HTTP request header field.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestExtractHeaderRejectsMultipleHeaderFields
+
+  - id: DP-002
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: All required claims per Section 4.2 are contained in the JWT.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsMissingJTI
+
+  - id: DP-003
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: The typ JOSE Header Parameter has the value dpop+jwt.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsWrongTyp
+
+  - id: DP-004
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: >-
+      The alg JOSE Header Parameter indicates a registered asymmetric digital
+      signature algorithm, is not none, is supported by the application, and
+      is acceptable per local policy.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsAlgNone
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsSymmetricAlg
+
+  - id: DP-005
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: >-
+      The JWT signature verifies with the public key contained in the jwk JOSE
+      Header Parameter.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofSucceedsForES256AndEdDSA
+
+  - id: DP-006
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: The jwk JOSE Header Parameter does not contain a private key.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsPrivateKeyInJWKHeader
+
+  - id: DP-007
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: The htm claim matches the HTTP method of the current request.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofHTMIsCaseSensitiveAgainstUppercasedMethod
+
+  - id: DP-008
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: >-
+      The htu claim matches the HTTP URI value for the HTTP request in which
+      the JWT was received, ignoring any query and fragment parts.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofHTUNormalizationEquivalence
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofHTUMismatchIsRejected
+
+  - id: DP-009
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: >-
+      If the server provided a nonce value to the client, the nonce claim
+      matches the server-provided nonce value.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+      - backend/internal/dpop/nonce.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRequiresNonceWhenInForce
+
+  - id: DP-010
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: >-
+      The creation time of the JWT, as determined by either the iat claim or a
+      server managed timestamp via the nonce claim, is within an acceptable
+      window.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsStaleIat
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofRejectsFutureIat
+
+  - id: DP-011
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    statement: >-
+      Ensure that the value of the ath claim equals the hash of that access
+      token.
+    roles: [resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+      - backend/internal/dpop/cnf.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestValidateProofATHMustMatchAccessToken
+
+  - id: DP-012
+    specification: rfc9449
+    section: "8"
+    level: MUST
+    statement: >-
+      Server-provided DPoP nonces expire after the configured lifetime and
+      entropy-generation failure is handled as an error rather than emitting a
+      predictable value.
+    roles: [authorization_server, resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/nonce.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/nonce_test.go
+        name: TestNonceIssuerRejectsOldNonceAfterLongIdlePeriod
+      - package: ./internal/dpop
+        file: backend/internal/dpop/nonce_test.go
+        name: TestNonceIssuerFailsClosedWhenEntropyUnavailable
+
+  - id: MDOC-001
+    specification: iso18013-5
+    section: "9.1.2"
+    level: MUST
+    statement: >-
+      Public COSE_Key processing rejects private key material and unsupported
+      curves.
+    roles: [issuer, wallet, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/cose/key.go
+    tests:
+      - package: ./internal/cose
+        file: backend/internal/cose/key_test.go
+        name: TestCOSEKeyToECPublicKeyRejectsPrivateMaterial
+
+  - id: MDOC-002
+    specification: iso18013-5
+    section: "9.1.2.4"
+    level: MUST
+    statement: >-
+      IssuerAuth verification requires tagged MobileSecurityObjectBytes and a
+      valid MSO version, digest algorithm, document type, device key,
+      namespaces, digests, and ordered validity interval.
+    roles: [wallet, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/mdoc/mso.go
+      - backend/internal/mdoc/verify.go
+    tests:
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestVerifyIssuerSignedRejectsBareMSOPayload
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestVerifyIssuerSignedRejectsInvalidMSOFields
+
+  - id: MDOC-003
+    specification: iso18013-5
+    section: "9.1.2.3"
+    level: MUST
+    statement: >-
+      IssuerSigned namespaces reject duplicate element identifiers and verify
+      every value digest.
+    roles: [issuer, wallet, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/mdoc/digest.go
+      - backend/internal/mdoc/issuersigned.go
+    tests:
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/digest_test.go
+        name: TestVerifyValueDigestsRejectsDuplicateElementIdentifier
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/model_test.go
+        name: TestBuildIssuerNameSpacesRejectsDuplicateElementIdentifier
+
+  - id: MDOC-004
+    specification: iso18013-5
+    section: "8.3.2.1"
+    level: MUST
+    statement: DeviceResponse version is exactly 1.0.
+    roles: [wallet, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/mdoc/deviceresponse.go
+      - backend/internal/mdoc/verify_device.go
+    tests:
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_device_test.go
+        name: TestDeviceResponseRejectsUnsupportedVersion
+
+  - id: MDOC-005
+    specification: iso18013-5
+    section: "B.1"
+    level: MUST
+    statement: >-
+      Document-signer certificates satisfy the Annex B profile, chain to an
+      independently configured IACA root, and their signing key is bound by
+      the COSE signature.
+    roles: [issuer, wallet, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/mdoc/verify.go
+    tests:
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestVerifyIssuerSignedRejectsNilRoots
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestDocumentSignerCertificateProfileRejectsInvalidFields
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestIssuerAuthSignatureBindsRFC9360X5ChainLeaf
+
+  - id: SDJWT-001
+    specification: rfc9901
+    section: "4.1"
+    level: "MUST NOT"
+    statement: The same digest value MUST NOT appear more than once in the SD-JWT.
+    roles: [issuer, holder, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/vc/sdjwt.go
+    tests:
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestSDJWTDisclosureDigestsRejectsDuplicateCommitment
+
+  - id: SDJWT-000
+    specification: rfc9901
+    section: "3"
+    level: "MUST NOT"
+    statement: >-
+      When there is no Key Binding JWT, the last element MUST be an empty
+      string and the last separating tilde character MUST NOT be omitted.
+    roles: [issuer, holder, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/vc/sdjwt.go
+    tests:
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestSDJWTCompactSerializationRequiresTrailingTildeWithoutKBJWT
+
+  - id: SDJWT-002
+    specification: rfc9901
+    section: "4.1.1"
+    level: MUST
+    statement: >-
+      If the _sd_alg claim is not present at the top level, a default value of
+      sha-256 MUST be used.
+    roles: [issuer, holder, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/vc/sdjwt.go
+    tests:
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestSDJWTDisclosureDigestsExtractsNestedCommitments
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestSDJWTDisclosureDigestsRejectsUnsupportedAlgorithm
+
+  - id: SDJWT-003
+    specification: rfc9901
+    section: "7.2"
+    level: MUST
+    statement: >-
+      If the claim name is _sd or ..., the SD-JWT MUST be rejected.
+    roles: [issuer, holder, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/vc/sdjwt.go
+    tests:
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestDecodeSDJWTDisclosureRejectsReservedClaimNames
+
+  - id: SDJWT-004
+    specification: rfc9901
+    section: "7.2"
+    level: MUST
+    statement: >-
+      If any Disclosure was not referenced by digest value in the
+      Issuer-signed JWT, the SD-JWT MUST be rejected.
+    roles: [verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/vc/sdjwt.go
+      - backend/internal/protocols/oid4vp/handlers.go
+    tests:
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestDecodeAndVerifyDisclosuresRejectsUncommittedDisclosure
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestDirectPostPolicyRejectsUncommittedSDJWTDisclosure
+
+  - id: SDJWT-005
+    specification: rfc9901
+    section: "7.2 and 7.3"
+    level: MUST
+    statement: >-
+      Disclosures are processed recursively at their committed object or array
+      positions, while nested _sd_alg and permanent-claim collisions are
+      rejected.
+    roles: [issuer, wallet, verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/vc/sdjwt.go
+    tests:
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestProcessSDJWTDisclosuresResolvesArrayElementsPositionally
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestProcessSDJWTDisclosuresResolvesRecursiveObjectAtDigestPosition
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestProcessSDJWTDisclosuresRejectsNestedSDAlg
+      - package: ./internal/vc
+        file: backend/internal/vc/sdjwt_test.go
+        name: TestProcessSDJWTDisclosuresRejectsPermanentClaimCollision

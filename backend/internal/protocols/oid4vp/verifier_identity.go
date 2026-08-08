@@ -767,8 +767,15 @@ func (p *Plugin) describeX509Chain() map[string]interface{} {
 
 func (s *x509RequestSigner) x5cHeader() []string {
 	values := make([]string, 0, len(s.certificates))
-	for _, certificate := range s.certificates {
+	for index, certificate := range s.certificates {
 		if certificate == nil {
+			continue
+		}
+		// RFC 7515 Section 4.1.6 carries the certificate chain used to sign the
+		// JWS. The trust anchor is configured out of band and is not part of the
+		// chain conveyed by HAIP request objects.
+		isLast := index == len(s.certificates)-1
+		if isLast && certificate.IsCA && certificate.CheckSignatureFrom(certificate) == nil {
 			continue
 		}
 		values = append(values, base64.StdEncoding.EncodeToString(certificate.Raw))

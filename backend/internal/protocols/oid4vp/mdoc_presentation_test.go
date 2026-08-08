@@ -17,7 +17,7 @@ const mdocDCQLQuery = `{
 	"credentials": [{
 		"id": "mdl",
 		"format": "mso_mdoc",
-		"meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]},
+		"meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
 		"claims": [
 			{"path": ["org.iso.18013.5.1", "family_name"]},
 			{"path": ["org.iso.18013.5.1", "document_number"]}
@@ -56,8 +56,8 @@ func issueMdocForVerifier(t *testing.T, deviceKey *ecdsa.PrivateKey) (mdoc.Issue
 	}
 	now := time.Now().Truncate(time.Second).UTC()
 	mso := mdoc.BuildMSO(vd, deviceCOSEKey, mdoc.DocTypeMDL, mdoc.ValidityInfo{
-		Signed:     now,
-		ValidFrom:  now.Add(-time.Hour),
+		Signed:     now.Add(-time.Hour),
+		ValidFrom:  now.Add(-time.Minute),
 		ValidUntil: now.Add(48 * time.Hour),
 	})
 	msoBytes, err := mdoc.EncodeMSOBytes(mso)
@@ -244,7 +244,7 @@ func TestEvaluateMdocPresentationRejectsDCQLMismatch(t *testing.T) {
 	vpToken := buildMdocVPToken(t, deviceKey, issuerSigned, handover)
 
 	// DCQL requires birth_date, which was not disclosed.
-	dcql := `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_values":["org.iso.18013.5.1.mDL"]},"claims":[{"path":["org.iso.18013.5.1","birth_date"]}]}]}`
+	dcql := `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"},"claims":[{"path":["org.iso.18013.5.1","birth_date"]}]}]}`
 	session := &requestSession{
 		ID:          "req-4",
 		ClientID:    "verifier-client-1",
@@ -275,7 +275,7 @@ func mdocCredentialSetsDCQLQuery(t *testing.T, credentialSets []map[string]inter
 			{
 				"id":     "mdl",
 				"format": "mso_mdoc",
-				"meta":   map[string]interface{}{"doctype_values": []string{"org.iso.18013.5.1.mDL"}},
+				"meta":   map[string]interface{}{"doctype_value": "org.iso.18013.5.1.mDL"},
 				"claims": []map[string]interface{}{
 					{"path": []string{"org.iso.18013.5.1", "family_name"}},
 					{"path": []string{"org.iso.18013.5.1", "document_number"}},
@@ -284,7 +284,7 @@ func mdocCredentialSetsDCQLQuery(t *testing.T, credentialSets []map[string]inter
 			{
 				"id":     "unused_pid",
 				"format": "mso_mdoc",
-				"meta":   map[string]interface{}{"doctype_values": []string{"eu.europa.ec.eudi.pid.1"}},
+				"meta":   map[string]interface{}{"doctype_value": "eu.europa.ec.eudi.pid.1"},
 			},
 		},
 		"credential_sets": credentialSets,

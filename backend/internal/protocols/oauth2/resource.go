@@ -162,15 +162,26 @@ func (p *Plugin) handleProtectedResource(w http.ResponseWriter, r *http.Request)
 
 	// RFC 9449 Section 8, RS role: independent of the AS-role nonce space
 	// (Section 8.2) even though both roles are served by this plugin.
-	if p.dpopRSNonceIssuer != nil && !p.dpopRSNonceIssuer.Valid(proof.Nonce) {
-		nonce := p.dpopRSNonceIssuer.Issue()
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Nonce Challenge", map[string]interface{}{
-			"endpoint": "/oauth2/resource",
-			"error":    dpop.ErrorUseDPoPNonce,
-		}, p.oauth2Annotation("dpop_nonce")...)
-		writeResourceAuthError(w, http.StatusUnauthorized, dpop.HeaderName, dpop.ErrorUseDPoPNonce,
-			"a fresh DPoP proof nonce is required; retry with the nonce from the DPoP-Nonce response header", nonce)
-		return
+	if p.dpopRSNonceIssuer != nil {
+		valid, nonceErr := p.dpopRSNonceIssuer.Valid(proof.Nonce)
+		if nonceErr != nil {
+			writeResourceAuthError(w, http.StatusInternalServerError, dpop.HeaderName, "server_error", "DPoP nonce validation is temporarily unavailable", "")
+			return
+		}
+		if !valid {
+			nonce, issueErr := p.dpopRSNonceIssuer.Issue()
+			if issueErr != nil {
+				writeResourceAuthError(w, http.StatusInternalServerError, dpop.HeaderName, "server_error", "DPoP nonce generation is temporarily unavailable", "")
+				return
+			}
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "DPoP Nonce Challenge", map[string]interface{}{
+				"endpoint": "/oauth2/resource",
+				"error":    dpop.ErrorUseDPoPNonce,
+			}, p.oauth2Annotation("dpop_nonce")...)
+			writeResourceAuthError(w, http.StatusUnauthorized, dpop.HeaderName, dpop.ErrorUseDPoPNonce,
+				"a fresh DPoP proof nonce is required; retry with the nonce from the DPoP-Nonce response header", nonce)
+			return
+		}
 	}
 
 	now := p.now()

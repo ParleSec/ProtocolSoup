@@ -144,6 +144,7 @@ func TestIndexerStoresBodyAndPreviewOnResult(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected pkce result in seed content")
+		return
 	}
 	if found.Body == "" {
 		t.Error("Result.Body empty; expected full markdown body")

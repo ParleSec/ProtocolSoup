@@ -104,6 +104,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	responseModeRaw := query.Get("response_mode")
 	claimsParam := query.Get("claims")
 	loginHint := query.Get("login_hint")
+	authorizationDetailsParam := query.Get("authorization_details")
 
 	// Emit OIDC authorization request
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authentication Request", map[string]interface{}{
@@ -220,8 +221,19 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// openid scope is required for an OIDC authorization request.
-	if !containsScope(scope, "openid") {
+	credentialConfigurationIDs, err := parseOID4VCIAuthorizationDetails(
+		authorizationDetailsParam,
+		strings.TrimRight(p.baseURL, "/")+"/oid4vci",
+	)
+	if err != nil {
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"invalid_authorization_details", err.Error())
+		return
+	}
+
+	// The shared endpoint serves both OIDC authentication requests and
+	// OID4VCI OAuth authorization requests. Only the former requires openid.
+	if len(credentialConfigurationIDs) == 0 && !containsScope(scope, "openid") {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
 			"invalid_scope", "openid scope is required for OIDC")
 		return
@@ -286,17 +298,18 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := authParams{
-		ClientID:            clientID,
-		RedirectURI:         redirectURI,
-		Scope:               scope,
-		State:               state,
-		Nonce:               nonce,
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: codeChallengeMethod,
-		ResponseType:        responseType,
-		ResponseMode:        responseMode,
-		Claims:              claimsParam,
-		LoginHint:           loginHint,
+		ClientID:                   clientID,
+		RedirectURI:                redirectURI,
+		Scope:                      scope,
+		State:                      state,
+		Nonce:                      nonce,
+		CodeChallenge:              codeChallenge,
+		CodeChallengeMethod:        codeChallengeMethod,
+		ResponseType:               responseType,
+		ResponseMode:               responseMode,
+		Claims:                     claimsParam,
+		LoginHint:                  loginHint,
+		CredentialConfigurationIDs: credentialConfigurationIDs,
 	}
 
 	// Interaction decision (OIDC Core 1.0 Section 3.1.2.1).
@@ -332,17 +345,18 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	loginRequestID := p.storeLoginRequest(loginRequestInfo{
-		ClientID:            clientID,
-		RedirectURI:         redirectURI,
-		Scope:               scope,
-		State:               state,
-		Nonce:               nonce,
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: codeChallengeMethod,
-		ResponseType:        responseType,
-		ResponseMode:        responseMode,
-		Claims:              claimsParam,
-		LoginHint:           loginHint,
+		ClientID:                   clientID,
+		RedirectURI:                redirectURI,
+		Scope:                      scope,
+		State:                      state,
+		Nonce:                      nonce,
+		CodeChallenge:              codeChallenge,
+		CodeChallengeMethod:        codeChallengeMethod,
+		ResponseType:               responseType,
+		ResponseMode:               responseMode,
+		Claims:                     claimsParam,
+		LoginHint:                  loginHint,
+		CredentialConfigurationIDs: credentialConfigurationIDs,
 	})
 
 	// Generate login page with HTML-escaped values to prevent XSS
@@ -461,16 +475,17 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	params := authParams{
-		ClientID:            clientID,
-		RedirectURI:         redirectURI,
-		Scope:               scope,
-		State:               state,
-		Nonce:               nonce,
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: codeChallengeMethod,
-		ResponseType:        responseType,
-		ResponseMode:        responseMode,
-		Claims:              requestInfo.Claims,
+		ClientID:                   clientID,
+		RedirectURI:                redirectURI,
+		Scope:                      scope,
+		State:                      state,
+		Nonce:                      nonce,
+		CodeChallenge:              codeChallenge,
+		CodeChallengeMethod:        codeChallengeMethod,
+		ResponseType:               responseType,
+		ResponseMode:               responseMode,
+		Claims:                     requestInfo.Claims,
+		CredentialConfigurationIDs: requestInfo.CredentialConfigurationIDs,
 	}
 
 	// auth_time is the moment this session was established, so a later silent
@@ -521,6 +536,13 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
 				"invalid_request", err.Error())
 			return
+		}
+		if len(params.CredentialConfigurationIDs) > 0 {
+			if err := p.mockIdP.BindCredentialAuthorizationDetails(authCode.Code, params.CredentialConfigurationIDs); err != nil {
+				p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+					"server_error", "Failed to bind credential authorization details")
+				return
+			}
 		}
 		authorizationCode = authCode.Code
 	}
@@ -1404,19 +1426,20 @@ func buildDemoUsersHTML(presets []mockidp.DemoUserPreset) string {
 }
 
 type loginRequestInfo struct {
-	ID                  string
-	ClientID            string
-	RedirectURI         string
-	Scope               string
-	State               string
-	Nonce               string
-	CodeChallenge       string
-	CodeChallengeMethod string
-	ResponseType        string
-	ResponseMode        string
-	Claims              string
-	LoginHint           string
-	CreatedAt           time.Time
+	ID                         string
+	ClientID                   string
+	RedirectURI                string
+	Scope                      string
+	State                      string
+	Nonce                      string
+	CodeChallenge              string
+	CodeChallengeMethod        string
+	ResponseType               string
+	ResponseMode               string
+	Claims                     string
+	LoginHint                  string
+	CredentialConfigurationIDs []string
+	CreatedAt                  time.Time
 }
 
 func (p *Plugin) storeLoginRequest(info loginRequestInfo) string {

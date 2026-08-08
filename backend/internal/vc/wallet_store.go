@@ -143,6 +143,11 @@ func (s *WalletCredentialStore) Put(record WalletCredentialRecord) bool {
 	if format == "" && configID == "" && vct == "" && doctype == "" {
 		return false
 	}
+	// RFC 9901 Section 7.2: the Issuer provides the Holder with an SD-JWT,
+	// not an SD-JWT+KB; a received SD-JWT+KB MUST be rejected.
+	if envelope, err := ParseSDJWTEnvelope(credential); err == nil && envelope.HasKeyBindingJWT() {
+		return false
+	}
 
 	now := time.Now().UTC()
 	record.Subject = subject

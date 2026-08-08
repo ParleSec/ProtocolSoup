@@ -11,7 +11,7 @@ func TestParseDCQLTrustedAuthorities(t *testing.T) {
 			{
 				"id": "mdl",
 				"format": "mso_mdoc",
-				"meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]},
+				"meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
 				"trusted_authorities": [
 					{"type": "aki", "values": ["sBdpcyfYjLDg7e6_KdjQQX2v8jY", "anotherAki"]}
 				]
@@ -76,7 +76,7 @@ func TestRequirementMatchesMdocByDoctypeAndNamespaceElementPaths(t *testing.T) {
 		"credentials": [{
 			"id": "mdl",
 			"format": "mso_mdoc",
-			"meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]},
+			"meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
 			"claims": [
 				{"path": ["org.iso.18013.5.1", "family_name"]},
 				{"path": ["org.iso.18013.5.1", "document_number"]}
@@ -104,7 +104,7 @@ func TestRequirementMatchesMdocByDoctypeAndNamespaceElementPaths(t *testing.T) {
 }
 
 func TestRequirementMatchesMdocRejectsDoctypeMismatch(t *testing.T) {
-	dcql := `{"credentials": [{"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]}, "claims": [{"path": ["org.iso.18013.5.1", "family_name"]}]}]}`
+	dcql := `{"credentials": [{"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"}, "claims": [{"path": ["org.iso.18013.5.1", "family_name"]}]}]}`
 	req := ParseDCQLCredentialRequirements(dcql)[0]
 
 	ev := mdocEvidence()
@@ -119,7 +119,7 @@ func TestRequirementMatchesMdocRejectsDoctypeMismatch(t *testing.T) {
 }
 
 func TestRequirementMatchesMdocRejectsMissingElement(t *testing.T) {
-	dcql := `{"credentials": [{"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]}, "claims": [{"path": ["org.iso.18013.5.1", "birth_date"]}]}]}`
+	dcql := `{"credentials": [{"id": "mdl", "format": "mso_mdoc", "meta": {"doctype_value": "org.iso.18013.5.1.mDL"}, "claims": [{"path": ["org.iso.18013.5.1", "birth_date"]}]}]}`
 	req := ParseDCQLCredentialRequirements(dcql)[0]
 
 	matched, code, _ := RequirementMatchesMdoc(req, mdocEvidence())

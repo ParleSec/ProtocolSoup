@@ -84,6 +84,9 @@ func EncodeDeviceResponse(response DeviceResponse) ([]byte, error) {
 	if version == "" {
 		version = DeviceResponseVersion
 	}
+	if version != DeviceResponseVersion {
+		return nil, fmt.Errorf("mdoc: unsupported DeviceResponse version %q, want %q", version, DeviceResponseVersion)
+	}
 	wire := deviceResponseWire{
 		Version: version,
 		Status:  response.Status,
@@ -132,6 +135,9 @@ func DecodeDeviceResponse(data []byte) (DeviceResponse, error) {
 	var wire deviceResponseWire
 	if err := intcose.Unmarshal(data, &wire); err != nil {
 		return DeviceResponse{}, fmt.Errorf("mdoc: decode DeviceResponse: %w", err)
+	}
+	if wire.Version != DeviceResponseVersion {
+		return DeviceResponse{}, fmt.Errorf("mdoc: unsupported DeviceResponse version %q, want %q", wire.Version, DeviceResponseVersion)
 	}
 	response := DeviceResponse{
 		Version: wire.Version,

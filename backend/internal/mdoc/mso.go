@@ -2,8 +2,10 @@ package mdoc
 
 import (
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"fmt"
+	"strings"
 
 	intcose "github.com/ParleSec/ProtocolSoup/internal/cose"
 )
@@ -48,6 +50,58 @@ func DecodeMSOBytes(msoBytes []byte) (MobileSecurityObject, error) {
 		return MobileSecurityObject{}, fmt.Errorf("mdoc: decode MobileSecurityObject: %w", err)
 	}
 	return mso, nil
+}
+
+// validateMobileSecurityObject enforces the locally checkable
+// MobileSecurityObject profile constraints from ISO/IEC 18013-5 clause 9.1.2.
+func validateMobileSecurityObject(mso MobileSecurityObject) error {
+	if mso.Version != MSOVersion {
+		return fmt.Errorf("mdoc: unsupported MobileSecurityObject version %q, want %q", mso.Version, MSOVersion)
+	}
+	if mso.DigestAlgorithm != DigestAlgorithmSHA256 {
+		return fmt.Errorf("mdoc: unsupported MobileSecurityObject digestAlgorithm %q", mso.DigestAlgorithm)
+	}
+	if strings.TrimSpace(mso.DocType) == "" {
+		return fmt.Errorf("mdoc: MobileSecurityObject docType is empty")
+	}
+	if len(mso.DeviceKeyInfo.DeviceKey) == 0 {
+		return fmt.Errorf("mdoc: MobileSecurityObject deviceKeyInfo.deviceKey is empty")
+	}
+	if _, err := intcose.COSEKeyToECPublicKey(mso.DeviceKeyInfo.DeviceKey); err != nil {
+		return fmt.Errorf("mdoc: invalid MobileSecurityObject deviceKeyInfo.deviceKey: %w", err)
+	}
+	if len(mso.ValueDigests) == 0 {
+		return fmt.Errorf("mdoc: MobileSecurityObject valueDigests is empty")
+	}
+	for namespace, digests := range mso.ValueDigests {
+		if strings.TrimSpace(namespace) == "" {
+			return fmt.Errorf("mdoc: MobileSecurityObject valueDigests contains an empty namespace")
+		}
+		if len(digests) == 0 {
+			return fmt.Errorf("mdoc: MobileSecurityObject valueDigests namespace %q is empty", namespace)
+		}
+		for digestID, digest := range digests {
+			if len(digest) != sha256.Size {
+				return fmt.Errorf("mdoc: MobileSecurityObject valueDigests namespace %q digestID %d has length %d, want %d", namespace, digestID, len(digest), sha256.Size)
+			}
+		}
+	}
+
+	validity := mso.ValidityInfo
+	if validity.Signed.IsZero() || validity.ValidFrom.IsZero() || validity.ValidUntil.IsZero() {
+		return fmt.Errorf("mdoc: MobileSecurityObject validityInfo contains a zero timestamp")
+	}
+	if validity.Signed.After(validity.ValidFrom) {
+		return fmt.Errorf("mdoc: MobileSecurityObject validityInfo signed must be at or before validFrom")
+	}
+	if !validity.ValidFrom.Before(validity.ValidUntil) {
+		return fmt.Errorf("mdoc: MobileSecurityObject validityInfo validFrom must be before validUntil")
+	}
+	if validity.ExpectedUpdate != nil &&
+		(!validity.ExpectedUpdate.After(validity.Signed) || !validity.ExpectedUpdate.Before(validity.ValidUntil)) {
+		return fmt.Errorf("mdoc: MobileSecurityObject validityInfo expectedUpdate must be after signed and before validUntil")
+	}
+	return nil
 }
 
 // BuildIssuerAuth creates the IssuerAuth COSE_Sign1 (untagged, per mdoc wire

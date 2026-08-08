@@ -51,6 +51,7 @@ __pycache__/
 # Testing
 coverage/
 .artifacts/
+artifacts/
 *.test
 *.out
 

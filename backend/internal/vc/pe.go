@@ -211,36 +211,24 @@ func BuildCredentialEvidence(rawCredential string, lifecycleStage CredentialLife
 
 	fullClaims := deepCopyMapPE(parsed.Claims)
 	disclosedClaims := map[string]interface{}{}
-	aliasVerifiableCredentialClaimsPE(fullClaims, parsed.VCClaims)
-	aliasMSOMDocClaimsPE(fullClaims)
 	var selectiveDisclosure *SelectiveDisclosureSummary
 	if parsed.IsSDJWT {
 		envelope, err := ParseSDJWTEnvelope(parsed.Original)
 		if err != nil {
 			return nil, err
 		}
-		committedCount, hasUnrepresentedForms := countSDJWTCommittedDigestsPE(parsed.Claims)
-		for _, disclosure := range envelope.Disclosures {
-			decodedDisclosure, err := DecodeSDJWTDisclosure(disclosure)
-			if err != nil {
-				return nil, err
-			}
-			claimName := strings.TrimSpace(decodedDisclosure.ClaimName)
-			if claimName == "" {
-				continue
-			}
-			disclosedClaims[claimName] = deepCopyJSONValuePE(decodedDisclosure.ClaimValue)
-			// A disclosed claim's own value can carry a further "_sd" array
-			// (SD-JWT's structured/nested disclosure), which is invisible to
-			// countSDJWTCommittedDigestsPE above because it only walks the
-			// issuer-signed payload, not what decoding a disclosure reveals.
-			if claimValueMap, ok := decodedDisclosure.ClaimValue.(map[string]interface{}); ok {
-				if _, hasNestedSD := claimValueMap["_sd"]; hasNestedSD {
-					hasUnrepresentedForms = true
-				}
-			}
+		decodedIssuer, err := intcrypto.DecodeTokenWithoutValidation(envelope.IssuerSignedJWT)
+		if err != nil {
+			return nil, fmt.Errorf("decode sd-jwt issuer-signed jwt: %w", err)
 		}
-		mergeDisclosedClaimsPE(fullClaims, disclosedClaims)
+		issuerPayload := map[string]interface{}(decodedIssuer.Payload)
+		committedCount, hasUnrepresentedForms := countSDJWTCommittedDigestsPE(issuerPayload)
+		processedPayload, decodedDisclosures, err := ProcessSDJWTDisclosures(issuerPayload, envelope.Disclosures)
+		if err != nil {
+			return nil, err
+		}
+		fullClaims = deepCopyMapPE(processedPayload)
+		disclosedClaims = DisclosedClaimMap(decodedDisclosures)
 		selectiveDisclosure = &SelectiveDisclosureSummary{
 			Mechanism:                       "sd_jwt_disclosures",
 			CommittedCount:                  committedCount,
@@ -256,6 +244,9 @@ func BuildCredentialEvidence(rawCredential string, lifecycleStage CredentialLife
 			return nil, err
 		}
 	}
+	vcClaims, _ := fullClaims["vc"].(map[string]interface{})
+	aliasVerifiableCredentialClaimsPE(fullClaims, vcClaims)
+	aliasMSOMDocClaimsPE(fullClaims)
 	flattenCredentialSubjectClaimsPE(fullClaims)
 
 	return &CredentialEvidence{
@@ -311,6 +302,7 @@ func countSDJWTCommittedDigestsPE(value interface{}) (count int, hasArrayElement
 		for _, element := range typed {
 			if elementMap, ok := element.(map[string]interface{}); ok && len(elementMap) == 1 {
 				if _, ok := elementMap["..."]; ok {
+					count++
 					hasArrayElementMarker = true
 					continue
 				}
@@ -995,39 +987,6 @@ func nestedPresentationFormatsPE(parsed *ParsedCredential) []string {
 			return []string{normalized}
 		}
 		return nil
-	}
-}
-
-func mergeDisclosedClaimsPE(fullClaims map[string]interface{}, disclosedClaims map[string]interface{}) {
-	if len(fullClaims) == 0 {
-		return
-	}
-	for claimName, claimValue := range disclosedClaims {
-		if _, exists := fullClaims[claimName]; !exists {
-			fullClaims[claimName] = deepCopyJSONValuePE(claimValue)
-		}
-	}
-	if vcObject, ok := fullClaims["vc"].(map[string]interface{}); ok {
-		credentialSubject := map[string]interface{}{}
-		if existingSubject, ok := vcObject["credentialSubject"].(map[string]interface{}); ok {
-			credentialSubject = deepCopyMapPE(existingSubject)
-		}
-		for claimName, claimValue := range disclosedClaims {
-			if _, exists := credentialSubject[claimName]; !exists {
-				credentialSubject[claimName] = deepCopyJSONValuePE(claimValue)
-			}
-		}
-		vcObject["credentialSubject"] = credentialSubject
-		fullClaims["vc"] = vcObject
-	}
-	if credentialSubject, ok := fullClaims["credentialSubject"].(map[string]interface{}); ok {
-		copiedSubject := deepCopyMapPE(credentialSubject)
-		for claimName, claimValue := range disclosedClaims {
-			if _, exists := copiedSubject[claimName]; !exists {
-				copiedSubject[claimName] = deepCopyJSONValuePE(claimValue)
-			}
-		}
-		fullClaims["credentialSubject"] = copiedSubject
 	}
 }
 

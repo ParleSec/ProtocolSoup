@@ -2,6 +2,7 @@ package mdoc
 
 import (
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/x509"
 	"fmt"
 	"time"
@@ -22,6 +23,9 @@ import (
 //
 // Returns the verified MobileSecurityObject on success.
 func VerifyIssuerSigned(is IssuerSigned, roots *x509.CertPool, now time.Time) (*MobileSecurityObject, error) {
+	if roots == nil {
+		return nil, fmt.Errorf("mdoc: issuer trust roots are required")
+	}
 	// 1. Parse the IssuerAuth COSE_Sign1.
 	msoPayload, sign1Msg, err := ParseIssuerAuth(is.IssuerAuth)
 	if err != nil {
@@ -42,6 +46,9 @@ func VerifyIssuerSigned(is IssuerSigned, roots *x509.CertPool, now time.Time) (*
 	// 4. Decode the MSO from the signed payload (tag-24 wrapped).
 	mso, err := decodeMSOFromPayload(msoPayload)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateMobileSecurityObject(mso); err != nil {
 		return nil, err
 	}
 
@@ -75,6 +82,9 @@ func VerifyIssuerSignedWithKey(is IssuerSigned, dsKey *ecdsa.PublicKey, now time
 
 	mso, err := decodeMSOFromPayload(msoPayload)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateMobileSecurityObject(mso); err != nil {
 		return nil, err
 	}
 
@@ -117,6 +127,9 @@ func IssuerAuthorityKeyIdentifier(is IssuerSigned) ([]byte, error) {
 }
 
 func extractAndVerifyDocSignerKey(msg *intcose.Sign1Message, roots *x509.CertPool, now time.Time) (*ecdsa.PublicKey, error) {
+	if roots == nil {
+		return nil, fmt.Errorf("mdoc: issuer trust roots are required")
+	}
 	if msg.Headers.Unprotected == nil {
 		return nil, fmt.Errorf("mdoc: IssuerAuth has no unprotected headers")
 	}
@@ -129,6 +142,9 @@ func extractAndVerifyDocSignerKey(msg *intcose.Sign1Message, roots *x509.CertPoo
 	}
 
 	leaf := chain[0]
+	if err := validateDocumentSignerCertificate(leaf); err != nil {
+		return nil, err
+	}
 	intermediates := x509.NewCertPool()
 	for _, cert := range chain[1:] {
 		intermediates.AddCert(cert)
@@ -146,24 +162,75 @@ func extractAndVerifyDocSignerKey(msg *intcose.Sign1Message, roots *x509.CertPoo
 	if !ok {
 		return nil, fmt.Errorf("mdoc: document-signer certificate has %T key, want *ecdsa.PublicKey", leaf.PublicKey)
 	}
+	if ecdsaKey.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("mdoc: document-signer certificate key must use P-256")
+	}
+	// RFC 9360 x5chain is a certificate transport header, not a certificate
+	// thumbprint contract. VerifyIssuerSigned uses this exact leaf key to verify
+	// the COSE_Sign1, which proves possession and binds IssuerAuth to the leaf.
 	return ecdsaKey, nil
 }
 
 func decodeMSOFromPayload(payload []byte) (MobileSecurityObject, error) {
-	// The payload of IssuerAuth is MobileSecurityObjectBytes, which may or may
-	// not be tag-24 wrapped depending on how the issuer encoded it. Try tag 24
-	// first; fall back to direct decode.
 	mso, err := DecodeMSOBytes(payload)
-	if err == nil {
-		return mso, nil
+	if err != nil {
+		return MobileSecurityObject{}, fmt.Errorf("mdoc: IssuerAuth payload must be tagged MobileSecurityObjectBytes: %w", err)
 	}
-	// Fallback: try bare decode (some implementations omit the outer tag 24
-	// from the COSE payload).
-	var bare MobileSecurityObject
-	if bareErr := intcose.Unmarshal(payload, &bare); bareErr != nil {
-		return MobileSecurityObject{}, fmt.Errorf("mdoc: decode MSO payload (tag24: %v; bare: %w)", err, bareErr)
+	return mso, nil
+}
+
+func validateDocumentSignerCertificate(cert *x509.Certificate) error {
+	if cert == nil {
+		return fmt.Errorf("mdoc: document-signer certificate is nil")
 	}
-	return bare, nil
+	if !cert.BasicConstraintsValid || cert.IsCA {
+		return fmt.Errorf("mdoc: document-signer certificate must have Basic Constraints CA=false")
+	}
+	if cert.KeyUsage != x509.KeyUsageDigitalSignature {
+		return fmt.Errorf("mdoc: document-signer certificate key usage must be digitalSignature only")
+	}
+	hasMDLDSEKU := false
+	for _, oid := range cert.UnknownExtKeyUsage {
+		if oid.Equal(OIDExtKeyUsageMDLDS) {
+			hasMDLDSEKU = true
+			break
+		}
+	}
+	if !hasMDLDSEKU {
+		return fmt.Errorf("mdoc: document-signer certificate is missing extended key usage %s", OIDExtKeyUsageMDLDS)
+	}
+	if cert.SerialNumber == nil || cert.SerialNumber.Sign() <= 0 || cert.SerialNumber.BitLen() > 160 {
+		return fmt.Errorf("mdoc: document-signer certificate serial number must be positive and at most 20 octets")
+	}
+	if len(cert.Subject.Country) == 0 || len(cert.Subject.Country[0]) != 2 || len(cert.Subject.Organization) == 0 || cert.Subject.Organization[0] == "" {
+		return fmt.Errorf("mdoc: document-signer certificate subject must contain countryName and organizationName")
+	}
+	if cert.NotBefore.IsZero() || cert.NotAfter.IsZero() || !cert.NotBefore.Before(cert.NotAfter) {
+		return fmt.Errorf("mdoc: document-signer certificate has an invalid validity period")
+	}
+	if cert.NotAfter.Sub(cert.NotBefore) > dsMaxValidity {
+		return fmt.Errorf("mdoc: document-signer certificate validity exceeds the 15-month profile maximum")
+	}
+	if len(cert.SubjectKeyId) == 0 || len(cert.AuthorityKeyId) == 0 {
+		return fmt.Errorf("mdoc: document-signer certificate must contain subjectKeyIdentifier and authorityKeyIdentifier")
+	}
+	if len(cert.CRLDistributionPoints) == 0 {
+		return fmt.Errorf("mdoc: document-signer certificate must contain a CRL distribution point")
+	}
+	hasIssuerAltName := false
+	for _, ext := range cert.Extensions {
+		if ext.Id.Equal(oidIssuerAltName) {
+			hasIssuerAltName = true
+			break
+		}
+	}
+	if !hasIssuerAltName {
+		return fmt.Errorf("mdoc: document-signer certificate must contain issuerAltName")
+	}
+	if cert.SignatureAlgorithm != x509.ECDSAWithSHA256 {
+		return fmt.Errorf("mdoc: document-signer certificate signature algorithm must be ECDSA-with-SHA256")
+	}
+	return nil
 }
 
 func validateValidity(v ValidityInfo, now time.Time) error {

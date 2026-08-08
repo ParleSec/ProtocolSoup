@@ -100,16 +100,17 @@ type Client struct {
 
 // AuthorizationCode represents an OAuth authorization code
 type AuthorizationCode struct {
-	Code                       string   `json:"code"`
-	ClientID                   string   `json:"client_id"`
-	UserID                     string   `json:"user_id"`
-	RedirectURI                string   `json:"redirect_uri"`
-	Scope                      string   `json:"scope"`
-	State                      string   `json:"state"`
-	Nonce                      string   `json:"nonce,omitempty"`
-	CodeChallenge              string   `json:"code_challenge,omitempty"`
-	CodeChallengeMethod        string   `json:"code_challenge_method,omitempty"`
-	CredentialConfigurationIDs []string `json:"credential_configuration_ids,omitempty"`
+	Code                               string   `json:"code"`
+	ClientID                           string   `json:"client_id"`
+	UserID                             string   `json:"user_id"`
+	RedirectURI                        string   `json:"redirect_uri"`
+	Scope                              string   `json:"scope"`
+	State                              string   `json:"state"`
+	Nonce                              string   `json:"nonce,omitempty"`
+	CodeChallenge                      string   `json:"code_challenge,omitempty"`
+	CodeChallengeMethod                string   `json:"code_challenge_method,omitempty"`
+	CredentialConfigurationIDs         []string `json:"credential_configuration_ids,omitempty"`
+	CredentialAuthorizationDetailsUsed bool     `json:"credential_authorization_details_used,omitempty"`
 	// Claims is the raw OIDC claims request parameter (OpenID Connect Core 1.0
 	// Section 5.5) supplied at the authorization endpoint, carried so the token
 	// endpoint can honour individually requested claims at issuance time.

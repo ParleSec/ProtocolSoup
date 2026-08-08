@@ -9,6 +9,23 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 )
 
+// RFC 9901 Section 7.2: "The Issuer provides the Holder with an SD-JWT, not
+// an SD-JWT+KB. If the Holder receives an SD-JWT+KB, it MUST be rejected."
+func TestWalletCredentialStoreRejectsIncomingSDJWTWithKBJWT(t *testing.T) {
+	store := NewWalletCredentialStore()
+	if ok := store.Put(WalletCredentialRecord{
+		Subject:       "did:key:holder",
+		Format:        "dc+sd-jwt",
+		VCT:           "https://example.org/credential",
+		CredentialJWT: "issuer.jwt.value~kb.jwt.value",
+	}); ok {
+		t.Fatal("wallet store accepted an issued credential carrying a KB-JWT")
+	}
+	if records := store.List("did:key:holder"); len(records) != 0 {
+		t.Fatalf("wallet store retained rejected credential: %#v", records)
+	}
+}
+
 func TestWalletCredentialStoreEncryptedPersistenceRoundTrip(t *testing.T) {
 	t.Parallel()
 

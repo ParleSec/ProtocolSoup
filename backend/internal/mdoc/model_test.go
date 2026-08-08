@@ -60,3 +60,15 @@ func TestBuildIssuerNameSpacesRejectsDuplicateDigestID(t *testing.T) {
 		t.Fatal("expected error for duplicate digestID, got nil")
 	}
 }
+
+func TestBuildIssuerNameSpacesRejectsDuplicateElementIdentifier(t *testing.T) {
+	item1, _ := NewIssuerSignedItem(0, "family_name", "Smith")
+	item2, _ := NewIssuerSignedItem(1, "family_name", "Jones")
+
+	_, err := BuildIssuerNameSpaces(map[NameSpace][]IssuerSignedItem{
+		NameSpaceMDL: {item1, item2},
+	})
+	if err == nil {
+		t.Fatal("expected error for duplicate elementIdentifier, got nil")
+	}
+}

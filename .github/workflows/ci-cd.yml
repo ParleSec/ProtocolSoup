@@ -449,6 +449,11 @@ jobs:
       
       - name: Set up Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@1.6
+
+      - name: Stage deployed source revision
+        run: flyctl secrets set --stage BUILD_COMMIT="${GITHUB_SHA}"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
       
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
@@ -508,6 +513,15 @@ jobs:
             --app protocolsoup-wallet \
             --stage \
             "WALLET_MDOC_IACA_ROOT_PEM=$(cat "${trust_anchor}")"
+
+      - name: Stage wallet source revision
+        run: >-
+          flyctl secrets set
+          --app protocolsoup-wallet
+          --stage
+          BUILD_COMMIT="${GITHUB_SHA}"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
       
       - name: Deploy wallet harness to Fly.io
         run: flyctl deploy --config fly.wallet.toml --app protocolsoup-wallet --remote-only

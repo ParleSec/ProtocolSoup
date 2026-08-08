@@ -100,11 +100,12 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       const resolvedOffer = await this.resolveOfferReference(offerData)
       const credentialIssuer = this.resolveCredentialIssuer(offerData, resolvedOffer)
       const tokenData = await this.exchangeToken(offerData)
+      const cNonce = await this.fetchNonce(tokenData.access_token)
       const walletSubject = typeof offerData.wallet_subject === 'string' ? offerData.wallet_subject.trim() : ''
       if (!walletSubject) {
         throw new Error('Offer response missing wallet_subject -- cannot create proof')
       }
-      const proofJWT = await this.createProof(tokenData.c_nonce, walletSubject, credentialIssuer)
+      const proofJWT = await this.createProof(cNonce, walletSubject, credentialIssuer)
       const credentialResponse = await this.requestCredential(tokenData.access_token, proofJWT)
 
       if (credentialResponse.transaction_id) {
@@ -320,10 +321,32 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
 
     const tokenData = data as Record<string, string>
     this.processTokenResponse(tokenData as Record<string, unknown>)
-    if (!tokenData.c_nonce) {
-      throw new Error('Token response missing c_nonce')
+    if (!tokenData.access_token) {
+      throw new Error('Token response missing access_token')
     }
     return tokenData
+  }
+
+  private async fetchNonce(_accessToken: string): Promise<string> {
+    this.updateState({ currentStep: 'Obtaining credential proof nonce' })
+    const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/nonce`, {
+      headers: {
+        Accept: 'application/json',
+      },
+      step: 'Nonce request',
+      rfcReference: 'OpenID4VCI 1.0 Section 7',
+    })
+    if (!response.ok) {
+      const errorData = data as Record<string, unknown>
+      throw new Error(String(errorData.error_description || errorData.error || `Nonce request failed (${response.status})`))
+    }
+    const cNonce = typeof (data as Record<string, unknown>).c_nonce === 'string'
+      ? String((data as Record<string, unknown>).c_nonce)
+      : ''
+    if (!cNonce) {
+      throw new Error('Nonce response missing c_nonce')
+    }
+    return cNonce
   }
 
   private async createProof(
@@ -344,33 +367,25 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       throw new Error('credential_issuer is required for proof audience')
     }
     const now = Math.floor(Date.now() / 1000)
-    const expiration = now + 180
-
     // ISO/IEC 18013-5 mso_mdoc binds an EC P-256 device key via an ES256 proof
-    // (the issuer copies cnf.jwk into the MSO deviceKeyInfo.deviceKey), so the
+    // (the issuer copies the JOSE jwk into the MSO deviceKeyInfo.deviceKey), so the
     // mDL default issues a genuine device-key proof. The JOSE formats keep the
     // existing RS256 proof. The proof algorithm matches the credential format.
     const isMdoc = this.selectedCredentialFormat() === 'mso_mdoc'
-    const { privateKey, publicJWK, kid, alg } = isMdoc
+    const { privateKey, publicJWK, alg } = isMdoc
       ? await this.getWalletDeviceSigningMaterial()
       : await this.getWalletSigningMaterial()
 
     const claims = {
-      iss: normalizedSubject,
-      sub: normalizedSubject,
       aud: audience,
       nonce: cNonce,
       iat: now,
-      exp: expiration,
       jti: this.randomValue(20),
-      cnf: {
-        jwk: publicJWK,
-      },
     }
     const header = {
       alg,
       typ: 'openid4vci-proof+jwt',
-      kid,
+      jwk: publicJWK,
     }
     const proofJWT = isMdoc
       ? await this.signES256JWT(header, claims, privateKey)
@@ -407,13 +422,9 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       },
       body: JSON.stringify({
         credential_configuration_id: this.selectedCredentialConfigurationID(),
-        format: this.selectedCredentialFormat(),
-        proofs: [
-          {
-            proof_type: 'jwt',
-            jwt: proofJWT,
-          },
-        ],
+        proofs: {
+          jwt: [proofJWT],
+        },
       }),
       step: 'Credential request',
       rfcReference: 'OpenID4VCI 1.0 Section 8',

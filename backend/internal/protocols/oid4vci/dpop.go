@@ -57,8 +57,18 @@ func (p *Plugin) validateTokenEndpointDPoP(r *http.Request) (dpopValidation, err
 	// the client mints an entirely new proof on retry). This is this
 	// plugin's AS-role nonce space -- independent of dpopRSNonceIssuer per
 	// Section 8.2.
-	if p.dpopASNonceIssuer != nil && !p.dpopASNonceIssuer.Valid(proof.Nonce) {
-		return dpopValidation{}, &dpop.NonceRequiredError{Nonce: p.dpopASNonceIssuer.Issue()}
+	if p.dpopASNonceIssuer != nil {
+		valid, nonceErr := p.dpopASNonceIssuer.Valid(proof.Nonce)
+		if nonceErr != nil {
+			return dpopValidation{}, dpop.NewInfrastructureError(nonceErr)
+		}
+		if !valid {
+			nonce, issueErr := p.dpopASNonceIssuer.Issue()
+			if issueErr != nil {
+				return dpopValidation{}, dpop.NewInfrastructureError(issueErr)
+			}
+			return dpopValidation{}, &dpop.NonceRequiredError{Nonce: nonce}
+		}
 	}
 
 	now := time.Now().UTC()
@@ -130,7 +140,11 @@ func (e *resourceAuthError) respond(w http.ResponseWriter) {
 		w.Header().Set(dpop.NonceHeaderName, e.nonce)
 	}
 	if e.code != "" {
-		w.Header().Set("WWW-Authenticate", fmt.Sprintf(`%s error="%s"`, scheme, e.code))
+		challenge := fmt.Sprintf(`%s error="%s"`, scheme, e.code)
+		if scheme == dpop.HeaderName {
+			challenge += fmt.Sprintf(`, algs="%s"`, strings.Join(dpop.AllowedAlgorithmsList, " "))
+		}
+		w.Header().Set("WWW-Authenticate", challenge)
 	} else {
 		w.Header().Set("WWW-Authenticate", scheme)
 	}
@@ -139,7 +153,7 @@ func (e *resourceAuthError) respond(w http.ResponseWriter) {
 
 // authorizeResourceRequest extracts and authorizes the access token
 // presented to a DPoP-aware OID4VCI resource endpoint (the credential,
-// nonce, and deferred_credential endpoints; RFC 9449 Section 7). A token
+// nonce, deferred_credential, and notification endpoints; RFC 9449 Section 7). A token
 // whose accessGrant carries a jkt was issued DPoP-bound and MUST be
 // presented with a valid, matching DPoP proof -- presenting it as a bare
 // bearer token is rejected outright, never silently downgraded. A token
@@ -162,6 +176,14 @@ func (p *Plugin) authorizeResourceRequest(r *http.Request) (string, *accessGrant
 		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: "access token expired", dpopBound: dpopBound}
 	}
 	if !dpopBound {
+		if scheme == "DPoP" {
+			return "", nil, &resourceAuthError{
+				status:      http.StatusUnauthorized,
+				code:        "invalid_token",
+				description: "an access token presented with the DPoP authorization scheme must be DPoP-bound",
+				dpopBound:   true,
+			}
+		}
 		return token, grant, nil
 	}
 
@@ -175,10 +197,10 @@ func (p *Plugin) authorizeResourceRequest(r *http.Request) (string, *accessGrant
 	}
 	proofHeader, err := dpop.ExtractHeader(r.Header.Values(dpop.HeaderName))
 	if err != nil {
-		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: err.Error(), dpopBound: true}
+		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_dpop_proof", description: err.Error(), dpopBound: true}
 	}
 	if proofHeader == "" {
-		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: "missing DPoP proof", dpopBound: true}
+		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_dpop_proof", description: "missing DPoP proof", dpopBound: true}
 	}
 
 	proof, proofErr := dpop.ValidateProof(proofHeader, dpop.ValidateOptions{
@@ -187,22 +209,32 @@ func (p *Plugin) authorizeResourceRequest(r *http.Request) (string, *accessGrant
 		AccessToken: token,
 	})
 	if proofErr != nil {
-		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: "invalid DPoP proof: " + proofErr.Error(), dpopBound: true}
+		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_dpop_proof", description: "invalid DPoP proof: " + proofErr.Error(), dpopBound: true}
 	}
 	if proof.JKT != grant.JKT {
-		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: "DPoP proof key does not match the token's bound key", dpopBound: true}
+		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_dpop_proof", description: "DPoP proof key does not match the token's bound key", dpopBound: true}
 	}
 
 	// RFC 9449 Section 8, RS role: this plugin's resource-endpoint nonce
 	// space, independent of dpopASNonceIssuer's AS-role space (Section
 	// 8.2) even though both live on this same plugin instance.
-	if p.dpopRSNonceIssuer != nil && !p.dpopRSNonceIssuer.Valid(proof.Nonce) {
-		return "", nil, &resourceAuthError{
-			status:      http.StatusUnauthorized,
-			code:        dpop.ErrorUseDPoPNonce,
-			description: "a fresh DPoP proof nonce is required; retry with the nonce from the DPoP-Nonce response header",
-			dpopBound:   true,
-			nonce:       p.dpopRSNonceIssuer.Issue(),
+	if p.dpopRSNonceIssuer != nil {
+		valid, nonceErr := p.dpopRSNonceIssuer.Valid(proof.Nonce)
+		if nonceErr != nil {
+			return "", nil, &resourceAuthError{status: http.StatusInternalServerError, code: "server_error", description: "DPoP nonce validation is temporarily unavailable", dpopBound: true}
+		}
+		if !valid {
+			nonce, issueErr := p.dpopRSNonceIssuer.Issue()
+			if issueErr != nil {
+				return "", nil, &resourceAuthError{status: http.StatusInternalServerError, code: "server_error", description: "DPoP nonce generation is temporarily unavailable", dpopBound: true}
+			}
+			return "", nil, &resourceAuthError{
+				status:      http.StatusUnauthorized,
+				code:        dpop.ErrorUseDPoPNonce,
+				description: "a fresh DPoP proof nonce is required; retry with the nonce from the DPoP-Nonce response header",
+				dpopBound:   true,
+				nonce:       nonce,
+			}
 		}
 	}
 

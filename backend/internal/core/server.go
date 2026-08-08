@@ -74,8 +74,8 @@ func (s *Server) setupRouter() {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   s.config.CORSOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-ID", "X-Looking-Glass-Session", lookingglass.OwnerTokenHeader, "If-Match", "If-None-Match", "MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"},
-		ExposedHeaders:   []string{"Link", "X-Request-ID", "ETag", "Location"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "DPoP", "X-Request-ID", "X-Looking-Glass-Session", lookingglass.OwnerTokenHeader, "If-Match", "If-None-Match", "MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"},
+		ExposedHeaders:   []string{"Link", "X-Request-ID", "ETag", "Location", "DPoP-Nonce", "WWW-Authenticate"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
@@ -299,6 +299,7 @@ func addVaryAccept(header http.Header) {
 type HealthResponse struct {
 	Status    string               `json:"status"`
 	Version   string               `json:"version"`
+	Commit    string               `json:"commit,omitempty"`
 	Protocols []string             `json:"protocols"`
 	Plugins   []plugin.HealthCheck `json:"plugins"`
 	Palette   *palette.Stats       `json:"palette,omitempty"`
@@ -352,6 +353,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	resp := HealthResponse{
 		Status:    "healthy",
 		Version:   "1.0.0",
+		Commit:    strings.TrimSpace(s.config.BuildCommit),
 		Protocols: protocols,
 		Plugins:   s.registry.HealthChecks(),
 	}

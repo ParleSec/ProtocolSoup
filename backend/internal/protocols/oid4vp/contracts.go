@@ -47,8 +47,7 @@ func ParseClientIDSchemeName(raw string) (ClientIDScheme, error) {
 // DefaultClientIDSchemeSet returns the supported OID4VP client_id scheme allowlist.
 func DefaultClientIDSchemeSet() map[ClientIDScheme]struct{} {
 	return map[ClientIDScheme]struct{}{
-		ClientIDSchemeRedirectURI:             {},
-		ClientIDSchemeDecentralizedIdentifier: {},
+		ClientIDSchemeRedirectURI: {},
 	}
 }
 
@@ -67,7 +66,11 @@ func ParseClientIDScheme(clientID string) (ClientIDScheme, error) {
 	prefix := trimmed[:idx]
 	scheme, ok := prefixedClientIDSchemes[prefix]
 	if !ok {
-		return ClientIDSchemeUnknown, nil
+		// OID4VP 1.0 Final §5.9.2 permits an unrecognized or unsupported
+		// Client Identifier Prefix to fall back to a pre-registered client.
+		// Classification as pre_registered keeps support policy explicit in
+		// ValidateSupportedClientIDScheme instead of returning Unknown+nil.
+		return ClientIDSchemePreRegistered, nil
 	}
 	return scheme, nil
 }
@@ -97,6 +100,16 @@ func ValidateDCQLQueryContract(dcqlQuery string, scopeAlias string) error {
 		return fmt.Errorf("either dcql_query or scope alias is required")
 	default:
 		return nil
+	}
+}
+
+// ValidateResponseMode enforces the response modes implemented by this verifier.
+func ValidateResponseMode(responseMode string) error {
+	switch strings.TrimSpace(responseMode) {
+	case responseModeDirectPost, responseModeDirectPostJWT, responseModeDCAPI, responseModeDCAPIJWT:
+		return nil
+	default:
+		return fmt.Errorf("response_mode %q is not supported", strings.TrimSpace(responseMode))
 	}
 }
 

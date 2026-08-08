@@ -250,9 +250,28 @@ func (f *SDJWTFormat) ParseCredential(raw string) (*ParsedCredential, error) {
 	if err != nil {
 		return nil, err
 	}
+	decodedIssuer, err := intcrypto.DecodeTokenWithoutValidation(strings.TrimSpace(envelope.IssuerSignedJWT))
+	if err != nil {
+		return nil, fmt.Errorf("decode sd-jwt issuer-signed jwt: %w", err)
+	}
+	if typ := strings.TrimSpace(formatString(decodedIssuer.Header["typ"])); typ != "dc+sd-jwt" {
+		return nil, fmt.Errorf("sd-jwt vc issuer typ must be dc+sd-jwt, got %q", typ)
+	}
+	processedPayload, _, err := ProcessSDJWTDisclosures(map[string]interface{}(decodedIssuer.Payload), envelope.Disclosures)
+	if err != nil {
+		return nil, fmt.Errorf("process sd-jwt disclosures: %w", err)
+	}
 	parsed, err := parseJWTCredential(strings.TrimSpace(envelope.IssuerSignedJWT))
 	if err != nil {
 		return nil, err
+	}
+	parsed.Claims = processedPayload
+	parsed.VCClaims, _ = processedPayload["vc"].(map[string]interface{})
+	parsed.Subject = strings.TrimSpace(formatString(processedPayload["sub"]))
+	if parsed.Subject == "" {
+		if credentialSubject, ok := parsed.VCClaims["credentialSubject"].(map[string]interface{}); ok {
+			parsed.Subject = strings.TrimSpace(formatString(credentialSubject["id"]))
+		}
 	}
 	parsed.Original = strings.TrimSpace(raw)
 	parsed.Format = f.FormatID()

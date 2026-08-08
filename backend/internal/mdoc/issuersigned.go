@@ -3,6 +3,7 @@ package mdoc
 import (
 	"crypto/rand"
 	"fmt"
+	"strings"
 
 	intcose "github.com/ParleSec/ProtocolSoup/internal/cose"
 	"github.com/fxamacker/cbor/v2"
@@ -242,13 +243,27 @@ func measureUntrustedCBORDepth(value any, depth int) (int, error) {
 func BuildIssuerNameSpaces(namespaces map[NameSpace][]IssuerSignedItem) (IssuerNameSpaces, error) {
 	out := make(IssuerNameSpaces, len(namespaces))
 	for ns, items := range namespaces {
+		if strings.TrimSpace(ns) == "" {
+			return nil, fmt.Errorf("mdoc: namespace identifier is empty")
+		}
+		if len(items) == 0 {
+			return nil, fmt.Errorf("mdoc: namespace %q contains no IssuerSignedItems", ns)
+		}
 		encoded := make([]IssuerSignedItemBytes, 0, len(items))
 		seen := make(map[DigestID]struct{}, len(items))
+		seenElements := make(map[string]struct{}, len(items))
 		for _, item := range items {
 			if _, dup := seen[item.DigestID]; dup {
 				return nil, fmt.Errorf("mdoc: duplicate digestID %d in namespace %q", item.DigestID, ns)
 			}
 			seen[item.DigestID] = struct{}{}
+			if strings.TrimSpace(item.ElementIdentifier) == "" {
+				return nil, fmt.Errorf("mdoc: empty elementIdentifier in namespace %q", ns)
+			}
+			if _, dup := seenElements[item.ElementIdentifier]; dup {
+				return nil, fmt.Errorf("mdoc: duplicate elementIdentifier %q in namespace %q", item.ElementIdentifier, ns)
+			}
+			seenElements[item.ElementIdentifier] = struct{}{}
 			b, err := EncodeIssuerSignedItemBytes(item)
 			if err != nil {
 				return nil, fmt.Errorf("mdoc: encode item %q (digestID %d) in %q: %w", item.ElementIdentifier, item.DigestID, ns, err)

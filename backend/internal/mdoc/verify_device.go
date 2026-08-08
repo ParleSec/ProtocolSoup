@@ -99,6 +99,9 @@ func VerifyDocument(doc Document, sessionTranscriptEncoded []byte, roots *x509.C
 // must be reconstructed by the verifier from its own inputs (the same shared
 // construction the wallet used) so the deviceSignature binding is genuine.
 func VerifyDeviceResponse(response DeviceResponse, sessionTranscriptEncoded []byte, roots *x509.CertPool, now time.Time) ([]VerifiedDocument, error) {
+	if response.Version != DeviceResponseVersion {
+		return nil, fmt.Errorf("mdoc: unsupported DeviceResponse version %q, want %q", response.Version, DeviceResponseVersion)
+	}
 	if response.Status != DeviceResponseStatusOK {
 		return nil, fmt.Errorf("mdoc: DeviceResponse status %d is not OK (0)", response.Status)
 	}
@@ -129,6 +132,9 @@ func CollectDisclosedElements(is IssuerSigned) (map[NameSpace]map[string]any, er
 			item, err := DecodeIssuerSignedItemBytes(itemBytes)
 			if err != nil {
 				return nil, fmt.Errorf("mdoc: namespace %q: %w", ns, err)
+			}
+			if _, duplicate := elements[item.ElementIdentifier]; duplicate {
+				return nil, fmt.Errorf("mdoc: namespace %q contains duplicate elementIdentifier %q", ns, item.ElementIdentifier)
 			}
 			elements[item.ElementIdentifier] = item.ElementValue
 		}

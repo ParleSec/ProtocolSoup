@@ -142,6 +142,27 @@ func TestVerifyValueDigestsDetectsTamper(t *testing.T) {
 	}
 }
 
+func TestVerifyValueDigestsRejectsDuplicateElementIdentifier(t *testing.T) {
+	first, _ := NewIssuerSignedItem(0, "family_name", "Smith")
+	second, _ := NewIssuerSignedItem(1, "family_name", "Jones")
+	firstBytes, err := EncodeIssuerSignedItemBytes(first)
+	if err != nil {
+		t.Fatalf("encode first item: %v", err)
+	}
+	secondBytes, err := EncodeIssuerSignedItemBytes(second)
+	if err != nil {
+		t.Fatalf("encode second item: %v", err)
+	}
+	firstDigest, _ := ComputeDigest(firstBytes, DigestAlgorithmSHA256)
+	secondDigest, _ := ComputeDigest(secondBytes, DigestAlgorithmSHA256)
+	namespaces := IssuerNameSpaces{NameSpaceMDL: {firstBytes, secondBytes}}
+	digests := ValueDigests{NameSpaceMDL: {0: firstDigest, 1: secondDigest}}
+
+	if err := VerifyValueDigests(namespaces, digests, DigestAlgorithmSHA256); err == nil {
+		t.Fatal("expected duplicate elementIdentifier to be rejected during verification")
+	}
+}
+
 // TestKnownDigestHex pins a specific IssuerSignedItem's tag-24 encoding and
 // SHA-256 digest to exact hex values, catching any future encoder regression.
 func TestKnownDigestHex(t *testing.T) {
@@ -198,7 +219,7 @@ func TestEndToEndIssueAndVerify(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	validity := ValidityInfo{
-		Signed:     now,
+		Signed:     now.Add(-2 * time.Hour),
 		ValidFrom:  now.Add(-time.Hour),
 		ValidUntil: now.Add(365 * 24 * time.Hour),
 	}
@@ -322,7 +343,7 @@ func TestVerifyRejectsBrokenSignature(t *testing.T) {
 
 	now := time.Now().Truncate(time.Second)
 	validity := ValidityInfo{
-		Signed:     now,
+		Signed:     now.Add(-2 * time.Hour),
 		ValidFrom:  now.Add(-time.Hour),
 		ValidUntil: now.Add(24 * time.Hour),
 	}

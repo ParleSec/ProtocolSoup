@@ -355,10 +355,10 @@ func TestNonceEndpointAcceptsBoundTokenWithMatchingProof(t *testing.T) {
 	}
 }
 
-// TestNonceEndpointRejectsMultipleDPoPHeaders covers RFC 9449 Section 4.3
-// check 1 at a resource endpoint: a request carrying more than one DPoP
-// header field must be rejected outright.
-func TestNonceEndpointRejectsMultipleDPoPHeaders(t *testing.T) {
+// TestNonceEndpointIsPublicWithIrrelevantAuthHeaders covers OID4VCI 1.0
+// Section 7: the Nonce Endpoint requires no authorization. Auth headers,
+// including malformed or repeated DPoP headers, are not processed there.
+func TestNonceEndpointIsPublicWithIrrelevantAuthHeaders(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	key := newDPoPOID4VCITestKey(t)
 	accessToken, _ := issueDPoPBoundCredentialGrant(t, server, key)
@@ -377,12 +377,16 @@ func TestNonceEndpointRejectsMultipleDPoPHeaders(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
+	}
+	payload := decodeJSONMap(t, response)
+	if strings.TrimSpace(asString(t, payload["c_nonce"])) == "" {
+		t.Fatal("public nonce response is missing c_nonce")
 	}
 }
 
-func TestNonceEndpointRejectsBoundTokenPresentedAsBearer(t *testing.T) {
+func TestNonceEndpointDoesNotRequireAccessToken(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	key := newDPoPOID4VCITestKey(t)
 	accessToken, _ := issueDPoPBoundCredentialGrant(t, server, key)
@@ -399,16 +403,12 @@ func TestNonceEndpointRejectsBoundTokenPresentedAsBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.StatusCode)
-	}
-	wwwAuthenticate := response.Header.Get("WWW-Authenticate")
-	if !strings.HasPrefix(wwwAuthenticate, dpop.HeaderName) {
-		t.Fatalf("WWW-Authenticate = %q, want DPoP scheme", wwwAuthenticate)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
 	}
 }
 
-func TestNonceEndpointRejectsBoundTokenWithNoProofAtAllUnderDPoPScheme(t *testing.T) {
+func TestNonceEndpointDoesNotProcessDPoPAuthorization(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	key := newDPoPOID4VCITestKey(t)
 	accessToken, _ := issueDPoPBoundCredentialGrant(t, server, key)
@@ -424,12 +424,12 @@ func TestNonceEndpointRejectsBoundTokenWithNoProofAtAllUnderDPoPScheme(t *testin
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
 	}
 }
 
-func TestNonceEndpointRejectsProofFromDifferentKey(t *testing.T) {
+func TestNonceEndpointIgnoresUnneededDPoPProof(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	originalKey := newDPoPOID4VCITestKey(t)
 	attackerKey := newDPoPOID4VCITestKey(t)
@@ -448,12 +448,12 @@ func TestNonceEndpointRejectsProofFromDifferentKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (proof key does not match bound key)", response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
 	}
 }
 
-func TestNonceEndpointRejectsReplayedProof(t *testing.T) {
+func TestNonceEndpointDoesNotConsumeDPoPReplayState(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	key := newDPoPOID4VCITestKey(t)
 	accessToken, _ := issueDPoPBoundCredentialGrant(t, server, key)
@@ -485,8 +485,8 @@ func TestNonceEndpointRejectsReplayedProof(t *testing.T) {
 
 	second := makeRequest()
 	defer second.Body.Close()
-	if second.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("replayed proof status = %d, want 401", second.StatusCode)
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("second public nonce request status = %d, want 200", second.StatusCode)
 	}
 }
 
@@ -523,9 +523,7 @@ func TestCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 	key := newDPoPOID4VCITestKey(t)
 	accessToken, walletSubject := issueDPoPBoundCredentialGrant(t, server, key)
 
-	// Fetch a fresh c_nonce: the pre-authorized token response already
-	// carried one from issuance; re-derive it from a DPoP-authorized nonce
-	// call so the credential request's proof-of-possession JWT can bind it.
+	// Fetch the c_nonce from the Nonce Endpoint using the DPoP-bound token.
 	nonceURL := server.server.URL + "/oid4vci/nonce"
 	nonceProof := key.proof(t, http.MethodPost, nonceURL, jwt.MapClaims{"ath": computeTestATH(accessToken)})
 	nonceRequest, err := http.NewRequest(http.MethodPost, nonceURL, nil)
@@ -550,13 +548,32 @@ func TestCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 		credentialURL,
 		map[string]interface{}{
 			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": walletProofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{walletProofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
 	)
 	assertStatus(t, bearerOnlyResp, http.StatusUnauthorized)
+	if challenge := bearerOnlyResp.Header.Get("WWW-Authenticate"); !strings.Contains(challenge, `algs="RS256 ES256 EdDSA"`) {
+		t.Fatalf("DPoP challenge = %q, want supported algs", challenge)
+	}
+	_ = bearerOnlyResp.Body.Close()
+
+	missingProofResp := postJSONWithHeaders(
+		t,
+		credentialURL,
+		map[string]interface{}{
+			"credential_configuration_id": "UniversityDegreeCredential",
+			"proofs":                      map[string]interface{}{"jwt": []string{walletProofJWT}},
+		},
+		map[string]string{"Authorization": dpop.HeaderName + " " + accessToken},
+	)
+	assertStatus(t, missingProofResp, http.StatusUnauthorized)
+	missingProofPayload := decodeJSONMap(t, missingProofResp)
+	if got := asString(t, missingProofPayload["error"]); got != "invalid_dpop_proof" {
+		t.Fatalf("missing proof error = %q, want invalid_dpop_proof", got)
+	}
 
 	// With a valid, matching DPoP proof: success.
 	credentialProof := key.proof(t, http.MethodPost, credentialURL, jwt.MapClaims{"ath": computeTestATH(accessToken)})
@@ -565,8 +582,8 @@ func TestCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 		credentialURL,
 		map[string]interface{}{
 			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": walletProofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{walletProofJWT},
 			},
 		},
 		map[string]string{
@@ -575,6 +592,38 @@ func TestCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 		},
 	)
 	assertStatus(t, credentialResp, http.StatusOK)
+	credentialPayload := decodeJSONMap(t, credentialResp)
+	notificationID := asString(t, credentialPayload["notification_id"])
+	if notificationID == "" {
+		t.Fatal("credential response missing notification_id")
+	}
+
+	notificationURL := server.server.URL + "/oid4vci/notification"
+	notificationPayload := map[string]interface{}{
+		"notification_id": notificationID,
+		"event":           "credential_accepted",
+	}
+	bearerNotification := postJSONWithHeaders(
+		t,
+		notificationURL,
+		notificationPayload,
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, bearerNotification, http.StatusUnauthorized)
+	_ = bearerNotification.Body.Close()
+
+	notificationProof := key.proof(t, http.MethodPost, notificationURL, jwt.MapClaims{"ath": computeTestATH(accessToken)})
+	dpopNotification := postJSONWithHeaders(
+		t,
+		notificationURL,
+		notificationPayload,
+		map[string]string{
+			"Authorization": dpop.HeaderName + " " + accessToken,
+			dpop.HeaderName: notificationProof,
+		},
+	)
+	assertStatus(t, dpopNotification, http.StatusNoContent)
+	_ = dpopNotification.Body.Close()
 }
 
 func TestDeferredCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
@@ -593,7 +642,20 @@ func TestDeferredCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 		t.Fatalf("token issuance status = %d, body = %#v", status, tokenBody)
 	}
 	accessToken := asString(t, tokenBody["access_token"])
-	cNonce := asString(t, tokenBody["c_nonce"])
+	nonceURL := server.server.URL + "/oid4vci/nonce"
+	nonceProof := key.proof(t, http.MethodPost, nonceURL, jwt.MapClaims{"ath": computeTestATH(accessToken)})
+	nonceRequest, err := http.NewRequest(http.MethodPost, nonceURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonceRequest.Header.Set("Authorization", dpop.HeaderName+" "+accessToken)
+	nonceRequest.Header.Set(dpop.HeaderName, nonceProof)
+	nonceResponse, err := http.DefaultClient.Do(nonceRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noncePayload := decodeJSONMap(t, nonceResponse)
+	cNonce := asString(t, noncePayload["c_nonce"])
 	walletProofJWT := createWalletProofJWT(t, cNonce, walletSubject, server.plugin.issuerID())
 
 	credentialURL := server.server.URL + "/oid4vci/credential"
@@ -603,8 +665,8 @@ func TestDeferredCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 		credentialURL,
 		map[string]interface{}{
 			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": walletProofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{walletProofJWT},
 			},
 		},
 		map[string]string{
@@ -612,7 +674,7 @@ func TestDeferredCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 			dpop.HeaderName: credentialProof,
 		},
 	)
-	assertStatus(t, credentialResp, http.StatusOK)
+	assertStatus(t, credentialResp, http.StatusAccepted)
 	credentialPayload := decodeJSONMap(t, credentialResp)
 	transactionID := asString(t, credentialPayload["transaction_id"])
 	if transactionID == "" {
@@ -644,7 +706,7 @@ func TestDeferredCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 	)
 	assertStatus(t, deferredResp, http.StatusOK)
 	deferredPayload := decodeJSONMap(t, deferredResp)
-	if asString(t, deferredPayload["credential"]) == "" {
+	if asString(t, firstCredential(t, deferredPayload)) == "" {
 		t.Fatalf("expected deferred credential")
 	}
 }
@@ -758,7 +820,7 @@ func TestTokenEndpointForeignNonceRejectedAsFreshChallengeOID4VCI(t *testing.T) 
 	}
 }
 
-func TestNonceEndpointChallengesMissingResourceNonce(t *testing.T) {
+func TestPublicNonceEndpointDoesNotUseDPoPResourceNonce(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	server.plugin.dpopRSNonceIssuer = dpop.NewNonceIssuer(time.Minute)
 	key := newDPoPOID4VCITestKey(t)
@@ -777,23 +839,19 @@ func TestNonceEndpointChallengesMissingResourceNonce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", response.StatusCode)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.StatusCode)
 	}
 	body := decodeJSONMap(t, response)
-	if body["error"] != dpop.ErrorUseDPoPNonce {
-		t.Fatalf("error = %v, want %s", body["error"], dpop.ErrorUseDPoPNonce)
+	if strings.TrimSpace(asString(t, body["c_nonce"])) == "" {
+		t.Fatal("expected credential c_nonce")
 	}
-	if response.Header.Get(dpop.NonceHeaderName) == "" {
-		t.Fatal("expected a DPoP-Nonce response header on the challenge")
-	}
-	wwwAuthenticate := response.Header.Get("WWW-Authenticate")
-	if !strings.Contains(wwwAuthenticate, dpop.ErrorUseDPoPNonce) {
-		t.Fatalf("WWW-Authenticate = %q, want it to carry error=%q", wwwAuthenticate, dpop.ErrorUseDPoPNonce)
+	if response.Header.Get(dpop.NonceHeaderName) != "" {
+		t.Fatal("public credential nonce response must not issue a DPoP resource nonce challenge")
 	}
 }
 
-func TestNonceEndpointRetryWithChallengedResourceNonceSucceeds(t *testing.T) {
+func TestPublicNonceEndpointSucceedsWithoutDPoPRetry(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	server.plugin.dpopRSNonceIssuer = dpop.NewNonceIssuer(time.Minute)
 	key := newDPoPOID4VCITestKey(t)
@@ -812,31 +870,12 @@ func TestNonceEndpointRetryWithChallengedResourceNonceSucceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer firstResponse.Body.Close()
-	if firstResponse.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("first request status = %d, want 401", firstResponse.StatusCode)
+	if firstResponse.StatusCode != http.StatusOK {
+		t.Fatalf("first request status = %d, want 200", firstResponse.StatusCode)
 	}
 	serverNonce := firstResponse.Header.Get(dpop.NonceHeaderName)
-	if serverNonce == "" {
-		t.Fatal("expected a DPoP-Nonce response header")
-	}
-
-	retryProof := key.proof(t, http.MethodPost, nonceURL, jwt.MapClaims{
-		"ath":   computeTestATH(accessToken),
-		"nonce": serverNonce,
-	})
-	retryRequest, err := http.NewRequest(http.MethodPost, nonceURL, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retryRequest.Header.Set("Authorization", dpop.HeaderName+" "+accessToken)
-	retryRequest.Header.Set(dpop.HeaderName, retryProof)
-	retryResponse, err := http.DefaultClient.Do(retryRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer retryResponse.Body.Close()
-	if retryResponse.StatusCode != http.StatusOK {
-		t.Fatalf("retry status = %d, want 200", retryResponse.StatusCode)
+	if serverNonce != "" {
+		t.Fatalf("unexpected DPoP-Nonce challenge %q", serverNonce)
 	}
 }
 

@@ -28,7 +28,7 @@ const offerResponse = await fetch('/oid4vci/offers/pre-authorized', {
 const credentialOffer = await fetch(offerResponse.credential_offer_uri)
   .then(r => r.json());
 
-// 3) Exchange pre-authorized code for access token + c_nonce
+// 3) Exchange pre-authorized code for an access token
 const tokenResponse = await fetch('/oid4vci/token', {
   method: 'POST',
   headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -38,6 +38,11 @@ const tokenResponse = await fetch('/oid4vci/token', {
   }),
 }).then(r => r.json());
 
+const nonceResponse = await fetch('/oid4vci/nonce', {
+  method: 'POST',
+  headers: { 'Authorization': 'Bearer ' + tokenResponse.access_token },
+}).then(r => r.json());
+
 // 4) Build proof JWT bound to c_nonce and issuer audience.
 //    mso_mdoc binds an EC P-256 device key via an ES256 proof; the issuer
 //    copies cnf.jwk into the MSO deviceKeyInfo.deviceKey. (SD-JWT VC and the
@@ -45,7 +50,7 @@ const tokenResponse = await fetch('/oid4vci/token', {
 const proofJWT = await createOID4VCIProofJWT({
   issuer: offerResponse.wallet_subject,         // wallet subject
   audience: window.location.origin + '/oid4vci',
-  nonce: tokenResponse.c_nonce,
+  nonce: nonceResponse.c_nonce,
   typ: 'openid4vci-proof+jwt',
   alg: 'ES256',
 });
@@ -59,7 +64,7 @@ const credentialResponse = await fetch('/oid4vci/credential', {
   },
   body: JSON.stringify({
     credential_configuration_id: 'MobileDrivingLicenceMsoMdoc',
-    proofs: [{ proof_type: 'jwt', jwt: proofJWT }],
+    proofs: { jwt: [proofJWT] },
   }),
 }).then(r => r.json());
 
@@ -129,10 +134,15 @@ const token = await fetch('/oid4vci/token', {
   }),
 }).then(r => r.json());
 
+const nonce = await fetch('/oid4vci/nonce', {
+  method: 'POST',
+  headers: { 'Authorization': 'Bearer ' + token.access_token },
+}).then(r => r.json());
+
 const proofJWT = await createOID4VCIProofJWT({
   issuer: offer.wallet_subject,
   audience: window.location.origin + '/oid4vci',
-  nonce: token.c_nonce,
+  nonce: nonce.c_nonce,
   typ: 'openid4vci-proof+jwt',
   alg: 'RS256',
 });
@@ -145,7 +155,7 @@ const initial = await fetch('/oid4vci/credential', {
   },
   body: JSON.stringify({
     credential_configuration_id: 'UniversityDegreeCredential',
-    proofs: [{ proof_type: 'jwt', jwt: proofJWT }],
+    proofs: { jwt: [proofJWT] },
   }),
 }).then(r => r.json());
 

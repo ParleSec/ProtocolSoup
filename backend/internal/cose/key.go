@@ -114,6 +114,9 @@ func COSEKeyToECPublicKey(k COSEKey) (*ecdsa.PublicKey, error) {
 	if err := requireEC2P256(k); err != nil {
 		return nil, err
 	}
+	if _, ok := k[keyLabelEC2D]; ok {
+		return nil, fmt.Errorf("cose: public COSE_Key must not contain private scalar d (label -4)")
+	}
 	x, ok := k.X()
 	if !ok {
 		return nil, fmt.Errorf("cose: COSE_Key missing x-coordinate (label -2)")
@@ -143,7 +146,13 @@ func COSEKeyToECPublicKey(k COSEKey) (*ecdsa.PublicKey, error) {
 // COSEKeyToECPrivateKey reconstructs a P-256 ECDSA private key from a COSE_Key
 // that carries the private scalar d (label -4).
 func COSEKeyToECPrivateKey(k COSEKey) (*ecdsa.PrivateKey, error) {
-	pub, err := COSEKeyToECPublicKey(k)
+	publicOnly := make(COSEKey, len(k))
+	for label, value := range k {
+		if label != keyLabelEC2D {
+			publicOnly[label] = value
+		}
+	}
+	pub, err := COSEKeyToECPublicKey(publicOnly)
 	if err != nil {
 		return nil, err
 	}
