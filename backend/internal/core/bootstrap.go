@@ -38,6 +38,9 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 	if err := validateProductionBaseURL(cfg); err != nil {
 		return nil, err
 	}
+	if err := validateProductionKeyStorage(cfg, opts.EnableKeySet); err != nil {
+		return nil, err
+	}
 
 	var keySet *crypto.KeySet
 	if opts.EnableKeySet {
@@ -51,9 +54,6 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		keySet = ks
 		if cfg.KeyStorePath == "" {
 			log.Println("Cryptographic keys initialized (ephemeral, in-memory)")
-			if cfg.IsProduction() {
-				log.Println("WARNING: SHOWCASE_KEY_STORE_PATH is unset in production; signing keys will not survive a restart")
-			}
 		} else {
 			log.Printf("Cryptographic keys initialized (persistent store at %s)", cfg.KeyStorePath)
 		}
@@ -127,6 +127,13 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		Palette:      paletteSvc,
 		PluginConfig: pluginConfig,
 	}, nil
+}
+
+func validateProductionKeyStorage(cfg *Config, enabled bool) error {
+	if cfg != nil && enabled && cfg.IsProduction() && strings.TrimSpace(cfg.KeyStorePath) == "" {
+		return fmt.Errorf("SHOWCASE_KEY_STORE_PATH is required in production when signing keys are enabled")
+	}
+	return nil
 }
 
 func validateProductionBaseURL(cfg *Config) error {

@@ -15,6 +15,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `SHOWCASE_LISTEN_ADDR` | `:8080` | Address and port the service binds to. |
 | `SHOWCASE_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated list of allowed CORS origins for browser clients. |
 | `SHOWCASE_ENV` | `demo` | Runtime environment. |
+| `BUILD_COMMIT` | *(empty)* | Full deployed source commit exposed by `/health`. Production deployment workflows set this automatically so conformance evidence can be bound to an immutable build. The wallet harness uses the same variable. |
 | `SHOWCASE_MOCK_IDP` | `true` | Enable built-in mock identity provider with demo users and clients. |
 | `SHOWCASE_DEBUG` | `false` | Enable debug logging. |
 | `SHOWCASE_PALETTE_DB` | *(empty — palette disabled)* | Path to the prebuilt palette SQLite index. Required in `SHOWCASE_ENV=production` when palette search is enabled. Docker images built from `Dockerfile.backend` and `Dockerfile.fly` default to `/app/palette.db`. See [Palette content index](/deploy/palette-index/). |
@@ -94,7 +95,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | `verifier_attestation:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=verifier_attestation`. |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS. Set this in production so attestation validation survives restarts and deploys. |
 | `OID4VP_X509_SANDNS_CLIENT_ID` | `x509_san_dns:<SHOWCASE_BASE_URL host>` | Verifier `client_id` used when `client_id_scheme=x509_san_dns`. Must match a DNS SAN on the leaf certificate. |
-| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | Ephemeral self-signed chain | PEM-encoded certificate chain added to the request object's `x5c` JOSE header (used for both `x509_san_dns` and the HAIP-mandated `x509_hash`). When unset, a CA + leaf chain is auto-generated using the deployment hostname as the leaf SAN; when a data dir is configured it is persisted under `{DataDir}/oid4vp` and reloaded across restarts, so the `x509_hash` `client_id` (the leaf hash) stays stable. |
+| `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` | Ephemeral generated chain | PEM-encoded certificate material for `x509_san_dns` and `x509_hash`. The request object's `x5c` contains the leaf/intermediate chain and excludes the root trust anchor. When unset, a CA + leaf are generated and persisted under `{DataDir}/oid4vp` when a data directory is configured. |
 | `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` | Ephemeral key | PEM-encoded private key matching the leaf certificate used for `x509_san_dns` / `x509_hash` request signing. When unset, generated alongside the auto-provisioned chain. Set both PEM variables to pin an externally issued certificate. |
 | `MDOC_IACA_ROOT_PEM` | `(unset)` | PEM-encoded ISO/IEC 18013-5 IACA root certificate(s) the verifier trusts for `mso_mdoc` presentations. The presented document-signer certificate (in the IssuerAuth `x5chain`) must chain to this root. |
 | `MDOC_IACA_ROOT_PEM_FILE` | `(unset)` | Path to a PEM file with the IACA root(s); used when `MDOC_IACA_ROOT_PEM` is not set. Falls back to the issuer-persisted `iaca_root.pem` under `SHOWCASE_MDOC_PKI_PATH` or `{DataDir}/mdoc`. |

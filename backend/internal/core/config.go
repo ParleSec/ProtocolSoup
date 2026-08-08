@@ -11,6 +11,9 @@ import (
 type Config struct {
 	// Environment (development, demo, production)
 	Environment string
+	// BuildCommit is the immutable source revision exposed by /health so
+	// conformance evidence can be tied to the deployed candidate.
+	BuildCommit string
 
 	// Server listening address
 	ListenAddr string
@@ -87,6 +90,7 @@ type Config struct {
 func LoadConfig() *Config {
 	cfg := &Config{
 		Environment:          getEnv("SHOWCASE_ENV", "development"),
+		BuildCommit:          getEnv("BUILD_COMMIT", ""),
 		ListenAddr:           getEnv("SHOWCASE_LISTEN_ADDR", ":8080"),
 		BaseURL:              getEnv("SHOWCASE_BASE_URL", "http://localhost:8080"),
 		MockIdPEnabled:       getEnvBool("SHOWCASE_MOCK_IDP", true),
