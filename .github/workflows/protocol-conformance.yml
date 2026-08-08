@@ -6,6 +6,31 @@ on:
   pull_request:
     branches: [ master, develop ]
   workflow_dispatch:
+    inputs:
+      oidf_vc_action:
+        description: OIDF VC plan action (official certification submission is never automated)
+        required: true
+        default: none
+        type: choice
+        options: [none, snapshot, start]
+      oidf_vc_plan_ids:
+        description: Comma-separated existing OIDF VC plan IDs
+        required: false
+        type: string
+      oidf_vc_target_commit:
+        description: Full deployed commit SHA; must match both role health endpoints
+        required: false
+        type: string
+      oidf_vc_issuer_url:
+        description: Deployed issuer/verifier origin
+        required: false
+        default: https://protocolsoup.com
+        type: string
+      oidf_vc_wallet_url:
+        description: Deployed wallet origin
+        required: false
+        default: https://wallet.protocolsoup.com
+        type: string
   schedule:
     - cron: '0 4 * * *'
 
@@ -36,9 +61,25 @@ jobs:
         working-directory: backend
         run: go mod download
 
-      - name: Run OID4VCI/OID4VP runtime conformance tests
+      - name: Run VC runtime conformance tests
         working-directory: backend
-        run: go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1
+        run: >-
+          go test
+          ./internal/protocols/oid4vci
+          ./internal/protocols/oid4vp
+          ./internal/dpop
+          ./internal/vc
+          ./internal/mdoc
+          ./internal/cose
+          ./cmd/walletharness
+          -count=1
+
+      - name: Verify generated VC requirement evidence
+        working-directory: backend
+        run: go run ./cmd/conformance-report -verify
+
+      - name: Test OIDF VC runner
+        run: python -m unittest discover -s scripts -p 'test_*.py'
 
   external-interop-conformance:
     name: External Interop Conformance
@@ -90,3 +131,96 @@ jobs:
       - name: Skip external interop (secrets not configured)
         if: steps.external_ready.outputs.ready != 'true'
         run: echo "Skipping external interop conformance because required secrets are not configured."
+
+  oidf-vc-plans:
+    name: OIDF VC Plan Runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: [local-conformance]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.oidf_vc_action != 'none'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Validate runner configuration
+        env:
+          CONFORMANCE_TOKEN: ${{ secrets.CONFORMANCE_TOKEN }}
+          PLAN_IDS: ${{ inputs.oidf_vc_plan_ids }}
+          TARGET_COMMIT: ${{ inputs.oidf_vc_target_commit }}
+        run: |
+          test -n "${CONFORMANCE_TOKEN}" || { echo "CONFORMANCE_TOKEN secret is required"; exit 1; }
+          test -n "${PLAN_IDS}" || { echo "oidf_vc_plan_ids input is required"; exit 1; }
+          test -n "${TARGET_COMMIT}" || { echo "oidf_vc_target_commit input is required"; exit 1; }
+          echo "${TARGET_COMMIT}" | grep -Eq '^[0-9a-fA-F]{40}$' || { echo "target commit must be a full 40-character SHA"; exit 1; }
+
+      - name: Smoke test deployed VC roles
+        env:
+          ISSUER_URL: ${{ inputs.oidf_vc_issuer_url }}
+          WALLET_URL: ${{ inputs.oidf_vc_wallet_url }}
+          TARGET_COMMIT: ${{ inputs.oidf_vc_target_commit }}
+        run: |
+          set -euo pipefail
+          test "$(curl --fail --silent --show-error "${ISSUER_URL}/health" | jq -r '.commit')" = "${TARGET_COMMIT}"
+          test "$(curl --fail --silent --show-error "${WALLET_URL}/health" | jq -r '.commit')" = "${TARGET_COMMIT}"
+          issuer_metadata="$(curl --fail --silent --show-error \
+            "${ISSUER_URL}/.well-known/openid-credential-issuer/oid4vci")"
+          echo "${issuer_metadata}" | jq -e '
+            (.credential_endpoint | endswith("/oid4vci/credential")) and
+            (.notification_endpoint | endswith("/oid4vci/notification"))
+          ' >/dev/null
+
+          verifier_response="$(curl --fail --silent --show-error \
+            -X POST "${ISSUER_URL}/oid4vp/request/create" \
+            -H "Content-Type: application/json" \
+            -d "{\"response_mode\":\"direct_post\",\"response_uri\":\"${ISSUER_URL}/oid4vp/response\"}")"
+          echo "${verifier_response}" | jq -e '
+            (.request | type == "string") and
+            (.request_uri | startswith("https://"))
+          ' >/dev/null
+
+          curl --fail --silent --show-error \
+            "${WALLET_URL}/health" |
+            jq -e '.status == "ok"' >/dev/null
+
+      - name: Run pinned OIDF VC plans
+        id: oidf_runner
+        env:
+          CONFORMANCE_TOKEN: ${{ secrets.CONFORMANCE_TOKEN }}
+          ACTION: ${{ inputs.oidf_vc_action }}
+          PLAN_IDS: ${{ inputs.oidf_vc_plan_ids }}
+          TARGET_COMMIT: ${{ inputs.oidf_vc_target_commit }}
+          ISSUER_URL: ${{ inputs.oidf_vc_issuer_url }}
+          WALLET_URL: ${{ inputs.oidf_vc_wallet_url }}
+        run: |
+          IFS=',' read -ra IDS <<< "${PLAN_IDS}"
+          ARGS=()
+          for ID in "${IDS[@]}"; do
+            ID="$(echo "${ID}" | xargs)"
+            test -n "${ID}" && ARGS+=(--plan-id "${ID}")
+          done
+          ARGS+=(--target-commit "${TARGET_COMMIT}")
+          ARGS+=(--deployment-url "issuer=${ISSUER_URL}")
+          ARGS+=(--deployment-url "wallet=${WALLET_URL}")
+          if [ "${ACTION}" = "start" ]; then
+            ARGS+=(--wait --wait-timeout 2400 --poll-interval 10)
+          fi
+          python scripts/oidf_vc_runner.py "${ACTION}" "${ARGS[@]}"
+
+      - name: Upload redacted OIDF evidence
+        if: always() && steps.oidf_runner.outcome != 'skipped'
+        uses: actions/upload-artifact@v7
+        with:
+          name: oidf-vc-${{ github.run_id }}
+          path: artifacts/oidf-vc/
+          if-no-files-found: warn
+          retention-days: 30
