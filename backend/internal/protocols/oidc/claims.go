@@ -103,10 +103,27 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get user ID from token
-	userID, ok := claims["sub"].(string)
+	// The access-token subject is the client-visible public or pairwise
+	// identifier. Resolve it through the token audience so claim lookup uses
+	// the canonical local identity while UserInfo returns the same sub.
+	tokenSubject, ok := claims["sub"].(string)
 	if !ok {
 		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Missing subject claim")
+		return
+	}
+	clientID, ok := claims["aud"].(string)
+	if !ok {
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Missing client audience claim")
+		return
+	}
+	client, exists := p.mockIdP.GetClient(clientID)
+	if !exists {
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Unknown client audience")
+		return
+	}
+	userID, found := p.mockIdP.ResolveUserIDForSubject(client, tokenSubject)
+	if !found {
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Unknown subject claim")
 		return
 	}
 
@@ -120,6 +137,7 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		writeOIDCError(w, http.StatusNotFound, "invalid_request", "User not found")
 		return
 	}
+	userClaims["sub"] = tokenSubject
 
 	// Honour the claims request parameter (OpenID Connect Core 1.0 Section 5.5):
 	// claims the client explicitly requested for the UserInfo endpoint are
@@ -147,6 +165,35 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		Description: "The claims returned depend on the scopes in the access token: openid→sub, profile→name/etc, email→email/verified",
 		Reference:   "OpenID Connect Core 1.0 Section 5.4",
 	})
+
+	// Signed UserInfo (OIDC Core 1.0 Section 5.3.2): when the client registered
+	// userinfo_signed_response_alg=RS256, return application/jwt instead of JSON.
+	if strings.EqualFold(client.UserinfoSignedResponseAlg, "RS256") {
+		// OIDC Core 1.0 Section 5.3.2: a signed UserInfo JWT MUST identify the
+		// OP and intended RP. These are JWT envelope claims, not user-profile
+		// attributes, so they are added only to the signed representation.
+		userClaims["iss"] = p.mockIdP.GetIssuer()
+		userClaims["aud"] = clientID
+		signed, err := jwtService.SignClaimsRS256(userClaims)
+		if err != nil {
+			writeOIDCError(w, http.StatusInternalServerError, "server_error", "Failed to sign UserInfo response")
+			return
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Signed UserInfo JWT", map[string]interface{}{
+			"alg":       "RS256",
+			"client_id": clientID,
+			"format":    "application/jwt",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeExplanation,
+			Title:       "Signed UserInfo",
+			Description: "The UserInfo response is a JWT signed with RS256 because the client registered userinfo_signed_response_alg=RS256.",
+			Reference:   "OpenID Connect Core 1.0 Section 5.3.2",
+		})
+		w.Header().Set("Content-Type", "application/jwt")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(signed))
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userClaims)
