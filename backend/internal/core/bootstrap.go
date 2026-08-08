@@ -100,16 +100,23 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 	}
 
 	pluginConfig := plugin.PluginConfig{
-		Environment:               cfg.Environment,
-		BaseURL:                   cfg.BaseURL,
-		DataDir:                   cfg.DataDir,
-		OAuth2ReplayRedisURL:      cfg.OAuth2ReplayRedisURL,
-		CORSOrigins:               cfg.CORSOrigins,
-		DPoPNonceRequired:         cfg.DPoPNonceRequired,
-		DPoPResourceNonceRequired: cfg.DPoPResourceNonceRequired,
-		KeySet:                    keySet,
-		MockIdP:                   idp,
-		LookingGlass:              lg,
+		Environment:                       cfg.Environment,
+		BaseURL:                           cfg.BaseURL,
+		DataDir:                           cfg.DataDir,
+		OAuth2ReplayRedisURL:              cfg.OAuth2ReplayRedisURL,
+		CORSOrigins:                       cfg.CORSOrigins,
+		DPoPNonceRequired:                 cfg.DPoPNonceRequired,
+		DPoPResourceNonceRequired:         cfg.DPoPResourceNonceRequired,
+		KeySet:                            keySet,
+		MockIdP:                           idp,
+		LookingGlass:                      lg,
+		OIDCDynamicRegistrationEnabled:    cfg.OIDCDynamicRegistrationEnabled,
+		OIDCDynamicRegistrationTTL:        cfg.OIDCDynamicRegistrationTTL,
+		OIDCDynamicRegistrationMaxClients: cfg.OIDCDynamicRegistrationMaxClients,
+		OIDCDynamicRegistrationRateLimit:  cfg.OIDCDynamicRegistrationRateLimit,
+		OIDCDynamicRegistrationRateWindow: cfg.OIDCDynamicRegistrationRateWindow,
+		OIDCPairwiseSubjectSalt:           cfg.OIDCPairwiseSubjectSalt,
+		OIDCKeyRotationToken:              cfg.OIDCKeyRotationToken,
 	}
 
 	return &BootstrapResult{

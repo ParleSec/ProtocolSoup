@@ -33,9 +33,21 @@ primary_region = 'syd'
 
   SHOWCASE_MDOC_PKI_PATH = '/data/mdoc'
 
-  # OIDF conformance suite callback URLs registered for the hosted profiles.
+  # OIDF conformance suite callback URLs registered for the hosted static
+  # profiles (Basic / Implicit / Hybrid / Form Post). Do NOT add Dynamic OP or
+  # Third-Party Initiated Login aliases here: those plans register their
+  # callback URI through Dynamic Client Registration, and static pre-registration
+  # would mask redirect_uri defects.
 
   OIDC_CONFORMANCE_REDIRECT_URIS = 'https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-postimplicit/callback'
+
+  # Dynamic Client Registration defaults (open, ephemeral). Override via secrets
+  # or env if tightening limits for a certification window.
+  OIDC_DYNAMIC_REGISTRATION_ENABLED = 'true'
+  OIDC_DYNAMIC_REGISTRATION_TTL = '2h'
+  OIDC_DYNAMIC_REGISTRATION_MAX_CLIENTS = '200'
+  OIDC_DYNAMIC_REGISTRATION_RATE_LIMIT = '30'
+  OIDC_DYNAMIC_REGISTRATION_RATE_WINDOW = '1m'
 
   # SPIFFE/SPIRE Configuration
   # The agent will connect to SPIRE Server via Fly private network
