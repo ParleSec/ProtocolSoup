@@ -274,11 +274,10 @@ func parseDCQLCredentialRequirement(credentialObject map[string]interface{}) DCQ
 	}
 	if meta, ok := credentialObject["meta"].(map[string]interface{}); ok {
 		requirement.VCTValues = normalizeStringSliceDCQL(meta["vct_values"])
-		requirement.DoctypeValues = normalizeStringSliceDCQL(meta["doctype_values"])
-		if len(requirement.DoctypeValues) == 0 {
-			if singleDoctype := strings.TrimSpace(stringValue(meta["doctype"])); singleDoctype != "" {
-				requirement.DoctypeValues = []string{singleDoctype}
-			}
+		// OID4VP 1.0 Final Section B.2.2 defines the mso_mdoc metadata
+		// parameter as the singular string doctype_value.
+		if doctypeValue := strings.TrimSpace(stringValue(meta["doctype_value"])); doctypeValue != "" {
+			requirement.DoctypeValues = []string{doctypeValue}
 		}
 		requirement.CredentialTypeValues = normalizeStringSliceDCQL(meta["type_values"])
 	}
@@ -376,7 +375,7 @@ func RequirementMatchesEvidence(requirement DCQLCredentialRequirement, evidence 
 		return false, "dcql_meta_mismatch", "credential vct does not satisfy dcql vct_values"
 	}
 	if len(requirement.DoctypeValues) > 0 && !containsStringDCQL(requirement.DoctypeValues, strings.TrimSpace(evidence.Doctype)) {
-		return false, "dcql_meta_mismatch", "credential doctype does not satisfy dcql doctype_values"
+		return false, "dcql_meta_mismatch", "credential doctype does not satisfy dcql doctype_value"
 	}
 	if len(requirement.CredentialTypeValues) > 0 && !intersectsStringSliceDCQL(requirement.CredentialTypeValues, evidence.CredentialTypes) {
 		return false, "dcql_meta_mismatch", "credential type does not satisfy dcql type_values"
@@ -421,7 +420,7 @@ func claimSetSatisfiesEvidence(claimsByID map[string]dcqlClaimPath, evidence DCQ
 
 // RequirementMatchesMdoc evaluates whether an mso_mdoc credential satisfies a
 // DCQL requirement (ISO/IEC 18013-5 + OID4VP/DCQL). Unlike SD-JWT VC, mdoc
-// matches by doctype (DCQL meta doctype_values) and by claim paths expressed as
+// matches by doctype (DCQL meta doctype_value) and by claim paths expressed as
 // [namespace, elementIdentifier] rather than JSON-pointer-style nested paths.
 // Returns (matched, reasonCode, reasonMessage). The existing SD-JWT VC matching
 // in RequirementMatchesEvidence is unaffected; this is an added branch.
@@ -430,7 +429,7 @@ func RequirementMatchesMdoc(requirement DCQLCredentialRequirement, evidence Mdoc
 		return false, "dcql_format_mismatch", fmt.Sprintf("credential format %q does not satisfy requested format %q", evidence.Format, requirement.Format)
 	}
 	if len(requirement.DoctypeValues) > 0 && !containsStringDCQL(requirement.DoctypeValues, strings.TrimSpace(evidence.Doctype)) {
-		return false, "dcql_meta_mismatch", "credential doctype does not satisfy dcql doctype_values"
+		return false, "dcql_meta_mismatch", "credential doctype does not satisfy dcql doctype_value"
 	}
 	for _, authority := range requirement.TrustedAuthorities {
 		if !strings.EqualFold(strings.TrimSpace(authority.Type), "aki") {

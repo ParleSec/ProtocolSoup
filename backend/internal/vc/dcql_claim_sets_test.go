@@ -205,7 +205,7 @@ func mdocPIDClaimSetDCQL() string {
 		"credentials": [{
 			"id": "mdl",
 			"format": "mso_mdoc",
-			"meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]},
+			"meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
 			"claims": [
 				{"id": "fname", "path": ["org.iso.18013.5.1", "family_name"]},
 				{"id": "docnum", "path": ["org.iso.18013.5.1", "document_number"]},
@@ -290,7 +290,7 @@ func TestRequirementMatchesMdocUnchangedWithoutClaimSets(t *testing.T) {
 		"credentials": [{
 			"id": "mdl",
 			"format": "mso_mdoc",
-			"meta": {"doctype_values": ["org.iso.18013.5.1.mDL"]},
+			"meta": {"doctype_value": "org.iso.18013.5.1.mDL"},
 			"claims": [{"path": ["org.iso.18013.5.1", "family_name"]}, {"path": ["org.iso.18013.5.1", "document_number"]}]
 		}]
 	}`)[0]

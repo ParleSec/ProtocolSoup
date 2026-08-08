@@ -156,9 +156,10 @@ func TestBuildPresentationSubmissionForSDJWT(t *testing.T) {
 		t.Fatalf("CreateSDJWTDisclosure: %v", err)
 	}
 	vpToken := BuildSDJWTSerialization(
-		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "vc+sd-jwt", jwt.MapClaims{
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "dc+sd-jwt", jwt.MapClaims{
 			"sub": "did:example:holder",
 			"vct": "https://credentials.example.com/identity_credential",
+			"_sd": []string{disclosure.Digest},
 			"vc": map[string]interface{}{
 				"type": []string{"VerifiableCredential", "IdentityCredential"},
 			},
@@ -341,7 +342,7 @@ func TestBuildCredentialEvidenceForSDJWTCommittedCountIsNeverExact(t *testing.T)
 		t.Fatalf("CreateSDJWTDisclosure: %v", err)
 	}
 	rawCredential := BuildSDJWTSerialization(
-		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "vc+sd-jwt", jwt.MapClaims{
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "dc+sd-jwt", jwt.MapClaims{
 			"vct": "https://example.org/credential",
 			"_sd": []string{disclosure.Digest},
 			"vc": map[string]interface{}{
@@ -368,6 +369,54 @@ func TestBuildCredentialEvidenceForSDJWTCommittedCountIsNeverExact(t *testing.T)
 	}
 	if sd.PresentCount != 1 {
 		t.Fatalf("sd.PresentCount = %d, want 1", sd.PresentCount)
+	}
+}
+
+// RFC 9901 Section 7.1 makes only the Processed SD-JWT Payload available to
+// the application. Credential evidence therefore must preserve the exact
+// nested object/array positions produced by disclosure processing.
+func TestBuildCredentialEvidenceUsesProcessedSDJWTClaimTree(t *testing.T) {
+	role, err := CreateSDJWTArrayDisclosure("admin", "salt-role")
+	if err != nil {
+		t.Fatal(err)
+	}
+	department, err := CreateSDJWTDisclosure("department", map[string]interface{}{
+		"name":  "Security",
+		"roles": []interface{}{"reader", map[string]interface{}{"...": role.Digest}},
+	}, "salt-department")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawCredential := BuildSDJWTSerialization(
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "dc+sd-jwt", jwt.MapClaims{
+			"_sd_alg": "sha-256",
+			"vct":     "https://example.org/credential",
+			"vc": map[string]interface{}{
+				"credentialSubject": map[string]interface{}{
+					"id":  "did:example:holder",
+					"_sd": []interface{}{department.Digest},
+				},
+			},
+		}),
+		[]string{department.Encoded, role.Encoded},
+		"",
+	)
+
+	evidence, err := BuildCredentialEvidence(rawCredential, LifecycleStagePresented)
+	if err != nil {
+		t.Fatalf("BuildCredentialEvidence: %v", err)
+	}
+	subject := evidence.FullClaims["credentialSubject"].(map[string]interface{})
+	departmentValue := subject["department"].(map[string]interface{})
+	roles := departmentValue["roles"].([]interface{})
+	if len(roles) != 2 || roles[0] != "reader" || roles[1] != "admin" {
+		t.Fatalf("processed roles = %#v", roles)
+	}
+	if _, flattened := evidence.FullClaims["roles"]; flattened {
+		t.Fatal("nested roles array was globally flattened")
+	}
+	if _, retained := evidence.FullClaims["_sd_alg"]; retained {
+		t.Fatal("processed evidence retained _sd_alg")
 	}
 }
 
