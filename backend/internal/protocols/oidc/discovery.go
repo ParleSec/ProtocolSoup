@@ -37,13 +37,18 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// client_credentials grant lives on the OAuth 2.0 token endpoint, not
 		// here, so advertising it would be false metadata (OIDC Discovery 1.0
 		// Section 3 requires metadata to reflect the OP's real behaviour).
-		GrantTypesSupported:   []string{"authorization_code", "refresh_token"},
-		SubjectTypesSupported: []string{"public"},
+		GrantTypesSupported:   []string{"authorization_code", "implicit", "refresh_token"},
+		SubjectTypesSupported: []string{"public", "pairwise"},
 		// ID Tokens are signed with RS256 only (crypto/jwt.go). ES256 keys are
 		// published in JWKS but never used to sign ID Tokens, so RS256 is the
 		// only honest advertisement here (OIDC Core 1.0 Section 3.1.3.7).
-		IDTokenSigningAlgValuesSupported:  []string{"RS256"},
-		TokenEndpointAuthMethodsSupported: []string{"client_secret_basic", "client_secret_post", "none"},
+		IDTokenSigningAlgValuesSupported: []string{"RS256"},
+		// Signed UserInfo is available when a client registers
+		// userinfo_signed_response_alg=RS256 (OIDC Core 1.0 Section 5.3.2).
+		UserinfoSigningAlgValuesSupported: []string{"RS256"},
+		// Dynamic OPs MUST support Request Objects by reference (OIDC Core §15.2).
+		RequestObjectSigningAlgValuesSupported: []string{"RS256"},
+		TokenEndpointAuthMethodsSupported:      []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
 		// Every claim listed here is genuinely returned in an ID Token or from
 		// UserInfo for some granted scope. at_hash and c_hash are emitted from
 		// the authorization endpoint for implicit and hybrid flows.

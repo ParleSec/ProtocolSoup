@@ -874,7 +874,12 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		if assertionType != clientAssertionType {
 			err = assertionError("unsupported_client_assertion_type")
 		} else {
-			client, assertionDetails, err = p.authenticatePrivateKeyJWTContext(r.Context(), clientID, assertion)
+			client, assertionDetails, err = p.AuthenticatePrivateKeyJWTWithAudiences(
+				r.Context(),
+				clientID,
+				assertion,
+				[]string{strings.TrimRight(p.baseURL, "/") + "/oauth2/token"},
+			)
 		}
 	} else {
 		client, err = p.mockIdP.ValidateClient(clientID, clientSecret)
