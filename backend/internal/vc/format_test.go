@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,10 +25,11 @@ func TestParseAnyCredentialDetectsFormats(t *testing.T) {
 		t.Fatalf("CreateSDJWTDisclosure: %v", err)
 	}
 	sdJWT := BuildSDJWTSerialization(
-		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "vc+sd-jwt", jwt.MapClaims{
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "dc+sd-jwt", jwt.MapClaims{
 			"sub": "did:example:holder",
 			"vct": "https://example.org/credential",
 			"exp": time.Now().Add(5 * time.Minute).Unix(),
+			"_sd": []string{disclosure.Digest},
 			"vc": map[string]interface{}{
 				"type": []string{"VerifiableCredential", "UniversityDegreeCredential"},
 				"credentialSubject": map[string]interface{}{
@@ -199,10 +201,11 @@ func buildCredentialFormatSamples(t *testing.T) map[string]string {
 		t.Fatalf("CreateSDJWTDisclosure: %v", err)
 	}
 	sdJWT := BuildSDJWTSerialization(
-		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "vc+sd-jwt", jwt.MapClaims{
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("sd-secret"), "dc+sd-jwt", jwt.MapClaims{
 			"sub": "did:example:holder",
 			"vct": "https://example.org/credential",
 			"exp": time.Now().Add(5 * time.Minute).Unix(),
+			"_sd": []string{disclosure.Digest},
 			"vc": map[string]interface{}{
 				"type": []string{"VerifiableCredential", "UniversityDegreeCredential"},
 				"credentialSubject": map[string]interface{}{
@@ -259,8 +262,9 @@ func TestSDJWTFormatBuildPresentationBuildsKBJWT(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSDJWTDisclosure: %v", err)
 	}
-	issuerSignedJWT := signedTestJWT(t, jwt.SigningMethodHS256, []byte("issuer-secret"), "vc+sd-jwt", jwt.MapClaims{
+	issuerSignedJWT := signedTestJWT(t, jwt.SigningMethodHS256, []byte("issuer-secret"), "dc+sd-jwt", jwt.MapClaims{
 		"sub": "did:example:holder",
+		"_sd": []string{disclosure.Digest},
 		"vc": map[string]interface{}{
 			"type": []string{"VerifiableCredential", "UniversityDegreeCredential"},
 		},
@@ -294,6 +298,60 @@ func TestSDJWTFormatBuildPresentationBuildsKBJWT(t *testing.T) {
 	}
 	if capturedClaims["sd_hash"] == nil {
 		t.Fatalf("expected sd_hash in kb-jwt claims")
+	}
+}
+
+// SD-JWT VC draft-ietf-oauth-sd-jwt-vc Section 2.2.1 requires the issuer
+// JOSE typ to be exactly "dc+sd-jwt".
+func TestSDJWTFormatRejectsLegacyIssuerTyp(t *testing.T) {
+	format := &SDJWTFormat{}
+	legacy := BuildSDJWTSerialization(
+		signedTestJWT(t, jwt.SigningMethodHS256, []byte("issuer-secret"), "vc+sd-jwt", jwt.MapClaims{
+			"vct": "https://example.org/credential",
+		}),
+		nil,
+		"",
+	)
+	if _, err := format.ParseCredential(legacy); err == nil {
+		t.Fatal("expected legacy vc+sd-jwt issuer typ to be rejected")
+	}
+}
+
+// RFC 9901 Section 7.1 requires validation of the Issuer-signed JWT before
+// the processed payload is made available. Disclosure processing must never
+// turn a failed issuer signature into an accepted credential.
+func TestSDJWTFormatValidateIssuerSignatureRejectsTampering(t *testing.T) {
+	keySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuerJWK := intcrypto.JWKFromEd25519PublicKey(keySet.Ed25519PublicKey(), keySet.Ed25519KeyID())
+	issuerJWT := signedTestJWT(t, jwt.SigningMethodEdDSA, keySet.Ed25519PrivateKey(), "dc+sd-jwt", jwt.MapClaims{
+		"iss": "https://issuer.example",
+		"vct": "https://example.org/credential",
+	})
+	format := &SDJWTFormat{}
+	validCredential := BuildSDJWTSerialization(issuerJWT, nil, "")
+	if status, err := format.ValidateIssuerSignature(CredentialValidationInput{
+		Credential: validCredential,
+		IssuerKeys: []intcrypto.JWK{issuerJWK},
+	}); err != nil || status != IssuerTrustVerified {
+		t.Fatalf("valid issuer signature rejected: status=%v err=%v", status, err)
+	}
+
+	segments := strings.Split(issuerJWT, ".")
+	if segments[2][0] == 'A' {
+		segments[2] = "B" + segments[2][1:]
+	} else {
+		segments[2] = "A" + segments[2][1:]
+	}
+	tampered := BuildSDJWTSerialization(strings.Join(segments, "."), nil, "")
+	status, err := format.ValidateIssuerSignature(CredentialValidationInput{
+		Credential: tampered,
+		IssuerKeys: []intcrypto.JWK{issuerJWK},
+	})
+	if err == nil || status != IssuerTrustFailed {
+		t.Fatalf("tampered issuer signature accepted: status=%v err=%v", status, err)
 	}
 }
 
