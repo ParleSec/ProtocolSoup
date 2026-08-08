@@ -435,6 +435,22 @@ requirements:
         file: backend/internal/protocols/oid4vci/plugin_test.go
         name: TestDecodeNotificationRequestRejectsDuplicatesAndIgnoresUnknownParameters
 
+  - id: CI-018
+    specification: oid4vci
+    section: "12.2.4"
+    level: MUST
+    statement: >-
+      mso_mdoc Credential Configurations advertise credential signing
+      algorithms as numeric COSE algorithm identifiers.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/registry.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialIssuerMetadataIncludesMultiFormatConfigurations
+
   - id: DP-001
     specification: rfc9449
     section: "4.3"

@@ -44,7 +44,7 @@ The issuer's default and lead `credential_configurations_supported` entry is the
 | Credential configuration selection | Wallet chooses from `credential_configurations_supported`. The default and lead entry is the mDL (`MobileDrivingLicenceMsoMdoc`); omitting an explicit configuration selects it. |
 | Credential formats | `mso_mdoc` (ISO/IEC 18013-5 mDL, **default**), `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
 | Proof container | OID4VCI 1.0 `proofs` object containing exactly one JWT in this implementation (for example, `{"jwt":["<compact-jws>"]}`). Batch issuance and other proof types are not advertised; the removed draft `proof` parameter is ignored. |
-| `mso_mdoc` device key binding | Proof JOSE header `jwk` must be an EC P-256 key; it is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key |
+| `mso_mdoc` device key binding | Proof JOSE header `jwk` must be an EC P-256 key; it is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key. Issuer metadata advertises the credential signing algorithm as COSE identifier `-7`, while the JWT proof algorithm remains JOSE `ES256`. |
 | Proof JWT header type | `openid4vci-proof+jwt` |
 | Proof JWT | Protected header contains exactly one key reference (`jwk` is supported); payload requires `aud`, `nonce`, and `iat`. Anonymous pre-authorized clients omit `iss`. |
 | Deferred issuance indicator | `transaction_id` returned by credential endpoint (e.g., an opaque identifier such as `"txn_..."`) |

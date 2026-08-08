@@ -53,7 +53,7 @@ type credentialConfiguration struct {
 	Claims                      []claimDescription
 	BindingMethodsSupported     []string
 	ProofSigningAlgsSupported   []string
-	CredentialSigningAlgs       []string
+	CredentialSigningAlgs       []interface{}
 	SupportedDisplayName        string
 	SupportsSelectiveDisclosure bool
 
@@ -104,7 +104,7 @@ func (c credentialConfiguration) toMetadataObject() map[string]interface{} {
 		}
 	}
 	if len(c.CredentialSigningAlgs) > 0 {
-		metadata["credential_signing_alg_values_supported"] = append([]string{}, c.CredentialSigningAlgs...)
+		metadata["credential_signing_alg_values_supported"] = append([]interface{}{}, c.CredentialSigningAlgs...)
 	}
 	if vct := strings.TrimSpace(c.VCT); vct != "" {
 		metadata["vct"] = vct
@@ -148,7 +148,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			CredentialTypes:             []string{"VerifiableCredential", "UniversityDegreeCredential"},
 			BindingMethodsSupported:     []string{"jwk"},
 			ProofSigningAlgsSupported:   []string{"RS256"},
-			CredentialSigningAlgs:       []string{"RS256"},
+			CredentialSigningAlgs:       []interface{}{"RS256"},
 			SupportedDisplayName:        "University Degree (SD-JWT VC)",
 			SupportsSelectiveDisclosure: true,
 		},
@@ -160,7 +160,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			CredentialTypes:           []string{"VerifiableCredential", "UniversityDegreeCredential"},
 			BindingMethodsSupported:   []string{"jwk"},
 			ProofSigningAlgsSupported: []string{"RS256"},
-			CredentialSigningAlgs:     []string{"RS256"},
+			CredentialSigningAlgs:     []interface{}{"RS256"},
 			SupportedDisplayName:      "University Degree (JWT VC JSON)",
 		},
 		"UniversityDegreeCredentialJWTLD": {
@@ -172,7 +172,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			Contexts:                  []string{"https://www.w3.org/2018/credentials/v1"},
 			BindingMethodsSupported:   []string{"jwk"},
 			ProofSigningAlgsSupported: []string{"RS256"},
-			CredentialSigningAlgs:     []string{"RS256"},
+			CredentialSigningAlgs:     []interface{}{"RS256"},
 			SupportedDisplayName:      "University Degree (JWT VC JSON-LD)",
 		},
 		"UniversityDegreeCredentialLDP": {
@@ -184,7 +184,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			Contexts:                  []string{"https://www.w3.org/2018/credentials/v1"},
 			BindingMethodsSupported:   []string{"jwk"},
 			ProofSigningAlgsSupported: []string{"ES256"},
-			CredentialSigningAlgs:     []string{"ES256"},
+			CredentialSigningAlgs:     []interface{}{"ES256"},
 			SupportedDisplayName:      "University Degree (LDP VC profile)",
 		},
 		// mso_mdoc mobile driving licence (ISO/IEC 18013-5). The device key is
@@ -199,7 +199,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			Doctype:                   mdlDoctype,
 			BindingMethodsSupported:   []string{"cose_key"},
 			ProofSigningAlgsSupported: []string{"ES256"},
-			CredentialSigningAlgs:     []string{"ES256"},
+			CredentialSigningAlgs:     []interface{}{-7},
 			SupportedDisplayName:      "Mobile Driving Licence (ISO/IEC 18013-5 mso_mdoc)",
 			Claims: []claimDescription{
 				{Path: []string{mdlNamespace, "family_name"}, Mandatory: true},
@@ -229,7 +229,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			Doctype:                   mdlDoctype,
 			BindingMethodsSupported:   []string{"cose_key"},
 			ProofSigningAlgsSupported: []string{"ES256"},
-			CredentialSigningAlgs:     []string{"ES256"},
+			CredentialSigningAlgs:     []interface{}{-7},
 			SupportedDisplayName:      "Mobile Driving Licence (ISO/IEC 18013-5 mso_mdoc, HAIP key-attested)",
 			RequireKeyAttestation:     true,
 			KeyAttestationKeyStorage:  []string{"iso_18045_moderate"},

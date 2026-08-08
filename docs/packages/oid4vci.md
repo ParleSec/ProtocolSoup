@@ -76,6 +76,8 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - Access tokens are issued by issuer keys; proof JWTs are signed by wallet keys and verified against the proof JOSE header `jwk`.
 - Proof JWT header `typ` is validated as `openid4vci-proof+jwt` before credential issuance.
 - `credential` responses return real artifacts in the negotiated format (`dc+sd-jwt`, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`, or `mso_mdoc`) from live handler execution using wallet-bound subject data.
+- `mso_mdoc` metadata uses numeric COSE algorithm identifier `-7` for
+  credential signing; JWT holder proofs continue to use JOSE `ES256`.
 - The issuer accepts one JWT proof per Credential Request. Batch issuance,
   non-JWT proof types, and encrypted Credential Requests are not advertised.
 - Authorization codes, credential nonces, and deferred transaction identifiers

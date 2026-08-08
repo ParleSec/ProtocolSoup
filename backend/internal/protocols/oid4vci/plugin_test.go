@@ -311,6 +311,20 @@ func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T)
 			t.Fatalf("expected configuration %q format %q, got %q", configurationID, expectedFormat, asString(t, configuration["format"]))
 		}
 	}
+	for _, configurationID := range []string{"MobileDrivingLicenceMsoMdoc", "MobileDrivingLicenceMsoMdocHAIP"} {
+		configuration, ok := configurations[configurationID].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected mdoc configuration %q to be object", configurationID)
+		}
+		algorithms, ok := configuration["credential_signing_alg_values_supported"].([]interface{})
+		if !ok || len(algorithms) != 1 || algorithms[0] != float64(-7) {
+			t.Fatalf(
+				"mdoc configuration %q credential signing algorithms = %#v, want COSE algorithm -7",
+				configurationID,
+				configuration["credential_signing_alg_values_supported"],
+			)
+		}
+	}
 }
 
 func TestCredentialIssuanceSupportsMultipleFormats(t *testing.T) {
