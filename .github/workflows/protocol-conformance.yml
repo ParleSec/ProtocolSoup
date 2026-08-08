@@ -74,9 +74,9 @@ jobs:
           ./cmd/walletharness
           -count=1
 
-      - name: Verify generated VC requirement evidence
+      - name: Generate and test VC requirement evidence
         working-directory: backend
-        run: go run ./cmd/conformance-report -verify
+        run: go run ./cmd/conformance-report
 
       - name: Test OIDF VC runner
         run: python -m unittest discover -s scripts -p 'test_*.py'

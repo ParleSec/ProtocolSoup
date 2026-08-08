@@ -1,13 +1,10 @@
 // Command conformance-report validates the canonical VC requirement registry,
-// executes its mapped Go tests, and emits the deterministic public evidence
-// document consumed by the Starlight site.
+// executes its mapped Go tests, and writes an ignored local evidence artifact.
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -25,7 +22,6 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("conformance-report", flag.ContinueOnError)
-	verify := flags.Bool("verify", false, "fail if the output differs from the tracked file")
 	validateOnly := flags.Bool("validate-only", false, "validate registry metadata without running tests")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -60,22 +56,12 @@ func run(ctx context.Context, args []string) error {
 	}
 	encoded = append(encoded, '\n')
 
-	if *verify {
-		tracked, err := os.ReadFile(outputPath)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(tracked, encoded) {
-			return errors.New("generated conformance report differs from tracked output; run conformance-report and commit the result")
-		}
-	} else {
-		if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(outputPath, encoded, 0o644); err != nil {
-			return err
-		}
-		fmt.Printf("conformance-report: wrote %s\n", outputPath)
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return err
 	}
+	if err := os.WriteFile(outputPath, encoded, 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("conformance-report: wrote %s\n", outputPath)
 	return testErr
 }
