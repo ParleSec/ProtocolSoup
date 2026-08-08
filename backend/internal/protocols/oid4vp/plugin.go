@@ -39,7 +39,7 @@ var defaultDCQLQuery = map[string]interface{}{
 			"id":     "mdl",
 			"format": "mso_mdoc",
 			"meta": map[string]interface{}{
-				"doctype_values": []string{"org.iso.18013.5.1.mDL"},
+				"doctype_value": "org.iso.18013.5.1.mDL",
 			},
 			"claims": []map[string]interface{}{
 				{"path": []string{"org.iso.18013.5.1", "family_name"}},

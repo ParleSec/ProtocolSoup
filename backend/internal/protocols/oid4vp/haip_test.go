@@ -144,7 +144,6 @@ func newHAIPMdocVerifierServer(t *testing.T, trust *mdoc.IssuerPKI) (*Plugin, st
 type dcapiCreateResponse struct {
 	RequestID        string   `json:"request_id"`
 	ClientID         string   `json:"client_id"`
-	ClientIDScheme   string   `json:"client_id_scheme"`
 	Nonce            string   `json:"nonce"`
 	State            string   `json:"state"`
 	ResponseMode     string   `json:"response_mode"`
@@ -191,9 +190,6 @@ func TestHAIPDCAPIRequestShape(t *testing.T) {
 	created := createDCAPIMdocRequest(t, serverURL, "https://verifier.example")
 	if !strings.HasPrefix(created.ClientID, string(ClientIDSchemeX509Hash)+":") {
 		t.Fatalf("HAIP request must use x509_hash client_id, got %q", created.ClientID)
-	}
-	if created.ClientIDScheme != string(ClientIDSchemeX509Hash) {
-		t.Fatalf("expected x509_hash scheme, got %q", created.ClientIDScheme)
 	}
 	if created.Origin != "https://verifier.example" {
 		t.Fatalf("expected bound origin, got %q", created.Origin)

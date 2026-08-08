@@ -9,12 +9,12 @@ This implementation provides:
 - **Request Object Creation**: Signed authorization request JWTs with `typ=oauth-authz-req+jwt`
 - **DCQL-First Contracts**: Enforces `dcql_query` xor scope alias request semantics
 - **Default Presentation Request**: the canonical request targets the mDL (`mso_mdoc`, doctype `org.iso.18013.5.1.mDL`) when no explicit `dcql_query`/`scope` is supplied; SD-JWT VC and the W3C formats remain selectable via an explicit query
-- **Response Modes**: Supports `direct_post`, `direct_post.jwt`, and backend processing for W3C Digital Credentials API (`dc_api`, `dc_api.jwt`); no browser DC API executor is included
+- **Response Modes**: Supports `direct_post` and `direct_post.jwt`; DC API building blocks are not an end-to-end browser implementation
 - **HAIP Mode**: Opt-in `profile: "haip"` enforcing HAIP 1.0 (DCQL, encrypted response, `x509_hash`, both `A128GCM`+`A256GCM`); out-of-profile choices are rejected
 - **Response JWT Validation**: Validates `typ=oauth-authz-resp+jwt` for the legacy JOSE `direct_post.jwt` path; ECDH-ES mdoc/HAIP responses carry the Authorization Response directly in the JWE payload
 - **VP Token Validation**: Signature, `typ=vp+jwt`, nonce, audience, expiry, and holder-binding checks
 - **ISO mdoc Online Profile**: `mso_mdoc` presentations with DCQL-keyed base64url CBOR `DeviceResponse`, verifier-reconstructed `OpenID4VPHandover` (redirect, Appendix B.2.6.1) or `OpenID4VPDCAPIHandover` (DC API, Appendix B.2.6.2), and ECDH-ES + A128GCM/A256GCM encrypted responses
-- **W3C Digital Credentials API Backend**: Origin-bound (`origin:`) response audience, `request_id` correlation (no `state`/`response_uri`), and distinct DC API handover processing for SD-JWT VC and `mso_mdoc`, covered by backend tests only
+- **W3C Digital Credentials API**: Handover/response-processing building blocks exist, but browser invocation is absent and the wallet harness rejects these modes
 - **Credential Evidence**: Produces deterministic verifier diagnostics and reason codes
 - **DID:web Trust Resolution**: Runtime trust checks for decentralized identifier client IDs
 - **Verifier Attestation**: Signed attestation JWTs with published JWKS for `verifier_attestation` scheme
@@ -78,7 +78,7 @@ The OID4VP implementation is mounted as plugin ID `oid4vp` in the backend protoc
 
 ### Wallet Response Rules
 
-- `state` (redirect) or `request_id` (DC API) must map to an active request session
+- Redirect response modes require exact `state` correlation with an active request session
 - `vp_token` is required for `direct_post`
 - `response` (JWE) is required for `direct_post.jwt` and `dc_api.jwt`
 - `direct_post.jwt` payload must include `vp_token` and matching `state`
@@ -124,9 +124,9 @@ Failures are emitted with deterministic machine-readable reason codes (for examp
 
 #### `x509_san_dns` (OpenID4VP Section 5.9)
 
-- Request object carries an `x5c` JOSE header with the certificate chain
+- Request object carries an `x5c` JOSE header without the root trust anchor
 - Wallet validates PKIX chain, verifies leaf SAN matches `client_id` DNS name, confirms `response_uri` host matches, and verifies JWT signature against leaf public key
-- The `client_id_scheme` claim is included in the signed request object
+- The Client Identifier Prefix is inferred from `client_id`; the removed draft `client_id_scheme` parameter is not emitted
 - When `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` and `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` are unset, an ephemeral ECDSA P-256 self-signed CA + leaf chain is auto-generated at startup with the leaf SAN bound to the deployment hostname
 - Set the PEM env vars in production for certificate continuity across restarts
 

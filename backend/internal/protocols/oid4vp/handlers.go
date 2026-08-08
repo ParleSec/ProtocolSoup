@@ -97,6 +97,10 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	if req.ResponseMode == "" {
 		req.ResponseMode = responseModeDirectPost
 	}
+	if err := ValidateResponseMode(req.ResponseMode); err != nil {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
 	req.Profile = strings.ToLower(strings.TrimSpace(req.Profile))
 	isDCAPI := isDCAPIResponseMode(req.ResponseMode)
 
@@ -234,16 +238,15 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	now := time.Now().UTC()
 	requestID := p.randomValue(24)
 	requestClaims := jwt.MapClaims{
-		"iss":              req.ClientID,
-		"aud":              "wallet",
-		"client_id":        req.ClientID,
-		"client_id_scheme": string(clientIDScheme),
-		"response_type":    "vp_token",
-		"response_mode":    req.ResponseMode,
-		"nonce":            nonce,
-		"iat":              now.Unix(),
-		"exp":              now.Add(requestObjectTTL).Unix(),
-		"jti":              requestID,
+		"iss":           req.ClientID,
+		"aud":           "wallet",
+		"client_id":     req.ClientID,
+		"response_type": "vp_token",
+		"response_mode": req.ResponseMode,
+		"nonce":         nonce,
+		"iat":           now.Unix(),
+		"exp":           now.Add(requestObjectTTL).Unix(),
+		"jti":           requestID,
 	}
 	if isDCAPI {
 		// OID4VP 1.0 Appendix A.2: response_uri and state are not used over the
@@ -402,7 +405,6 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		"state":                 state,
 		"nonce":                 nonce,
 		"client_id":             req.ClientID,
-		"client_id_scheme":      string(clientIDScheme),
 		"expires_in_seconds":    int(requestObjectTTL.Seconds()),
 		"dcql_query_supplied":   dcqlQuery != "",
 		"trust_mode":            p.trustMode(),
@@ -451,59 +453,19 @@ func (p *Plugin) handleGetAuthorizationRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"request":    session.RequestJWT,
-		"request_id": requestID,
-		"expires_at": session.ExpiresAt.Format(time.RFC3339),
-	})
+	// OID4VP 1.0 Final Section 5.10.1: a GET request_uri endpoint returns the
+	// compact Request Object JWT directly, not a JSON envelope.
+	w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(session.RequestJWT))
 }
 
 func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
-	if strings.TrimSpace(p.requestDataPath) != "" {
-		if err := p.loadRequestState(p.requestDataPath); err != nil {
-			writeServerError(w, "load request state", err)
-			return
-		}
-	}
-	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
-	if requestID == "" {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "requestID is required")
-		return
-	}
-
-	p.mu.RLock()
-	session, ok := p.requests[requestID]
-	p.mu.RUnlock()
-	if !ok {
-		writeOID4VPError(w, http.StatusNotFound, "invalid_request_uri", "request object not found")
-		return
-	}
-	if time.Now().UTC().After(session.ExpiresAt) {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_uri", "request object expired")
-		return
-	}
-	if err := validateRequestObjectTyp(session.RequestJWT); err != nil {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_object", err.Error())
-		return
-	}
-
-	// OID4VP Section 5.10: parse wallet_nonce from POST body if present
-	walletNonce := strings.TrimSpace(r.FormValue("wallet_nonce"))
-	walletMetadata := strings.TrimSpace(r.FormValue("wallet_metadata"))
-
-	response := map[string]interface{}{
-		"request":             session.RequestJWT,
-		"request_id":          requestID,
-		"request_uri_method":  "post",
-		"dcql_query_supplied": session.DCQLQuery != "",
-	}
-	if walletNonce != "" {
-		response["wallet_nonce"] = walletNonce
-	}
-	if walletMetadata != "" {
-		response["wallet_metadata"] = walletMetadata
-	}
-	writeJSON(w, http.StatusOK, response)
+	// request_uri_method=post requires the full wallet_nonce/wallet_metadata
+	// protocol. This verifier advertises only GET and fails explicitly instead
+	// of returning the legacy non-conformant JSON wrapper.
+	w.Header().Set("Allow", http.MethodGet)
+	writeOID4VPError(w, http.StatusMethodNotAllowed, "invalid_request", "request_uri_method=post is not supported")
 }
 
 func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
@@ -526,19 +488,27 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 	// from the same browser context.
 	state := strings.TrimSpace(payload.State)
 	requestID := strings.TrimSpace(payload.RequestID)
-	if state == "" && requestID == "" {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state or request_id is required")
-		return
-	}
 
 	p.mu.RLock()
+	var session *requestSession
 	if state != "" {
 		requestID = p.requestsByState[state]
+		session = p.requests[requestID]
+	} else if requestID != "" {
+		session = p.requests[requestID]
 	}
-	session := p.requests[requestID]
 	p.mu.RUnlock()
 	if session == nil {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state or request_id does not map to active request")
+		return
+	}
+	if session.isDCAPI() {
+		if strings.TrimSpace(payload.RequestID) == "" {
+			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "request_id is required for DC API response modes")
+			return
+		}
+	} else if state == "" || state != session.State {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state must exactly match the authorization request")
 		return
 	}
 	if time.Now().UTC().After(session.ExpiresAt) {
@@ -564,17 +534,14 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 				writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
 				return
 			}
-			// The DC API response has no state (OID4VP Appendix A.2); only
-			// enforce a state match when the wallet actually returned one.
-			if extractedState != "" {
-				expectedState := session.State
-				if state != "" {
-					expectedState = state
-				}
-				if extractedState != expectedState {
-					writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state mismatch in encrypted response payload")
+			if session.isDCAPI() {
+				if extractedState != "" {
+					writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state must be omitted from DC API response payload")
 					return
 				}
+			} else if extractedState != session.State {
+				writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "state mismatch in encrypted response payload")
+				return
 			}
 			vpToken = extractedVPToken
 		} else {
@@ -836,6 +803,13 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 		finalizePolicyDecision(result)
 		return result
 	}
+	processedPayload, decodedDisclosures, err := vc.ProcessSDJWTDisclosures(
+		map[string]interface{}(issuerToken.Payload),
+		envelope.Disclosures,
+	)
+	if err != nil {
+		addPolicyReason(result, "disclosure_invalid", err.Error())
+	}
 
 	credSubject := ""
 	if sub, ok := issuerToken.Payload["sub"].(string); ok {
@@ -933,18 +907,10 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 		}
 	}
 
-	// Build credential evidence from issuer JWT + disclosed claims
-	decodedDisclosures, discErr := vc.DecodeAndVerifyDisclosures(envelope.Disclosures, nil)
-	if discErr != nil {
-		addPolicyReason(result, "disclosure_invalid", discErr.Error())
-	}
 	disclosedClaims := vc.DisclosedClaimMap(decodedDisclosures)
-	fullClaims := make(map[string]interface{})
-	for k, v := range issuerToken.Payload {
-		fullClaims[k] = v
-	}
-	for k, v := range disclosedClaims {
-		fullClaims[k] = v
+	fullClaims := processedPayload
+	if fullClaims == nil {
+		fullClaims = map[string]interface{}{}
 	}
 
 	evidence := models.OID4VPCredentialEvidence{
@@ -954,6 +920,23 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 		Issuer:          strings.TrimSpace(asString(issuerToken.Payload["iss"])),
 		FullClaims:      fullClaims,
 		DisclosedClaims: disclosedClaims,
+	}
+	validatedEvidence, credentialErr := p.validatePresentedCredentialEnvelopes(
+		[]presentedCredentialEnvelope{{
+			Format:     credentialFormatDCSdJWT,
+			Credential: vpToken,
+		}},
+		credSubject,
+		session,
+	)
+	if credentialErr != nil {
+		if policyErr, ok := asVerifierPolicyError(credentialErr); ok {
+			addPolicyReason(result, policyErr.Code, policyErr.Message)
+		} else {
+			addPolicyReason(result, "credential_validation_failed", credentialErr.Error())
+		}
+	} else if len(validatedEvidence) > 0 {
+		evidence = validatedEvidence[0]
 	}
 	result.CredentialEvidence = &evidence
 	result.CredentialEvidenceSet = []models.OID4VPCredentialEvidence{evidence}
@@ -1184,9 +1167,10 @@ func defaultVPFormatsSupported() map[string]interface{} {
 		},
 		credentialFormatMsoMdoc: map[string]interface{}{
 			// ISO/IEC 18013-5 IssuerAuth and DeviceAuth both use ES256 (P-256)
-			// in this build (OID4VP 1.0 Appendix B.2).
-			"issuerauth_alg_values": []string{"ES256"},
-			"deviceauth_alg_values": []string{"ES256"},
+			// in this build. OID4VP 1.0 Final Appendix B.2 requires COSE
+			// algorithm identifiers, where ES256 is the integer -7.
+			"issuerauth_alg_values": []int{-7},
+			"deviceauth_alg_values": []int{-7},
 		},
 	}
 }
