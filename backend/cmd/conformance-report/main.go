@@ -39,7 +39,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	repoRoot := filepath.Dir(backendDir)
 	registryPath := filepath.Join(backendDir, "internal", "conformance", "vc-requirements.yaml")
-	outputPath := filepath.Join(repoRoot, "docs", "starlight", "src", "data", "vc-conformance.json")
+	outputPath := filepath.Join(repoRoot, "artifacts", "vc-conformance", "report.json")
 
 	registry, err := conformance.Load(registryPath)
 	if err != nil {
