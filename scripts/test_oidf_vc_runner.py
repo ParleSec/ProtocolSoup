@@ -2,11 +2,48 @@ import json
 import pathlib
 import tempfile
 import unittest
+import urllib.parse
 
 import oidf_vc_runner
+from oidf_api import OIDFClient
 
 
 class OIDFVCRunnerTest(unittest.TestCase):
+    def test_create_plan_uses_suite_api_shape(self) -> None:
+        client = OIDFClient("https://suite.example", "token")
+        captured: dict[str, object] = {}
+
+        def request(method: str, path: str, body: object = None) -> object:
+            captured.update(method=method, path=path, body=body)
+            return {"id": "plan-1"}
+
+        client.request = request  # type: ignore[method-assign]
+        plan_id = client.create_plan(
+            "oid4vci-1_0-issuer-test-plan",
+            "protocolsoup",
+            {"client_auth_type": "private_key_jwt", "fapi_profile": "vci"},
+            {"vci": {"credential_issuer_url": "https://issuer.example"}},
+            "ProtocolSoup issuer",
+        )
+
+        self.assertEqual("plan-1", plan_id)
+        self.assertEqual("POST", captured["method"])
+        parsed = urllib.parse.urlparse(str(captured["path"]))
+        query = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(["oid4vci-1_0-issuer-test-plan"], query["planName"])
+        self.assertEqual(
+            {"client_auth_type": "private_key_jwt", "fapi_profile": "vci"},
+            json.loads(query["variant"][0]),
+        )
+        self.assertEqual(
+            {
+                "vci": {"credential_issuer_url": "https://issuer.example"},
+                "alias": "protocolsoup",
+                "description": "ProtocolSoup issuer",
+            },
+            captured["body"],
+        )
+
     def test_manifest_requires_pinned_suite_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "manifest.json"

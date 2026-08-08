@@ -55,16 +55,20 @@ class OIDFClient:
         config: dict[str, Any],
         description: str,
     ) -> str:
-        query = urllib.parse.urlencode({"planName": plan_name, "alias": alias})
+        query = urllib.parse.urlencode(
+            {
+                "planName": plan_name,
+                "variant": json.dumps(variant, separators=(",", ":"), sort_keys=True),
+            }
+        )
+        plan_config = dict(config)
+        plan_config["alias"] = alias
+        if description:
+            plan_config["description"] = description
         created = self.request(
             "POST",
             f"/api/plan?{query}",
-            {
-                "planName": plan_name,
-                "variant": variant,
-                "config": config,
-                "description": description,
-            },
+            plan_config,
         )
         plan_id = (
             created.get("id") or created.get("planId")
