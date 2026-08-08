@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	tokenTTL           = 10 * time.Minute
+	tokenTTL           = 5 * time.Minute
 	nonceTTL           = 5 * time.Minute
 	deferredReadyDelay = 3 * time.Second
 )
@@ -52,6 +52,8 @@ type accessGrant struct {
 	Subject                    string
 	WalletID                   string
 	CredentialConfigurationIDs map[string]struct{}
+	CredentialIdentifiers      map[string]string
+	AuthorizationDetailsUsed   bool
 	CNonce                     models.VCNonce
 	CNonceUsed                 bool
 	OfferID                    string
@@ -78,10 +80,30 @@ type walletIdentity struct {
 }
 
 type issuanceTransaction struct {
-	Model      models.VCIssuanceTransaction
-	Subject    string
-	ReadyAt    time.Time
-	Credential interface{}
+	Model        models.VCIssuanceTransaction
+	Subject      string
+	ReadyAt      time.Time
+	Credential   interface{}
+	CredentialID string
+}
+
+type notificationEvent struct {
+	Event            string
+	EventDescription string
+	ReceivedAt       time.Time
+}
+
+type notificationRecord struct {
+	ID                        string
+	AccessToken               string
+	CredentialConfigurationID string
+	CredentialIDs             []string
+	State                     string
+	Events                    []notificationEvent
+	EventKeys                 map[string]struct{}
+	CreatedAt                 time.Time
+	UpdatedAt                 time.Time
+	ExpiresAt                 time.Time
 }
 
 // Plugin implements OpenID for Verifiable Credential Issuance.
@@ -112,6 +134,8 @@ type Plugin struct {
 	offersByPreAuthCode    map[string]string
 	accessGrants           map[string]*accessGrant
 	issuanceTransactions   map[string]*issuanceTransaction
+	notifications          map[string]*notificationRecord
+	credentialNonces       map[string]time.Time
 	wallets                map[string]*walletIdentity
 	walletsByUserID        map[string]string
 	usedAttestationPoPJTIs map[string]time.Time
@@ -150,6 +174,8 @@ func NewPlugin() *Plugin {
 		offersByPreAuthCode:      make(map[string]string),
 		accessGrants:             make(map[string]*accessGrant),
 		issuanceTransactions:     make(map[string]*issuanceTransaction),
+		notifications:            make(map[string]*notificationRecord),
+		credentialNonces:         make(map[string]time.Time),
 		wallets:                  make(map[string]*walletIdentity),
 		walletsByUserID:          make(map[string]string),
 		usedAttestationPoPJTIs:   make(map[string]time.Time),
@@ -294,6 +320,16 @@ func (p *Plugin) evictExpiredIssuanceState() {
 			delete(p.issuanceTransactions, txID)
 		}
 	}
+	for notificationID, notification := range p.notifications {
+		if now.After(notification.ExpiresAt) {
+			delete(p.notifications, notificationID)
+		}
+	}
+	for nonce, expiry := range p.credentialNonces {
+		if now.After(expiry) {
+			delete(p.credentialNonces, nonce)
+		}
+	}
 	for jti, expiry := range p.usedAttestationPoPJTIs {
 		if now.After(expiry) {
 			delete(p.usedAttestationPoPJTIs, jti)
@@ -319,6 +355,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/nonce", p.handleNonce)
 	router.Post("/credential", p.handleCredential)
 	router.Post("/deferred_credential", p.handleDeferredCredential)
+	router.Post("/notification", p.handleNotification)
 }
 
 // GetInspectors returns OID4VCI-focused inspectors.
@@ -339,7 +376,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "oid4vci-pre-authorized",
 			Name:        "OID4VCI Pre-Authorized Code",
-			Description: "Wallet resolves a credential offer URI, discovers issuer metadata, exchanges a pre-authorized code for an access token with c_nonce, and requests a Verifiable Credential bound to a proof JWT.",
+			Description: "Wallet resolves a credential offer URI, discovers issuer metadata, exchanges a pre-authorized code for an access token, obtains c_nonce from the Nonce Endpoint, and requests a Verifiable Credential bound to a proof JWT.",
 			Executable:  true,
 			Category:    "issuance",
 			Steps: []plugin.FlowStep{
@@ -393,7 +430,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       4,
 					Name:        "Token Response",
-					Description: "Authorization Server validates the pre-authorized code and returns an access token with a c_nonce challenge for proof binding (OID4VCI §6.2).",
+					Description: "Authorization Server validates the pre-authorized code and returns an access token (OID4VCI §6.2). The wallet obtains the proof challenge from the Nonce Endpoint.",
 					From:        "Authorization Server",
 					To:          "Wallet",
 					Type:        "response",
@@ -418,8 +455,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Credential Issuer",
 					Type:        "request",
 					Parameters: map[string]string{
-						"credential_configuration_id": "Requested credential configuration (REQUIRED)",
-						"proof / proofs":              "Proof object(s) with proof_type=jwt containing signed JWT (REQUIRED when proof_types_supported declared)",
+						"credential_configuration_id / credential_identifier": "Exactly one identifier selected according to the Token Response (REQUIRED)",
+						"proofs": "Proof object keyed by proof type with a non-empty JWT array (REQUIRED when proof_types_supported declared)",
 					},
 					Security: []string{
 						"Proof JWT header typ must be openid4vci-proof+jwt",
@@ -431,15 +468,13 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       6,
 					Name:        "Credential Response",
-					Description: "Credential Issuer validates proof key binding, nonce freshness, and audience, then returns the issued Verifiable Credential in the requested format with a fresh c_nonce for subsequent requests (OID4VCI §7.3).",
+					Description: "Credential Issuer validates proof key binding, nonce freshness, and audience, then returns the issued Verifiable Credential in the requested format (OID4VCI §8.3).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"format":             "Per credential_configuration_id (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, or ldp_vc)",
-						"credential":         "Issuer-signed credential in the negotiated format",
-						"c_nonce":            "Next challenge nonce for any follow-up credential requests",
-						"c_nonce_expires_in": "Next nonce lifetime in seconds",
+						"credentials":     "Array of objects containing issuer-signed credentials",
+						"notification_id": "Identifier for status notification at the notification endpoint",
 					},
 					Security: []string{
 						"Credential must be signed by the issuer using advertised key material and algorithm",
@@ -506,7 +541,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       4,
 					Name:        "Token Response",
-					Description: "Authorization Server validates pre-authorized code and tx_code, then returns access token with c_nonce challenge (OID4VCI §6.2).",
+					Description: "Authorization Server validates pre-authorized code and tx_code, then returns an access token (OID4VCI §6.2). The wallet obtains the proof challenge from the Nonce Endpoint.",
 					From:        "Authorization Server",
 					To:          "Wallet",
 					Type:        "response",
@@ -529,8 +564,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Credential Issuer",
 					Type:        "request",
 					Parameters: map[string]string{
-						"credential_configuration_id": "Requested credential configuration (REQUIRED)",
-						"proof / proofs":              "Proof object(s) with proof_type=jwt (REQUIRED)",
+						"credential_configuration_id / credential_identifier": "Exactly one identifier selected according to the Token Response (REQUIRED)",
+						"proofs": "Proof object keyed by proof type with a non-empty JWT array (REQUIRED)",
 					},
 					Security: []string{
 						"Proof JWT typ must be openid4vci-proof+jwt",
@@ -540,14 +575,13 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       6,
 					Name:        "Credential Response",
-					Description: "Credential Issuer validates proof and returns the issued Verifiable Credential with a fresh c_nonce (OID4VCI §7.3).",
+					Description: "Credential Issuer validates proof and returns the issued Verifiable Credential (OID4VCI §8.3).",
 					From:        "Credential Issuer",
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"format":     "Per credential_configuration_id (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, or ldp_vc)",
-						"credential": "Issuer-signed credential in the negotiated format",
-						"c_nonce":    "Next challenge nonce",
+						"credentials":     "Array of objects containing issuer-signed credentials",
+						"notification_id": "Identifier for status notification at the notification endpoint",
 					},
 					Security: []string{
 						"Credential is signed by the issuer and returned in the negotiated format",
@@ -593,7 +627,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       3,
 					Name:        "Token Request (Pre-Authorized Code)",
-					Description: "Wallet exchanges pre-authorized code for an access token with c_nonce (OID4VCI §6.1).",
+					Description: "Wallet exchanges the pre-authorized code for an access token (OID4VCI §6.1).",
 					From:        "Wallet",
 					To:          "Authorization Server",
 					Type:        "request",
@@ -608,7 +642,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       4,
 					Name:        "Token Response",
-					Description: "Authorization Server returns access token and c_nonce challenge for proof binding (OID4VCI §6.2).",
+					Description: "Authorization Server returns an access token (OID4VCI §6.2); proof nonce acquisition is a separate Nonce Endpoint request.",
 					From:        "Authorization Server",
 					To:          "Wallet",
 					Type:        "response",
@@ -645,9 +679,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"transaction_id":     "Opaque identifier for the pending issuance transaction (REQUIRED)",
-						"c_nonce":            "Next challenge nonce",
-						"c_nonce_expires_in": "Next nonce lifetime in seconds",
+						"transaction_id": "Opaque identifier for the pending issuance transaction (REQUIRED)",
+						"interval":       "Minimum polling interval in seconds (REQUIRED)",
 					},
 					Security: []string{
 						"transaction_id is bound to the original access token — a different token cannot poll for this credential",
@@ -656,7 +689,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       7,
 					Name:        "Poll Deferred Endpoint",
-					Description: "Wallet polls the deferred_credential endpoint with transaction_id until the credential is ready. Issuer returns issuance_pending while processing (OID4VCI §9.1).",
+					Description: "Wallet polls the deferred_credential endpoint with transaction_id until the credential is ready. While pending, the issuer returns HTTP 202 with the same transaction_id and an interval (OID4VCI §9.1).",
 					From:        "Wallet",
 					To:          "Credential Issuer",
 					Type:        "request",
@@ -667,7 +700,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					Security: []string{
 						"Access token must match the token used in the original credential request",
 						"Wallet should poll according to server guidance and apply reasonable backoff",
-						"issuance_pending error indicates credential is not yet ready",
+						"HTTP 202 with transaction_id and interval indicates the credential is not yet ready",
 					},
 				},
 				{
@@ -678,8 +711,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Wallet",
 					Type:        "response",
 					Parameters: map[string]string{
-						"format":     "Per credential_configuration_id (dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, or ldp_vc)",
-						"credential": "Issuer-signed credential in the negotiated format",
+						"credentials":     "Array of objects containing issuer-signed credentials",
+						"notification_id": "Identifier for status notification at the notification endpoint",
 					},
 					Security: []string{
 						"Credential is identical to what would have been returned in an immediate response",

@@ -129,18 +129,18 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 
 	credentialID := d.plugin.randomValue(24)
 	credentialSubject := map[string]interface{}{
-		"id":      subject,
-		"_sd":     disclosureDigests,
-		"_sd_alg": "sha-256",
+		"id":  subject,
+		"_sd": disclosureDigests,
 	}
 	claims := jwt.MapClaims{
-		"iss": nowIssuer(d.plugin.issuerID()),
-		"sub": subject,
-		"iat": now.Unix(),
-		"nbf": now.Unix(),
-		"exp": now.Add(20 * time.Minute).Unix(),
-		"jti": credentialID,
-		"vct": configuration.VCT,
+		"_sd_alg": "sha-256",
+		"iss":     nowIssuer(d.plugin.issuerID()),
+		"sub":     subject,
+		"iat":     now.Unix(),
+		"nbf":     now.Unix(),
+		"exp":     now.Add(20 * time.Minute).Unix(),
+		"jti":     credentialID,
+		"vct":     configuration.VCT,
 		"vc": map[string]interface{}{
 			"@context":          credentialContexts(configuration),
 			"type":              credentialTypes(configuration),
@@ -159,7 +159,7 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["typ"] = "vc+sd-jwt"
+	token.Header["typ"] = "dc+sd-jwt"
 	token.Header["kid"] = d.plugin.keySet.RSAKeyID()
 	issuerSignedJWT, err := token.SignedString(d.plugin.keySet.RSAPrivateKey())
 	if err != nil {

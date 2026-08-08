@@ -1,7 +1,9 @@
 package oid4vci
 
 import (
+	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strings"
@@ -223,8 +225,8 @@ func (p *Plugin) recordAttestationPoPJTI(jti string) bool {
 
 // verificationKeyFromJWK resolves a bare JWK (no cnf wrapper) to a
 // crypto/*.PublicKey and the JWT algorithm family prefix expected to sign
-// with it. Shared by the Client Attestation PoP (cnf.jwk) and, via
-// proofVerificationKeyFromClaims, the OID4VCI proof JWT (also cnf.jwk).
+// with it. Shared by the Client Attestation PoP (cnf.jwk) and the OID4VCI
+// proof JWT's JOSE header jwk.
 func verificationKeyFromJWK(jwk crypto.JWK) (interface{}, string, error) {
 	switch strings.ToUpper(strings.TrimSpace(jwk.Kty)) {
 	case "RSA":
@@ -239,6 +241,18 @@ func verificationKeyFromJWK(jwk crypto.JWK) (interface{}, string, error) {
 			return nil, "", fmt.Errorf("EC parse failed: %w", err)
 		}
 		return key, "ES", nil
+	case "OKP":
+		if strings.TrimSpace(jwk.Crv) != "Ed25519" {
+			return nil, "", fmt.Errorf("unsupported OKP curve %q", jwk.Crv)
+		}
+		keyBytes, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(jwk.X))
+		if err != nil {
+			return nil, "", fmt.Errorf("Ed25519 x parse failed: %w", err)
+		}
+		if len(keyBytes) != ed25519.PublicKeySize {
+			return nil, "", fmt.Errorf("Ed25519 x length %d is invalid", len(keyBytes))
+		}
+		return ed25519.PublicKey(keyBytes), "EdDSA", nil
 	default:
 		return nil, "", fmt.Errorf("unsupported kty %q", jwk.Kty)
 	}

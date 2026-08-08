@@ -164,9 +164,7 @@ func TestAuthorizationCodeGrantWithClientAttestationSucceeds(t *testing.T) {
 	if asString(t, payload["access_token"]) == "" {
 		t.Fatalf("expected access_token in token response")
 	}
-	if asString(t, payload["c_nonce"]) == "" {
-		t.Fatalf("expected c_nonce in token response")
-	}
+	assertTokenResponseHasNoCredentialNonce(t, payload)
 }
 
 func TestAuthorizationCodeGrantRejectsClientIDMismatchWithAttestation(t *testing.T) {
@@ -343,7 +341,7 @@ func TestCredentialRequestRequiresKeyAttestationForHAIPConfiguration(t *testing.
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -365,15 +363,15 @@ func TestCredentialRequestRequiresKeyAttestationForHAIPConfiguration(t *testing.
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": "MobileDrivingLicenceMsoMdocHAIP",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
 	)
 	assertStatus(t, credentialResp, http.StatusOK)
 	credentialPayload := decodeJSONMap(t, credentialResp)
-	if asString(t, credentialPayload["credential"]) == "" {
+	if asString(t, firstCredential(t, credentialPayload)) == "" {
 		t.Fatalf("expected mso_mdoc credential in response")
 	}
 }
@@ -402,7 +400,7 @@ func TestCredentialRequestRejectsMissingKeyAttestationForHAIPConfiguration(t *te
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	// Standard RSA proof with no key_attestation header at all.
 	proofJWT := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
@@ -412,8 +410,8 @@ func TestCredentialRequestRejectsMissingKeyAttestationForHAIPConfiguration(t *te
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": "MobileDrivingLicenceMsoMdocHAIP",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
@@ -449,7 +447,7 @@ func TestCredentialRequestRejectsKeyAttestationBelowRequiredLevel(t *testing.T) 
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -472,8 +470,8 @@ func TestCredentialRequestRejectsKeyAttestationBelowRequiredLevel(t *testing.T) 
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": "MobileDrivingLicenceMsoMdocHAIP",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
@@ -511,7 +509,7 @@ func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 	proofJWT := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
 
 	responseKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -523,8 +521,8 @@ func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/oid4vci/credential", strings.NewReader(mustMarshalJSON(t, map[string]interface{}{
 		"credential_configuration_id": "UniversityDegreeCredential",
-		"proofs": []map[string]interface{}{
-			{"proof_type": "jwt", "jwt": proofJWT},
+		"proofs": map[string]interface{}{
+			"jwt": []string{proofJWT},
 		},
 		"credential_response_encryption": map[string]interface{}{
 			"jwk": responseJWK,
@@ -567,7 +565,7 @@ func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(plaintext, &decrypted); err != nil {
 		t.Fatalf("unmarshal decrypted credential response: %v", err)
 	}
-	if asString(t, decrypted["credential"]) == "" {
+	if asString(t, firstCredential(t, decrypted)) == "" {
 		t.Fatalf("expected credential in decrypted JWE payload")
 	}
 }
@@ -593,7 +591,7 @@ func TestCredentialResponseEncryptionRejectsUnsupportedEnc(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 	proofJWT := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
 
 	responseKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -608,8 +606,8 @@ func TestCredentialResponseEncryptionRejectsUnsupportedEnc(t *testing.T) {
 		server.URL+"/oid4vci/credential",
 		map[string]interface{}{
 			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 			"credential_response_encryption": map[string]interface{}{
 				"jwk": responseJWK,
@@ -789,7 +787,7 @@ func buildKeyAttestationJWT(t *testing.T, leafKey *ecdsa.PrivateKey, leafDER []b
 }
 
 // createECProofJWTWithKeyAttestation builds an OID4VCI 1.0 §7 proof JWT bound
-// to an EC holder key (cnf.jwk), carrying the given raw Key Attestation JWT in
+// to an EC holder key (JOSE jwk), carrying the given raw Key Attestation JWT in
 // the key_attestation JOSE header (Appendix F.1).
 func createECProofJWTWithKeyAttestation(t *testing.T, holderKey *ecdsa.PrivateKey, holderJWK crypto.JWK, nonce string, subject string, audience string, keyAttestationJWT string) string {
 	t.Helper()
@@ -802,13 +800,10 @@ func createECProofJWTWithKeyAttestation(t *testing.T, holderKey *ecdsa.PrivateKe
 		"iat":   now.Unix(),
 		"exp":   now.Add(3 * time.Minute).Unix(),
 		"jti":   "proof-" + subject,
-		"cnf": map[string]interface{}{
-			"jwk": holderJWK,
-		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
-	token.Header["kid"] = holderJWK.Kid
+	token.Header["jwk"] = holderJWK
 	token.Header["key_attestation"] = keyAttestationJWT
 	signed, err := token.SignedString(holderKey)
 	if err != nil {

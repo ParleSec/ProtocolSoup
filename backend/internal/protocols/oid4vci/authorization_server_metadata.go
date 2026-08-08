@@ -46,6 +46,7 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": tokenEndpointAuthMethods,
+		"authorization_details_types_supported": []string{"openid_credential"},
 		// RFC 9449 Section 5.1: signals DPoP support and the acceptable
 		// proof JWS algorithms at this issuer's own token endpoint. DPoP is
 		// opt-in per request (no separate on/off switch to reflect here);

@@ -39,7 +39,7 @@ func TestMsoMdocStoredInWalletStore(t *testing.T) {
 	assertStatus(t, tokenResp, http.StatusOK)
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
-	cNonce := asString(t, tokenPayload["c_nonce"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
 
 	// Use a persistent device key, reload it, and confirm the same key survives
 	// the reload before binding it at issuance.
@@ -63,8 +63,8 @@ func TestMsoMdocStoredInWalletStore(t *testing.T) {
 		map[string]interface{}{
 			"credential_configuration_id": mdocConfigurationID,
 			"format":                      "mso_mdoc",
-			"proofs": []map[string]interface{}{
-				{"proof_type": "jwt", "jwt": proofJWT},
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
 			},
 		},
 		map[string]string{"Authorization": "Bearer " + accessToken},
