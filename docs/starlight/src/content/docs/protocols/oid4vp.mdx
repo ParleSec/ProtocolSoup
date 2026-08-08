@@ -53,7 +53,7 @@ The default and canonical presentation request targets the ISO/IEC 18013-5 mobil
     "id": "mdl",
     "format": "mso_mdoc",
     "meta": {
-      "doctype_values": ["org.iso.18013.5.1.mDL"]
+      "doctype_value": "org.iso.18013.5.1.mDL"
     },
     "claims": [
       { "path": ["org.iso.18013.5.1", "family_name"] },
@@ -63,7 +63,9 @@ The default and canonical presentation request targets the ISO/IEC 18013-5 mobil
 }
 ```
 
-SD-JWT VC and the W3C formats remain fully selectable by sending an explicit `dcql_query` (or `scope`) that names them. For example, a `university_degree` SD-JWT VC requesting `degree` and `graduation_year`:
+SD-JWT VC and the W3C formats remain selectable by sending an explicit
+`dcql_query` that names them. Scope aliases are not currently resolved to
+DCQL and are therefore not conformance evidence. For example:
 
 ```json
 {
@@ -85,7 +87,9 @@ SD-JWT VC and the W3C formats remain fully selectable by sending an explicit `dc
 
 - Authorization request enforces XOR: exactly one of `dcql_query` or `scope`.
 - For `response_mode` `direct_post` and `direct_post.jwt`, `response_uri` is required and `redirect_uri` must be absent.
-- For `response_mode` `dc_api` and `dc_api.jwt` (the W3C Digital Credentials API), `response_uri` and `state` are not used; the request carries `origin` (and `expected_origins` for signed requests), and the wallet response is correlated by `request_id`.
+- The repository does not currently provide a browser-mediated W3C Digital
+  Credentials API flow. Private `request_id` APIs are not classified as DC API
+  conformance evidence.
 - Request object header `typ` must be `oauth-authz-req+jwt`.
 - VP token header `typ` must be `vp+jwt` (JWT/SD-JWT VP tokens; not used by `mso_mdoc`).
 - `direct_post.jwt` inner response header `typ` must be `oauth-authz-resp+jwt` (SD-JWT path; the `mso_mdoc` online profile uses an unsigned encrypted JWT, see below).
@@ -130,7 +134,7 @@ Example DCQL query requesting an mdoc mobile driving licence:
   "credentials": [{
     "id": "mdl",
     "format": "mso_mdoc",
-    "meta": { "doctype_values": ["org.iso.18013.5.1.mDL"] },
+    "meta": { "doctype_value": "org.iso.18013.5.1.mDL" },
     "claims": [
       { "path": ["org.iso.18013.5.1", "family_name"] },
       { "path": ["org.iso.18013.5.1", "document_number"] }
@@ -141,11 +145,9 @@ Example DCQL query requesting an mdoc mobile driving licence:
 
 ## HAIP mode and the W3C Digital Credentials API
 
-ProtocolSoup implements the OpenID4VC **High Assurance Interoperability Profile
-(HAIP 1.0, final)** as an opt-in mode and adds the browser-mediated **W3C Digital
-Credentials API** presentation path. Both layer on top of the general SD-JWT VC
-and `mso_mdoc` support, which stays available and unchanged outside HAIP / DC API
-mode.
+ProtocolSoup implements verifier-side HAIP constraints as an opt-in mode.
+Browser-mediated W3C Digital Credentials API invocation and the HAIP wallet role
+remain unsupported and are excluded from the current certification scope.
 
 ### HAIP mode (`profile: "haip"`)
 
@@ -173,10 +175,10 @@ out-of-profile choices at request creation:
 
 ### W3C Digital Credentials API path (`dc_api`, `dc_api.jwt`)
 
-The backend implements the request-object, handover, audience, decryption, and
-policy-processing side of this path. The repository does not currently invoke
-the browser's Digital Credentials API, so this is not exposed as an end-to-end
-browser demo.
+The backend contains request-object, handover, audience, decryption, and policy
+building blocks for this path. The repository does not invoke the browser's
+Digital Credentials API, and the wallet harness rejects these response modes.
+These private APIs are implementation scaffolding, not a conforming DC API flow.
 
 In a conforming browser invocation, the request is delivered browser-mediated rather than by redirect / `direct_post`.
 The verifier sets `response_mode: "dc_api.jwt"` and the Verifier Web `origin`
@@ -227,7 +229,8 @@ Verifier identity is bound to a DNS name via X.509 certificate Subject Alternati
 2. Leaf certificate DNS SAN matches the `client_id` DNS name
 3. `response_uri` hostname matches the `client_id` DNS name
 4. JWT signature verifies against the leaf certificate public key
-5. The `client_id_scheme` claim is present in the signed request object
+5. The Client Identifier Prefix is inferred from `client_id`; the removed
+   draft `client_id_scheme` parameter is not emitted.
 
 When no certificate material is configured via environment variables, the verifier auto-provisions an ephemeral ECDSA P-256 self-signed CA + leaf chain at startup, with the leaf SAN bound to the deployment hostname.
 
@@ -236,7 +239,8 @@ When no certificate material is configured via environment variables, the verifi
 The HAIP-mandated Client Identifier Prefix for signed requests. The `client_id`
 is `x509_hash:<base64url(SHA-256(leaf-cert-DER))>` — verifier identity is bound to
 the hash of the leaf certificate's DER encoding rather than a DNS SAN. The request
-object carries the `x5c` chain. This is the default scheme for HAIP / DC API
+object carries the `x5c` chain without the root trust anchor. This is the
+default scheme for HAIP
 requests and reuses the same X.509 signer as `x509_san_dns`. When a persistence
 root (data dir) is configured the auto-provisioned signing certificate is
 persisted and reloaded across restarts, so the `x509_hash` `client_id` stays
@@ -249,17 +253,21 @@ appoint its own trust root.
 
 ### Not implemented
 
-- `pre_registered`, `openid_federation` are defined in the spec but not currently implemented.
+- `openid_federation` is not currently implemented. Unknown Client Identifier
+  Prefixes follow the Final fallback policy and are treated as pre-registered.
 
 ## Verifier Evaluation Flow (OID4VP §5, §6, §8)
 
 1. **Create Authorization Request** — Verifier builds a signed request object (`typ=oauth-authz-req+jwt`) containing `client_id`, `response_type=vp_token`, `response_mode`, `response_uri`, `dcql_query` (or `scope`), `nonce`, `state`, and `exp`. Publishes it at a `request_uri`.
-2. **Wallet Fetches Request Object** — Wallet fetches the signed request from `request_uri` via GET or POST. Validates JWT signature, `typ` header, and expiry before processing.
+2. **Wallet Fetches Request Object** — Wallet fetches the compact signed JWT
+   from `request_uri` via GET with media type
+   `application/oauth-authz-req+jwt`. POST retrieval is explicitly unsupported
+   and returns 405. The wallet validates signature, `typ`, and expiry.
 3. **Wallet Submits Response** — Wallet evaluates DCQL query, selects matching credentials, creates the `vp_token`, and submits it:
    - `direct_post`: form-post `vp_token` + `state`
    - `direct_post.jwt`: form-post encrypted `response` JWE containing signed inner JWT (`typ=oauth-authz-resp+jwt`) with `vp_token`, `state`, and audience bound to `response_uri`
-   - `dc_api.jwt` (W3C Digital Credentials API): post encrypted `response` JWE + `request_id` (no `state`), with the response audience bound to `origin:<verifier-origin>`
-4. **Verifier Validates + Policy Decision** — Verifier resolves the session by `state` (redirect path) or `request_id` (DC API path), then validates:
+4. **Verifier Validates + Policy Decision** — Verifier requires exact `state`
+   correlation for redirect response modes, then validates:
    - nonce binding (VP token nonce matches request nonce)
    - audience binding (VP token audience includes `client_id`, or `origin:<origin>` on the DC API path)
    - token expiry
@@ -278,7 +286,7 @@ appoint its own trust root.
 | Verifier Attestation Discovery | OpenID discovery metadata for the verifier attestation issuer |
 | Verifier Attestation AS Metadata | OAuth 2.0 Authorization Server metadata for the attestation issuer |
 | Verifier Attestation JWKS | Public signing keys used to validate `verifier_attestation` request objects |
-| Response Endpoint | Wallet submits `direct_post` / `direct_post.jwt` (correlated by `state`) or `dc_api.jwt` (correlated by `request_id`) response payloads |
+| Response Endpoint | Wallet submits `direct_post` / `direct_post.jwt`, correlated by exact `state` |
 | Verification Result Endpoint (optional) | Verifier exposes policy evaluation outcome to client tooling |
 
 ## Illustrative Examples (Non-Normative)

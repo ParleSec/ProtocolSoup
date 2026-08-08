@@ -23,7 +23,7 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 
 | Flow ID | Name | Steps | Description |
 |---------|------|-------|-------------|
-| `oid4vci-pre-authorized` | Pre-Authorized Code | 6 | Resolve offer, discover metadata, exchange pre-authorized code, receive token + c_nonce, submit proof, receive issued credential |
+| `oid4vci-pre-authorized` | Pre-Authorized Code | 6 | Resolve offer, discover metadata, exchange pre-authorized code, receive an access token, obtain `c_nonce` from the Nonce Endpoint, submit proof, receive issued credential |
 | `oid4vci-pre-authorized-tx-code` | Pre-Authorized + tx_code | 6 | Same flow with mandatory `tx_code` at token exchange |
 | `oid4vci-deferred-issuance` | Deferred Issuance | 8 | Full end-to-end flow: offer, metadata, token, credential request, deferred response with `transaction_id`, polling, credential ready |
 
@@ -43,10 +43,10 @@ The issuer's default and lead `credential_configurations_supported` entry is the
 |----------|-------|
 | Credential configuration selection | Wallet chooses from `credential_configurations_supported`. The default and lead entry is the mDL (`MobileDrivingLicenceMsoMdoc`); omitting an explicit configuration selects it. |
 | Credential formats | `mso_mdoc` (ISO/IEC 18013-5 mDL, **default**), `dc+sd-jwt` (SD-JWT VC), `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` (W3C Data Integrity) |
-| Proof container | `proof` or `proofs` with `proof_type: jwt` (e.g., `{"proof_type":"jwt","jwt":"<compact-jws>"}`) |
-| `mso_mdoc` device key binding | Proof `cnf.jwk` must be an EC P-256 key; it is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key |
+| Proof container | OID4VCI 1.0 `proofs` object containing exactly one JWT in this implementation (for example, `{"jwt":["<compact-jws>"]}`). Batch issuance and other proof types are not advertised; the removed draft `proof` parameter is ignored. |
+| `mso_mdoc` device key binding | Proof JOSE header `jwk` must be an EC P-256 key; it is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key |
 | Proof JWT header type | `openid4vci-proof+jwt` |
-| Proof JWT required claims | `iss`, `sub`, `aud`, `nonce`, `iat`, `exp`, `cnf.jwk` |
+| Proof JWT | Protected header contains exactly one key reference (`jwk` is supported); payload requires `aud`, `nonce`, and `iat`. Anonymous pre-authorized clients omit `iss`. |
 | Deferred issuance indicator | `transaction_id` returned by credential endpoint (e.g., an opaque identifier such as `"txn_..."`) |
 
 ## Pre-Authorized Code Issuance Flow (OID4VCI §4, §6.1, §7)
@@ -54,11 +54,12 @@ The issuer's default and lead `credential_configurations_supported` entry is the
 1. **Resolve Credential Offer** — Wallet receives `credential_offer_uri` out-of-band and fetches the credential offer object from the Credential Issuer. Offer contains `credential_issuer`, `credential_configuration_ids`, and `grants.urn:ietf:params:oauth:grant-type:pre-authorized_code`.
 2. **Discover Issuer Metadata** — Wallet fetches `/.well-known/openid-credential-issuer` to discover `credential_configurations_supported`, `credential_endpoint`, `nonce_endpoint`, `deferred_credential_endpoint`, and token endpoint URL.
 3. **Token Request** — Wallet calls token endpoint with `grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code`, `pre-authorized_code`, and `tx_code` when required by the offer grant.
-4. **Token Response** — Authorization Server validates the pre-authorized code (and `tx_code` if required) and returns `access_token`, `token_type`, `scope` (if applicable), `c_nonce`, and `c_nonce_expires_in`.
-5. **Credential Request** — Wallet submits `credential_configuration_id` and `proof`/`proofs` (`proof_type: jwt`) with a proof JWT bound to the active `c_nonce` and the credential issuer audience.
+4. **Token Response and Nonce Request** — Authorization Server returns `access_token`, `token_type`, and `scope` (if applicable). The Wallet then obtains `c_nonce` from the advertised Nonce Endpoint.
+5. **Credential Request** — Wallet submits `credential_configuration_id` and `proofs: { "jwt": ["..."] }` with a proof JWT bound to the active `c_nonce` and the credential issuer audience.
 6. **Credential Response** — Issuer validates proof key binding, nonce freshness, and audience/subject constraints, then returns:
-   - **Immediate**: `format` matching the credential configuration (e.g. `dc+sd-jwt` with disclosures, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` with Data Integrity proof, or `mso_mdoc` as base64url-encoded CBOR `IssuerSigned`), `credential`, next `c_nonce`, or
-   - **Deferred**: `transaction_id`, next `c_nonce` — wallet then polls `deferred_credential` endpoint until credential is ready.
+   - **Immediate**: a `credentials` array containing the live credential and a `notification_id`, or
+   - **Deferred**: `transaction_id` — wallet then polls `deferred_credential` until it receives the `credentials` array and `notification_id`.
+7. **Notification** — Wallet reports `credential_accepted`, `credential_failure`, or `credential_deleted` to the advertised `notification_endpoint`. The identifier is bound to the issuing access token and exact retries are idempotent.
 
 ## Authorization Code Flow
 
@@ -78,11 +79,18 @@ In addition to `pre-authorized_code`, the token endpoint accepts
 3. Wallet drives the standard OAuth 2.0 authorization code flow (with PKCE)
    against `authorization_endpoint`, then exchanges the code at
    `token_endpoint` exactly as it would for `pre-authorized_code`, receiving
-   `access_token` and `c_nonce`.
+   `access_token` before requesting `c_nonce` from the Nonce Endpoint.
 
 This path is implemented and covered at the HTTP/API layer. The current Looking
 Glass OID4VCI executors demonstrate only the pre-authorized-code variants; they
 do not yet drive this authorization-code flow.
+
+Authorization requests can carry `openid_credential` `authorization_details`.
+The issuer validates each requested configuration, binds the approved details
+to the authorization code and access token, returns stable
+`credential_identifiers` in the token response, and authorizes credential
+requests by `credential_identifier`. A credential identifier from another
+token or a replayed authorization code is rejected.
 
 ## HAIP issuance building blocks
 
@@ -101,8 +109,8 @@ The unattested Final flow remains unaffected by default.
   not issue refresh tokens for any grant, so DPoP binding applies only to the
   access token here (the oauth2 protocol's `authorization_code` grant does
   bind a refresh token for public clients, per RFC 9449 Section 5). A token
-  bound this way is then rejected at the credential, nonce, and
-  deferred_credential endpoints unless presented as `Authorization: DPoP
+  bound this way is then rejected at the credential, nonce,
+  deferred_credential, and notification endpoints unless presented as `Authorization: DPoP
   <token>` with a matching, unreplayed DPoP proof — presenting it as a bare
   bearer token fails outright, never silently downgrades. A server-provided
   nonce challenge (`DPoP-Nonce` response header, `use_dpop_nonce` error) is
@@ -116,7 +124,7 @@ The unattested Final flow remains unaffected by default.
   The token endpoint accepts an `OAuth-Client-Attestation` +
   `OAuth-Client-Attestation-PoP` header pair as an alternative to
   `client_secret`/Basic auth. The attestation JWT's `x5c` chain is verified
-  against a configured trust anchor, its `cnf.jwk` becomes the Client Instance
+   against a configured trust anchor, its `cnf.jwk` becomes the Client Instance
   Key that must sign the PoP JWT, and the PoP's `jti` is single-use. When both
   headers are present, they are the authentication verdict for the request —
   a failed attestation is never silently downgraded to a weaker method. The
@@ -129,7 +137,7 @@ The unattested Final flow remains unaffected by default.
   configurations, the proof JWT's JOSE header must carry a `key_attestation`
   JWT (`typ: key-attestation+jwt`) whose `x5c` chain is verified against a
   configured trust anchor, and whose `attested_keys` must include the proof's
-  `cnf.jwk` holder key and satisfy any required `key_storage` /
+  JOSE-header `jwk` holder key and satisfy any required `key_storage` /
   `user_authentication` attack-potential levels.
 - **Encrypted credential responses.** A wallet may include a
   `credential_response_encryption` object (`jwk`, `enc`) on the Credential or
@@ -149,9 +157,21 @@ is still required before any certification or external-conformance claim.
 - `tx_code` is required when the offer grant includes a `tx_code` object.
 - Proofs are required when proof types are declared for the credential configuration.
 - Proof JWT header `typ` must be `openid4vci-proof+jwt`.
-- Proof must include `iss`, `sub`, `aud`, `nonce`, `iat`, `exp`, and `cnf.jwk`.
+- Proof payload must include `aud`, `nonce`, and `iat`; anonymous clients omit `iss`. The proof key is carried in exactly one JOSE key-reference header, with `jwk` supported by this issuer.
 - Nonce is freshness-bound and one-time in issuance requests (replay and expiry are rejected).
 - Deferred polling requires matching `transaction_id` and same access token lineage.
+- Authorization codes and deferred transaction identifiers are redeemed
+  atomically at most once, including under concurrent requests.
+- Notification retries are idempotent only for the same event/description;
+  conflicting lifecycle events return a conflict instead of rewriting history.
+- Issued SD-JWT VC uses `typ: dc+sd-jwt`, canonical tilde serialization, a
+  top-level `_sd_alg`, and positional recursive disclosure processing for
+  objects and arrays. Reserved/permanent-claim collisions are rejected, and a
+  stored issuer credential must not already contain a Key Binding JWT.
+- `mso_mdoc` verification requires a tagged MSO, version/digest/document/device
+  invariants, unique element identifiers, DeviceResponse version `1.0`, and an
+  Annex B document-signer profile. Revocation requires external CRL/OCSP state
+  and is not inferred from local certificate-path validation.
 
 ## Endpoints
 
@@ -160,15 +180,15 @@ is still required before any certification or external-conformance claim.
 | Credential Issuer Metadata Endpoint | `/.well-known/openid-credential-issuer/{issuer-path}` | Discover issuer metadata, credential configurations, and endpoint URLs |
 | Authorization Server Metadata Endpoint | `/.well-known/oauth-authorization-server/{issuer-path}` (RFC 8414) | Discover `authorization_endpoint`, `token_endpoint`, and supported grant/auth methods for `authorization_code` |
 | Credential Offer URI | `credential_offer_uri` | Retrieve a credential offer by reference |
-| Token Endpoint | Issuer/Authorization Server metadata | Exchange `pre-authorized_code` or `authorization_code` for access token and nonce; accepts client attestation headers |
-| Nonce Endpoint | `nonce_endpoint` from issuer metadata | Request a fresh `c_nonce` challenge when needed |
+| Token Endpoint | Issuer/Authorization Server metadata | Exchange `pre-authorized_code` or `authorization_code` for an access token; accepts client attestation headers |
+| Nonce Endpoint | `nonce_endpoint` from issuer metadata | Public endpoint that returns a fresh, single-use `c_nonce`; no access token is required |
 | Credential Endpoint | `credential_endpoint` from issuer metadata | Submit proof and request credential issuance |
 | Deferred Credential Endpoint | `deferred_credential_endpoint` from issuer metadata | Poll a pending issuance transaction with `transaction_id` |
 
 ## Illustrative Examples (Non-Normative)
 
 - Pre-authorized token request body (form-encoded): `grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code&pre-authorized_code=...`
-- Proof JWT protected header for the default mDL `mso_mdoc`: `{"typ":"openid4vci-proof+jwt","alg":"ES256","kid":"..."}` with an EC P-256 `cnf.jwk` (the device key bound into the MSO). The SD-JWT VC and JOSE formats accept any wallet-supported signing algorithm.
+- Proof JWT protected header for the default mDL `mso_mdoc`: `{"typ":"openid4vci-proof+jwt","alg":"ES256","jwk":{...}}`, where the EC P-256 public key is the device key bound into the MSO.
 - Deferred credential response shape: `{"transaction_id":"...","c_nonce":"...","c_nonce_expires_in":...}`
 
 ## Default credential format (behavioural change)
@@ -186,7 +206,7 @@ As of the parity-then-flip change, the issuer's **default and lead** credential 
 
 **Action for consumers:** API consumers that relied on the implicit SD-JWT VC default must now name `UniversityDegreeCredential` (or the desired configuration) explicitly to continue receiving SD-JWT VC. The wallet harness honours the `WALLET_DEFAULT_CREDENTIAL_FORMAT` environment variable (default `mso_mdoc`) for its stored and presented format.
 
-Note that the mDL proof uses an EC P-256 device key signed with `ES256`: the proof `cnf.jwk` is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key, per ISO/IEC 18013-5.
+Note that the mDL proof uses an EC P-256 device key signed with `ES256`: the proof header `jwk` is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key, per ISO/IEC 18013-5.
 
 ## Credential Inspection (Looking Glass)
 
@@ -204,7 +224,7 @@ Both fields are part of the shared, format-agnostic evidence/assurance shape rat
 - Credential offer envelope: exactly one of `credential_offer` or `credential_offer_uri`
 - Metadata retrieval: well-known endpoint resolves to issuer metadata and endpoint URLs
 - Token exchange: `pre-authorized_code` grant processing and `tx_code` enforcement when offered
-- Proof JWT: `typ=openid4vci-proof+jwt`, `cnf.jwk` key binding, `aud` matches issuer, `nonce` matches active `c_nonce`
+- Proof JWT: `typ=openid4vci-proof+jwt`, JOSE-header `jwk` key binding, `aud` matches issuer, `nonce` is a live single-use `c_nonce`
 - Nonce behavior: replayed or expired `c_nonce` is rejected; next nonce is returned after successful issuance
 - Credential response: serialization matches negotiated format (e.g. `dc+sd-jwt` includes issuer-signed JWT + disclosures, `ldp_vc` includes Data Integrity proof, `mso_mdoc` is base64url-encoded CBOR `IssuerSigned` with a COSE_Sign1 `IssuerAuth`)
 - Deferred flow: `issuance_pending` before ready time, then final credential on successful poll

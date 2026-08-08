@@ -21,12 +21,15 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
   (`credential_response_encryption`)
 - Sender-constrained access tokens (RFC 9449 DPoP), opt-in per request via a
   `DPoP` proof header at the token endpoint, enforced on the credential,
-  nonce, and deferred_credential endpoints when a token is bound, with an
+  nonce, deferred_credential, and notification endpoints when a token is bound, with an
   independent, off-by-default `DPoP-Nonce` challenge per role
   (`SHOWCASE_DPOP_NONCE_REQUIRED` at the token endpoint,
   `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` at the resource endpoints); this
   issuer's RFC 8414 metadata advertises `dpop_signing_alg_values_supported`
 - Deferred issuance with `transaction_id`
+- Authorization-details state bound through authorization code, access token,
+  `credential_identifiers`, and credential request
+- Access-token-bound, idempotent credential status notifications
 - Replay/freshness denial handling
 
 The attestation, encryption, and DPoP items are HAIP-related API building
@@ -59,20 +62,38 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 | `/.well-known/openid-credential-issuer/oid4vci` | `GET` | Canonical credential issuer metadata (issuer-derived path) |
 | `/.well-known/oauth-authorization-server/oid4vci` | `GET` | Canonical Authorization Server metadata (RFC 8414, issuer-derived path) |
 | `/credential-offer/{offerID}` | `GET` | Resolve by-reference credential offer |
-| `/token` | `POST` | Exchange grant (`pre-authorized_code` or `authorization_code`) for access token + `c_nonce`; accepts `OAuth-Client-Attestation`/`-PoP` headers |
-| `/nonce` | `POST` | Rotate `c_nonce` for active access token |
+| `/token` | `POST` | Exchange grant (`pre-authorized_code` or `authorization_code`) for an access token; accepts `OAuth-Client-Attestation`/`-PoP` headers |
+| `/nonce` | `POST` | Obtain a fresh `c_nonce` for an active access token |
 | `/credential` | `POST` | Submit proof and request credential |
 | `/deferred_credential` | `POST` | Poll deferred transaction |
+| `/notification` | `POST` | Report the storage outcome for an issued credential |
 | `/offers/pre-authorized` | `POST` | Create pre-authorized offer |
 | `/offers/pre-authorized/by-value` | `POST` | Create by-value pre-authorized offer |
 | `/offers/pre-authorized/deferred` | `POST` | Create deferred pre-authorized offer |
 
 ## Real Execution Guarantees
 
-- Access tokens are issued by issuer keys; proof JWTs are signed by wallet keys and verified against `cnf.jwk`.
+- Access tokens are issued by issuer keys; proof JWTs are signed by wallet keys and verified against the proof JOSE header `jwk`.
 - Proof JWT header `typ` is validated as `openid4vci-proof+jwt` before credential issuance.
 - `credential` responses return real artifacts in the negotiated format (`dc+sd-jwt`, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`, or `mso_mdoc`) from live handler execution using wallet-bound subject data.
-- `mso_mdoc` (ISO/IEC 18013-5 mDL, doctype `org.iso.18013.5.1.mDL`) is issued as base64url-encoded CBOR `IssuerSigned`, with `IssuerAuth` signed (COSE_Sign1, ES256) by a document-signer key whose certificate chains to an IACA root per the ISO/IEC 18013-5 Annex B profile; the holder device key is bound into the MSO from the proof.
+- The issuer accepts one JWT proof per Credential Request. Batch issuance,
+  non-JWT proof types, and encrypted Credential Requests are not advertised.
+- Authorization codes, credential nonces, and deferred transaction identifiers
+  are consumed atomically; conflicting notification lifecycle events are
+  rejected without mutating accepted history.
+- `dc+sd-jwt` issuance uses `typ: dc+sd-jwt`, canonical compact serialization,
+  top-level `_sd_alg`, and positional recursive disclosure processing. Incoming
+  issuer credentials that already contain a Key Binding JWT are not stored.
+- `openid_credential` authorization details are validated before approval,
+  bound to the grant, and enforced through token-response
+  `credential_identifiers`; identifiers cannot be reused across access tokens.
+- Credential responses return an access-token-bound `notification_id`.
+  Accepted, failed, and deleted events mutate issuer state, emit Looking Glass
+  evidence, and treat exact retries idempotently.
+- `mso_mdoc` is issued as base64url CBOR `IssuerSigned`; verification enforces
+  tagged MSO bytes, MSO and DeviceResponse invariants, unique elements, value
+  digests, and the Annex B document-signer profile against an independent IACA
+  root. CRL/OCSP revocation requires external trust state.
 - Issued credentials are persisted into a shared wallet credential store for downstream OID4VP presentation lineage.
 - `c_nonce` freshness is enforced at runtime (`invalid_nonce` on stale replay/mismatch).
 - Client attestation, when presented, is authenticated by real `x5c` chain validation against `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` and real signature verification of both the attestation and PoP JWTs — never accepted on trust anchor absence.
