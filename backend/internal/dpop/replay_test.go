@@ -158,6 +158,28 @@ func TestNewRedisReplayStoreRejectsMalformedURL(t *testing.T) {
 	}
 }
 
+func TestSecureProductionRedisURLAllowsOnlyTLSOrFlyPrivateUpstash(t *testing.T) {
+	tests := []struct {
+		name    string
+		rawURL  string
+		allowed bool
+	}{
+		{name: "TLS", rawURL: "rediss://default:secret@redis.example:6379/0", allowed: true},
+		{name: "Fly private Upstash", rawURL: "redis://default:secret@fly-vc-replay.upstash.io:6379/0", allowed: true},
+		{name: "plaintext public", rawURL: "redis://default:secret@redis.example:6379/0"},
+		{name: "lookalike host", rawURL: "redis://default:secret@fly-vc-replay.upstash.io.attacker.example:6379/0"},
+		{name: "missing password", rawURL: "redis://default@fly-vc-replay.upstash.io:6379/0"},
+		{name: "wrong port", rawURL: "redis://default:secret@fly-vc-replay.upstash.io:6380/0"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := IsSecureProductionRedisURL(test.rawURL); got != test.allowed {
+				t.Fatalf("IsSecureProductionRedisURL() = %t, want %t", got, test.allowed)
+			}
+		})
+	}
+}
+
 func TestRedisReplayStoreReserveWithNonPositiveTTLReturnsFalse(t *testing.T) {
 	server := miniredis.RunT(t)
 	rawURL := "redis://" + server.Addr() + "/0"

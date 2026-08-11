@@ -1669,6 +1669,9 @@ func TestOAuthAuthorizationServerMetadataAdvertisesImplementedJWTAuth(t *testing
 			t.Fatalf("%s missing from %#v", algorithm, algorithms)
 		}
 	}
+	if supported, ok := metadata["authorization_response_iss_parameter_supported"].(bool); !ok || !supported {
+		t.Fatalf("authorization_response_iss_parameter_supported = %#v, want true", metadata["authorization_response_iss_parameter_supported"])
+	}
 }
 
 // TestOAuthAuthorizationServerMetadataAdvertisesDPoPAlgorithms covers RFC

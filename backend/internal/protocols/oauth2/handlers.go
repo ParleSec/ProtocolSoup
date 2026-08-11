@@ -319,6 +319,10 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	if state != "" {
 		q.Set("state", state)
 	}
+	// RFC 9207 Section 2 / FAPI 2.0 SP §5.3.2.2: include iss matching AS metadata.
+	if issuer, err := authorizationServerMetadataIssuer(p.baseURL); err == nil {
+		q.Set("iss", issuer)
+	}
 	redirectURL.RawQuery = q.Encode()
 
 	// Emit redirect event
@@ -618,6 +622,9 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		writeOAuth2Error(w, "server_error", "Failed to issue tokens", "")
 		return
 	}
+	// RFC 6749 Section 4.1.2: record tokens against the redeemed code so a
+	// later replay can revoke them (SHOULD). Matches the OIDC / OID4VCI paths.
+	p.mockIdP.RecordIssuedTokens(authCode.Code, tokenResponse.AccessToken, tokenResponse.RefreshToken)
 
 	// Emit token issued event
 	p.emitEvent(sessionID, lookingglass.EventTypeTokenIssued, "Access Token Issued", map[string]interface{}{

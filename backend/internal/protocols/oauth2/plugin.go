@@ -252,12 +252,12 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       4,
 					Name:        "Authorization Code Response",
-					Description: "Authorization Server redirects user back to Client's redirect_uri with a short-lived authorization code (RFC 6749 §4.1.2). The code is single-use and expires quickly (~10 minutes).",
+					Description: "Authorization Server redirects user back to Client's redirect_uri with a short-lived authorization code (RFC 6749 §4.1.2; FAPI2 SP Final §5.3.2.1 caps lifetime at 60 seconds). The code is single-use.",
 					From:        "Authorization Server",
 					To:          "Client",
 					Type:        "redirect",
 					Parameters: map[string]string{
-						"code":  "Single-use authorization code (short-lived, ~10 min)",
+						"code":  "Single-use authorization code (short-lived, ≤60s)",
 						"state": "MUST match the original state value exactly",
 					},
 					Security: []string{

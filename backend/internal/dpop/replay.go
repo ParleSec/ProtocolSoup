@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -87,17 +88,14 @@ func NewRedisReplayStore(ctx context.Context, rawURL string, production bool) (R
 	if rawURL == "" {
 		return nil, errors.New("dpop: replay Redis URL is required")
 	}
-	if production && !strings.HasPrefix(strings.ToLower(rawURL), "rediss://") {
-		return nil, errors.New("dpop: replay Redis URL must use rediss:// in production")
+	if production && !IsSecureProductionRedisURL(rawURL) {
+		return nil, errors.New("dpop: replay Redis URL must use rediss:// or a Fly private Upstash URL in production")
 	}
 	options, err := redis.ParseURL(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("dpop: parse replay Redis URL: %w", err)
 	}
-	if production {
-		if options.TLSConfig == nil {
-			return nil, errors.New("dpop: replay Redis URL must configure TLS in production")
-		}
+	if production && options.TLSConfig != nil {
 		if options.TLSConfig.InsecureSkipVerify {
 			return nil, errors.New("dpop: replay Redis URL must verify Redis certificates in production")
 		}
@@ -109,6 +107,28 @@ func NewRedisReplayStore(ctx context.Context, rawURL string, production bool) (R
 		return nil, fmt.Errorf("dpop: connect to replay Redis: %w", err)
 	}
 	return &redisReplayStore{client: client}, nil
+}
+
+// IsSecureProductionRedisURL accepts either end-to-end TLS or Fly's private
+// Upstash endpoint. The latter is reachable only over Fly's encrypted 6PN
+// network and intentionally uses redis:// rather than Redis-level TLS.
+func IsSecureProductionRedisURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(parsed.Scheme, "rediss") {
+		return true
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	password, hasPassword := parsed.User.Password()
+	return strings.EqualFold(parsed.Scheme, "redis") &&
+		strings.HasPrefix(hostname, "fly-") &&
+		strings.HasSuffix(hostname, ".upstash.io") &&
+		parsed.Port() == "6379" &&
+		parsed.User.Username() != "" &&
+		hasPassword &&
+		password != ""
 }
 
 func (s *redisReplayStore) Reserve(

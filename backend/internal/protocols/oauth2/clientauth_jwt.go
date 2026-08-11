@@ -94,7 +94,7 @@ func (p *Plugin) AuthenticatePrivateKeyJWTWithAudiences(
 ) (*models.Client, *validatedClientAssertion, error) {
 	// RFC 7523 / OIDC Core Section 9: client_id may be omitted from the token
 	// request when using private_key_jwt; the identifier is carried as iss/sub
-	// in the client_assertion JWT. OIDF Dynamic OP token requests omit it.
+	// in the client_assertion JWT. Dynamic OP token requests often omit it.
 	if clientID == "" {
 		extracted, err := clientIDFromClientAssertion(assertion)
 		if err != nil {
@@ -836,6 +836,9 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"revocation_endpoint":                              issuer + "/revoke",
 		"introspection_endpoint":                           issuer + "/introspect",
 		"code_challenge_methods_supported":                 []string{"S256"},
+		// RFC 9207 Section 3 / FAPI 2.0 SP §5.3.2.2: advertise and return iss
+		// on authorization responses.
+		"authorization_response_iss_parameter_supported": true,
 		// RFC 9449 Section 5.1: signals DPoP support and the acceptable
 		// proof JWS algorithms. DPoP itself is opt-in per request (no
 		// separate on/off switch to reflect here); this only advertises

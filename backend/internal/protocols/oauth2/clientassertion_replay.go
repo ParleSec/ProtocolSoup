@@ -7,10 +7,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -72,17 +72,14 @@ func newRedisClientAssertionReplayStore(
 	if rawURL == "" {
 		return nil, errors.New("OAUTH2_REPLAY_REDIS_URL is required")
 	}
-	if production && !strings.HasPrefix(strings.ToLower(rawURL), "rediss://") {
-		return nil, errors.New("OAUTH2_REPLAY_REDIS_URL must use rediss:// in production")
+	if production && !dpop.IsSecureProductionRedisURL(rawURL) {
+		return nil, errors.New("OAUTH2_REPLAY_REDIS_URL must use rediss:// or a Fly private Upstash URL in production")
 	}
 	options, err := redis.ParseURL(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse OAUTH2_REPLAY_REDIS_URL: %w", err)
 	}
-	if production {
-		if options.TLSConfig == nil {
-			return nil, errors.New("OAUTH2_REPLAY_REDIS_URL must configure TLS in production")
-		}
+	if production && options.TLSConfig != nil {
 		if options.TLSConfig.InsecureSkipVerify {
 			return nil, errors.New("OAUTH2_REPLAY_REDIS_URL must verify Redis certificates in production")
 		}
