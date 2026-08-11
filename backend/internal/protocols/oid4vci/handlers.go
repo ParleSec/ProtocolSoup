@@ -1,13 +1,19 @@
 package oid4vci
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"mime"
+	"net"
 	"net/http"
+	"net/netip"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +32,21 @@ type createOfferRequest struct {
 	TxCodeRequired             bool     `json:"tx_code_required"`
 	Deferred                   bool     `json:"deferred"`
 	WalletUserID               string   `json:"wallet_user_id,omitempty"`
+	// CredentialOfferEndpoint is the wallet's OID4VCI ?4.1.2 Credential Offer
+	// Endpoint. When set on an issuer-initiated create, the issuer performs a
+	// real HTTPS GET that delivers credential_offer as a query parameter.
+	CredentialOfferEndpoint string `json:"credential_offer_endpoint,omitempty"`
 }
+
+const credentialOfferDeliveryTimeout = 15 * time.Second
+const maxCredentialOfferDeliveryBodyBytes = 64 * 1024
+
+const (
+	issuerInitiatedStatusWaitingForWallet             = "waiting_for_wallet"
+	issuerInitiatedStatusAuthorizationRequestReceived = "authorization_request_received"
+	issuerInitiatedStatusTokenIssued                  = "token_issued"
+	issuerInitiatedStatusCredentialIssued             = "credential_issued"
+)
 
 type credentialRequest struct {
 	CredentialConfigurationID    string                               `json:"credential_configuration_id,omitempty"`
@@ -72,22 +92,7 @@ func (p *Plugin) handleCredentialIssuerMetadata(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	metadata := map[string]interface{}{
-		"credential_issuer":                   issuerID,
-		"authorization_servers":               []string{issuerID},
-		"credential_endpoint":                 issuerID + "/credential",
-		"deferred_credential_endpoint":        issuerID + "/deferred_credential",
-		"notification_endpoint":               issuerID + "/notification",
-		"nonce_endpoint":                      nonceEndpoint,
-		"credential_configurations_supported": p.credentialConfigurationsSupported(),
-		"display": []map[string]interface{}{
-			{
-				"name":   "ProtocolSoup Credential Issuer",
-				"locale": "en-US",
-			},
-		},
-		"credential_response_encryption": credentialResponseEncryptionMetadata(),
-	}
+	metadata := p.credentialIssuerMetadata(issuerID, nonceEndpoint)
 
 	p.emitEvent(
 		sessionID,
@@ -101,7 +106,103 @@ func (p *Plugin) handleCredentialIssuerMetadata(w http.ResponseWriter, r *http.R
 		p.vcAnnotation("metadata_discovery")...,
 	)
 
+	if strings.Contains(strings.ToLower(r.Header.Get("Accept")), "application/jwt") {
+		signedMetadata, err := p.signCredentialIssuerMetadata(metadata)
+		if err != nil {
+			writeServerError(w, "sign credential issuer metadata", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/jwt")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(signedMetadata))
+		return
+	}
 	writeJSON(w, http.StatusOK, metadata)
+}
+
+func (p *Plugin) credentialIssuerMetadata(issuerID, nonceEndpoint string) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"credential_issuer":                   issuerID,
+		"authorization_servers":               []string{issuerID},
+		"credential_endpoint":                 issuerID + "/credential",
+		"deferred_credential_endpoint":        issuerID + "/deferred_credential",
+		"notification_endpoint":               issuerID + "/notification",
+		"nonce_endpoint":                      nonceEndpoint,
+		"credential_configurations_supported": p.credentialConfigurationsSupported(),
+		// OID4VCI 1.0 ?11.2.3: presence advertises multi-proof batch issuance
+		// of the same Credential Dataset via the Credential Endpoint.
+		"batch_credential_issuance": map[string]interface{}{
+			"batch_size": batchCredentialIssuanceBatchSize,
+		},
+		"display": []map[string]interface{}{
+			{
+				"name":   "ProtocolSoup Credential Issuer",
+				"locale": "en-US",
+			},
+		},
+		"credential_response_encryption": credentialResponseEncryptionMetadata(),
+	}
+	if requestEncryption, err := p.credentialRequestEncryptionMetadata(); err == nil {
+		metadata["credential_request_encryption"] = requestEncryption
+	}
+	return metadata
+}
+
+func (p *Plugin) signCredentialIssuerMetadata(metadata map[string]interface{}) (string, error) {
+	if p.mdocPKI == nil || p.mdocPKI.DocumentSignerKey() == nil {
+		return "", fmt.Errorf("certificate-backed metadata signer is unavailable")
+	}
+	chain := p.mdocPKI.DocumentSignerChain()
+	if len(chain) == 0 {
+		return "", fmt.Errorf("certificate-backed metadata signer chain is unavailable")
+	}
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"iss": p.issuerID(),
+		"sub": p.issuerID(),
+		"iat": now.Unix(),
+		"exp": now.Add(5 * time.Minute).Unix(),
+	}
+	for name, value := range metadata {
+		claims[name] = value
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = "openidvci-issuer-metadata+jwt"
+	x5c := make([]string, 0, len(chain))
+	for _, certificate := range chain {
+		if certificate == nil {
+			return "", fmt.Errorf("certificate-backed metadata signer chain contains an empty certificate")
+		}
+		x5c = append(x5c, base64.StdEncoding.EncodeToString(certificate.Raw))
+	}
+	token.Header["x5c"] = x5c
+	return token.SignedString(p.mdocPKI.DocumentSignerKey())
+}
+
+func (p *Plugin) handleUniversityDegreeTypeMetadata(w http.ResponseWriter, r *http.Request) {
+	configuration, ok := p.credentialConfigurations["UniversityDegreeCredentialSDJWTHAIP"]
+	if !ok || strings.TrimSpace(configuration.VCT) == "" {
+		writeOID4VCIError(w, http.StatusNotFound, "invalid_request", "credential type metadata is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"vct":         configuration.VCT,
+		"name":        "ProtocolSoup University Degree Credential",
+		"description": "A selectively disclosable university degree credential issued by ProtocolSoup's HAIP profile.",
+		"claims": []map[string]interface{}{
+			{
+				"path":      []string{"given_name"},
+				"mandatory": true,
+				"sd":        "always",
+			},
+			{
+				"path":      []string{"family_name"},
+				"mandatory": true,
+				"sd":        "always",
+			},
+		},
+	})
 }
 
 func (p *Plugin) handleCreatePreAuthorizedOffer(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +314,330 @@ func (p *Plugin) handleCreateOffer(w http.ResponseWriter, r *http.Request, byVal
 	writeJSON(w, http.StatusCreated, data)
 }
 
+// handleCreateAuthorizationCodeOffer builds an issuer-initiated OID4VCI 1.0
+// Section 4.1 Credential Offer for the authorization_code grant. Unlike the
+// pre-authorized offer endpoints, this never issues a code itself: the
+// wallet is expected to use the returned issuer_state as the
+// `issuer_state` parameter on its own RFC 9126 PAR request to this
+// issuer's authorization server, per Section 5.1. The issuer persists the
+// processing context so issuer_state can be authenticated as issuer-created,
+// bound to the offered credential configurations, and observed through the
+// real PAR, token, and credential requests that follow.
+func (p *Plugin) handleCreateAuthorizationCodeOffer(w http.ResponseWriter, r *http.Request) {
+	sessionID := p.getSessionFromRequest(r)
+
+	var req createOfferRequest
+	if err := jsonDecode(r, &req); err != nil {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	credentialIDs := p.normalizeCredentialConfigurationIDs(req.CredentialConfigurationIDs)
+	if len(credentialIDs) == 0 {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", "credential_configuration_ids must name at least one known credential configuration")
+		return
+	}
+
+	now := time.Now().UTC()
+	issuerState := p.randomValue(32)
+	statusID := p.randomValue(32)
+	issuerID := p.issuerID()
+	offer := models.VCCredentialOffer{
+		CredentialIssuer:           issuerID,
+		CredentialConfigurationIDs: credentialIDs,
+		Grants: models.VCCredentialOfferGrants{
+			AuthorizationCode: &models.VCAuthorizationCodeGrant{
+				IssuerState:         issuerState,
+				AuthorizationServer: issuerID,
+			},
+		},
+		CreatedAt: now,
+	}
+
+	transaction := &issuerInitiatedTransaction{
+		StatusID:                   statusID,
+		IssuerState:                issuerState,
+		SessionID:                  sessionID,
+		CredentialConfigurationIDs: append([]string(nil), credentialIDs...),
+		Status:                     issuerInitiatedStatusWaitingForWallet,
+		CreatedAt:                  now,
+		UpdatedAt:                  now,
+		ExpiresAt:                  now.Add(issuerInitiatedTransactionTTL),
+	}
+	p.mu.Lock()
+	p.issuerInitiatedOffers[issuerState] = transaction
+	p.issuerInitiatedStatus[statusID] = issuerState
+	p.mu.Unlock()
+
+	data := map[string]interface{}{
+		"credential_issuer":            issuerID,
+		"credential_configuration_ids": credentialIDs,
+		"issuer_state":                 issuerState,
+		"credential_offer":             offer,
+		"status_uri":                   issuerID + "/offers/authorization-code/status/" + statusID,
+		"expires_in":                   int(issuerInitiatedTransactionTTL.Seconds()),
+	}
+
+	p.emitEvent(
+		sessionID,
+		lookingglass.EventTypeFlowStep,
+		"Issuer-Initiated Credential Offer Created",
+		data,
+		p.vcAnnotation("metadata_discovery")...,
+	)
+
+	if endpoint := strings.TrimSpace(req.CredentialOfferEndpoint); endpoint != "" {
+		deliveryURL, statusCode, err := p.deliverCredentialOffer(r.Context(), endpoint, offer)
+		if err != nil {
+			writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
+		data["credential_offer_endpoint"] = endpoint
+		data["credential_offer_delivery_url"] = deliveryURL
+		data["credential_offer_delivered"] = true
+		data["credential_offer_delivery_status"] = statusCode
+		p.emitEvent(
+			sessionID,
+			lookingglass.EventTypeHTTPExchange,
+			"Credential Offer Delivered to Wallet Endpoint",
+			map[string]interface{}{
+				"credential_offer_endpoint": endpoint,
+				"delivery_url":              deliveryURL,
+				"status_code":               statusCode,
+			},
+			p.vcAnnotation("metadata_discovery")...,
+		)
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, data)
+}
+
+// deliverCredentialOffer performs the OID4VCI 1.0 ?4.1.2 issuer-to-wallet
+// handoff: an HTTPS GET to the wallet's Credential Offer Endpoint with the
+// Credential Offer object as the credential_offer query parameter.
+func (p *Plugin) deliverCredentialOffer(ctx context.Context, endpoint string, offer models.VCCredentialOffer) (string, int, error) {
+	deliveryURL, err := buildCredentialOfferDeliveryURL(endpoint, offer)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := rejectCredentialOfferEndpointSSRF(deliveryURL); err != nil {
+		return "", 0, err
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, credentialOfferDeliveryTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, deliveryURL, nil)
+	if err != nil {
+		return "", 0, fmt.Errorf("build credential offer delivery request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json, text/html, */*")
+
+	client := &http.Client{
+		Timeout: credentialOfferDeliveryTimeout,
+		// Wallets often 302 after accepting the offer. The
+		// Credential Offer Endpoint has already received credential_offer on
+		// the first response; do not follow redirects into HTML/error pages.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("deliver credential offer: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxCredentialOfferDeliveryBodyBytes))
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			return "", resp.StatusCode, fmt.Errorf("wallet credential_offer_endpoint returned HTTP %d", resp.StatusCode)
+		}
+		if len(detail) > 240 {
+			detail = detail[:240] + "?"
+		}
+		return "", resp.StatusCode, fmt.Errorf("wallet credential_offer_endpoint returned HTTP %d: %s", resp.StatusCode, detail)
+	}
+	return deliveryURL, resp.StatusCode, nil
+}
+
+func buildCredentialOfferDeliveryURL(endpoint string, offer models.VCCredentialOffer) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("credential_offer_endpoint must be an absolute URL")
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		host := strings.ToLower(parsed.Hostname())
+		if host != "localhost" && !strings.HasPrefix(host, "127.") {
+			return "", fmt.Errorf("credential_offer_endpoint must use https:// (OID4VCI 1.0 Section 4.1.2)")
+		}
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("credential_offer_endpoint must not include userinfo")
+	}
+	rawOffer, err := marshalCredentialOfferForWire(offer)
+	if err != nil {
+		return "", fmt.Errorf("marshal credential_offer: %w", err)
+	}
+	query := parsed.Query()
+	query.Set("credential_offer", string(rawOffer))
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+// marshalCredentialOfferForWire encodes the OID4VCI Credential Offer object
+// without ProtocolSoup-internal fields (for example created_at) that are not
+// part of OpenID4VCI 1.0 Section 4.1.1.
+func marshalCredentialOfferForWire(offer models.VCCredentialOffer) ([]byte, error) {
+	wire := struct {
+		CredentialIssuer           string                        `json:"credential_issuer"`
+		CredentialConfigurationIDs []string                      `json:"credential_configuration_ids"`
+		Grants                     models.VCCredentialOfferGrants `json:"grants,omitempty"`
+	}{
+		CredentialIssuer:           offer.CredentialIssuer,
+		CredentialConfigurationIDs: offer.CredentialConfigurationIDs,
+		Grants:                     offer.Grants,
+	}
+	return json.Marshal(wire)
+}
+
+func rejectCredentialOfferEndpointSSRF(rawURL string) error {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" {
+		return fmt.Errorf("credential_offer_endpoint host is required")
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		// Local Looking Glass / test harnesses may expose the endpoint on loopback.
+		return nil
+	}
+	if strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
+		return fmt.Errorf("credential_offer_endpoint must not target internal hosts")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		addr, ok := netip.AddrFromSlice(ip)
+		if !ok {
+			return fmt.Errorf("credential_offer_endpoint host is invalid")
+		}
+		addr = addr.Unmap()
+		// Literal loopback is allowed for local harness delivery only.
+		if addr.IsLoopback() {
+			return nil
+		}
+		if addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
+			return fmt.Errorf("credential_offer_endpoint must not target private or link-local addresses")
+		}
+		return nil
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return fmt.Errorf("credential_offer_endpoint host could not be resolved")
+	}
+	for _, ip := range ips {
+		addr, ok := netip.AddrFromSlice(ip)
+		if !ok {
+			continue
+		}
+		addr = addr.Unmap()
+		if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
+			return fmt.Errorf("credential_offer_endpoint must not target private or link-local addresses")
+		}
+	}
+	return nil
+}
+
+func (p *Plugin) handleAuthorizationCodeOfferStatus(w http.ResponseWriter, r *http.Request) {
+	statusID := strings.TrimSpace(chi.URLParam(r, "statusID"))
+	p.mu.RLock()
+	issuerState := p.issuerInitiatedStatus[statusID]
+	transaction := p.issuerInitiatedOffers[issuerState]
+	if transaction == nil {
+		p.mu.RUnlock()
+		writeOID4VCIError(w, http.StatusNotFound, "invalid_request", "issuer-initiated transaction not found")
+		return
+	}
+	snapshot := *transaction
+	snapshot.CredentialConfigurationIDs = append([]string(nil), transaction.CredentialConfigurationIDs...)
+	p.mu.RUnlock()
+
+	now := time.Now().UTC()
+	status := snapshot.Status
+	terminal := status == issuerInitiatedStatusCredentialIssued
+	if now.After(snapshot.ExpiresAt) && !terminal {
+		status = "expired"
+		terminal = true
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":                       status,
+		"terminal":                     terminal,
+		"credential_configuration_ids": snapshot.CredentialConfigurationIDs,
+		"created_at":                   snapshot.CreatedAt,
+		"updated_at":                   snapshot.UpdatedAt,
+		"expires_at":                   snapshot.ExpiresAt,
+	})
+}
+
+func (p *Plugin) acceptIssuerInitiatedAuthorizationRequest(issuerState, clientID string, credentialConfigurationIDs []string) (*issuerInitiatedTransaction, error) {
+	issuerState = strings.TrimSpace(issuerState)
+	if issuerState == "" {
+		return nil, nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	transaction := p.issuerInitiatedOffers[issuerState]
+	if transaction == nil || time.Now().UTC().After(transaction.ExpiresAt) {
+		return nil, fmt.Errorf("issuer_state is unknown or expired")
+	}
+	// OpenID4VCI 1.0 Section 5.1.3 defines issuer_state as an opaque Issuer
+	// processing context returned with the Credential Offer. It does not
+	// require single-use. Multi-client happy flows reuse the same issuer_state
+	// for a consecutive second client (with a distinct redirect_uri query
+	// suffix), so the offer remains redeemable until ExpiresAt while still
+	// enforcing Credential Configuration binding.
+	offered := make(map[string]struct{}, len(transaction.CredentialConfigurationIDs))
+	for _, configurationID := range transaction.CredentialConfigurationIDs {
+		offered[configurationID] = struct{}{}
+	}
+	if err := validateCredentialConfigurationSubset(credentialConfigurationIDs, offered); err != nil {
+		return nil, fmt.Errorf("issuer_state credential binding failed: %w", err)
+	}
+	transaction.ClientID = strings.TrimSpace(clientID)
+	transaction.Status = issuerInitiatedStatusAuthorizationRequestReceived
+	transaction.UpdatedAt = time.Now().UTC()
+	snapshot := *transaction
+	snapshot.CredentialConfigurationIDs = append([]string(nil), transaction.CredentialConfigurationIDs...)
+	return &snapshot, nil
+}
+
+func (p *Plugin) updateIssuerInitiatedTransaction(issuerState, status string) *issuerInitiatedTransaction {
+	issuerState = strings.TrimSpace(issuerState)
+	if issuerState == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	transaction := p.issuerInitiatedOffers[issuerState]
+	if transaction == nil || time.Now().UTC().After(transaction.ExpiresAt) {
+		return nil
+	}
+	transaction.Status = status
+	transaction.UpdatedAt = time.Now().UTC()
+	snapshot := *transaction
+	snapshot.CredentialConfigurationIDs = append([]string(nil), transaction.CredentialConfigurationIDs...)
+	return &snapshot
+}
+
+func (p *Plugin) issuerInitiatedSessionID(issuerState string) string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	transaction := p.issuerInitiatedOffers[strings.TrimSpace(issuerState)]
+	if transaction == nil {
+		return ""
+	}
+	return transaction.SessionID
+}
+
 func (p *Plugin) handleCredentialOfferByReference(w http.ResponseWriter, r *http.Request) {
 	offerID := strings.TrimSpace(chi.URLParam(r, "offerID"))
 	if offerID == "" {
@@ -246,6 +671,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", "invalid token request")
 		return
 	}
+	requiresHAIPSecurity := p.tokenRequestRequiresHAIPSecurity(r)
 
 	// OAuth 2.0 Attestation-Based Client Authentication: when a
 	// request presents OAuth-Client-Attestation(-PoP) headers at all, that is
@@ -265,10 +691,18 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", err.Error())
 		return
 	}
+	if requiresHAIPSecurity && !attestationUsed {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "OAuth client attestation is required for HAIP issuance")
+		return
+	}
 
 	// RFC 9449 (DPoP): validate an optional proof once, up front, since htm
 	// and htu are identical across both grant types at this single token
 	// endpoint. Absent header -> zero-value result, no behavioural change.
+	// Validate DPoP before committing the Client Attestation PoP jti so a
+	// use_dpop_nonce challenge can be retried with the same attestation PoP
+	// (FAPI2 RefreshTokenRequestSteps regenerates DPoP only).
 	dpopResult, dpopErr := p.validateTokenEndpointDPoP(r)
 	if dpopErr != nil {
 		var infrastructureErr *dpop.InfrastructureError
@@ -315,6 +749,21 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeOID4VCIError(w, http.StatusBadRequest, dpop.ErrorInvalidDPoPProof, dpopErr.Error())
 		return
 	}
+	if requiresHAIPSecurity && !dpopResult.Present {
+		writeOID4VCIError(w, http.StatusBadRequest, dpop.ErrorInvalidDPoPProof, "a DPoP proof is required for HAIP issuance")
+		return
+	}
+	if p.tokenRequestRequiresDPoP(r) && !dpopResult.Present {
+		writeOID4VCIError(w, http.StatusBadRequest, dpop.ErrorInvalidDPoPProof, "a DPoP proof is required to redeem this refresh token")
+		return
+	}
+	if attestationUsed {
+		if commitErr := p.commitClientAttestationPoP(attestation); commitErr != nil {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", commitErr.Error())
+			return
+		}
+	}
 	if dpopResult.Present {
 		p.emitEvent(sessionID, lookingglass.EventTypeCryptoOperation, "DPoP Proof Validated", map[string]interface{}{
 			"jkt": dpopResult.JKT,
@@ -332,12 +781,71 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		p.handlePreAuthorizedTokenGrant(w, r, sessionID, attestation, attestationUsed, dpopResult.JKT)
 	case "authorization_code":
 		p.handleAuthorizationCodeTokenGrant(w, r, sessionID, attestation, attestationUsed, dpopResult.JKT)
+	case "refresh_token":
+		p.handleRefreshTokenGrant(w, r, sessionID, attestation, attestationUsed, dpopResult.JKT)
 	default:
 		writeOID4VCIError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type is not supported")
 	}
 }
 
-// parseAuthorizationDetails implements the OpenID4VCI Final §5.1.1 profile of
+// tokenRequestRequiresHAIPSecurity resolves the credential configurations
+// bound to the grant without consuming it. HAIP 1.0 requires OAuth client
+// authentication and DPoP sender-constrained access tokens for HAIP issuance;
+// the issuer's non-HAIP educational profiles retain their own OAuth policy.
+func (p *Plugin) tokenRequestRequiresHAIPSecurity(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	var configurationIDs []string
+	switch r.FormValue("grant_type") {
+	case "urn:ietf:params:oauth:grant-type:pre-authorized_code":
+		code := strings.TrimSpace(r.FormValue("pre-authorized_code"))
+		p.mu.RLock()
+		offerID := p.offersByPreAuthCode[code]
+		record := p.offers[offerID]
+		if record != nil {
+			configurationIDs = append(configurationIDs, record.Offer.CredentialConfigurationIDs...)
+		}
+		p.mu.RUnlock()
+	case "authorization_code":
+		if p.mockIDP != nil {
+			if authCode, ok := p.mockIDP.GetAuthorizationCode(r.FormValue("code")); ok {
+				configurationIDs = append(configurationIDs, authCode.CredentialConfigurationIDs...)
+			}
+		}
+	case "refresh_token":
+		refreshToken := strings.TrimSpace(r.FormValue("refresh_token"))
+		p.mu.RLock()
+		if grant := p.refreshGrants[refreshToken]; grant != nil {
+			for configurationID := range grant.CredentialConfigurationIDs {
+				configurationIDs = append(configurationIDs, configurationID)
+			}
+		}
+		p.mu.RUnlock()
+	}
+	for _, configurationID := range configurationIDs {
+		if configuration, ok := p.credentialConfigurations[configurationID]; ok && configuration.HAIP {
+			return true
+		}
+	}
+	return false
+}
+
+// tokenRequestRequiresDPoP reports whether a refresh_token request must present
+// a DPoP proof because the grant was originally issued with a DPoP-bound access
+// token (FAPI2 SP sender-constrained refresh without proof must fail).
+func (p *Plugin) tokenRequestRequiresDPoP(r *http.Request) bool {
+	if r == nil || r.FormValue("grant_type") != "refresh_token" {
+		return false
+	}
+	refreshToken := strings.TrimSpace(r.FormValue("refresh_token"))
+	p.mu.RLock()
+	grant := p.refreshGrants[refreshToken]
+	p.mu.RUnlock()
+	return grant != nil && grant.RequireDPoP
+}
+
+// parseAuthorizationDetails implements the OpenID4VCI Final ?5.1.1 profile of
 // RFC 9396 used at the Token Endpoint.
 func (p *Plugin) parseAuthorizationDetails(raw string) ([]string, bool, error) {
 	if strings.TrimSpace(raw) == "" {
@@ -504,7 +1012,6 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		writeServerError(w, "issue access token", err)
 		return
 	}
-
 	nonce := models.VCNonce{
 		Value:     p.randomValue(24),
 		IssuedAt:  time.Now().UTC(),
@@ -582,7 +1089,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	clientSecret := strings.TrimSpace(r.FormValue("client_secret"))
 	codeVerifier := strings.TrimSpace(r.FormValue("code_verifier"))
 	if attestationUsed {
-		// draft-ietf-oauth-attestation-based-client-auth-09 §7: the Client
+		// draft-ietf-oauth-attestation-based-client-auth-09 ?7: the Client
 		// Attestation authenticates the Client Instance; its sub claim is the
 		// authoritative client_id, so it takes precedence over (and must not
 		// contradict) any client_id form parameter.
@@ -592,6 +1099,12 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 			writeOID4VCIError(w, http.StatusBadRequest, "invalid_client", "client_id does not match the authenticated client attestation subject")
 			return
 		}
+		// Attestation alone authenticates the Client Instance. FAPI2
+		// ensure-authorization-code-is-bound-to-client authenticates as the
+		// second client without a prior PAR from that client; register it here
+		// so the grant check can return invalid_grant (HTTP 400) instead of
+		// treating a successfully attested client as unknown (HTTP 401).
+		p.ensureAttestedWalletClient(clientID, redirectURI)
 	} else if clientID == "" {
 		clientID, clientSecret, _ = r.BasicAuth()
 	}
@@ -612,8 +1125,13 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
 		return
 	}
+	if client.TokenEndpointAuthMethod == "attest_jwt_client_auth" && !attestationUsed {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "OAuth client attestation is required for this client")
+		return
+	}
 	if !attestationUsed && !client.Public {
-		// draft-ietf-oauth-attestation-based-client-auth-09 §7: a validated
+		// draft-ietf-oauth-attestation-based-client-auth-09 ?7: a validated
 		// Client Attestation + PoP already authenticates the Client Instance,
 		// replacing (not stacking with) client_secret authentication.
 		if _, err := p.mockIDP.ValidateClient(clientID, clientSecret); err != nil {
@@ -626,6 +1144,10 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	authCode, err := p.mockIDP.ValidateAuthorizationCode(code, clientID, redirectURI, codeVerifier)
 	if err != nil {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", err.Error())
+		return
+	}
+	if authCode.DPoPJKT != "" && dpopJKT != authCode.DPoPJKT {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "authorization code is bound to a different DPoP key")
 		return
 	}
 
@@ -676,6 +1198,32 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		writeServerError(w, "issue access token", err)
 		return
 	}
+	// RFC 6749 Section 4.1.2: if an authorization code is replayed, the
+	// Authorization Server SHOULD revoke tokens previously issued from it.
+	refreshToken, err := p.mockIDP.JWTService().CreateRefreshToken(
+		authCode.UserID,
+		clientID,
+		scope,
+		refreshTokenTTL,
+	)
+	if err != nil {
+		writeServerError(w, "issue refresh token", err)
+		return
+	}
+	p.mockIDP.StoreRefreshToken(refreshToken, clientID, authCode.UserID, scope, authCode.AuthTime, time.Now().Add(refreshTokenTTL))
+	// RFC 9449 ?5: DPoP-bind refresh tokens only for public clients that are
+	// not otherwise sender-constrained. Attestation-authenticated clients are
+	// bound to the Client Instance Key (OAuth2-ATCA ?9.3); FAPI2 refresh
+	// tests also rotate the DPoP proof key on refresh and expect success.
+	if dpopJKT != "" && !attestationUsed {
+		p.mockIDP.BindRefreshTokenKey(refreshToken, dpopJKT)
+	}
+	if attestationUsed && attestation.InstanceJKT != "" {
+		// draft-ietf-oauth-attestation-based-client-auth ?9.3: bind to the
+		// Client Instance Key, not merely the client_id.
+		p.mockIDP.BindRefreshTokenClientInstanceKey(refreshToken, attestation.InstanceJKT)
+	}
+	p.mockIDP.RecordIssuedTokens(authCode.Code, accessToken, refreshToken)
 
 	nonce := models.VCNonce{
 		Value:     p.randomValue(24),
@@ -700,12 +1248,28 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		CNonce:                     nonce,
 		CNonceUsed:                 false,
 		OfferID:                    "authorization_code",
+		IssuerState:                authCode.IssuerState,
 		Deferred:                   false,
 		ExpiresAt:                  time.Now().UTC().Add(tokenTTL),
 		JKT:                        dpopJKT,
 	}
+	p.refreshGrants[refreshToken] = &refreshGrant{
+		Subject:                    wallet.Subject,
+		WalletID:                   wallet.ID,
+		CredentialConfigurationIDs: cloneStringSet(authorizedCredentialConfigurations),
+		CredentialIdentifiers:      cloneStringMap(credentialIdentifiers),
+		AuthorizationDetailsUsed:   authorizationDetailsUsed,
+		IssuerState:                authCode.IssuerState,
+		Scope:                      scope,
+		RequireDPoP:                dpopJKT != "",
+	}
 	p.mu.Unlock()
 
+	issuerTransaction := p.updateIssuerInitiatedTransaction(authCode.IssuerState, issuerInitiatedStatusTokenIssued)
+	effectiveSessionID := sessionID
+	if effectiveSessionID == "" && issuerTransaction != nil {
+		effectiveSessionID = issuerTransaction.SessionID
+	}
 	authEventData := map[string]interface{}{
 		"grant_type":                           "authorization_code",
 		"client_id":                            clientID,
@@ -717,9 +1281,11 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		"expires_in":                           int(tokenTTL.Seconds()),
 		"nonce_expires":                        int(nonceTTL.Seconds()),
 		"client_authenticated_via_attestation": attestationUsed,
+		"issuer_initiated":                     issuerTransaction != nil,
+		"refresh_token_issued":                 true,
 	}
 	p.emitEvent(
-		sessionID,
+		effectiveSessionID,
 		lookingglass.EventTypeFlowStep,
 		"Authorization Code Token Issued",
 		authEventData,
@@ -727,15 +1293,228 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	)
 
 	response := map[string]interface{}{
-		"access_token": accessToken,
-		"token_type":   dpop.TokenType(dpopJKT),
-		"expires_in":   int(tokenTTL.Seconds()),
-		"scope":        scope,
+		"access_token":  accessToken,
+		"token_type":    dpop.TokenType(dpopJKT),
+		"expires_in":    int(tokenTTL.Seconds()),
+		"scope":         scope,
+		"refresh_token": refreshToken,
 	}
 	if authorizationDetailsUsed {
 		response["authorization_details"] = responseAuthorizationDetails
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, attestation clientAttestationAuth, attestationUsed bool, dpopJKT string) {
+	if p.mockIDP == nil {
+		writeOID4VCIError(w, http.StatusServiceUnavailable, "server_error", "mock identity provider is unavailable")
+		return
+	}
+
+	refreshToken := strings.TrimSpace(r.FormValue("refresh_token"))
+	clientID := strings.TrimSpace(r.FormValue("client_id"))
+	clientSecret := strings.TrimSpace(r.FormValue("client_secret"))
+	scope := strings.TrimSpace(r.FormValue("scope"))
+	if attestationUsed {
+		if clientID == "" {
+			clientID = attestation.ClientID
+		} else if clientID != attestation.ClientID {
+			writeOID4VCIError(w, http.StatusBadRequest, "invalid_client", "client_id does not match the authenticated client attestation subject")
+			return
+		}
+		p.ensureAttestedWalletClient(clientID, "")
+	} else if clientID == "" {
+		clientID, clientSecret, _ = r.BasicAuth()
+	}
+
+	if refreshToken == "" || clientID == "" {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", "refresh_token and client_id are required")
+		return
+	}
+
+	client, exists := p.mockIDP.GetClient(clientID)
+	if !exists {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
+		return
+	}
+	// RFC 6749 ?6 / FAPI2 SP: confidential and attestation-authenticated
+	// clients MUST authenticate on refresh; omitting auth is rejected.
+	if client.TokenEndpointAuthMethod == "attest_jwt_client_auth" && !attestationUsed {
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "OAuth client attestation is required for this client")
+		return
+	}
+	if !attestationUsed && !client.Public {
+		if _, err := p.mockIDP.ValidateClient(clientID, clientSecret); err != nil {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "client authentication failed")
+			return
+		}
+	}
+
+	rt, ok := p.mockIDP.GetRefreshToken(refreshToken)
+	if !ok {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "invalid refresh token")
+		return
+	}
+	if rt.ClientID != clientID {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "client ID mismatch")
+		return
+	}
+	if rt.ExpiresAt.Before(time.Now()) {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "refresh token expired")
+		return
+	}
+
+	if rt.ClientInstanceJKT != "" {
+		// draft-ietf-oauth-attestation-based-client-auth ?10.3: refresh MUST
+		// use attestation with the same Client Instance Key as issuance.
+		if !attestationUsed {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeOID4VCIError(w, http.StatusUnauthorized, "invalid_client", "OAuth client attestation is required to redeem this refresh token")
+			return
+		}
+		if attestation.InstanceJKT != rt.ClientInstanceJKT {
+			writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "refresh token is bound to a different client instance key")
+			return
+		}
+	}
+	if rt.JKT != "" && dpopJKT != rt.JKT {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "refresh token is bound to a different DPoP key")
+		return
+	}
+
+	p.mu.RLock()
+	priorGrant := p.refreshGrants[refreshToken]
+	p.mu.RUnlock()
+	if priorGrant == nil {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "refresh token grant context is unavailable")
+		return
+	}
+	if scope == "" {
+		scope = priorGrant.Scope
+	}
+
+	accessTokenClaims := map[string]interface{}{
+		"credential_configuration_ids": sortedSetKeys(priorGrant.CredentialConfigurationIDs),
+	}
+	// Prefer the DPoP key presented on this refresh (FAPI2 rotates it). Only
+	// fall back to the refresh-token binding when the token itself is DPoP-bound.
+	boundJKT := dpopJKT
+	if rt.JKT != "" {
+		boundJKT = rt.JKT
+	}
+	if boundJKT != "" {
+		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, boundJKT)
+	}
+	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
+		rt.UserID,
+		"oid4vci",
+		scope,
+		tokenTTL,
+		accessTokenClaims,
+	)
+	if err != nil {
+		writeServerError(w, "issue access token", err)
+		return
+	}
+
+	nonce := models.VCNonce{
+		Value:     p.randomValue(24),
+		IssuedAt:  time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(nonceTTL),
+	}
+	p.mu.Lock()
+	p.accessGrants[accessToken] = &accessGrant{
+		Token:                      accessToken,
+		Subject:                    priorGrant.Subject,
+		WalletID:                   priorGrant.WalletID,
+		CredentialConfigurationIDs: cloneStringSet(priorGrant.CredentialConfigurationIDs),
+		CredentialIdentifiers:      cloneStringMap(priorGrant.CredentialIdentifiers),
+		AuthorizationDetailsUsed:   priorGrant.AuthorizationDetailsUsed,
+		CNonce:                     nonce,
+		CNonceUsed:                 false,
+		OfferID:                    "refresh_token",
+		IssuerState:                priorGrant.IssuerState,
+		Deferred:                   false,
+		ExpiresAt:                  time.Now().UTC().Add(tokenTTL),
+		JKT:                        boundJKT,
+	}
+	// FAPI2 SP Final ?5.3.2.1-9: do not rotate refresh tokens. Keep the same
+	// refresh_token and grant context so the client can retry after a lost
+	// access-token response.
+	if scope != "" {
+		priorGrant.Scope = scope
+	}
+	if boundJKT != "" {
+		priorGrant.RequireDPoP = true
+	}
+	p.mu.Unlock()
+
+	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "Refresh Token Redeemed", map[string]interface{}{
+		"grant_type":                           "refresh_token",
+		"client_id":                            clientID,
+		"client_authenticated_via_attestation": attestationUsed,
+		"dpop_bound":                           boundJKT != "",
+		"refresh_token_rotated":                false,
+	})
+
+	response := map[string]interface{}{
+		"access_token": accessToken,
+		"token_type":   dpop.TokenType(boundJKT),
+		"expires_in":   int(tokenTTL.Seconds()),
+		"scope":        scope,
+		// Same refresh_token value (FAPI2 SP Final ?5.3.2.1-9: no rotation).
+		"refresh_token": refreshToken,
+	}
+	if priorGrant.AuthorizationDetailsUsed {
+		response["authorization_details"] = p.authorizationDetailsForIdentifiers(priorGrant.CredentialIdentifiers)
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func cloneStringSet(in map[string]struct{}) map[string]struct{} {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func sortedSetKeys(in map[string]struct{}) []string {
+	keys := make([]string, 0, len(in))
+	for key := range in {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (p *Plugin) authorizationDetailsForIdentifiers(identifiers map[string]string) []map[string]interface{} {
+	details := make([]map[string]interface{}, 0, len(identifiers))
+	for credentialIdentifier, configurationID := range identifiers {
+		details = append(details, map[string]interface{}{
+			"type":                        "openid_credential",
+			"credential_configuration_id": configurationID,
+			"credential_identifiers":      []string{credentialIdentifier},
+		})
+	}
+	return details
 }
 
 func (p *Plugin) handleNonce(w http.ResponseWriter, r *http.Request) {
@@ -770,13 +1549,11 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		authErr.respond(w)
 		return
 	}
-	if !requestHasMediaType(r, "application/json") {
-		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "Content-Type must be application/json")
-		return
+	if sessionID == "" {
+		sessionID = p.issuerInitiatedSessionID(grant.IssuerState)
 	}
-
 	var req credentialRequest
-	if err := decodeRequestObject(r.Body, &req, "credential request"); err != nil {
+	if err := p.decodeCredentialRequest(r, &req); err != nil {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", err.Error())
 		return
 	}
@@ -786,26 +1563,35 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_identifier and credential_configuration_id are mutually exclusive")
 		return
 	}
-	if grant.AuthorizationDetailsUsed {
-		if req.CredentialIdentifier == "" {
-			writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_identifier is required for this access token")
+	// OID4VCI 1.0 ?8.3.1.2 unknown_credential_configuration: when the wallet
+	// presents credential_configuration_id, validate it against issuer metadata
+	// before other Credential Request shape rules. An unknown configuration id
+	// must yield unknown_credential_configuration even on tokens that returned
+	// credential_identifiers (where credential_configuration_id MUST NOT be
+	// used), rather than invalid_credential_request for the missing identifier.
+	if req.CredentialConfigurationID != "" {
+		if _, supported := p.credentialConfigurations[req.CredentialConfigurationID]; !supported {
+			writeOID4VCIError(w, http.StatusBadRequest, "unknown_credential_configuration", "credential_configuration_id is not supported by issuer metadata")
 			return
 		}
+	}
+	// OID4VCI 1.0 ?8.3.1.2 unknown_credential_identifier takes precedence over a
+	// generic invalid_credential_request when the Wallet presents a
+	// credential_identifier that is not bound to this access token ? including
+	// when the Token Response never returned credential_identifiers.
+	if req.CredentialIdentifier != "" {
 		configurationID, allowed := grant.CredentialIdentifiers[req.CredentialIdentifier]
 		if !allowed {
 			writeOID4VCIError(w, http.StatusBadRequest, "unknown_credential_identifier", "credential_identifier is unknown or is not bound to this access token")
 			return
 		}
 		req.CredentialConfigurationID = configurationID
-	} else {
-		if req.CredentialIdentifier != "" {
-			writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_identifier MUST NOT be used when the Token Response did not return credential_identifiers")
-			return
-		}
-		if req.CredentialConfigurationID == "" {
-			writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_configuration_id is required")
-			return
-		}
+	} else if grant.AuthorizationDetailsUsed {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_identifier is required for this access token")
+		return
+	} else if req.CredentialConfigurationID == "" {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "credential_configuration_id is required")
+		return
 	}
 	credentialConfiguration, supported := p.credentialConfigurations[req.CredentialConfigurationID]
 	if !supported {
@@ -817,7 +1603,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.CredentialResponseEncryption != nil {
-		// OID4VCI 1.0 §8.2/§10: the
+		// OID4VCI 1.0 ?8.2/?10: the
 		// wallet MAY request an encrypted response; encryption_required stays
 		// false (credentialResponseEncryptionMetadata), so a missing object is
 		// never rejected here.
@@ -849,8 +1635,9 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proofDeclaredSubject := ""
-	var holderJWK *crypto.JWK
+	holderJWKs := make([]*crypto.JWK, 0, len(proofs))
 	credentialNonce := ""
+	seenHolderThumbprints := make(map[string]struct{}, len(proofs))
 	for _, proof := range proofs {
 		nonce, proofSub, proofKey, keyAttestationJWT, err := p.validateProofJWT(
 			proof,
@@ -876,9 +1663,23 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		if proofSub != "" {
 			proofDeclaredSubject = proofSub
 		}
+		var holderJWK *crypto.JWK
 		if strings.TrimSpace(proofKey.Kty) != "" {
-			holderJWK = &proofKey
+			keyCopy := proofKey
+			holderJWK = &keyCopy
+			// OID4VCI 1.0 ?3.3.2: batch credentials SHOULD use different
+			// cryptographic keys; reject duplicate proof keys so each issued
+			// credential binds to a distinct key from the proofs array.
+			thumbprint := keyCopy.Thumbprint()
+			if thumbprint != "" {
+				if _, duplicate := seenHolderThumbprints[thumbprint]; duplicate {
+					writeOID4VCIError(w, http.StatusBadRequest, "invalid_proof", "batch Credential Request proofs must use distinct cryptographic keys")
+					return
+				}
+				seenHolderThumbprints[thumbprint] = struct{}{}
+			}
 		}
+		holderJWKs = append(holderJWKs, holderJWK)
 		if credentialNonce == "" {
 			credentialNonce = nonce
 		} else if nonce != credentialNonce {
@@ -943,45 +1744,65 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issuedCredential, err := p.issueCredential(effectiveSubject, req.CredentialConfigurationID, wallet, holderJWK)
-	if err != nil {
-		writeServerError(w, "issue credential", err)
-		return
-	}
 	if p.walletStore == nil {
 		writeServerError(w, "persist credential lineage", fmt.Errorf("wallet credential store is unavailable"))
 		return
 	}
-	issuerJWK := issuedCredential.IssuerJWK
-	if strings.TrimSpace(issuerJWK.Kty) == "" {
-		writeServerError(w, "persist credential lineage", fmt.Errorf("issuer jwk is unavailable"))
-		return
+
+	// OID4VCI 1.0 ?3.3.2 / ?8: one Credential per proof, same Credential
+	// Dataset and Format, distinct Cryptographic Data (per-proof key binding).
+	// Response MUST NOT contain more credentials than proofs submitted.
+	issuedArtifacts := make([]deferredCredentialArtifact, 0, len(holderJWKs))
+	credentialEntries := make([]map[string]interface{}, 0, len(holderJWKs))
+	credentialIDs := make([]string, 0, len(holderJWKs))
+	issuedFormat := ""
+	for _, holderJWK := range holderJWKs {
+		issuedCredential, err := p.issueCredential(effectiveSubject, req.CredentialConfigurationID, wallet, holderJWK)
+		if err != nil {
+			writeServerError(w, "issue credential", err)
+			return
+		}
+		issuerJWK := issuedCredential.IssuerJWK
+		if strings.TrimSpace(issuerJWK.Kty) == "" {
+			writeServerError(w, "persist credential lineage", fmt.Errorf("issuer jwk is unavailable"))
+			return
+		}
+		issuerID := strings.TrimSpace(issuedCredential.Issuer)
+		if issuerID == "" {
+			issuerID = p.issuerID()
+		}
+		issuedCredentialID := strings.TrimSpace(issuedCredential.CredentialID)
+		if issuedCredentialID == "" {
+			issuedCredentialID = p.randomValue(24)
+		}
+		if !p.walletStore.Put(vc.WalletCredentialRecord{
+			Subject:                   effectiveSubject,
+			Format:                    issuedCredential.Format,
+			CredentialConfigurationID: req.CredentialConfigurationID,
+			VCT:                       issuedCredential.VCT,
+			Doctype:                   issuedCredential.Doctype,
+			CredentialTypes:           issuedCredential.CredentialTypes,
+			CredentialJWT:             issuedCredential.CredentialJWT,
+			IssuerSignedJWT:           issuedCredential.IssuerSignedJWT,
+			CredentialID:              issuedCredentialID,
+			Issuer:                    issuerID,
+			IssuerJWK:                 issuerJWK,
+			IssuedAt:                  time.Now().UTC(),
+		}) {
+			writeServerError(w, "persist credential lineage", fmt.Errorf("failed to persist issued credential in wallet store"))
+			return
+		}
+		issuedArtifacts = append(issuedArtifacts, deferredCredentialArtifact{
+			Credential:   issuedCredential.Credential,
+			CredentialID: issuedCredentialID,
+		})
+		credentialEntries = append(credentialEntries, map[string]interface{}{
+			"credential": issuedCredential.Credential,
+		})
+		credentialIDs = append(credentialIDs, issuedCredentialID)
+		issuedFormat = issuedCredential.Format
 	}
-	issuerID := strings.TrimSpace(issuedCredential.Issuer)
-	if issuerID == "" {
-		issuerID = p.issuerID()
-	}
-	issuedCredentialID := strings.TrimSpace(issuedCredential.CredentialID)
-	if issuedCredentialID == "" {
-		issuedCredentialID = p.randomValue(24)
-	}
-	if !p.walletStore.Put(vc.WalletCredentialRecord{
-		Subject:                   effectiveSubject,
-		Format:                    issuedCredential.Format,
-		CredentialConfigurationID: req.CredentialConfigurationID,
-		VCT:                       issuedCredential.VCT,
-		Doctype:                   issuedCredential.Doctype,
-		CredentialTypes:           issuedCredential.CredentialTypes,
-		CredentialJWT:             issuedCredential.CredentialJWT,
-		IssuerSignedJWT:           issuedCredential.IssuerSignedJWT,
-		CredentialID:              issuedCredentialID,
-		Issuer:                    issuerID,
-		IssuerJWK:                 issuerJWK,
-		IssuedAt:                  time.Now().UTC(),
-	}) {
-		writeServerError(w, "persist credential lineage", fmt.Errorf("failed to persist issued credential in wallet store"))
-		return
-	}
+	p.updateIssuerInitiatedTransaction(grant.IssuerState, issuerInitiatedStatusCredentialIssued)
 
 	nextNonce := models.VCNonce{
 		Value:     p.randomValue(24),
@@ -1005,17 +1826,16 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			Model: models.VCIssuanceTransaction{
 				TransactionID:             transactionID,
 				CredentialConfigurationID: req.CredentialConfigurationID,
-				Format:                    issuedCredential.Format,
+				Format:                    issuedFormat,
 				AccessTokenID:             accessToken,
 				Deferred:                  true,
 				Status:                    "pending",
 				CreatedAt:                 now,
 				UpdatedAt:                 now,
 			},
-			Subject:      grant.Subject,
-			ReadyAt:      now.Add(deferredReadyDelay),
-			Credential:   issuedCredential.Credential,
-			CredentialID: issuedCredentialID,
+			Subject:     grant.Subject,
+			ReadyAt:     now.Add(deferredReadyDelay),
+			Credentials: issuedArtifacts,
 		}
 		p.mu.Unlock()
 
@@ -1030,6 +1850,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 				"c_nonce_expires_in_seconds":    int(nonceTTL.Seconds()),
 				"deferred_credential_endpoint":  "/oid4vci/deferred_credential",
 				"proofs_submitted":              len(proofs),
+				"credentials_prepared":          len(issuedArtifacts),
 				"credential_request_deferred":   true,
 				"credential_response_immediate": false,
 			},
@@ -1051,8 +1872,9 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		"Credential Issued",
 		map[string]interface{}{
 			"credential_configuration_id": req.CredentialConfigurationID,
-			"format":                      issuedCredential.Format,
+			"format":                      issuedFormat,
 			"proofs_submitted":            len(proofs),
+			"credentials_issued":          len(credentialEntries),
 		},
 		p.vcAnnotation("credential_endpoint")...,
 	)
@@ -1060,13 +1882,11 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	notificationID := p.createNotificationRecord(
 		accessToken,
 		req.CredentialConfigurationID,
-		[]string{issuedCredentialID},
+		credentialIDs,
 		grant.ExpiresAt,
 	)
 	if err := writeCredentialResponse(w, http.StatusOK, map[string]interface{}{
-		"credentials": []map[string]interface{}{
-			{"credential": issuedCredential.Credential},
-		},
+		"credentials":     credentialEntries,
 		"notification_id": notificationID,
 	}, req.CredentialResponseEncryption); err != nil {
 		writeServerError(w, "encrypt credential response", err)
@@ -1096,7 +1916,7 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if req.CredentialResponseEncryption != nil {
-		// OID4VCI 1.0 §9.1: the Deferred Credential Request's own encryption
+		// OID4VCI 1.0 ?9.1: the Deferred Credential Request's own encryption
 		// parameters govern the Deferred Credential Response, independent of
 		// what (if anything) was sent on the original Credential Request.
 		if err := req.CredentialResponseEncryption.validate(); err != nil {
@@ -1183,16 +2003,22 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		p.vcAnnotation("deferred_credential")...,
 	)
 
+	deferredCredentialIDs := make([]string, 0, len(transaction.Credentials))
+	deferredCredentialEntries := make([]map[string]interface{}, 0, len(transaction.Credentials))
+	for _, artifact := range transaction.Credentials {
+		deferredCredentialIDs = append(deferredCredentialIDs, artifact.CredentialID)
+		deferredCredentialEntries = append(deferredCredentialEntries, map[string]interface{}{
+			"credential": artifact.Credential,
+		})
+	}
 	notificationID := p.createNotificationRecord(
 		accessToken,
 		transaction.Model.CredentialConfigurationID,
-		[]string{transaction.CredentialID},
+		deferredCredentialIDs,
 		grant.ExpiresAt,
 	)
 	if err := writeCredentialResponse(w, http.StatusOK, map[string]interface{}{
-		"credentials": []map[string]interface{}{
-			{"credential": transaction.Credential},
-		},
+		"credentials":     deferredCredentialEntries,
 		"notification_id": notificationID,
 	}, req.CredentialResponseEncryption); err != nil {
 		writeServerError(w, "encrypt deferred credential response", err)
@@ -1457,12 +2283,14 @@ func (p *Plugin) collectProofs(req credentialRequest) ([]credentialProof, error)
 		if len(values) == 0 {
 			return nil, fmt.Errorf("proofs.jwt must be a non-empty array")
 		}
-		if len(values) > 1 {
-			// OID4VCI 1.0 Final Section 12.2.4 uses
-			// batch_credential_issuance.batch_size to advertise support for
-			// more than one proof. This issuer omits that metadata, so it
-			// accepts exactly one key proof and issues one Credential.
-			return nil, fmt.Errorf("multiple proofs are not supported by this Credential Issuer")
+		// OID4VCI 1.0 ?11.2.3: when batch_credential_issuance is advertised,
+		// batch_size is the maximum proofs array length in one request.
+		if len(values) > batchCredentialIssuanceBatchSize {
+			return nil, fmt.Errorf(
+				"proofs.jwt length %d exceeds batch_credential_issuance.batch_size %d",
+				len(values),
+				batchCredentialIssuanceBatchSize,
+			)
 		}
 		proofs := make([]credentialProof, 0, len(values))
 		for _, value := range values {
@@ -1476,7 +2304,7 @@ func (p *Plugin) collectProofs(req credentialRequest) ([]credentialProof, error)
 	return nil, nil
 }
 
-// validateProofJWT validates an OID4VCI 1.0 §7 proof JWT and returns its
+// validateProofJWT validates an OID4VCI 1.0 ?7 proof JWT and returns its
 // nonce, optional issuer subject, JOSE-header holder key, and (if present) the raw
 // key_attestation JOSE header value (Appendix F.1) for the caller to validate
 // separately against a credential configuration's key_attestations_required

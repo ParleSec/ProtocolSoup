@@ -30,9 +30,16 @@ import (
 )
 
 const (
-	tokenTTL           = 5 * time.Minute
-	nonceTTL           = 5 * time.Minute
-	deferredReadyDelay = 3 * time.Second
+	tokenTTL                      = 5 * time.Minute
+	nonceTTL                      = 5 * time.Minute
+	refreshTokenTTL               = 7 * 24 * time.Hour
+	deferredReadyDelay            = 3 * time.Second
+	issuerInitiatedTransactionTTL = 10 * time.Minute
+	// batchCredentialIssuanceBatchSize is OID4VCI 1.0 §11.2.3
+	// batch_credential_issuance.batch_size: maximum proofs.jwt array length
+	// accepted in one Credential Request. Must be >= 2 when the metadata
+	// object is advertised.
+	batchCredentialIssuanceBatchSize = 20
 )
 
 type offerRecord struct {
@@ -57,12 +64,42 @@ type accessGrant struct {
 	CNonce                     models.VCNonce
 	CNonceUsed                 bool
 	OfferID                    string
+	IssuerState                string
 	Deferred                   bool
 	ExpiresAt                  time.Time
 	// JKT is the RFC 7638 JWK thumbprint this access token is bound to when
 	// it was issued against a DPoP proof (RFC 9449 Section 4.1). Empty for
 	// ordinary bearer-issued tokens, which continue to work unchanged.
 	JKT string
+}
+
+// refreshGrant retains OID4VCI authorization state across refresh_token
+// redemptions so refreshed access tokens keep the same credential bindings.
+type refreshGrant struct {
+	Subject                    string
+	WalletID                   string
+	CredentialConfigurationIDs map[string]struct{}
+	CredentialIdentifiers      map[string]string
+	AuthorizationDetailsUsed   bool
+	IssuerState                string
+	Scope                      string
+	// RequireDPoP is true when the access token issued with this refresh
+	// token was DPoP-bound. FAPI2 sender-constrained refresh must then present
+	// a DPoP proof even when the refresh token itself is bound only to a
+	// Client Instance Key (OAuth2-ATCA §10.3).
+	RequireDPoP bool
+}
+
+type issuerInitiatedTransaction struct {
+	StatusID                   string
+	IssuerState                string
+	SessionID                  string
+	ClientID                   string
+	CredentialConfigurationIDs []string
+	Status                     string
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
+	ExpiresAt                  time.Time
 }
 
 type walletIdentity struct {
@@ -79,12 +116,16 @@ type walletIdentity struct {
 	CreatedAt      time.Time
 }
 
-type issuanceTransaction struct {
-	Model        models.VCIssuanceTransaction
-	Subject      string
-	ReadyAt      time.Time
+type deferredCredentialArtifact struct {
 	Credential   interface{}
 	CredentialID string
+}
+
+type issuanceTransaction struct {
+	Model       models.VCIssuanceTransaction
+	Subject     string
+	ReadyAt     time.Time
+	Credentials []deferredCredentialArtifact
 }
 
 type notificationEvent struct {
@@ -132,10 +173,14 @@ type Plugin struct {
 	mu                     sync.RWMutex
 	offers                 map[string]*offerRecord
 	offersByPreAuthCode    map[string]string
+	issuerInitiatedOffers  map[string]*issuerInitiatedTransaction
+	issuerInitiatedStatus  map[string]string
 	accessGrants           map[string]*accessGrant
+	refreshGrants          map[string]*refreshGrant
 	issuanceTransactions   map[string]*issuanceTransaction
 	notifications          map[string]*notificationRecord
 	credentialNonces       map[string]time.Time
+	statusListIndexes      map[int]struct{}
 	wallets                map[string]*walletIdentity
 	walletsByUserID        map[string]string
 	usedAttestationPoPJTIs map[string]time.Time
@@ -172,10 +217,14 @@ func NewPlugin() *Plugin {
 		credentialConfigurations: defaultCredentialConfigurationRegistry(),
 		offers:                   make(map[string]*offerRecord),
 		offersByPreAuthCode:      make(map[string]string),
+		issuerInitiatedOffers:    make(map[string]*issuerInitiatedTransaction),
+		issuerInitiatedStatus:    make(map[string]string),
 		accessGrants:             make(map[string]*accessGrant),
+		refreshGrants:            make(map[string]*refreshGrant),
 		issuanceTransactions:     make(map[string]*issuanceTransaction),
 		notifications:            make(map[string]*notificationRecord),
 		credentialNonces:         make(map[string]time.Time),
+		statusListIndexes:        make(map[int]struct{}),
 		wallets:                  make(map[string]*walletIdentity),
 		walletsByUserID:          make(map[string]string),
 		usedAttestationPoPJTIs:   make(map[string]time.Time),
@@ -192,6 +241,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if p.baseURL == "" {
 		p.baseURL = "http://localhost:8080"
 	}
+	configuration := p.credentialConfigurations["UniversityDegreeCredentialSDJWTHAIP"]
+	configuration.VCT = p.baseURL + "/oid4vci/credential-types/university-degree"
+	p.credentialConfigurations[configuration.ID] = configuration
 
 	if idp, ok := config.MockIdP.(*mockidp.MockIdP); ok {
 		p.mockIDP = idp
@@ -309,6 +361,12 @@ func (p *Plugin) evictExpiredIssuanceState() {
 			}
 		}
 	}
+	for issuerState, transaction := range p.issuerInitiatedOffers {
+		if now.After(transaction.ExpiresAt) {
+			delete(p.issuerInitiatedStatus, transaction.StatusID)
+			delete(p.issuerInitiatedOffers, issuerState)
+		}
+	}
 	for token, grant := range p.accessGrants {
 		if now.After(grant.ExpiresAt) {
 			delete(p.accessGrants, token)
@@ -350,8 +408,13 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/offers/pre-authorized", p.handleCreatePreAuthorizedOffer)
 	router.Post("/offers/pre-authorized/by-value", p.handleCreatePreAuthorizedOfferByValue)
 	router.Post("/offers/pre-authorized/deferred", p.handleCreateDeferredPreAuthorizedOffer)
+	router.Post("/offers/authorization-code", p.handleCreateAuthorizationCodeOffer)
+	router.Get("/offers/authorization-code/status/{statusID}", p.handleAuthorizationCodeOfferStatus)
 
 	router.Post("/token", p.handleToken)
+	router.Post("/par", p.handlePushedAuthorizationRequest)
+	router.Get("/status-lists/{listID}", p.handleStatusList)
+	router.Get("/credential-types/university-degree", p.handleUniversityDegreeTypeMetadata)
 	router.Post("/nonce", p.handleNonce)
 	router.Post("/credential", p.handleCredential)
 	router.Post("/deferred_credential", p.handleDeferredCredential)
@@ -721,6 +784,69 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				},
 			},
 		},
+		{
+			ID:          "oid4vci-issuer-initiated",
+			Name:        "OID4VCI Issuer-Initiated Offer",
+			Description: "Issuer builds an authorization_code Credential Offer with a server-generated issuer_state and hands it to a wallet's Credential Offer Endpoint. The wallet then drives its own client-attested RFC 9126 PAR, token exchange, and credential request while Looking Glass checks the issuer's persisted processing context on demand for real lifecycle milestones (OID4VCI §4.1, §5.1).",
+			Executable:  true,
+			Category:    "issuance",
+			Steps: []plugin.FlowStep{
+				{
+					Order:       1,
+					Name:        "Create Credential Offer",
+					Description: "Issuer generates a Credential Offer naming one or more credential_configuration_ids and an authorization_code grant with a fresh, opaque issuer_state (OID4VCI §4.1.1).",
+					From:        "Credential Issuer",
+					To:          "Credential Issuer",
+					Type:        "internal",
+					Parameters: map[string]string{
+						"credential_configuration_ids":           "Requested credential configuration(s) (REQUIRED)",
+						"grants.authorization_code.issuer_state": "Opaque value binding the later Authorization Request to this offer",
+					},
+					Security: []string{
+						"issuer_state is generated per-offer and never reused across offers",
+					},
+				},
+				{
+					Order:       2,
+					Name:        "Deliver Offer to Wallet",
+					Description: "Issuer delivers the Credential Offer to the wallet's published Credential Offer Endpoint as a credential_offer query parameter over HTTPS (OID4VCI §4.1.2), e.g. via QR code, deep link, or direct HTTP GET.",
+					From:        "Credential Issuer",
+					To:          "Wallet",
+					Type:        "request",
+					Parameters: map[string]string{
+						"credential_offer": "The Credential Offer object, URL-encoded as a query parameter",
+					},
+					Security: []string{
+						"Delivery endpoint must use https://",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "Wallet Drives Authorization Code Flow",
+					Description: "The wallet pushes a client-attested Authorization Request carrying issuer_state (RFC 9126 PAR), completes any interactive authorization, exchanges the code for a DPoP-bound access token, and requests the credential with a nonce-bound proof.",
+					From:        "Wallet",
+					To:          "Credential Issuer",
+					Type:        "request",
+					Security: []string{
+						"issuer_state must resolve to a live issuer-created context and the requested Credential Configurations must be a subset of the offer",
+					},
+				},
+				{
+					Order:       4,
+					Name:        "Observe Issuance Lifecycle",
+					Description: "Looking Glass checks the separate opaque status_uri on demand (an operator-triggered \"Check Result\", reusing the OID4VP wallet-handoff awaiting_user chrome) and completes only after the issuer has observed the wallet's PAR, token exchange, and successful credential request, or reports the offer context has expired.",
+					From:        "Looking Glass",
+					To:          "Credential Issuer",
+					Type:        "request",
+					Parameters: map[string]string{
+						"status_uri": "Opaque lifecycle reference returned alongside the Credential Offer",
+					},
+					Security: []string{
+						"The status reference is independent from issuer_state so checking status does not expose the authorization binding value",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -756,6 +882,16 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 				{Order: 1, Name: "Create Deferred Offer", Description: "Generate deferred-capable offer", Auto: true},
 				{Order: 2, Name: "Initial Credential Request", Description: "Receive transaction_id", Auto: true},
 				{Order: 3, Name: "Poll Deferred Endpoint", Description: "Retrieve final credential", Auto: true},
+			},
+		},
+		{
+			ID:          "oid4vci-issuer-initiated",
+			Name:        "Issuer-Initiated Offer",
+			Description: "Build an authorization_code offer with issuer_state, hand it to a wallet, and click Check Result to observe real issuer-observed milestones until credential issuance",
+			Steps: []plugin.DemoStep{
+				{Order: 1, Name: "Create Offer", Description: "Generate authorization_code offer with issuer_state", Auto: true},
+				{Order: 2, Name: "Deliver to Wallet", Description: "Issuer HTTPS-GETs the wallet credential_offer_endpoint when supplied; otherwise expose openid-credential-offer:// QR", Auto: true},
+				{Order: 3, Name: "Check Result", Description: "Click Check Result until PAR, token exchange, and credential issuance are observed", Auto: false},
 			},
 		},
 	}
