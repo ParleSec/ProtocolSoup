@@ -35,6 +35,10 @@ func (p *Plugin) tokenEndpointURL() string {
 // it needs the identical AS-side validation, scoped to its own token
 // endpoint and its own replay store.
 func (p *Plugin) validateTokenEndpointDPoP(r *http.Request) (dpopValidation, error) {
+	return p.validateAuthorizationServerDPoP(r, p.tokenEndpointURL())
+}
+
+func (p *Plugin) validateAuthorizationServerDPoP(r *http.Request, endpointURL string) (dpopValidation, error) {
 	header, err := dpop.ExtractHeader(r.Header.Values(dpop.HeaderName))
 	if err != nil {
 		return dpopValidation{}, err
@@ -45,7 +49,7 @@ func (p *Plugin) validateTokenEndpointDPoP(r *http.Request) (dpopValidation, err
 
 	proof, err := dpop.ValidateProof(header, dpop.ValidateOptions{
 		Method: http.MethodPost,
-		URI:    p.tokenEndpointURL(),
+		URI:    endpointURL,
 	})
 	if err != nil {
 		return dpopValidation{}, err
@@ -169,6 +173,24 @@ func (p *Plugin) authorizeResourceRequest(r *http.Request) (string, *accessGrant
 	p.mu.RUnlock()
 	if !ok {
 		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: "unknown access token"}
+	}
+
+	// RFC 6749 Section 4.1.2: when an authorization code is replayed the AS
+	// SHOULD revoke previously issued tokens. MockIdP records those JTIs on
+	// redemption and marks them revoked on replay; enforce that here so the
+	// credential/nonce/deferred/notification resource endpoints reject the
+	// token with HTTP 4xx (RFC 6750 Section 3.1) instead of serving it from
+	// the still-cached access grant.
+	if p.mockIDP != nil && p.mockIDP.IsTokenRevoked(token) {
+		p.mu.Lock()
+		delete(p.accessGrants, token)
+		p.mu.Unlock()
+		return "", nil, &resourceAuthError{
+			status:      http.StatusUnauthorized,
+			code:        "invalid_token",
+			description: "the access token has been revoked",
+			dpopBound:   grant.JKT != "",
+		}
 	}
 
 	dpopBound := grant.JKT != ""

@@ -1,12 +1,14 @@
 package oid4vci
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,6 +28,59 @@ import (
 )
 
 const mdocConfigurationID = "MobileDrivingLicenceMsoMdoc"
+
+func TestRoundCredentialIssuanceTimeUsesUTCDayStart(t *testing.T) {
+	now := time.Date(2026, 8, 9, 14, 29, 47, 123, time.UTC)
+	got := roundCredentialIssuanceTime(now)
+	want := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("roundCredentialIssuanceTime = %s, want %s", got, want)
+	}
+	later := now.Add(45 * time.Second)
+	if !roundCredentialIssuanceTime(later).Equal(got) {
+		t.Fatal("same-day issuances must round to the same instant (RFC 9901 §10.1)")
+	}
+}
+
+func TestMdocValidityInfoDoesNotTrackPreciseIssuanceGap(t *testing.T) {
+	server, testPlugin, _ := newMdocTestEnv(t)
+	defer server.Close()
+
+	wallet, err := testPlugin.getOrCreateWallet("alice")
+	if err != nil {
+		t.Fatalf("wallet: %v", err)
+	}
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate holder key: %v", err)
+	}
+	holderJWK := crypto.JWKFromECPublicKey(&holderKey.PublicKey, "holder")
+
+	driver := &msoMdocCredentialIssuerDriver{plugin: testPlugin}
+	configuration := testPlugin.credentialConfigurations[mdocConfigurationID]
+
+	first, err := driver.IssueCredential("alice", configuration, wallet, &holderJWK)
+	if err != nil {
+		t.Fatalf("first issuance: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	second, err := driver.IssueCredential("alice", configuration, wallet, &holderJWK)
+	if err != nil {
+		t.Fatalf("second issuance: %v", err)
+	}
+
+	a, _ := decodeAndVerifyMdoc(t, testPlugin, first.CredentialJWT)
+	b, _ := decodeAndVerifyMdoc(t, testPlugin, second.CredentialJWT)
+	if !a.ValidityInfo.Signed.Equal(b.ValidityInfo.Signed) ||
+		!a.ValidityInfo.ValidFrom.Equal(b.ValidityInfo.ValidFrom) ||
+		!a.ValidityInfo.ValidUntil.Equal(b.ValidityInfo.ValidUntil) {
+		t.Fatalf("validityInfo diverged across issuances: first=%+v second=%+v", a.ValidityInfo, b.ValidityInfo)
+	}
+	dayStart := roundCredentialIssuanceTime(time.Now().UTC())
+	if !a.ValidityInfo.Signed.Equal(dayStart) || !a.ValidityInfo.ValidFrom.Equal(dayStart) {
+		t.Fatalf("validityInfo not day-rounded: signed=%s validFrom=%s want %s", a.ValidityInfo.Signed, a.ValidityInfo.ValidFrom, dayStart)
+	}
+}
 
 // newMdocTestEnv builds an OID4VCI server alongside the live plugin and mock IdP
 // so a test can drive the HTTP flow and still reach the issuer trust anchor.
@@ -180,7 +235,7 @@ func TestMsoMdocPreAuthorizedIssuance(t *testing.T) {
 		found[item.ElementIdentifier] = true
 		values[item.ElementIdentifier] = item.ElementValue
 	}
-	for _, required := range []string{"family_name", "given_name", "birth_date", "issuing_country", "document_number"} {
+	for _, required := range []string{"family_name", "given_name", "birth_date", "issuing_country", "document_number", "portrait"} {
 		if !found[required] {
 			t.Fatalf("expected mDL element %q to be present", required)
 		}
@@ -190,6 +245,13 @@ func TestMsoMdocPreAuthorizedIssuance(t *testing.T) {
 	}
 	if got := fmt.Sprint(values["given_name"]); got != "Alice" {
 		t.Fatalf("given_name = %q, want identity-record value Alice", got)
+	}
+	portrait, ok := values["portrait"].([]byte)
+	if !ok {
+		t.Fatalf("portrait = %T, want JPEG byte string", values["portrait"])
+	}
+	if _, err := jpeg.Decode(bytes.NewReader(portrait)); err != nil {
+		t.Fatalf("portrait is not a valid JPEG: %v", err)
 	}
 	if got := fmt.Sprint(values["document_number"]); got != "D-ALICE-001" {
 		t.Fatalf("document_number = %q, want identity-record value D-ALICE-001", got)
@@ -350,7 +412,7 @@ func TestMsoMdocIssuedCredentialNestingDepthWithinHardenedCeiling(t *testing.T) 
 	if err != nil {
 		t.Fatalf("mdoc.CheckUntrustedCBOR rejected a real production-shaped issued mDL: %v", err)
 	}
-	t.Logf("measured nesting depth of a real issued mDL (11 elements incl. driving_privileges): %d", depth)
+	t.Logf("measured nesting depth of a real issued mDL (12 elements incl. portrait and driving_privileges): %d", depth)
 
 	// 16 mirrors mdoc.maxUntrustedNestedLevels (internal/mdoc/issuersigned.go),
 	// which is unexported; duplicated here as a literal rather than exported

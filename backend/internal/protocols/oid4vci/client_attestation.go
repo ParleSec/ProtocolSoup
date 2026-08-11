@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/pkg/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -36,6 +37,16 @@ type clientAttestationAuth struct {
 	// ClientID is the sub claim of the Client Attestation JWT (draft-09 §4.2:
 	// "sub: REQUIRED. ... MUST specify client_id value of the OAuth Client").
 	ClientID string
+	// InstanceJKT is the RFC 7638 thumbprint of the Client Instance Key
+	// (cnf.jwk). Refresh tokens issued under attestation are bound to this
+	// value (draft §9.3 / §10.3).
+	InstanceJKT string
+	// popJTI is the Client Attestation PoP JWT jti. Callers must invoke
+	// commitClientAttestationPoP after other request checks that may still
+	// fail and be retried with the same PoP (notably RFC 9449 DPoP nonce
+	// challenges). Recording jti before those checks breaks FAPI2
+	// RefreshTokenRequestSteps, which regenerates DPoP but not attestation.
+	popJTI string
 }
 
 // initClientAttestationTrust loads the CA trust anchor used to validate the
@@ -82,10 +93,52 @@ func (p *Plugin) authenticateClientAttestation(r *http.Request) (auth clientAtte
 	if err != nil {
 		return clientAttestationAuth{}, true, fmt.Errorf("client attestation pop: %w", err)
 	}
-	if !p.recordAttestationPoPJTI(jti) {
-		return clientAttestationAuth{}, true, fmt.Errorf("client attestation pop: jti has already been used (replay)")
+	return clientAttestationAuth{
+		ClientID:    clientID,
+		InstanceJKT: cnfJWK.Thumbprint(),
+		popJTI:      jti,
+	}, true, nil
+}
+
+// commitClientAttestationPoP records the PoP jti for replay detection
+// (draft-09 §11.1). Call only after request checks that can return a
+// retryable challenge (for example DPoP nonce) have already succeeded.
+func (p *Plugin) commitClientAttestationPoP(auth clientAttestationAuth) error {
+	if strings.TrimSpace(auth.popJTI) == "" {
+		return nil
 	}
-	return clientAttestationAuth{ClientID: clientID}, true, nil
+	if !p.recordAttestationPoPJTI(auth.popJTI) {
+		return fmt.Errorf("client attestation pop: jti has already been used (replay)")
+	}
+	return nil
+}
+
+// ensureAttestedWalletClient registers an attestation-authenticated wallet when
+// the Client Instance has not yet completed PAR. Draft attestation-based client
+// auth authenticates via the attestation itself; requiring a prior RegisterClient
+// would turn FAPI2 cross-client code redemption into HTTP 401 unknown_client
+// instead of the required HTTP 400 invalid_grant binding failure.
+func (p *Plugin) ensureAttestedWalletClient(clientID, redirectURI string) {
+	if p.mockIDP == nil || strings.TrimSpace(clientID) == "" {
+		return
+	}
+	if _, exists := p.mockIDP.GetClient(clientID); exists {
+		return
+	}
+	redirectURIs := []string(nil)
+	if trimmed := strings.TrimSpace(redirectURI); trimmed != "" {
+		redirectURIs = []string{trimmed}
+	}
+	p.mockIDP.RegisterClient(&models.Client{
+		ID:                      clientID,
+		Name:                    "Attested OID4VCI Wallet",
+		RedirectURIs:            redirectURIs,
+		ResponseTypes:           []string{"code"},
+		GrantTypes:              []string{"authorization_code", "refresh_token"},
+		Public:                  true,
+		TokenEndpointAuthMethod: "attest_jwt_client_auth",
+		CreatedAt:               time.Now(),
+	})
 }
 
 // validateClientAttestationJWT validates the Client Attestation JWT (draft-09

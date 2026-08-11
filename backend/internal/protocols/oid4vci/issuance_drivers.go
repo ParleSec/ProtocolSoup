@@ -1,12 +1,16 @@
 package oid4vci
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"sort"
 	"strings"
 	"time"
@@ -25,7 +29,23 @@ const (
 	// mdlLicenceValidity is the mDL expiry_date horizon (the licence's own
 	// validity, distinct from the MSO refresh window).
 	mdlLicenceValidity = 5 * 365 * 24 * time.Hour
+	// jwtCredentialLifetime is the lifetime of JWT/SD-JWT credentials measured
+	// from the rounded issuance instant. Day-rounding (RFC 9901 §10.1) makes
+	// a short wall-clock TTL unsafe, so this is at least one quantization
+	// period.
+	jwtCredentialLifetime = 24 * time.Hour
+	// credentialTimeRounding is the RFC 9901 Section 10.1 quantization for
+	// issuance time claims (iat/nbf/exp and mdoc validityInfo). Rounding to
+	// the start of the UTC day prevents same-dataset credentials issued
+	// seconds apart from embedding the precise inter-issuance gap.
+	credentialTimeRounding = 24 * time.Hour
 )
+
+// roundCredentialIssuanceTime returns the RFC 9901 §10.1-rounded issuance
+// instant for credential time claims: the start of the UTC day containing now.
+func roundCredentialIssuanceTime(now time.Time) time.Time {
+	return now.UTC().Truncate(credentialTimeRounding)
+}
 
 type issuedCredential struct {
 	Format          string
@@ -110,6 +130,7 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 		return nil, fmt.Errorf("wallet context is required")
 	}
 	now := time.Now().UTC()
+	issuedAt := roundCredentialIssuanceTime(now)
 	selectiveClaims := walletSelectiveClaims(wallet)
 	claimNames := make([]string, 0, len(selectiveClaims))
 	for claimName := range selectiveClaims {
@@ -128,46 +149,77 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 	}
 
 	credentialID := d.plugin.randomValue(24)
-	credentialSubject := map[string]interface{}{
-		"id":  subject,
-		"_sd": disclosureDigests,
-	}
 	claims := jwt.MapClaims{
 		"_sd_alg": "sha-256",
+		"_sd":     disclosureDigests,
 		"iss":     nowIssuer(d.plugin.issuerID()),
 		"sub":     subject,
-		"iat":     now.Unix(),
-		"nbf":     now.Unix(),
-		"exp":     now.Add(20 * time.Minute).Unix(),
+		"iat":     issuedAt.Unix(),
+		"nbf":     issuedAt.Unix(),
+		"exp":     issuedAt.Add(jwtCredentialLifetime).Unix(),
 		"jti":     credentialID,
 		"vct":     configuration.VCT,
-		"vc": map[string]interface{}{
-			"@context":          credentialContexts(configuration),
-			"type":              credentialTypes(configuration),
-			"credentialSubject": credentialSubject,
-		},
+	}
+	if configuration.UseX509CredentialSigner {
+		statusListIndex, err := d.plugin.allocateStatusListIndex()
+		if err != nil {
+			return nil, err
+		}
+		claims["status"] = map[string]interface{}{
+			"status_list": map[string]interface{}{
+				"idx": statusListIndex,
+				"uri": d.plugin.statusListURI(),
+			},
+		}
 	}
 	if holderJWK != nil && strings.TrimSpace(holderJWK.Kty) != "" {
-		cnf := map[string]interface{}{
+		claims["cnf"] = map[string]interface{}{
 			"jwk": *holderJWK,
 		}
-		thumbprint := strings.TrimSpace(holderJWK.Thumbprint())
-		if thumbprint != "" {
-			cnf["jkt"] = thumbprint
-		}
-		claims["cnf"] = cnf
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["typ"] = "dc+sd-jwt"
-	token.Header["kid"] = d.plugin.keySet.RSAKeyID()
-	issuerSignedJWT, err := token.SignedString(d.plugin.keySet.RSAPrivateKey())
-	if err != nil {
-		return nil, err
-	}
-	issuerJWK, ok := d.plugin.keySet.GetJWKByID(d.plugin.keySet.RSAKeyID())
-	if !ok {
-		return nil, fmt.Errorf("issuer rsa jwk is unavailable")
+	var (
+		issuerSignedJWT string
+		issuerJWK       crypto.JWK
+		err             error
+	)
+	if configuration.UseX509CredentialSigner {
+		if d.plugin.mdocPKI == nil || d.plugin.mdocPKI.DocumentSignerKey() == nil {
+			return nil, fmt.Errorf("certificate-backed credential signer is unavailable")
+		}
+		signerKey := d.plugin.mdocPKI.DocumentSignerKey()
+		chain := d.plugin.mdocPKI.DocumentSignerChain()
+		if len(chain) == 0 || chain[0] == nil {
+			return nil, fmt.Errorf("certificate-backed credential signer chain is unavailable")
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+		token.Header["typ"] = "dc+sd-jwt"
+		x5c := make([]string, 0, len(chain))
+		for _, certificate := range chain {
+			if certificate == nil {
+				return nil, fmt.Errorf("certificate-backed credential signer chain contains an empty certificate")
+			}
+			x5c = append(x5c, base64.StdEncoding.EncodeToString(certificate.Raw))
+		}
+		token.Header["x5c"] = x5c
+		issuerSignedJWT, err = token.SignedString(signerKey)
+		if err != nil {
+			return nil, err
+		}
+		issuerJWK = crypto.JWKFromECPublicKey(&signerKey.PublicKey, "")
+	} else {
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+		token.Header["typ"] = "dc+sd-jwt"
+		token.Header["kid"] = d.plugin.keySet.RSAKeyID()
+		issuerSignedJWT, err = token.SignedString(d.plugin.keySet.RSAPrivateKey())
+		if err != nil {
+			return nil, err
+		}
+		var ok bool
+		issuerJWK, ok = d.plugin.keySet.GetJWKByID(d.plugin.keySet.RSAKeyID())
+		if !ok {
+			return nil, fmt.Errorf("issuer rsa jwk is unavailable")
+		}
 	}
 
 	serialized := vc.BuildSDJWTSerialization(issuerSignedJWT, disclosureSegments, "")
@@ -204,6 +256,7 @@ func (d *ldpVCCredentialIssuerDriver) IssueCredential(subject string, configurat
 	}
 
 	now := time.Now().UTC()
+	issuedAt := roundCredentialIssuanceTime(now)
 	credentialID := d.plugin.randomValue(24)
 	issuerJWK, ok := d.plugin.keySet.GetJWKByID(d.plugin.keySet.ECKeyID())
 	if !ok {
@@ -213,7 +266,7 @@ func (d *ldpVCCredentialIssuerDriver) IssueCredential(subject string, configurat
 	if err != nil {
 		return nil, fmt.Errorf("derive issuer did:jwk: %w", err)
 	}
-	expiry := now.Add(20 * time.Minute)
+	expiry := issuedAt.Add(jwtCredentialLifetime)
 	credential := map[string]interface{}{
 		"@context": credentialContexts(configuration),
 		"id":       strings.TrimRight(d.plugin.issuerID(), "/") + "/credentials/" + credentialID,
@@ -222,8 +275,8 @@ func (d *ldpVCCredentialIssuerDriver) IssueCredential(subject string, configurat
 			"id":   issuerDID,
 			"name": "ProtocolSoup Issuer",
 		},
-		"issuanceDate":      now.Format(time.RFC3339),
-		"validFrom":         now.Format(time.RFC3339),
+		"issuanceDate":      issuedAt.Format(time.RFC3339),
+		"validFrom":         issuedAt.Format(time.RFC3339),
 		"expirationDate":    expiry.Format(time.RFC3339),
 		"validUntil":        expiry.Format(time.RFC3339),
 		"credentialSubject": walletFullCredentialSubject(subject, wallet),
@@ -241,7 +294,7 @@ func (d *ldpVCCredentialIssuerDriver) IssueCredential(subject string, configurat
 	securedCredential, err := vc.SecureDataIntegrityDocument(
 		credential,
 		map[string]interface{}{
-			"created":            now.Format(time.RFC3339),
+			"created":            issuedAt.Format(time.RFC3339),
 			"proofPurpose":       "assertionMethod",
 			"verificationMethod": vc.DefaultVerificationMethodID(issuerDID),
 		},
@@ -302,6 +355,7 @@ func issueJWTBackedCredential(
 	}
 
 	now := time.Now().UTC()
+	issuedAt := roundCredentialIssuanceTime(now)
 	credentialID := p.randomValue(24)
 	issuerJWK, ok := p.keySet.GetJWKByID(p.keySet.RSAKeyID())
 	if !ok {
@@ -320,16 +374,16 @@ func issueJWTBackedCredential(
 			"type":               "JsonWebSignature2020",
 			"proofPurpose":       "assertionMethod",
 			"verificationMethod": p.issuerID() + "#keys-1",
-			"created":            now.Format(time.RFC3339),
+			"created":            issuedAt.Format(time.RFC3339),
 		}
 	}
 
 	claims := jwt.MapClaims{
 		"iss": nowIssuer(p.issuerID()),
 		"sub": subject,
-		"iat": now.Unix(),
-		"nbf": now.Unix(),
-		"exp": now.Add(20 * time.Minute).Unix(),
+		"iat": issuedAt.Unix(),
+		"nbf": issuedAt.Unix(),
+		"exp": issuedAt.Add(jwtCredentialLifetime).Unix(),
 		"jti": credentialID,
 		"vct": configuration.VCT,
 		"vc":  vcClaim,
@@ -398,10 +452,11 @@ func (d *msoMdocCredentialIssuerDriver) IssueCredential(subject string, configur
 		docType = mdoc.DocTypeMDL
 	}
 
-	now := time.Now().UTC().Truncate(time.Second)
+	now := time.Now().UTC()
+	issuedAt := roundCredentialIssuanceTime(now)
 	credentialID := d.plugin.randomValue(24)
 
-	items, err := buildMDLIssuerSignedItems(now, wallet, d.plugin.mdocPKI)
+	items, err := buildMDLIssuerSignedItems(issuedAt, wallet, d.plugin.mdocPKI)
 	if err != nil {
 		return nil, fmt.Errorf("build mDL data elements: %w", err)
 	}
@@ -417,9 +472,9 @@ func (d *msoMdocCredentialIssuerDriver) IssueCredential(subject string, configur
 	}
 
 	validity := mdoc.ValidityInfo{
-		Signed:     now,
-		ValidFrom:  now,
-		ValidUntil: now.Add(msoValidity),
+		Signed:     issuedAt,
+		ValidFrom:  issuedAt,
+		ValidUntil: issuedAt.Add(msoValidity),
 	}
 	mso := mdoc.BuildMSO(valueDigests, deviceKey, docType, validity)
 	msoBytes, err := mdoc.EncodeMSOBytes(mso)
@@ -490,6 +545,10 @@ func buildMDLIssuerSignedItems(now time.Time, wallet *walletIdentity, pki *mdoc.
 		age--
 	}
 	ageOver21 := age >= 21
+	portrait, err := generatedMDLPortrait(wallet)
+	if err != nil {
+		return nil, err
+	}
 
 	drivingPrivileges := make([]map[string]interface{}, 0, len(privilegeCodes))
 	for _, privilegeCode := range privilegeCodes {
@@ -513,6 +572,7 @@ func buildMDLIssuerSignedItems(now time.Time, wallet *walletIdentity, pki *mdoc.
 		{"issuing_country", country},
 		{"issuing_authority", authority},
 		{"document_number", documentNumber},
+		{"portrait", portrait},
 		{"un_distinguishing_sign", unDistinguishingSign(country)},
 		{"driving_privileges", drivingPrivileges},
 		{"age_over_21", ageOver21},
@@ -527,6 +587,47 @@ func buildMDLIssuerSignedItems(now time.Time, wallet *walletIdentity, pki *mdoc.
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+// generatedMDLPortrait creates a valid JPEG avatar from the identity record.
+// It is intentionally stylized so the demo identity cannot be mistaken for a
+// photograph of a real person, while still carrying real image bytes through
+// the ISO/IEC 18013-5 issuance and verification paths.
+func generatedMDLPortrait(wallet *walletIdentity) ([]byte, error) {
+	const (
+		width  = 96
+		height = 128
+	)
+	seed := sha256.Sum256([]byte(strings.TrimSpace(wallet.GivenName) + "\x00" + strings.TrimSpace(wallet.FamilyName)))
+	background := color.RGBA{R: 210 + seed[0]%30, G: 220 + seed[1]%25, B: 225 + seed[2]%25, A: 255}
+	hair := color.RGBA{R: 35 + seed[3]%70, G: 25 + seed[4]%55, B: 20 + seed[5]%45, A: 255}
+	skin := color.RGBA{R: 190 + seed[6]%50, G: 135 + seed[7]%55, B: 100 + seed[8]%45, A: 255}
+	shirt := color.RGBA{R: 35 + seed[9]%120, G: 55 + seed[10]%120, B: 85 + seed[11]%120, A: 255}
+
+	portrait := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			pixel := background
+			if dx, dy := x-width/2, y-54; dx*dx*4+dy*dy*3 <= 38*38*3 {
+				pixel = skin
+			}
+			if dx, dy := x-width/2, y-38; dy < 0 && dx*dx+dy*dy <= 34*34 {
+				pixel = hair
+			}
+			if y >= 96 && (x-48)*(x-48) <= (y-90)*(y-90) {
+				pixel = shirt
+			}
+			if y >= 52 && y <= 57 && (x == 35 || x == 36 || x == 59 || x == 60) {
+				pixel = color.RGBA{R: 30, G: 30, B: 30, A: 255}
+			}
+			portrait.SetRGBA(x, y, pixel)
+		}
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, portrait, &jpeg.Options{Quality: 90}); err != nil {
+		return nil, fmt.Errorf("encode identity-derived mDL portrait: %w", err)
+	}
+	return encoded.Bytes(), nil
 }
 
 func splitNonEmptyCSV(raw string) []string {

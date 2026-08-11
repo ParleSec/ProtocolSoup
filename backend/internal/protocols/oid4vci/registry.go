@@ -44,6 +44,7 @@ type claimDescription struct {
 
 type credentialConfiguration struct {
 	ID                          string
+	HAIP                        bool
 	Format                      string
 	Scope                       string
 	VCT                         string
@@ -56,6 +57,10 @@ type credentialConfiguration struct {
 	CredentialSigningAlgs       []interface{}
 	SupportedDisplayName        string
 	SupportsSelectiveDisclosure bool
+	// UseX509CredentialSigner selects the persistent ES256 certificate-backed
+	// issuer key and emits its leaf-first chain in x5c. HAIP 1.0 Section 6.1.1
+	// requires this key-resolution method for SD-JWT VC credentials.
+	UseX509CredentialSigner bool
 
 	// RequireKeyAttestation gates OID4VCI 1.0 Appendix D key attestation
 	// enforcement (key_attestation.go) for this configuration only, so the
@@ -112,6 +117,17 @@ func (c credentialConfiguration) toMetadataObject() map[string]interface{} {
 	if doctype := strings.TrimSpace(c.Doctype); doctype != "" {
 		metadata["doctype"] = doctype
 	}
+	// OID4VCI 1.0 Final §12.2.4 / Appendix A put claims (and display) under
+	// credential_metadata for every format profile, including dc+sd-jwt.
+	credentialMetadata := map[string]interface{}{}
+	if name := strings.TrimSpace(c.SupportedDisplayName); name != "" {
+		credentialMetadata["display"] = []map[string]interface{}{
+			{
+				"name":   name,
+				"locale": "en-US",
+			},
+		}
+	}
 	if len(c.Claims) > 0 {
 		claims := make([]map[string]interface{}, 0, len(c.Claims))
 		for _, claim := range c.Claims {
@@ -123,9 +139,15 @@ func (c credentialConfiguration) toMetadataObject() map[string]interface{} {
 			}
 			claims = append(claims, entry)
 		}
-		metadata["claims"] = claims
+		credentialMetadata["claims"] = claims
 	}
-	if len(c.CredentialTypes) > 0 || len(c.Contexts) > 0 {
+	if len(credentialMetadata) > 0 {
+		metadata["credential_metadata"] = credentialMetadata
+	}
+	if (c.Format == credentialFormatJWTVCJSON ||
+		c.Format == credentialFormatJWTVCJSONL ||
+		c.Format == credentialFormatLDPVC) &&
+		(len(c.CredentialTypes) > 0 || len(c.Contexts) > 0) {
 		credentialDefinition := make(map[string]interface{})
 		if len(c.CredentialTypes) > 0 {
 			credentialDefinition["type"] = append([]string{}, c.CredentialTypes...)
@@ -151,6 +173,21 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			CredentialSigningAlgs:       []interface{}{"RS256"},
 			SupportedDisplayName:        "University Degree (SD-JWT VC)",
 			SupportsSelectiveDisclosure: true,
+		},
+		"UniversityDegreeCredentialSDJWTHAIP": {
+			ID:                          "UniversityDegreeCredentialSDJWTHAIP",
+			HAIP:                        true,
+			Format:                      credentialFormatDCSdJWT,
+			Scope:                       "vc:university_degree_haip",
+			VCT:                         universityDegreeVCT,
+			CredentialTypes:             []string{"VerifiableCredential", "UniversityDegreeCredential"},
+			BindingMethodsSupported:     []string{"jwk"},
+			ProofSigningAlgsSupported:   []string{"ES256"},
+			CredentialSigningAlgs:       []interface{}{"ES256"},
+			SupportedDisplayName:        "University Degree (SD-JWT VC, HAIP)",
+			SupportsSelectiveDisclosure: true,
+			UseX509CredentialSigner:     true,
+			RequireKeyAttestation:       true,
 		},
 		"UniversityDegreeCredentialJWT": {
 			ID:                        "UniversityDegreeCredentialJWT",
@@ -210,6 +247,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 				{Path: []string{mdlNamespace, "issuing_country"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "issuing_authority"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "document_number"}, Mandatory: true},
+				{Path: []string{mdlNamespace, "portrait"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "un_distinguishing_sign"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "driving_privileges"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "age_over_21"}},
@@ -224,6 +262,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 		// plan is unaffected.
 		"MobileDrivingLicenceMsoMdocHAIP": {
 			ID:                        "MobileDrivingLicenceMsoMdocHAIP",
+			HAIP:                      true,
 			Format:                    credentialFormatMsoMdoc,
 			Scope:                     "vc:mdl",
 			Doctype:                   mdlDoctype,
@@ -243,6 +282,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 				{Path: []string{mdlNamespace, "issuing_country"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "issuing_authority"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "document_number"}, Mandatory: true},
+				{Path: []string{mdlNamespace, "portrait"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "un_distinguishing_sign"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "driving_privileges"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "age_over_21"}},
@@ -258,9 +298,24 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 func credentialConfigurationsSupportedFromRegistry(registry map[string]credentialConfiguration) map[string]map[string]interface{} {
 	supported := make(map[string]map[string]interface{}, len(registry))
 	for id, configuration := range registry {
+		// HAIP 1.0 only recognizes dc+sd-jwt and mso_mdoc in issuer metadata.
+		// Keep W3C formats in the issuance registry for Looking Glass,
+		// but do not advertise them in Credential Issuer Metadata.
+		if !credentialFormatAdvertisedInIssuerMetadata(configuration.Format) {
+			continue
+		}
 		supported[id] = configuration.toMetadataObject()
 	}
 	return supported
+}
+
+func credentialFormatAdvertisedInIssuerMetadata(format string) bool {
+	switch strings.TrimSpace(format) {
+	case credentialFormatDCSdJWT, credentialFormatMsoMdoc:
+		return true
+	default:
+		return false
+	}
 }
 
 func sortedCredentialConfigurationIDs(registry map[string]credentialConfiguration) []string {
