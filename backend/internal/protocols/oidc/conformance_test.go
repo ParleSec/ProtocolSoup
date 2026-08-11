@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
@@ -46,11 +47,11 @@ func redirectParam(t *testing.T, location, key string) string {
 	return ""
 }
 
-// TestFullCodeFlowClaimsPlacement drives the real HTTP path the OIDF suite
-// exercises (authorize -> interactive login -> token -> UserInfo) and asserts
+// TestFullCodeFlowClaimsPlacement drives the real HTTP path
+// (authorize -> interactive login -> token -> UserInfo) and asserts
 // the OIDC Core 1.0 Section 5.4 split: scope claims appear in UserInfo, not the
-// ID Token. It reproduces VerifyScopesReturnedInUserInfoClaims and
-// EnsureUserInfoContainsName against the genuine flow rather than a minted token.
+// ID Token. It reproduces scope-claim UserInfo placement and name-from-UserInfo
+// against the genuine flow rather than a minted token.
 func TestFullCodeFlowClaimsPlacement(t *testing.T) {
 	p := newTestPlugin(t)
 
@@ -151,12 +152,66 @@ func TestFullCodeFlowClaimsPlacement(t *testing.T) {
 	}
 }
 
-// TestClaimsParameterCodeFlowReturnsNameFromUserInfo reproduces the OIDF
-// oidcc-claims-essential module for the code flow: scope is openid (no profile)
-// and the claims parameter requests name as essential in userinfo. The OP must
-// return name from UserInfo (EnsureUserInfoContainsName) and must NOT place it
-// in the ID Token because an access token is issued (EnsureIdTokenDoesNotContainName,
-// OIDC Core 1.0 Section 5.4/5.5). It drives the full HTTP path the suite uses.
+// TestLoginCancelReturnsAccessDenied pins OIDCC-3.1.2.6 / RFC 6749 §4.1.2.1:
+// pressing Cancel on the interactive login screen redirects to redirect_uri
+// with error=access_denied (and echoes state / iss).
+func TestLoginCancelReturnsAccessDenied(t *testing.T) {
+	p := newTestPlugin(t)
+
+	rr := doAuthorize(t, p, url.Values{
+		"response_type": {"code"},
+		"client_id":     {testConfClient},
+		"redirect_uri":  {testRedirectURI},
+		"scope":         {"openid"},
+		"state":         {"st-cancel"},
+		"nonce":         {"nonce-cancel"},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("authorize status = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `name="user_action" value="cancel"`) {
+		t.Fatal("login page must offer a Cancel control named user_action=cancel")
+	}
+	// Cancel must not share the credential form: a shared submit button set
+	// lets Enter/password-managers activate Sign In instead of access_denied.
+	if strings.Count(body, `<form method="POST"`) < 2 {
+		t.Fatal("Cancel must be a separate form from Sign In")
+	}
+	loginReqID := extractLoginRequestID(t, body)
+
+	cancelForm := url.Values{
+		"login_request_id": {loginReqID},
+		"user_action":      {"cancel"},
+	}
+	creq := httptest.NewRequest(http.MethodPost, "/oidc/authorize", strings.NewReader(cancelForm.Encode()))
+	creq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	crr := httptest.NewRecorder()
+	p.handleAuthorizePost(crr, creq)
+	if crr.Code != http.StatusFound {
+		t.Fatalf("cancel status = %d, want 302; body=%s", crr.Code, crr.Body.String())
+	}
+	loc := crr.Header().Get("Location")
+	if got := redirectParam(t, loc, "error"); got != "access_denied" {
+		t.Fatalf("error = %q, want access_denied (Location=%s)", got, loc)
+	}
+	if got := redirectParam(t, loc, "state"); got != "st-cancel" {
+		t.Fatalf("state = %q, want st-cancel (Location=%s)", got, loc)
+	}
+	if got := redirectParam(t, loc, "iss"); got == "" {
+		t.Fatalf("access_denied response missing iss (Location=%s)", loc)
+	}
+	if got := redirectParam(t, loc, "code"); got != "" {
+		t.Fatalf("cancel must not issue a code, got %q", got)
+	}
+}
+
+// TestClaimsParameterCodeFlowReturnsNameFromUserInfo covers the code-flow
+// claims-parameter case: scope is openid (no profile) and the claims parameter
+// requests name as essential in userinfo. The OP must return name from UserInfo
+// and must NOT place it in the ID Token because an access token is issued
+// (OIDC Core 1.0 Section 5.4/5.5 — ID Token must not include unrequested claims).
+// It drives the full HTTP path.
 func TestClaimsParameterCodeFlowReturnsNameFromUserInfo(t *testing.T) {
 	p := newTestPlugin(t)
 
@@ -323,13 +378,11 @@ func keysOf(m map[string]interface{}) []string {
 	return keys
 }
 
-// These tests pin the behaviour the OIDF OP conformance suite depends on for
-// static-client Basic/Implicit/Hybrid runs: the suite callback must be accepted
-// as an exact registered redirect URI, authorization codes must be bound to the
-// issuing client (the suite verifies this with a second client), and
-// token-endpoint client-authentication failures must follow RFC 6749 Section
-// 5.2. They are independent of the suite so a regression is caught before a
-// paid certification run.
+// These tests pin the behaviour static-client Basic/Implicit/Hybrid runs
+// depend on: the registered callback must be accepted as an exact redirect URI,
+// authorization codes must be bound to the issuing client (verified with a
+// second client), and token-endpoint client-authentication failures must follow
+// RFC 6749 Section 5.2. They catch regressions before external certification.
 
 const (
 	confClientA = "conformance-client"
@@ -344,7 +397,7 @@ func registerConfClients(t *testing.T, p *Plugin) {
 		p.mockIdP.RegisterClient(&models.Client{
 			ID:           id,
 			Secret:       confSecret,
-			Name:         "OIDF Conformance Client",
+			Name:         "Test Client",
 			RedirectURIs: []string{suiteURI},
 			GrantTypes:   []string{"authorization_code", "refresh_token"},
 			Scopes:       []string{"openid", "profile", "email"},
@@ -450,11 +503,11 @@ func TestAuthorizationCodeBoundToIssuingClient(t *testing.T) {
 }
 
 // RFC 6749 Section 4.1.2: replaying an authorization code MUST be denied
-// (invalid_grant) and SHOULD revoke the tokens already issued from it. The OIDF
-// oidcc-codereuse module verifies the revocation by re-calling the resource
-// (UserInfo) endpoint with the first access token and expecting a 4xx. This
-// test pins the full negative path: redeem once, confirm UserInfo works, replay
-// the code, then confirm the original access token is now rejected at UserInfo.
+// (invalid_grant) and SHOULD revoke the tokens already issued from it.
+// Verify revocation by re-calling the resource (UserInfo) endpoint with the
+// first access token and expecting a 4xx. This test pins the full negative
+// path: redeem once, confirm UserInfo works, replay the code, then confirm the
+// original access token is now rejected at UserInfo.
 func TestAuthorizationCodeReplayRevokesAccessToken(t *testing.T) {
 	p := newTestPlugin(t)
 	registerConfClients(t, p)
@@ -507,9 +560,9 @@ func TestAuthorizationCodeReplayRevokesAccessToken(t *testing.T) {
 // When the flow issues an access token (the code flow always does), the
 // scope-requested claims are served from the UserInfo endpoint, and the ID
 // Token carries only authentication claims (OIDC Core 1.0 Section 5.4). The
-// OIDF suite enforces this with EnsureIdTokenDoesNotContainEmailForScopeEmail.
-// Non-standard attributes (the demo "department") must never appear either
-// (EnsureIdTokenDoesNotContainNonRequestedClaims).
+// ID Token must not include email for scope=email alone, and must not include
+// unrequested claims. Non-standard attributes (the demo "department") must
+// never appear either.
 func TestCodeFlowIDTokenOmitsScopeAndCustomClaims(t *testing.T) {
 	p := newTestPlugin(t)
 
@@ -577,10 +630,9 @@ func TestUserInfoReturnsScopeClaims(t *testing.T) {
 }
 
 // TestUserInfoReturnsFullProfileScopeClaims pins OIDC Core 1.0 Section 5.4: the
-// profile scope returns the full profile standard-claim set from UserInfo. This
-// is exactly the set the OIDF VerifyScopesReturnedInUserInfoClaims condition
-// (oidcc-scope-profile) checks. Each claim is sourced from the user record, not
-// synthesised, so the values are genuine profile data for the demo persona.
+// profile scope returns the full profile standard-claim set from UserInfo.
+// Each claim is sourced from the user record, not synthesised, so the values
+// are genuine profile data for the demo persona.
 func TestUserInfoReturnsFullProfileScopeClaims(t *testing.T) {
 	p := newTestPlugin(t)
 
@@ -672,8 +724,7 @@ func TestUserInfoReturnsAddressAndPhoneScopeClaims(t *testing.T) {
 
 // RFC 6750 Section 2.2 / OIDC Core 1.0 Section 5.3.1: the UserInfo endpoint must
 // accept the access token in a form-encoded POST body (access_token parameter),
-// not only in the Authorization header. The OIDF suite checks this with
-// UserInfoEndpointWithAccessTokenInBodyNotSupported.
+// not only in the Authorization header.
 func TestUserInfoAcceptsAccessTokenInPostBody(t *testing.T) {
 	p := newTestPlugin(t)
 
@@ -843,6 +894,134 @@ func TestAuthorizationRejectsRequestObject(t *testing.T) {
 				t.Fatalf("state = %q, want it echoed on the error", vals.Get("state"))
 			}
 		})
+	}
+}
+
+func TestOID4VCIAuthorizationRequiresPAR(t *testing.T) {
+	p := newTestPlugin(t)
+	registerConfClients(t, p)
+
+	params := url.Values{
+		"response_type":         {"code"},
+		"scope":                 {"vc:university_degree_haip"},
+		"client_id":             {confClientA},
+		"redirect_uri":          {suiteURI},
+		"state":                 {"par-required-state"},
+		"code_challenge":        {"0123456789012345678901234567890123456789012"},
+		"code_challenge_method": {"S256"},
+	}
+	rr := doAuthorize(t, p, params)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 error redirect; body=%s", rr.Code, rr.Body.String())
+	}
+	values := locationError(t, rr.Header().Get("Location"))
+	if values.Get("error") != "invalid_request" {
+		t.Fatalf("error = %q, want invalid_request", values.Get("error"))
+	}
+	if !strings.Contains(values.Get("error_description"), "pushed authorization requests are required") {
+		t.Fatalf("error_description = %q", values.Get("error_description"))
+	}
+	if values.Get("state") != "par-required-state" {
+		t.Fatalf("state = %q, want par-required-state", values.Get("state"))
+	}
+}
+
+// FAPI2 SP Final §5.3.2.2 Note 3: one-time use of request_uri is enforced at
+// authorization completion, not on the first (preload) visit to the
+// authorization endpoint. A leftover session must not silently finish that
+// preload visit when the request is PAR-backed; the OP shows a continue
+// confirmation that requires an explicit POST.
+func TestPARRequestURIReusableUntilAuthorizationCompletes(t *testing.T) {
+	p := newTestPlugin(t)
+	p.baseURL = "https://op.example.com"
+
+	const (
+		codeChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		state         = "fapi2-note3-state"
+	)
+	requestURI := p.mockIdP.StorePushedAuthorizationRequest(mockidp.PushedAuthorizationRequest{
+		ClientID:                   testPublicClient,
+		RedirectURI:                testRedirectURI,
+		ResponseType:               "code",
+		Scope:                      "vc:university_degree",
+		State:                      state,
+		CodeChallenge:              codeChallenge,
+		CodeChallengeMethod:        "S256",
+		CredentialConfigurationIDs: []string{"UniversityDegreeCredential"},
+		ExpiresAt:                  time.Now().Add(2 * time.Minute),
+	})
+
+	// Establish a fresh session cookie that would otherwise allow silent SSO
+	// when max_age is present.
+	sessionRR := httptest.NewRecorder()
+	session := p.establishAuthSession(sessionRR, testUserID, testPublicClient)
+	if session == nil {
+		t.Fatal("expected session")
+	}
+	sessionCookie := sessionRR.Result().Cookies()[0]
+
+	authorizeParams := url.Values{
+		"client_id":   {testPublicClient},
+		"request_uri": {requestURI},
+		"max_age":     {"3600"},
+	}
+
+	first := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+authorizeParams.Encode(), nil)
+	firstReq.AddCookie(sessionCookie)
+	p.handleAuthorize(first, firstReq)
+	if first.Code != http.StatusOK {
+		t.Fatalf("preload visit status = %d, want 200 continue page; body=%s", first.Code, first.Body.String())
+	}
+	if !strings.Contains(first.Body.String(), `name="user_action" value="continue"`) {
+		t.Fatalf("preload visit must show continue confirmation, got: %s", first.Body.String())
+	}
+	if strings.Contains(first.Body.String(), `name="password"`) {
+		t.Fatal("preload continue page must not expose a password field")
+	}
+	if _, err := p.mockIdP.GetPushedAuthorizationRequest(requestURI, testPublicClient); err != nil {
+		t.Fatalf("request_uri must remain usable after preload visit: %v", err)
+	}
+
+	second := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+authorizeParams.Encode(), nil)
+	secondReq.AddCookie(sessionCookie)
+	p.handleAuthorize(second, secondReq)
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `name="user_action" value="continue"`) {
+		t.Fatalf("second visit must still show continue page; status=%d body=%s", second.Code, second.Body.String())
+	}
+	loginReqID := extractLoginRequestID(t, second.Body.String())
+
+	continueForm := url.Values{
+		"user_action":      {"continue"},
+		"login_request_id": {loginReqID},
+	}
+	continueRR := httptest.NewRecorder()
+	continueReq := httptest.NewRequest(http.MethodPost, "/oidc/authorize", strings.NewReader(continueForm.Encode()))
+	continueReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	continueReq.AddCookie(sessionCookie)
+	p.handleAuthorizePost(continueRR, continueReq)
+	if continueRR.Code != http.StatusFound {
+		t.Fatalf("continue status = %d, want 302; body=%s", continueRR.Code, continueRR.Body.String())
+	}
+	if code := redirectParam(t, continueRR.Header().Get("Location"), "code"); code == "" {
+		t.Fatalf("expected authorization code after continue, location=%q", continueRR.Header().Get("Location"))
+	}
+
+	if _, err := p.mockIdP.GetPushedAuthorizationRequest(requestURI, testPublicClient); err == nil {
+		t.Fatal("request_uri must be consumed after authorization completes")
+	}
+
+	third := doAuthorize(t, p, authorizeParams)
+	// Without a resolvable PAR handle there is no redirect_uri to deliver the
+	// error to, so the endpoint may return a direct 400 or a redirected
+	// invalid_request_uri. Either proves the handle is no longer redeemable.
+	if third.Code == http.StatusFound {
+		if got := locationError(t, third.Header().Get("Location")).Get("error"); got != "invalid_request_uri" {
+			t.Fatalf("error = %q, want invalid_request_uri", got)
+		}
+	} else if third.Code != http.StatusBadRequest {
+		t.Fatalf("reused request_uri after completion status = %d, want 302 or 400; body=%s", third.Code, third.Body.String())
 	}
 }
 

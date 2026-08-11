@@ -40,8 +40,8 @@ type User struct {
 }
 
 // Address is the OpenID Connect address claim (OIDC Core 1.0 Section 5.1.1). All
-// members are OPTIONAL; only the populated ones are returned, since the
-// conformance suite rejects blank string members.
+// members are OPTIONAL; only the populated ones are returned, since blank
+// string members must not be serialized.
 type Address struct {
 	Formatted     string `json:"formatted,omitempty"`
 	StreetAddress string `json:"street_address,omitempty"`
@@ -111,6 +111,8 @@ type AuthorizationCode struct {
 	CodeChallengeMethod                string   `json:"code_challenge_method,omitempty"`
 	CredentialConfigurationIDs         []string `json:"credential_configuration_ids,omitempty"`
 	CredentialAuthorizationDetailsUsed bool     `json:"credential_authorization_details_used,omitempty"`
+	DPoPJKT                            string   `json:"dpop_jkt,omitempty"`
+	IssuerState                        string   `json:"issuer_state,omitempty"`
 	// Claims is the raw OIDC claims request parameter (OpenID Connect Core 1.0
 	// Section 5.5) supplied at the authorization endpoint, carried so the token
 	// endpoint can honour individually requested claims at issuance time.
@@ -158,6 +160,11 @@ type RefreshToken struct {
 	// it was issued alongside a DPoP-bound access token (RFC 9449 Section
 	// 5). Empty for ordinary bearer-issued refresh tokens.
 	JKT string `json:"jkt,omitempty"`
+	// ClientInstanceJKT is the RFC 7638 thumbprint of the Client Instance
+	// Key (cnf.jwk) from the Client Attestation used when this refresh
+	// token was issued (draft-ietf-oauth-attestation-based-client-auth
+	// §9.3 / §10.3). Empty when the token was not issued under attestation.
+	ClientInstanceJKT string `json:"client_instance_jkt,omitempty"`
 }
 
 // IntrospectionResponse represents token introspection response
@@ -243,6 +250,10 @@ type DiscoveryDocument struct {
 	// Section 3). This OP honours the claims request parameter, so it is emitted
 	// explicitly as true.
 	ClaimsParameterSupported bool `json:"claims_parameter_supported"`
+	// authorization_response_iss_parameter_supported (RFC 9207 Section 3) defaults
+	// to false. This OP always returns iss on authorization responses, so the
+	// value is emitted explicitly as true (FAPI 2.0 SP §5.3.2.2).
+	AuthorizationResponseIssParameterSupported bool `json:"authorization_response_iss_parameter_supported"`
 }
 
 // VCCredentialOffer represents an OpenID4VCI credential offer envelope.

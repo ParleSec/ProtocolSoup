@@ -135,7 +135,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/third-party/initiate", p.handleThirdPartyInitiate)
 	router.Post("/third-party/initiate", p.handleThirdPartyInitiate)
 
-	// Operator-only OP signing-key rotation for OIDF OP-Rotation-OP-Sig.
+	// Operator-only OP signing-key rotation (OIDC Core §10.1.1).
 	router.Post("/admin/rotate-keys", p.handleRotateKeys)
 }
 
@@ -258,7 +258,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       6,
 					Name:        "Authorization Code Response",
-					Description: "OpenID Provider redirects back with authorization code (OIDC Core §3.1.2.5). The code is bound to the client and nonce. Single-use, short-lived (~10 minutes).",
+					Description: "OpenID Provider redirects back with authorization code (OIDC Core §3.1.2.5). The code is bound to the client and nonce. Single-use, short-lived (FAPI2 SP Final: maximum 60 seconds).",
 					From:        "OpenID Provider",
 					To:          "Client",
 					Type:        "redirect",

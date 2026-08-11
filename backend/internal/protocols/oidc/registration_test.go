@@ -53,7 +53,7 @@ func TestDynamicRegistrationCreatesClientAndConfigRead(t *testing.T) {
 
 	body := map[string]interface{}{
 		"redirect_uris":                []string{"https://rp.example.com/callback"},
-		"client_name":                  "OIDF Dynamic RP",
+		"client_name":                  "Demo Client",
 		"token_endpoint_auth_method":   "client_secret_basic",
 		"logo_uri":                     "https://rp.example.com/logo.png",
 		"policy_uri":                   "https://rp.example.com/policy",

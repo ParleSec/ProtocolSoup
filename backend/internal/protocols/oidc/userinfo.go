@@ -77,7 +77,8 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 				} else if m, ec, _ := resolveResponseMode(responseType, query.Get("response_mode")); ec == "" {
 					mode = m
 				}
-				p.redirectAuthError(w, r, normalized, responseType, mode, state, errCode, errDesc)
+				earlyIss := p.authorizationResponseIssuer(query.Get("scope"), query.Get("_ps_issuer_state"), nil)
+				p.redirectAuthError(w, r, normalized, responseType, mode, state, errCode, errDesc, earlyIss)
 				return
 			}
 		}
@@ -151,6 +152,33 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	redirectURI = normalizedRedirectURI
 
+	// RFC 9126 Section 5: the OID4VCI authorization server advertises
+	// require_pushed_authorization_requests=true, so every OID4VCI
+	// authorization request must arrive through the issuer's PAR endpoint.
+	// Ordinary OIDC requests remain available on this shared endpoint.
+	isOID4VCIRequest := strings.TrimSpace(query.Get("authorization_details")) != "" ||
+		strings.TrimSpace(query.Get("_ps_credential_configuration_ids")) != "" ||
+		strings.TrimSpace(query.Get("_ps_authorization_details_used")) == "true"
+	if !isOID4VCIRequest {
+		for _, scopeValue := range strings.Fields(query.Get("scope")) {
+			if strings.HasPrefix(scopeValue, "vc:") {
+				isOID4VCIRequest = true
+				break
+			}
+		}
+	}
+	// RFC 9207: iss must match the AS issuer the client discovered. OID4VCI
+	// clients discover .../oid4vci; OIDC clients discover the OP issuer.
+	responseIss := p.authorizationResponseIssuer(scope, query.Get("_ps_issuer_state"), nil)
+	if isOID4VCIRequest {
+		responseIss = strings.TrimRight(p.baseURL, "/") + "/oid4vci"
+	}
+	if isOID4VCIRequest && strings.TrimSpace(query.Get("_ps_par_request_uri")) == "" {
+		p.redirectAuthError(w, r, redirectURI, responseType, defaultResponseMode(responseType), state,
+			"invalid_request", "pushed authorization requests are required for OID4VCI", responseIss)
+		return
+	}
+
 	// Step 2: response_type must be recognised before a channel can be chosen.
 	validResponseTypes := map[string]bool{
 		"code":                true,
@@ -172,14 +200,14 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		// 6749), which is safe because an error response carries no token.
 		mode := errorResponseModeForMissingType(responseModeRaw)
 		p.redirectAuthError(w, r, redirectURI, "", mode, state,
-			"unsupported_response_type", "Unsupported response_type")
+			"unsupported_response_type", "Unsupported response_type", responseIss)
 		return
 	}
 
 	// Resolve response_mode now that response_type is known (Phase 2e).
 	responseMode, rmErrCode, rmErrDesc := resolveResponseMode(responseType, responseModeRaw)
 	if rmErrCode != "" {
-		p.redirectAuthError(w, r, redirectURI, responseType, defaultResponseMode(responseType), state, rmErrCode, rmErrDesc)
+		p.redirectAuthError(w, r, redirectURI, responseType, defaultResponseMode(responseType), state, rmErrCode, rmErrDesc, responseIss)
 		return
 	}
 
@@ -208,7 +236,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		p.redirectAuthError(w, r, redirectURI, responseType, rejMode, rejState,
-			"request_not_supported", "The request parameter is not supported (OIDC Core 1.0 Section 6.2.1)")
+			"request_not_supported", "The request parameter is not supported (OIDC Core 1.0 Section 6.2.1)", responseIss)
 		return
 	}
 
@@ -217,7 +245,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// a malformed value is rejected as invalid_request rather than ignored.
 	if _, err := parseClaimsParameter(claimsParam); err != nil {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_request", "The claims parameter is not a valid JSON object (OIDC Core 1.0 Section 5.5)")
+			"invalid_request", "The claims parameter is not a valid JSON object (OIDC Core 1.0 Section 5.5)", responseIss)
 		return
 	}
 
@@ -227,15 +255,25 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_authorization_details", err.Error())
+			"invalid_authorization_details", err.Error(), responseIss)
 		return
+	}
+	authorizationDetailsUsed := strings.TrimSpace(query.Get("_ps_authorization_details_used")) == "true" ||
+		strings.TrimSpace(authorizationDetailsParam) != ""
+	if len(credentialConfigurationIDs) == 0 {
+		credentialConfigurationIDs, err = parsePushedCredentialConfigurationIDs(query.Get("_ps_credential_configuration_ids"))
+		if err != nil {
+			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+				"invalid_request", err.Error(), responseIss)
+			return
+		}
 	}
 
 	// The shared endpoint serves both OIDC authentication requests and
 	// OID4VCI OAuth authorization requests. Only the former requires openid.
 	if len(credentialConfigurationIDs) == 0 && !containsScope(scope, "openid") {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_scope", "openid scope is required for OIDC")
+			"invalid_scope", "openid scope is required for OIDC", responseIss)
 		return
 	}
 
@@ -243,21 +281,21 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Section 3.2.2.1).
 	if strings.Contains(responseType, "id_token") && nonce == "" {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_request", "nonce is REQUIRED when response_type includes id_token (OIDC Core 1.0 Section 3.2.2.1)")
+			"invalid_request", "nonce is REQUIRED when response_type includes id_token (OIDC Core 1.0 Section 3.2.2.1)", responseIss)
 		return
 	}
 
 	// prompt syntax (OIDC Core 1.0 Section 3.1.2.1).
 	prompts := promptValues(prompt)
 	if code, desc := validatePrompt(prompts); code != "" {
-		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, code, desc)
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, code, desc, responseIss)
 		return
 	}
 
 	// max_age syntax (OIDC Core 1.0 Section 3.1.2.1).
 	maxAge, maxAgePresent, maxAgeErr := parseMaxAge(maxAgeRaw)
 	if maxAgeErr != "" {
-		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, "invalid_request", maxAgeErr)
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, "invalid_request", maxAgeErr, responseIss)
 		return
 	}
 
@@ -266,13 +304,13 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// 4.4.1, OAuth 2.0 Security BCP Section 2.1.1).
 	if client.Public && strings.Contains(responseType, "code") && codeChallenge == "" {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_request", "code_challenge is required for public clients (PKCE, RFC 7636 Section 4.4.1)")
+			"invalid_request", "code_challenge is required for public clients (PKCE, RFC 7636 Section 4.4.1)", responseIss)
 		return
 	}
 	// Reject unsupported code_challenge_method when a challenge is present.
 	if codeChallenge != "" && codeChallengeMethod != "" && codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
 		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_request", "unsupported code_challenge_method (supported: S256, plain) per RFC 7636 Section 4.3")
+			"invalid_request", "unsupported code_challenge_method (supported: S256, plain) per RFC 7636 Section 4.3", responseIss)
 		return
 	}
 
@@ -292,7 +330,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		}
 		if !allowed {
 			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-				"unauthorized_client", "response_type is not registered for this client")
+				"unauthorized_client", "response_type is not registered for this client", responseIss)
 			return
 		}
 	}
@@ -310,6 +348,10 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		Claims:                     claimsParam,
 		LoginHint:                  loginHint,
 		CredentialConfigurationIDs: credentialConfigurationIDs,
+		AuthorizationDetailsUsed:   authorizationDetailsUsed,
+		PARRequestURI:              query.Get("_ps_par_request_uri"),
+		DPoPJKT:                    query.Get("_ps_dpop_jkt"),
+		IssuerState:                query.Get("_ps_issuer_state"),
 	}
 
 	// Interaction decision (OIDC Core 1.0 Section 3.1.2.1).
@@ -327,7 +369,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 				"redirect_uri": redirectURI,
 			})
 			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-				"login_required", "No End-User session is available for prompt=none")
+				"login_required", "No End-User session is available for prompt=none", responseIss)
 			return
 		}
 		p.issueAuthorizationResponse(w, r, sessionID, params, session.UserID, session.CreatedAt)
@@ -339,7 +381,14 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// enough. A request with neither prompt nor max_age keeps the interactive
 	// login so the authentication step stays visible (the OP MAY require fresh
 	// authentication, OIDC Core 1.0 Section 3.1.2.1).
-	if hasSession && !needReauth && maxAgePresent {
+	//
+	// FAPI2 SP Final §5.3.2.2 Note 3: PAR request_uri preloads must not
+	// complete authorization. Never silent-SSO a PAR-backed request — a
+	// leftover session cookie (or browser password-manager auto-submit on a
+	// password form) must not finish the first visit before the suite's
+	// intentional second visit.
+	parBacked := params.PARRequestURI != ""
+	if hasSession && !needReauth && maxAgePresent && !parBacked {
 		p.issueAuthorizationResponse(w, r, sessionID, params, session.UserID, session.CreatedAt)
 		return
 	}
@@ -357,9 +406,34 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		Claims:                     claimsParam,
 		LoginHint:                  loginHint,
 		CredentialConfigurationIDs: credentialConfigurationIDs,
+		AuthorizationDetailsUsed:   authorizationDetailsUsed,
+		PARRequestURI:              query.Get("_ps_par_request_uri"),
+		DPoPJKT:                    query.Get("_ps_dpop_jkt"),
+		IssuerState:                query.Get("_ps_issuer_state"),
 	})
 
-	// Generate login page with HTML-escaped values to prevent XSS
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	// PAR + usable session: show a continue confirmation with no password
+	// fields so preload visits and password managers cannot complete auth
+	// without an explicit click (FAPI2 SP Final §5.3.2.2 Note 3).
+	if parBacked && hasSession && !needReauth {
+		displayName := session.UserID
+		if user, ok := p.mockIdP.GetUser(session.UserID); ok && user.Email != "" {
+			displayName = user.Email
+		}
+		_, _ = fmt.Fprint(w, p.generateOIDCContinuePage(
+			html.EscapeString(client.Name),
+			html.EscapeString(sessionID),
+			html.EscapeString(loginRequestID),
+			html.EscapeString(displayName),
+			html.EscapeString(scope),
+			client,
+		))
+		return
+	}
+
 	loginPage := p.generateOIDCLoginPage(
 		html.EscapeString(clientID),
 		html.EscapeString(scope),
@@ -369,7 +443,6 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		html.EscapeString(loginHint),
 		client,
 	)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprint(w, loginPage)
 }
 
@@ -438,6 +511,74 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	if responseType == "" {
 		responseType = "code"
 	}
+	responseMode := requestInfo.ResponseMode
+	if responseMode == "" {
+		responseMode = defaultResponseMode(responseType)
+	}
+
+	// OIDC Core 1.0 §3.1.2.6 / RFC 6749 §4.1.2.1: when the End-User denies or
+	// cancels authentication, redirect to redirect_uri with access_denied.
+	if strings.EqualFold(strings.TrimSpace(r.FormValue("user_action")), "cancel") {
+		p.consumeLoginRequest(loginRequestID)
+		responseIss := p.authorizationResponseIssuer(
+			scope,
+			requestInfo.IssuerState,
+			requestInfo.CredentialConfigurationIDs,
+		)
+		p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authorization Denied by User", map[string]interface{}{
+			"from":          "OpenID Provider",
+			"to":            "Client",
+			"error":         "access_denied",
+			"client_id":     clientID,
+			"redirect_uri":  redirectURI,
+			"response_type": responseType,
+			"response_mode": responseMode,
+			"state":         state,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeRFCReference,
+			Title:       "User Rejected Authentication",
+			Description: "The End-User cancelled the login screen. The Authorization Endpoint returns access_denied to the registered redirect_uri.",
+			Reference:   "OpenID Connect Core 1.0 Section 3.1.2.6; RFC 6749 Section 4.1.2.1",
+		})
+		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+			"access_denied", "The resource owner or authorization server denied the request", responseIss)
+		return
+	}
+
+	// PAR continue confirmation (FAPI2 SP Final §5.3.2.2 Note 3): an existing
+	// session is acknowledged only after an explicit Continue click — never on
+	// the initial authorize GET, and never via a password-form auto-submit.
+	if strings.EqualFold(strings.TrimSpace(r.FormValue("user_action")), "continue") {
+		if requestInfo.PARRequestURI == "" {
+			writeOIDCError(w, http.StatusBadRequest, "invalid_request", "continue is only valid for PAR-backed authorization")
+			return
+		}
+		session, ok := p.currentAuthSession(r)
+		if !ok {
+			writeOIDCError(w, http.StatusBadRequest, "invalid_request", "No End-User session is available to continue")
+			return
+		}
+		p.consumeLoginRequest(loginRequestID)
+		params := authParams{
+			ClientID:                   clientID,
+			RedirectURI:                redirectURI,
+			Scope:                      scope,
+			State:                      state,
+			Nonce:                      nonce,
+			CodeChallenge:              codeChallenge,
+			CodeChallengeMethod:        codeChallengeMethod,
+			ResponseType:               responseType,
+			ResponseMode:               responseMode,
+			Claims:                     requestInfo.Claims,
+			CredentialConfigurationIDs: requestInfo.CredentialConfigurationIDs,
+			AuthorizationDetailsUsed:   requestInfo.AuthorizationDetailsUsed,
+			PARRequestURI:              requestInfo.PARRequestURI,
+			DPoPJKT:                    requestInfo.DPoPJKT,
+			IssuerState:                requestInfo.IssuerState,
+		}
+		p.issueAuthorizationResponse(w, r, sessionID, params, session.UserID, session.CreatedAt)
+		return
+	}
 
 	// Validate user credentials
 	user, err := p.mockIdP.ValidateCredentials(email, password)
@@ -469,11 +610,6 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	// requests can be answered correctly (OIDC Core 1.0 Section 3.1.2.1).
 	session := p.establishAuthSession(w, user.ID, clientID)
 
-	responseMode := requestInfo.ResponseMode
-	if responseMode == "" {
-		responseMode = defaultResponseMode(responseType)
-	}
-
 	params := authParams{
 		ClientID:                   clientID,
 		RedirectURI:                redirectURI,
@@ -486,6 +622,10 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 		ResponseMode:               responseMode,
 		Claims:                     requestInfo.Claims,
 		CredentialConfigurationIDs: requestInfo.CredentialConfigurationIDs,
+		AuthorizationDetailsUsed:   requestInfo.AuthorizationDetailsUsed,
+		PARRequestURI:              requestInfo.PARRequestURI,
+		DPoPJKT:                    requestInfo.DPoPJKT,
+		IssuerState:                requestInfo.IssuerState,
 	}
 
 	// auth_time is the moment this session was established, so a later silent
@@ -507,6 +647,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		p.writeAuthorizationErrorPage(w, http.StatusBadRequest, "invalid_request", "Malformed redirect_uri")
 		return
 	}
+	responseIss := p.authorizationResponseIssuer(params.Scope, params.IssuerState, params.CredentialConfigurationIDs)
 
 	hasCode := strings.Contains(params.ResponseType, "code")
 	hasToken := params.ResponseType == "token" ||
@@ -518,7 +659,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 	subject, subjectErr := p.outwardSubject(params.ClientID, userID)
 	if subjectErr != nil {
 		p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
-			"server_error", "Failed to resolve subject identifier")
+			"server_error", "Failed to resolve subject identifier", responseIss)
 		return
 	}
 	var authorizationCode string
@@ -534,15 +675,38 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 			// failure is a request error, not a server error, so it is
 			// delivered to the client.
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
-				"invalid_request", err.Error())
+				"invalid_request", err.Error(), responseIss)
 			return
 		}
 		if len(params.CredentialConfigurationIDs) > 0 {
-			if err := p.mockIdP.BindCredentialAuthorizationDetails(authCode.Code, params.CredentialConfigurationIDs); err != nil {
+			if params.AuthorizationDetailsUsed {
+				if err := p.mockIdP.BindCredentialAuthorizationDetails(authCode.Code, params.CredentialConfigurationIDs); err != nil {
+					p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+						"server_error", "Failed to bind credential authorization details", responseIss)
+					return
+				}
+			} else if err := p.mockIdP.BindCredentialConfigurationIDs(authCode.Code, params.CredentialConfigurationIDs); err != nil {
 				p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
-					"server_error", "Failed to bind credential authorization details")
+					"server_error", "Failed to bind credential configuration ids", responseIss)
 				return
 			}
+		}
+		if params.DPoPJKT != "" {
+			if err := p.mockIdP.BindAuthorizationCodeDPoP(authCode.Code, params.DPoPJKT); err != nil {
+				p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+					"server_error", "Failed to bind the authorization code to its DPoP key", responseIss)
+				return
+			}
+		}
+		if params.IssuerState != "" {
+			if err := p.mockIdP.BindAuthorizationCodeIssuerState(authCode.Code, params.IssuerState); err != nil {
+				p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
+					"server_error", "Failed to bind issuer_state to the authorization code", responseIss)
+				return
+			}
+		}
+		if params.PARRequestURI != "" {
+			p.mockIdP.CompletePushedAuthorizationRequest(params.PARRequestURI)
 		}
 		authorizationCode = authCode.Code
 	}
@@ -554,7 +718,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		accessToken, err = jwtService.CreateAccessToken(subject, params.ClientID, params.Scope, time.Hour, requestedUserInfoClaimNames(params.Claims))
 		if err != nil {
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
-				"server_error", "Failed to create access token")
+				"server_error", "Failed to create access token", responseIss)
 			return
 		}
 	}
@@ -604,7 +768,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		)
 		if err != nil {
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
-				"server_error", "Failed to create ID token")
+				"server_error", "Failed to create ID token", responseIss)
 			return
 		}
 	}
@@ -626,6 +790,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 	if params.State != "" {
 		out.Set("state", params.State)
 	}
+	out.Set("iss", responseIss)
 
 	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "OIDC Authorization Response", map[string]interface{}{
 		"from":             "OpenID Provider",
@@ -1141,6 +1306,126 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	return response, nil
 }
 
+func (p *Plugin) generateOIDCContinuePage(clientName, sessionID, loginRequestID, displayName, scope string, client *models.Client) string {
+	formAction := "/oidc/authorize"
+	if sessionID != "" {
+		formAction += "?lg_session=" + url.QueryEscape(sessionID)
+	}
+	metadataHTML := buildClientMetadataHTML(client)
+	return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Continue - OpenID Connect</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #e4e4e7;
+            padding: 16px;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 28px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .logo { text-align: center; margin-bottom: 30px; }
+        .logo h1 { font-size: 24px; font-weight: 600; color: #fff; }
+        .logo .oidc-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+        .client-info {
+            background: rgba(249, 115, 22, 0.1);
+            border: 1px solid rgba(249, 115, 22, 0.2);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            text-align: center;
+        }
+        .client-info span { color: #fdba74; font-size: 14px; }
+        .client-info strong { color: #fff; }
+        .session-info {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            text-align: center;
+            color: #d4d4d8;
+            font-size: 14px;
+        }
+        .session-info strong { color: #fff; }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 12px;
+        }
+        button.cancel {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #a1a1aa;
+        }
+        .scopes { margin-top: 16px; font-size: 12px; color: #71717a; }
+        .scopes span {
+            display: inline-block;
+            background: rgba(249, 115, 22, 0.1);
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin: 2px;
+        }
+        .scopes .openid { background: rgba(34, 197, 94, 0.2); color: #86efac; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>Protocol Showcase</h1>
+            <div class="oidc-badge">OpenID Connect</div>
+        </div>
+        <div class="client-info">
+            <span>Continue to <strong>` + clientName + `</strong></span>
+        </div>
+        ` + metadataHTML + `
+        <div class="session-info">Signed in as <strong>` + displayName + `</strong></div>
+        <form method="POST" action="` + formAction + `" autocomplete="off">
+            <input type="hidden" name="login_request_id" value="` + loginRequestID + `">
+            <button type="submit" name="user_action" value="continue">Continue</button>
+        </form>
+        <form method="POST" action="` + formAction + `" autocomplete="off">
+            <input type="hidden" name="login_request_id" value="` + loginRequestID + `">
+            <button type="submit" name="user_action" value="cancel" formnovalidate class="cancel">Cancel</button>
+        </form>
+        <div class="scopes">Requested scopes: ` + formatOIDCScopes(scope) + `</div>
+    </div>
+</body>
+</html>`
+}
+
 func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, loginRequestID, loginHint string, client *models.Client) string {
 	// All string arguments except those derived below must already be HTML-escaped.
 	if clientName == "" {
@@ -1275,6 +1560,23 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
             transform: translateY(-2px);
             box-shadow: 0 10px 20px -10px rgba(249, 115, 22, 0.5);
         }
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        button.cancel {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #d4d4d8;
+            box-shadow: none;
+        }
+        button.cancel:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.35);
+            box-shadow: none;
+            transform: none;
+        }
         .error {
             background: rgba(239, 68, 68, 0.1);
             border: 1px solid rgba(239, 68, 68, 0.2);
@@ -1338,20 +1640,26 @@ func (p *Plugin) generateOIDCLoginPage(clientID, scope, sessionID, clientName, l
 
         <!-- ERROR -->
 
-        <form method="POST" action="` + formAction + `">
+        <form method="POST" action="` + formAction + `" autocomplete="off">
             <input type="hidden" name="login_request_id" value="` + loginRequestID + `">
             
             <div class="form-group">
                 <label for="email">Email</label>
-                <input type="email" id="email" name="email" value="` + emailValue + `" placeholder="alice@example.com" required>
+                <input type="email" id="email" name="email" value="` + emailValue + `" placeholder="alice@example.com" required autocomplete="username">
             </div>
             
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" placeholder="password" required>
+                <input type="password" id="password" name="password" placeholder="password" required autocomplete="current-password">
             </div>
             
-            <button type="submit">Sign In with OpenID Connect</button>
+            <div class="actions">
+                <button type="submit" name="user_action" value="login">Sign In with OpenID Connect</button>
+            </div>
+        </form>
+        <form method="POST" action="` + formAction + `" autocomplete="off">
+            <input type="hidden" name="login_request_id" value="` + loginRequestID + `">
+            <button type="submit" name="user_action" value="cancel" formnovalidate class="cancel">Cancel</button>
         </form>
 
         ` + demoUsersHTML + `
@@ -1439,7 +1747,30 @@ type loginRequestInfo struct {
 	Claims                     string
 	LoginHint                  string
 	CredentialConfigurationIDs []string
+	AuthorizationDetailsUsed   bool
+	PARRequestURI              string
+	DPoPJKT                    string
+	IssuerState                string
 	CreatedAt                  time.Time
+}
+
+// authorizationResponseIssuer returns the RFC 9207 iss value for an
+// authorization response. OID4VCI clients discover the Credential Issuer's
+// authorization server (.../oid4vci); ordinary OIDC clients discover the OP
+// issuer. The shared /oidc/authorize endpoint serves both.
+func (p *Plugin) authorizationResponseIssuer(scope, issuerState string, credentialConfigurationIDs []string) string {
+	if len(credentialConfigurationIDs) > 0 || strings.TrimSpace(issuerState) != "" {
+		return strings.TrimRight(p.baseURL, "/") + "/oid4vci"
+	}
+	for _, scopeValue := range strings.Fields(scope) {
+		if strings.HasPrefix(scopeValue, "vc:") {
+			return strings.TrimRight(p.baseURL, "/") + "/oid4vci"
+		}
+	}
+	if p.mockIdP != nil {
+		return strings.TrimRight(p.mockIdP.GetIssuer(), "/")
+	}
+	return strings.TrimRight(p.baseURL, "/")
 }
 
 func (p *Plugin) storeLoginRequest(info loginRequestInfo) string {

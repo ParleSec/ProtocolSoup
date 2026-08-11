@@ -28,7 +28,7 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		ScopesSupported:       scopesSupported,
 		// Canonical response_type sets actually handled by the authorization
 		// endpoint (OIDC Core 1.0 Section 3). response_type is an unordered
-		// space-delimited set, so the canonical OIDF orderings are advertised.
+		// space-delimited set, so canonical response_type orderings are advertised.
 		ResponseTypesSupported: []string{"code", "token", "id_token", "id_token token", "code id_token", "code token", "code id_token token"},
 		// query and fragment are the OAuth 2.0 defaults; form_post is supported
 		// for every response type and delivers the response in an HTTP POST body
@@ -77,6 +77,9 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// Token for the id_token response type). claims_parameter_supported
 		// defaults to false, so it is advertised true explicitly.
 		ClaimsParameterSupported: true,
+		// RFC 9207 Section 3 / FAPI 2.0 SP §5.3.2.2: authorization responses
+		// always include iss; advertise support so clients validate it.
+		AuthorizationResponseIssParameterSupported: true,
 	}
 	if p.registrationEnabled() {
 		discovery.RegistrationEndpoint = issuer + "/oidc/register"
@@ -89,9 +92,9 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 
 // handleJWKS returns the JSON Web Key Set used to verify OP-issued JWTs.
 // Only RSA and EC keys are published here: OIDC discovery advertises RS256 for
-// ID Tokens, and the OIDF suite JWKS validator does not accept OKP/Ed25519 keys
-// (it fails oidcc-server-rotate-keys with "unknown key type 'OKP'"). Ed25519
-// material remains available in the KeySet for other ProtocolSoup surfaces.
+// ID Tokens, and many JWKS validators do not accept OKP/Ed25519 keys
+// (unknown key type 'OKP'). Ed25519 material remains available in the KeySet
+// for other ProtocolSoup surfaces.
 func (p *Plugin) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	jwks := p.keySet.PublicJWKS()
 	filtered := make([]crypto.JWK, 0, len(jwks.Keys))

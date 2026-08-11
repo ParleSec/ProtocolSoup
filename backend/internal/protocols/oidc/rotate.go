@@ -8,9 +8,9 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
-// handleRotateKeys performs an operator-triggered OP signing-key rotation so the
-// OIDF oidcc-server-rotate-keys module can observe a new kid while retired keys
-// remain published (OIDC Core 1.0 Section 10.1.1). Disabled unless configured.
+// handleRotateKeys performs an operator-triggered OP signing-key rotation so
+// clients can observe a new kid while retired keys remain published
+// (OIDC Core 1.0 Section 10.1.1). Disabled unless configured.
 func (p *Plugin) handleRotateKeys(w http.ResponseWriter, r *http.Request) {
 	if p.keyRotationToken == "" {
 		writeOIDCError(w, http.StatusNotFound, "not_found", "Key rotation is not enabled")
@@ -47,7 +47,7 @@ func (p *Plugin) handleRotateKeys(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"rotated":         true,
+		"rotated":          true,
 		"previous_rsa_kid": before,
 		"current_rsa_kid":  after,
 	})

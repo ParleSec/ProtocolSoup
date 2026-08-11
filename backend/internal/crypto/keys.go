@@ -25,9 +25,9 @@ type KeySet struct {
 	ed25519KeyID string
 	createdAt    time.Time
 	// retired holds public JWKs from previous key generations so that tokens
-	// signed before a rotation remain verifiable. Required for an OIDF-certified
-	// deployment per OpenID Connect Core 1.0 Section 10.1.1 (signing key rotation
-	// keeps old keys published until dependent tokens have expired).
+	// signed before a rotation remain verifiable. Required for OIDC Core 1.0
+	// Section 10.1.1 deployments (signing key rotation keeps old keys published
+	// until dependent tokens have expired).
 	retired []JWK
 	// storePath is the directory backing this key set. Empty means ephemeral
 	// (in-memory only), which is acceptable for development but never for the

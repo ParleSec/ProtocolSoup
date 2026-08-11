@@ -136,11 +136,17 @@ func TestDiscoveryMetadataIsAccurate(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), `"claims_parameter_supported":true`) {
 		t.Errorf("discovery document must emit claims_parameter_supported:true explicitly; body=%s", rr.Body.String())
 	}
+	if !doc.AuthorizationResponseIssParameterSupported {
+		t.Errorf("authorization_response_iss_parameter_supported must be true (RFC 9207 / FAPI 2.0 SP)")
+	}
+	if !strings.Contains(rr.Body.String(), `"authorization_response_iss_parameter_supported":true`) {
+		t.Errorf("discovery document must emit authorization_response_iss_parameter_supported:true; body=%s", rr.Body.String())
+	}
 }
 
 // TestOIDCJWKSOmitsOKP pins that the OIDC jwks_uri publishes only RSA/EC keys.
-// The KeySet still holds Ed25519 material, but OIDF's JWKS validator rejects OKP
-// and OIDC discovery only advertises RS256 for ID Tokens.
+// The KeySet still holds Ed25519 material, but OIDC discovery only advertises
+// RS256 for ID Tokens and JWKS consumers that reject OKP/Ed25519 are common.
 func TestOIDCJWKSOmitsOKP(t *testing.T) {
 	p := newTestPlugin(t)
 	if err := p.keySet.Rotate(); err != nil {
