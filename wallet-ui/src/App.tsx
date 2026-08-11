@@ -129,6 +129,7 @@ type PresentResponse = {
   request_uri?: string
   response_mode?: string
   response_uri?: string
+  redirect_uri?: string
   wallet_subject?: string
   wallet_scope?: string
   credential_source?: string
@@ -241,12 +242,16 @@ function resolveAuthorizationRedirectTarget(response: ImportResponse): string {
   return targetURL.toString()
 }
 
-function buildResolvePayloadFromInput(rawInput: string): Record<string, string> {
+function buildResolvePayloadFromInput(rawInput: string, extras?: { clientID?: string; requestURIMethod?: string }): Record<string, string> {
   const trimmed = rawInput.trim()
   if (!trimmed) throw new Error('Provide openid4vp URI or request_uri')
-  if (trimmed.startsWith('openid4vp://')) return { openid4vp_uri: trimmed }
-  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return { request_uri: trimmed }
-  return { request: trimmed }
+  const payload: Record<string, string> = {}
+  if (trimmed.startsWith('openid4vp://')) payload.openid4vp_uri = trimmed
+  else if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) payload.request_uri = trimmed
+  else payload.request = trimmed
+  if (extras?.clientID) payload.client_id = extras.clientID
+  if (extras?.requestURIMethod) payload.request_uri_method = extras.requestURIMethod
+  return payload
 }
 
 function tryParseJSONObject(rawInput: string): Record<string, unknown> | null {
@@ -560,19 +565,43 @@ export default function WalletApp() {
   }, [])
 
   const resolveRequest = useCallback(
-    async (rawInput: string) => {
+    async (rawInput: string, extras?: { clientID?: string; requestURIMethod?: string }) => {
       if (resolveInFlightRef.current) return
       resolveInFlightRef.current = true
       setResolveInFlight(true)
       setBanner('Resolving request object')
       try {
-        const payload = buildResolvePayloadFromInput(rawInput)
+        const payload = buildResolvePayloadFromInput(rawInput, extras)
         const response = await apiRequest<ResolveResponse>('/api/resolve', 'POST', payload)
         setResolved(response); setPreview(null); setResult(null)
-        setPendingAuthorizationURL(''); setSelectedDisclosureClaims([]); setExternalTrustApproval(false)
+        setPendingAuthorizationURL('')
+        const dcqlClaims: string[] = []
+        const credentials = Array.isArray((response.dcql_query as { credentials?: unknown } | undefined)?.credentials)
+          ? ((response.dcql_query as { credentials: Array<{ claims?: Array<{ path?: unknown[] }> }> }).credentials)
+          : []
+        for (const credential of credentials) {
+          for (const claim of credential.claims || []) {
+            const path = Array.isArray(claim.path) ? claim.path.map((part) => String(part)) : []
+            if (path.length === 0) continue
+            dcqlClaims.push(path[path.length - 1])
+          }
+        }
+        setSelectedDisclosureClaims(Array.from(new Set(dcqlClaims)))
+        setExternalTrustApproval(false)
         if (response.inferred_credential_format) {
           const match = ISSUE_FORMAT_OPTIONS.find((opt) => opt.format === response.inferred_credential_format)
           if (match) setSelectedIssueFormat(match.format)
+        }
+        const matched = Boolean(response.credential_matches?.matched)
+        if (!matched && response.inferred_credential_format) {
+          setBanner('Issuing a credential that matches the presentation request')
+          const issued = await apiRequest<SessionPayload>('/api/issue', 'POST', {
+            force_issue: true,
+            credential_format: response.inferred_credential_format,
+            credential_configuration_id: response.inferred_credential_configuration_id || undefined,
+          })
+          setSession((previous) => mergeCredentialSession(previous, issued))
+          if (issued.credential_id) setSelectedCredentialID(String(issued.credential_id))
         }
         setActiveView('review')
         setBanner('Request object resolved', 'success')
@@ -615,35 +644,57 @@ export default function WalletApp() {
   const buildWalletPayload = useCallback(() => {
     if (!resolved) throw new Error('Resolve a request first')
     const selectedFormatEntry = ISSUE_FORMAT_OPTIONS.find((option) => option.format === selectedIssueFormat) || ISSUE_FORMAT_OPTIONS[0]
+    const inferredFormat = String(resolved.inferred_credential_format || '').trim()
+    const inferredConfigID = String(resolved.inferred_credential_configuration_id || '').trim()
+    const activeFormat = String(activeCredentialEntry?.credential_format || '').trim()
+    const activeConfigID = String(activeCredentialEntry?.credential_configuration_id || '').trim()
     const activeCredentialID = String(activeCredentialEntry?.credential_id || selectedCredentialID || '').trim()
-    return {
+
+    // Prefer the request-inferred credential profile. A leftover mdoc (or other)
+    // active credential must not pin present/preview to the wrong format — that
+    // skips HAIP SD-JWT bootstrap and fails DCQL matching.
+    const formatMatches = !inferredFormat || !activeFormat || activeFormat === inferredFormat
+    const configMatches = !inferredConfigID || !activeConfigID || activeConfigID === inferredConfigID
+    const activeMatchesRequest = formatMatches && configMatches
+    const credentialID = activeMatchesRequest ? activeCredentialID : ''
+    const credentialFormat = activeMatchesRequest
+      ? (activeFormat || inferredFormat || selectedFormatEntry?.format || '')
+      : (inferredFormat || selectedFormatEntry?.format || '')
+    const credentialConfigurationID = activeMatchesRequest
+      ? (activeConfigID || inferredConfigID || selectedFormatEntry?.configurationID || '')
+      : (inferredConfigID || selectedFormatEntry?.configurationID || '')
+
+    const payload: Record<string, unknown> = {
       request_id: String(resolved.request_id || ''),
       request: String(resolved.request || ''),
       request_uri: String(resolved.request_uri || ''),
-      credential_id: activeCredentialID,
-      credential_format: String(activeCredentialEntry?.credential_format || selectedFormatEntry?.format || ''),
-      credential_configuration_id: String(activeCredentialEntry?.credential_configuration_id || selectedFormatEntry?.configurationID || ''),
+      credential_id: credentialID,
+      credential_format: credentialFormat,
+      credential_configuration_id: credentialConfigurationID,
       disclosure_claims: selectedDisclosureClaims,
       approve_external_trust: externalTrustApproval,
     }
+    if (resolved.client_id) payload.client_id = String(resolved.client_id)
+    return payload
   }, [activeCredentialEntry, externalTrustApproval, resolved, selectedCredentialID, selectedDisclosureClaims, selectedIssueFormat])
 
   const issueCredential = useCallback(
-    async (forceIssue: boolean) => {
+    async (forceIssue: boolean, overrides?: { format?: string; configurationID?: string }) => {
       setActionPending('issue')
       setBanner('Issuing credential via OID4VCI')
       try {
         const selectedFormatEntry = ISSUE_FORMAT_OPTIONS.find((option) => option.format === selectedIssueFormat) || ISSUE_FORMAT_OPTIONS[0]
         const response = await apiRequest<SessionPayload>('/api/issue', 'POST', {
           force_issue: forceIssue,
-          credential_format: selectedFormatEntry?.format,
-          credential_configuration_id: selectedFormatEntry?.configurationID,
-          credential_id: selectedCredentialID || undefined,
+          credential_format: overrides?.format || selectedFormatEntry?.format,
+          credential_configuration_id: overrides?.configurationID || selectedFormatEntry?.configurationID,
+          credential_id: overrides ? undefined : (selectedCredentialID || undefined),
         })
         setSession((previous) => mergeCredentialSession(previous, response))
         if (response.credential_id) setSelectedCredentialID(String(response.credential_id))
         setActiveView('credentials')
         setBanner(`Credential ready from ${String(response.credential_source || 'wallet')}`, 'success')
+        return response
       } finally { setActionPending('') }
     },
     [apiRequest, selectedCredentialID, selectedIssueFormat, setBanner],
@@ -669,6 +720,12 @@ export default function WalletApp() {
       const payload = buildWalletPayload()
       const response = await apiRequest<PresentResponse>('/api/present', 'POST', payload)
       setResult(response); setActiveView('result')
+      const redirectURI = String(response.redirect_uri || '').trim()
+      if (redirectURI) {
+        setBanner('Presentation accepted; continuing to verifier redirect', 'success')
+        window.location.assign(redirectURI)
+        return
+      }
       setBanner('Verifier response received', 'success')
     } finally { setActionPending('') }
   }, [apiRequest, buildWalletPayload, setBanner])
@@ -730,8 +787,14 @@ export default function WalletApp() {
         }
         const initialURI = String(query.get('uri') || query.get('request_uri') || '').trim()
         if (!initialURI) return
+        const clientID = String(query.get('client_id') || '').trim()
+        const requestURIMethod = String(query.get('request_uri_method') || '').trim()
         setURIInput(initialURI)
-        await resolveRequest(initialURI)
+        await resolveRequest(initialURI, {
+          clientID: clientID || undefined,
+          requestURIMethod: requestURIMethod || undefined,
+        })
+        window.history.replaceState({}, document.title, window.location.pathname)
       } catch (error) { if (!cancelled) setBanner(toErrorMessage(error), 'error') }
     }
     void init()
@@ -750,7 +813,36 @@ export default function WalletApp() {
     return { bg: 'bg-surface-900/50', border: 'border-white/10', text: 'text-surface-300', Icon: Info }
   }, [statusBanner])
 
-  const resultAllowed = Boolean(result?.upstream_body?.result && typeof result.upstream_body.result === 'object' && (result.upstream_body.result as Record<string, unknown>)?.policy && typeof (result.upstream_body.result as Record<string, unknown>).policy === 'object' && ((result.upstream_body.result as Record<string, unknown>).policy as Record<string, unknown>)?.allowed)
+  // ProtocolSoup Looking Glass returns { result: { policy: { allowed } } }.
+  // OID4VP response_uri replies are usually 2xx with { redirect_uri } or an
+  // empty body — those are acceptance, not denial.
+  const resultAllowed = useMemo(() => {
+    if (!result) return false
+    const status = Number(result.upstream_status || 0)
+    if (status > 0 && (status < 200 || status >= 300)) return false
+    const body = result.upstream_body
+    if (!body || typeof body !== 'object') return status === 0 || (status >= 200 && status < 300)
+    const nestedResult = body.result
+    if (nestedResult && typeof nestedResult === 'object') {
+      const policy = (nestedResult as Record<string, unknown>).policy
+      if (policy && typeof policy === 'object' && 'allowed' in (policy as Record<string, unknown>)) {
+        return Boolean((policy as Record<string, unknown>).allowed)
+      }
+    }
+    if (typeof body.error === 'string' && body.error.trim()) return false
+    if (typeof body.redirect_uri === 'string' && body.redirect_uri.trim()) return true
+    return status === 0 || (status >= 200 && status < 300)
+  }, [result])
+
+  const resultTitle = useMemo(() => {
+    if (!result) return 'Presentation denied'
+    if (resultAllowed) {
+      return String(result.redirect_uri || result.upstream_body?.redirect_uri || '').trim()
+        ? 'Presentation accepted (verifier redirect)'
+        : 'Presentation accepted'
+    }
+    return 'Presentation denied'
+  }, [result, resultAllowed])
 
   return (
     <main className="min-h-screen bg-[#0a0a0f] relative">
@@ -1107,7 +1199,7 @@ export default function WalletApp() {
 
           {activeView === 'result' && (
             <motion.section key="result" {...viewTransition} className="rounded-xl border border-white/10 bg-surface-900/20 p-3 sm:p-4 space-y-3 sm:space-y-4">
-              <SectionHeading icon={CheckCircle2} title="Result" subtitle="Verifier evaluation of the submitted presentation" />
+              <SectionHeading icon={CheckCircle2} title="Result" subtitle="HTTP outcome from response_uri (suite redirect or Looking Glass policy)" />
               {!result && (
                 <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-center">
                   <CheckCircle2 className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600 mb-3" />
@@ -1123,7 +1215,7 @@ export default function WalletApp() {
                       : 'border-red-500/30 bg-red-500/5 text-red-300'
                   }`}>
                     {resultAllowed ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                    {resultAllowed ? 'Presentation accepted' : 'Presentation denied'}
+                    {resultTitle}
                     <span className="ml-auto text-surface-400 font-normal font-mono text-xs">HTTP {String(result.upstream_status || 'n/a')}</span>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-surface-900/50 p-3 space-y-0.5">
