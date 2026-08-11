@@ -20,6 +20,9 @@ RUN go mod download
 
 COPY backend/ ./
 COPY --from=wallet-ui-builder /repo/backend/cmd/walletharness/static ./cmd/walletharness/static
+# Optional cache buster for dirty local deploys of wallet harness sources.
+ARG CACHE_BUST=
+RUN echo "cache_bust=${CACHE_BUST}"
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o wallet-harness ./cmd/walletharness
 
 FROM alpine:3.24

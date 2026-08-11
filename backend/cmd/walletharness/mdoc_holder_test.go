@@ -398,6 +398,56 @@ func TestHarnessCreateMdocVPToken(t *testing.T) {
 	}
 }
 
+// TestHarnessCreateMdocVPTokenOmitsElementsWhenDCQLClaimsAbsent proves OID4VP
+// §6.4.1: a matching mso_mdoc credential query without claims returns the
+// credential (issuerAuth + DeviceSigned) with no selectively disclosable
+// IssuerSignedItem elements.
+func TestHarnessCreateMdocVPTokenOmitsElementsWhenDCQLClaimsAbsent(t *testing.T) {
+	s := newMdocTestHarness(t)
+	wallet := &walletMaterial{
+		Subject:     "did:example:wallet:alice",
+		Credentials: make(map[string]walletCredentialMaterial),
+	}
+	credential := issueMdocBoundTo(t, s, &s.deviceKey.PublicKey)
+	if err := s.bindCredential(wallet, credential, "MobileDrivingLicenceMsoMdoc", credentialFormatMsoMdoc); err != nil {
+		t.Fatalf("bindCredential: %v", err)
+	}
+
+	const noClaimsDCQL = `{"credentials":[{"id":"mdl","format":"mso_mdoc","meta":{"doctype_value":"org.iso.18013.5.1.mDL"}}]}`
+	requestContext := &resolvedRequestContext{
+		ClientID:     "x509_san_dns:verifier.example",
+		Nonce:        "nonce-mdoc-no-claims",
+		ResponseURI:  "https://verifier.example/oid4vp/response",
+		ResponseMode: "direct_post",
+		DCQLQuery:    noClaimsDCQL,
+	}
+
+	vpToken, format, err := s.createVPToken(wallet, requestContext, wallet.CredentialJWT)
+	if err != nil {
+		t.Fatalf("createVPToken (mso_mdoc, no claims): %v", err)
+	}
+	if format != credentialFormatMsoMdoc {
+		t.Fatalf("vp_token format = %q, want %q", format, credentialFormatMsoMdoc)
+	}
+
+	rawResponse := decodeMdocDCQLVPToken(t, vpToken)
+	response, err := mdoc.DecodeDeviceResponse(rawResponse)
+	if err != nil {
+		t.Fatalf("DecodeDeviceResponse: %v", err)
+	}
+	if len(response.Documents) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(response.Documents))
+	}
+	doc := response.Documents[0]
+	if len(doc.IssuerSigned.NameSpaces) != 0 {
+		disclosed, _ := mdoc.CollectDisclosedElements(doc.IssuerSigned)
+		t.Fatalf("OID4VP §6.4.1: empty DCQL claims must disclose no mdoc elements, got %v", disclosed)
+	}
+	if len(doc.IssuerSigned.IssuerAuth) == 0 {
+		t.Fatal("issuerAuth remains mandatory and must still be present")
+	}
+}
+
 // TestHarnessCreateMdocVPTokenRequiresResponseEncryptionKey proves the mso_mdoc
 // direct_post.jwt path fails clearly when the verifier advertises no
 // response-encryption key: without it the wallet cannot bind the verifier key

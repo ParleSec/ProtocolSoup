@@ -311,11 +311,11 @@ func mdocMatchEvidence(record walletCredentialMaterial) (vc.MdocCredentialEviden
 // mdocRequestedElements resolves the namespace -> element identifiers that the
 // DCQL query asks the wallet to disclose from a stored mso_mdoc credential. mdoc
 // claim paths are [namespace, elementIdentifier] (OID4VP/DCQL + ISO/IEC
-// 18013-5). A single-segment [namespace] path or a requirement with no claims
-// requests the whole namespace, so every available element in scope is
-// disclosed. Requested elements are always intersected with what the credential
-// actually carries, so the DeviceResponse never claims to disclose an element it
-// does not hold.
+// 18013-5). OID4VP §6.4.1: when claims is absent the Verifier requests no
+// selectively disclosable claims, so the DeviceResponse MUST carry issuerAuth
+// only (empty nameSpaces). A single-segment [namespace] path requests every
+// available element in that namespace. Requested elements are always intersected
+// with what the credential actually carries.
 func mdocRequestedElements(dcqlQueryRaw string, record walletCredentialMaterial) (map[mdoc.NameSpace][]string, error) {
 	available, err := mdocAvailableElements(record)
 	if err != nil {
@@ -357,8 +357,9 @@ func mdocRequestedElements(dcqlQueryRaw string, record walletCredentialMaterial)
 			continue
 		}
 		matchedAnyRequirement = true
+		// OID4VP §6.4.1: absent/empty claims => disclose no selectively
+		// disclosable mdoc elements (issuerAuth / DeviceSigned only).
 		if len(requirement.RequiredClaimPathSegments) == 0 {
-			addAll()
 			continue
 		}
 		for _, segments := range requirement.RequiredClaimPathSegments {
@@ -372,10 +373,9 @@ func mdocRequestedElements(dcqlQueryRaw string, record walletCredentialMaterial)
 			}
 		}
 	}
-	// With no DCQL requirement scoping this credential (e.g. a scope-aliased
-	// request), default to disclosing the full credential so the verifier can
-	// evaluate it. An empty requested map would disclose nothing (issuerAuth
-	// only), which is never the intent for a matched credential.
+	// Scope-aliased requests without a matching DCQL credential query still
+	// default to full disclosure so the verifier can evaluate the credential.
+	// A matched DCQL query with no claims intentionally yields an empty map.
 	if !matchedAnyRequirement {
 		addAll()
 	}

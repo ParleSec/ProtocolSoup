@@ -370,6 +370,7 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		pending.JWTProofRequired,
 		tokenPayload,
 		nil,
+		nil,
 	)
 	if err != nil {
 		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
@@ -601,12 +602,13 @@ func (s *walletHarnessServer) issueFromExternalIssuer(
 		}
 	}
 
-	tokenPayload, err := s.exchangeExternalPreAuthorizedToken(
+	tokenPayload, haipSession, err := s.exchangeExternalPreAuthorizedToken(
 		ctx,
 		authorizationServerMetadata.TokenEndpoint,
 		preAuthorizedGrant.PreAuthorizedCode,
 		input.TxCode,
 		input.LookingGlassSessionID,
+		selectedConfigurationID,
 	)
 	if err != nil {
 		return nil, err
@@ -624,6 +626,7 @@ func (s *walletHarnessServer) issueFromExternalIssuer(
 		jwtProofRequired,
 		tokenPayload,
 		preAuthorizedGrant,
+		haipSession,
 	)
 }
 
@@ -730,6 +733,7 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 	jwtProofRequired bool,
 	tokenPayload map[string]interface{},
 	preAuthorizedGrant *models.VCPreAuthorizedCodeGrant,
+	haipSession *haipIssuanceSession,
 ) (*externalIssuerImportResult, error) {
 	accessToken := strings.TrimSpace(asString(tokenPayload["access_token"]))
 	if accessToken == "" {
@@ -742,7 +746,8 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 
 	proofJWT := ""
 	var err error
-	if jwtProofRequired {
+	haipIssuance := isHAIPCredentialConfigurationID(selectedConfigurationID)
+	if jwtProofRequired || haipIssuance {
 		if strings.TrimSpace(issuerMetadata.NonceEndpoint) == "" {
 			return nil, &walletAPIError{
 				Status:      http.StatusBadGateway,
@@ -754,21 +759,62 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 		if nonceErr != nil {
 			return nil, nonceErr
 		}
-		proofJWT, err = s.createCredentialProofJWT(wallet, wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
+		if haipIssuance {
+			if haipSession == nil {
+				return nil, &walletAPIError{
+					Status:      http.StatusBadRequest,
+					Code:        "invalid_request",
+					Description: "haip issuance session is required",
+				}
+			}
+			proofJWT, err = s.createHAIPCredentialProofJWT(
+				wallet,
+				wallet.Subject,
+				cNonce,
+				issuerMetadata.CredentialIssuer,
+				selectedConfigurationID,
+				credentialFormatHint,
+			)
+		} else {
+			proofJWT, err = s.createCredentialProofJWT(wallet, wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("create credential proof jwt: %w", err)
 		}
 	}
 
-	credentialPayload, err := s.requestExternalCredential(
-		ctx,
-		issuerMetadata.CredentialEndpoint,
-		selectedConfigurationID,
-		credentialFormatHint,
-		accessToken,
-		proofJWT,
-		input.LookingGlassSessionID,
-	)
+	tokenType := firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer")
+	var credentialPayload map[string]interface{}
+	if haipIssuance {
+		if haipSession == nil {
+			return nil, &walletAPIError{
+				Status:      http.StatusBadRequest,
+				Code:        "invalid_request",
+				Description: "haip issuance session is required",
+			}
+		}
+		credentialPayload, err = s.requestHAIPCredential(
+			ctx,
+			issuerMetadata.CredentialEndpoint,
+			selectedConfigurationID,
+			accessToken,
+			tokenType,
+			proofJWT,
+			haipSession,
+			input.LookingGlassSessionID,
+		)
+	} else {
+		credentialPayload, err = s.requestExternalCredential(
+			ctx,
+			issuerMetadata.CredentialEndpoint,
+			selectedConfigurationID,
+			credentialFormatHint,
+			accessToken,
+			tokenType,
+			proofJWT,
+			input.LookingGlassSessionID,
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -819,7 +865,8 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 			NotificationID:     strings.TrimSpace(asString(credentialPayload["notification_id"])),
 			NotificationURL:    issuerMetadata.NotificationEndpoint,
 			AccessToken:        accessToken,
-			TokenType:          firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer"),
+			TokenType:          tokenType,
+			HAIPDPoPSession:    haipSession,
 		},
 		CredentialIssuer:            issuerMetadata.CredentialIssuer,
 		IssuerMetadata:              issuerMetadata.Raw,
@@ -1096,10 +1143,11 @@ func (s *walletHarnessServer) exchangeExternalPreAuthorizedToken(
 	preAuthorizedCode string,
 	txCode string,
 	lookingGlassSessionID string,
-) (map[string]interface{}, error) {
+	credentialConfigurationID string,
+) (map[string]interface{}, *haipIssuanceSession, error) {
 	validatedEndpoint, err := s.validateExternalURL(tokenEndpoint)
 	if err != nil {
-		return nil, fmt.Errorf("validate token endpoint: %w", err)
+		return nil, nil, fmt.Errorf("validate token endpoint: %w", err)
 	}
 	tokenEndpoint = validatedEndpoint
 	form := url.Values{}
@@ -1109,9 +1157,34 @@ func (s *walletHarnessServer) exchangeExternalPreAuthorizedToken(
 		form.Set("tx_code", strings.TrimSpace(txCode))
 	}
 
+	haipIssuance := isHAIPCredentialConfigurationID(credentialConfigurationID)
+	if haipIssuance {
+		if !s.haipIssuanceEnabled() {
+			return nil, nil, &walletAPIError{
+				Status:      http.StatusBadRequest,
+				Code:        "invalid_request",
+				Description: fmt.Sprintf("credential configuration %q requires haip attestation material", credentialConfigurationID),
+			}
+		}
+		session, err := s.newHAIPIssuanceSession()
+		if err != nil {
+			return nil, nil, err
+		}
+		payload, err := s.exchangeHAIPPreAuthorizedToken(ctx, haipTokenExchangeInput{
+			TokenEndpoint:         tokenEndpoint,
+			Form:                  form,
+			LookingGlassSessionID: lookingGlassSessionID,
+			Session:               session,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		return payload, session, nil
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("build token request: %w", err)
+		return nil, nil, fmt.Errorf("build token request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1121,20 +1194,20 @@ func (s *walletHarnessServer) exchangeExternalPreAuthorizedToken(
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("token request failed: %w", err)
+		return nil, nil, fmt.Errorf("token request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return nil, walletAPIErrorFromUpstream(resp.StatusCode, body, "token request")
+		return nil, nil, walletAPIErrorFromUpstream(resp.StatusCode, body, "token request")
 	}
 
 	var payload map[string]interface{}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("decode token response: %w", err)
+		return nil, nil, fmt.Errorf("decode token response: %w", err)
 	}
-	return payload, nil
+	return payload, nil, nil
 }
 
 func (s *walletHarnessServer) exchangeExternalAuthorizationCodeToken(
@@ -1240,6 +1313,7 @@ func (s *walletHarnessServer) requestExternalCredential(
 	credentialConfigurationID string,
 	_ string,
 	accessToken string,
+	tokenType string,
 	proofJWT string,
 	lookingGlassSessionID string,
 ) (map[string]interface{}, error) {
@@ -1267,7 +1341,7 @@ func (s *walletHarnessServer) requestExternalCredential(
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
+	req.Header.Set("Authorization", authorizationHeaderForAccessToken(tokenType, accessToken))
 	if strings.TrimSpace(lookingGlassSessionID) != "" {
 		req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
 	}

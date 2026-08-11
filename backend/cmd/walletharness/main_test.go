@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,54 @@ func TestNotifyCredentialAcceptedUsesNotificationBinding(t *testing.T) {
 	}
 }
 
+func TestNotifyCredentialAcceptedUsesDPoPWhenTokenBound(t *testing.T) {
+	session, err := (&walletHarnessServer{}).newHAIPIssuanceSession()
+	if err != nil {
+		t.Fatalf("newHAIPIssuanceSession: %v", err)
+	}
+	accessToken := "dpop-access-token"
+	var gotAuthorization string
+	var gotDPoP string
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuthorization = r.Header.Get("Authorization")
+		gotDPoP = r.Header.Get("DPoP")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer issuer.Close()
+
+	server := &walletHarnessServer{httpClient: issuer.Client(), issuerBaseURL: issuer.URL}
+	err = server.notifyCredentialAccepted(context.Background(), &issuedWalletCredential{
+		NotificationID:  "notification-1",
+		NotificationURL: issuer.URL,
+		AccessToken:     accessToken,
+		TokenType:       "DPoP",
+		HAIPDPoPSession: session,
+	}, "session-1")
+	if err != nil {
+		t.Fatalf("notifyCredentialAccepted returned error: %v", err)
+	}
+	if gotAuthorization != "DPoP "+accessToken {
+		t.Fatalf("Authorization = %q, want DPoP %s", gotAuthorization, accessToken)
+	}
+	if strings.TrimSpace(gotDPoP) == "" {
+		t.Fatal("expected DPoP proof header")
+	}
+	decoded, err := intcrypto.DecodeTokenWithoutValidation(gotDPoP)
+	if err != nil {
+		t.Fatalf("decode dpop proof: %v", err)
+	}
+	if asString(decoded.Payload["htm"]) != "POST" {
+		t.Fatalf("dpop htm = %q", decoded.Payload["htm"])
+	}
+	if asString(decoded.Payload["htu"]) != issuer.URL {
+		t.Fatalf("dpop htu = %q, want %s", decoded.Payload["htu"], issuer.URL)
+	}
+	expectedATH := computeAccessTokenHash(accessToken)
+	if asString(decoded.Payload["ath"]) != expectedATH {
+		t.Fatalf("dpop ath = %q, want %s", decoded.Payload["ath"], expectedATH)
+	}
+}
+
 func TestResolveWalletScopeKeyStrictIsolation(t *testing.T) {
 	strictServer := &walletHarnessServer{strictIsolation: true}
 	if _, err := strictServer.resolveWalletScopeKey(walletSubmitRequest{}); err == nil {
@@ -193,8 +242,66 @@ func TestCreateCredentialProofJWTUsesFinalAnonymousProofShape(t *testing.T) {
 	if _, exists := parsed.Header["jwk"]; !exists {
 		t.Fatal("proof JOSE header must carry jwk")
 	}
+	if _, exists := parsed.Header["kid"]; exists {
+		t.Fatal("proof JOSE header must not carry kid when it carries jwk")
+	}
 	if _, exists := claims["cnf"]; exists {
 		t.Fatal("proof key must not be carried in payload cnf")
+	}
+}
+
+func TestSignWalletJWTOmitsKidForKeyBindingJWT(t *testing.T) {
+	keySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("create wallet keyset: %v", err)
+	}
+	wallet := &walletMaterial{
+		KeySet:           keySet,
+		SigningAlgorithm: "ES256",
+	}
+	signed, err := walletSignToken(wallet, jwt.MapClaims{
+		"aud":   "https://verifier.example",
+		"nonce": "n",
+		"iat":   time.Now().UTC().Unix(),
+	}, map[string]interface{}{"typ": "kb+jwt"})
+	if err != nil {
+		t.Fatalf("walletSignToken: %v", err)
+	}
+	parsed, _, err := jwt.NewParser().ParseUnverified(signed, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse kb-jwt: %v", err)
+	}
+	if parsed.Header["typ"] != "kb+jwt" {
+		t.Fatalf("typ = %#v, want kb+jwt", parsed.Header["typ"])
+	}
+	if _, exists := parsed.Header["kid"]; exists {
+		t.Fatal("kb+jwt JOSE header must not carry kid (SD-JWT §4.3)")
+	}
+}
+
+func TestSelectWalletSigningAlgorithmUsesCredentialMetadataAlgorithm(t *testing.T) {
+	keySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("create wallet keyset: %v", err)
+	}
+	wallet := &walletMaterial{KeySet: keySet, SigningAlgorithm: "ES256"}
+	configuration := map[string]interface{}{
+		"proof_types_supported": map[string]interface{}{
+			"jwt": map[string]interface{}{
+				"proof_signing_alg_values_supported": []interface{}{"RS256"},
+			},
+		},
+	}
+
+	algorithm := preferredCredentialProofSigningAlgorithm(configuration)
+	if algorithm != "RS256" {
+		t.Fatalf("preferredCredentialProofSigningAlgorithm() = %q, want RS256", algorithm)
+	}
+	if err := selectWalletSigningAlgorithm(wallet, algorithm); err != nil {
+		t.Fatalf("selectWalletSigningAlgorithm: %v", err)
+	}
+	if wallet.SigningAlgorithm != "RS256" {
+		t.Fatalf("wallet SigningAlgorithm = %q, want RS256", wallet.SigningAlgorithm)
 	}
 }
 
@@ -676,7 +783,7 @@ func TestExtractPublicKeyFromMethodSupportsOKP(t *testing.T) {
 }
 
 func TestParseOpenID4VPURIExtractsRequestURI(t *testing.T) {
-	requestURI, requestJWT, _, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123")
+	requestURI, requestJWT, _, method, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123")
 	if err != nil {
 		t.Fatalf("parseOpenID4VPURI: %v", err)
 	}
@@ -686,12 +793,18 @@ func TestParseOpenID4VPURIExtractsRequestURI(t *testing.T) {
 	if requestURI != "https://protocolsoup.com/oid4vp/request/abc123" {
 		t.Fatalf("unexpected requestURI %q", requestURI)
 	}
+	if method != "get" {
+		t.Fatalf("unexpected request_uri_method %q", method)
+	}
 }
 
-func TestParseOpenID4VPURIRejectsRequestURIMethodPost(t *testing.T) {
-	_, _, _, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123&request_uri_method=post")
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("expected explicit request_uri_method=post rejection, got %v", err)
+func TestParseOpenID4VPURIAcceptsRequestURIMethodPost(t *testing.T) {
+	_, _, _, method, err := parseOpenID4VPURI("openid4vp://authorize?request_uri=https%3A%2F%2Fprotocolsoup.com%2Foid4vp%2Frequest%2Fabc123&request_uri_method=post")
+	if err != nil {
+		t.Fatalf("parseOpenID4VPURI(post): %v", err)
+	}
+	if method != "post" {
+		t.Fatalf("unexpected request_uri_method %q", method)
 	}
 }
 
@@ -710,7 +823,7 @@ func TestFetchRequestObjectConsumesFinalCompactJWTBody(t *testing.T) {
 	defer requestServer.Close()
 
 	server := &walletHarnessServer{httpClient: requestServer.Client()}
-	gotJWT, requestID, err := server.fetchRequestObject(context.Background(), requestServer.URL)
+	gotJWT, requestID, err := server.fetchRequestObject(context.Background(), requestServer.URL, "get")
 	if err != nil {
 		t.Fatalf("fetchRequestObject: %v", err)
 	}
@@ -1060,6 +1173,7 @@ func TestInferClientIDSchemeUsesClientIDPrefixOnly(t *testing.T) {
 			want:     "pre_registered",
 		},
 		{clientID: "example-client", want: "pre_registered"},
+		{clientID: "invalid_scheme:attacker", want: "unknown"},
 	}
 
 	for _, testCase := range testCases {
@@ -1387,7 +1501,7 @@ func TestInferCredentialFormatFromVPRequestDCQLFormat(t *testing.T) {
 					},
 				},
 			}
-			format, configID := inferCredentialFormatFromVPRequest(envelope)
+			format, configID := inferCredentialFormatFromVPRequest(envelope, false)
 			if format != tc.format {
 				t.Fatalf("expected format %q, got %q", tc.format, format)
 			}
@@ -1410,7 +1524,7 @@ func TestInferCredentialFormatFromVPRequestNoFormat(t *testing.T) {
 			},
 		},
 	}
-	format, configID := inferCredentialFormatFromVPRequest(envelope)
+	format, configID := inferCredentialFormatFromVPRequest(envelope, false)
 	if format != "" {
 		t.Fatalf("expected empty format, got %q", format)
 	}
@@ -1420,9 +1534,376 @@ func TestInferCredentialFormatFromVPRequestNoFormat(t *testing.T) {
 }
 
 func TestInferCredentialFormatFromVPRequestNilEnvelope(t *testing.T) {
-	format, configID := inferCredentialFormatFromVPRequest(nil)
+	format, configID := inferCredentialFormatFromVPRequest(nil, false)
 	if format != "" || configID != "" {
 		t.Fatalf("expected empty results for nil envelope, got format=%q configID=%q", format, configID)
+	}
+}
+
+func TestHandleAuthorizeRedirectsToConsentFlow(t *testing.T) {
+	server := &walletHarnessServer{
+		targetHost:    "protocolsoup.com",
+		allowExternal: true,
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/authorize", server.handleAuthorize)
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	requestURI := "https://suite.example/request/abc"
+	resp, err := client.Get(ts.URL + "/authorize?" + url.Values{
+		"client_id":          {"x509_hash:abc"},
+		"request_uri":        {requestURI},
+		"request_uri_method": {"post"},
+	}.Encode())
+	if err != nil {
+		t.Fatalf("GET /authorize: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302", resp.StatusCode)
+	}
+	location := resp.Header.Get("Location")
+	parsed, err := url.Parse(location)
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	query := parsed.Query()
+	if query.Get("request_uri") != requestURI {
+		t.Fatalf("request_uri = %q", query.Get("request_uri"))
+	}
+	if query.Get("request_uri_method") != "post" {
+		t.Fatalf("request_uri_method = %q", query.Get("request_uri_method"))
+	}
+	if !strings.Contains(query.Get("uri"), "openid4vp://authorize?") {
+		t.Fatalf("uri = %q", query.Get("uri"))
+	}
+}
+
+func TestFetchRequestObjectPOSTSendsWalletNonce(t *testing.T) {
+	requestJWT := buildTestRequestJWT(t, "https://protocolsoup.com/oid4vp/response")
+	var sawNonce string
+	requestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		sawNonce = strings.TrimSpace(r.Form.Get("wallet_nonce"))
+		if sawNonce == "" {
+			t.Fatal("expected wallet_nonce")
+		}
+		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+		_, _ = w.Write([]byte(requestJWT))
+	}))
+	defer requestServer.Close()
+
+	server := &walletHarnessServer{httpClient: requestServer.Client()}
+	gotJWT, _, err := server.fetchRequestObject(context.Background(), requestServer.URL, "post")
+	if err != nil {
+		t.Fatalf("fetchRequestObject(post): %v", err)
+	}
+	if gotJWT != requestJWT {
+		t.Fatalf("unexpected JWT %q", gotJWT)
+	}
+	if sawNonce == "" {
+		t.Fatal("wallet_nonce was not captured")
+	}
+}
+
+func TestResolveRequestContextRejectsRedirectURIWithResponseURI(t *testing.T) {
+	responseURI := "https://protocolsoup.com/oid4vp/response"
+	server := &walletHarnessServer{
+		targetHost:        "protocolsoup.com",
+		targetResponseURI: responseURI,
+	}
+	claims := jwt.MapClaims{
+		"jti":           "req-123",
+		"nonce":         "nonce-123",
+		"client_id":     "redirect_uri:" + responseURI,
+		"response_type": "vp_token",
+		"response_mode": "direct_post",
+		"response_uri":  responseURI,
+		"redirect_uri":  "https://protocolsoup.com/oid4vp/result/req-123",
+		"dcql_query": map[string]interface{}{
+			"credentials": []interface{}{map[string]interface{}{"id": "credential-query"}},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token.Header["typ"] = "oauth-authz-req+jwt"
+	requestJWT, err := token.SignedString([]byte("wallet-harness-test-secret"))
+	if err != nil {
+		t.Fatalf("sign request: %v", err)
+	}
+	_, err = server.resolveRequestContextWithOptions("req-123", requestJWT, true)
+	if err == nil || !strings.Contains(err.Error(), "must not include redirect_uri") {
+		t.Fatalf("expected redirect_uri rejection, got %v", err)
+	}
+}
+
+func TestResolveRequestContextRejectsUnknownClientIDScheme(t *testing.T) {
+	responseURI := "https://protocolsoup.com/oid4vp/response"
+	server := &walletHarnessServer{
+		targetHost:        "protocolsoup.com",
+		targetResponseURI: responseURI,
+	}
+	claims := jwt.MapClaims{
+		"jti":           "req-123",
+		"nonce":         "nonce-123",
+		"client_id":     "invalid_scheme:attacker",
+		"response_type": "vp_token",
+		"response_mode": "direct_post",
+		"response_uri":  responseURI,
+		"dcql_query": map[string]interface{}{
+			"credentials": []interface{}{map[string]interface{}{"id": "credential-query"}},
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token.Header["typ"] = "oauth-authz-req+jwt"
+	requestJWT, err := token.SignedString([]byte("wallet-harness-test-secret"))
+	if err != nil {
+		t.Fatalf("sign request: %v", err)
+	}
+	_, err = server.resolveRequestContextWithOptions("req-123", requestJWT, true)
+	if err == nil || !strings.Contains(err.Error(), "unsupported client_id scheme") {
+		t.Fatalf("expected unknown scheme rejection, got %v", err)
+	}
+}
+
+func TestDisclosureClaimsFromDCQLExactEmptyMeansNone(t *testing.T) {
+	claims := disclosureClaimsFromDCQL(`{"credentials":[{"id":"credential","format":"dc+sd-jwt"}]}`)
+	if len(claims) != 0 {
+		t.Fatalf("expected no claims for empty DCQL claims, got %v", claims)
+	}
+	claims = disclosureClaimsFromDCQL(`{"credentials":[{"id":"credential","format":"dc+sd-jwt","claims":[{"path":["family_name"]},{"path":["address","street"]}]}]}`)
+	if !containsString(claims, "family_name") || !containsString(claims, "street") {
+		t.Fatalf("unexpected claims %v", claims)
+	}
+	resolved, exact := resolvePresentationDisclosureClaims(nil, `{"credentials":[{"id":"credential","format":"dc+sd-jwt"}]}`)
+	if !exact || len(resolved) != 0 {
+		t.Fatalf("expected exact empty selection, got exact=%v claims=%v", exact, resolved)
+	}
+}
+
+func TestWrapDCQLKeyedVPToken(t *testing.T) {
+	wrapped, err := wrapDCQLKeyedVPToken(
+		`{"credentials":[{"id":"pid","format":"dc+sd-jwt"}]}`,
+		"eyJhbGciOiJFUzI1NiJ9.e30.sig~disclosure~",
+		"dc+sd-jwt",
+		map[string]bool{"pid": true},
+	)
+	if err != nil {
+		t.Fatalf("wrapDCQLKeyedVPToken: %v", err)
+	}
+	var keyed map[string][]string
+	if err := json.Unmarshal([]byte(wrapped), &keyed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(keyed["pid"]) != 1 {
+		t.Fatalf("unexpected keyed token %v", keyed)
+	}
+}
+
+// TestWrapDCQLKeyedVPTokenOmitsUnmatchedOptionalCredential proves OID4VP
+// optional credential_sets behaviour: only the matched Credential Query id is
+// present in vp_token even when another same-format query is in the DCQL.
+func TestWrapDCQLKeyedVPTokenOmitsUnmatchedOptionalCredential(t *testing.T) {
+	dcql := `{
+		"credentials": [
+			{"id":"real","format":"dc+sd-jwt","meta":{"vct_values":["https://protocolsoup.com/oid4vci/credential-types/university-degree"]}},
+			{"id":"optional_other","format":"dc+sd-jwt","meta":{"vct_values":["urn:example:never"]}}
+		],
+		"credential_sets": [
+			{"options":[["real"]]},
+			{"options":[["optional_other"]],"required":false}
+		]
+	}`
+	wrapped, err := wrapDCQLKeyedVPToken(
+		dcql,
+		"eyJhbGciOiJFUzI1NiJ9.e30.sig~disclosure~",
+		"dc+sd-jwt",
+		map[string]bool{"real": true},
+	)
+	if err != nil {
+		t.Fatalf("wrapDCQLKeyedVPToken: %v", err)
+	}
+	var keyed map[string][]string
+	if err := json.Unmarshal([]byte(wrapped), &keyed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(keyed) != 1 || len(keyed["real"]) != 1 {
+		t.Fatalf("expected only real credential key, got %v", keyed)
+	}
+	if _, ok := keyed["optional_other"]; ok {
+		t.Fatalf("optional unmatched credential must not appear in vp_token: %v", keyed)
+	}
+}
+
+func TestValidateBrowserRedirectURI(t *testing.T) {
+	got, err := validateBrowserRedirectURI("https://suite.example/continue")
+	if err != nil || got != "https://suite.example/continue" {
+		t.Fatalf("validateBrowserRedirectURI https: %v %q", err, got)
+	}
+	if _, err := validateBrowserRedirectURI("http://suite.example/continue"); err == nil {
+		t.Fatal("expected http rejection")
+	}
+	if _, err := validateBrowserRedirectURI("https://127.0.0.1/continue"); err == nil {
+		t.Fatal("expected loopback rejection")
+	}
+	got, err = validateBrowserRedirectURI("https://suite.example/callback#code_verifier")
+	if err != nil || got != "https://suite.example/callback#code_verifier" {
+		t.Fatalf("validateBrowserRedirectURI fragment: %v %q", err, got)
+	}
+	got, err = validateBrowserRedirectURI("https://suite.example/callback%23code_verifier")
+	if err != nil || got != "https://suite.example/callback#code_verifier" {
+		t.Fatalf("validateBrowserRedirectURI encoded fragment: %v %q", err, got)
+	}
+}
+
+func TestHAIPAttestationJWTBuildersUseExpectedHeaders(t *testing.T) {
+	attesterKey, attesterChain := createECDSACertificateChain(t, []string{"attester.example"}, "HAIP Attester")
+	keyAttesterKey, keyAttesterChain := createECDSACertificateChain(t, []string{"key-attestation.example"}, "Key Attester")
+	holderKey := generateECDSAKey(t)
+	holderJWK := intcrypto.JWKFromECPublicKey(&holderKey.PublicKey, "holder-key")
+	instanceKey := generateECDSAKey(t)
+	const clientID = "protocolsoup-wallet"
+
+	attestationJWT, err := buildClientAttestationJWT(
+		attesterKey,
+		encodeCertificateChain(attesterChain),
+		clientID,
+		intcrypto.JWKFromECPublicKey(&instanceKey.PublicKey, "client-instance"),
+		time.Now().Add(5*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("buildClientAttestationJWT: %v", err)
+	}
+	decodedAttestation, err := intcrypto.DecodeTokenWithoutValidation(attestationJWT)
+	if err != nil {
+		t.Fatalf("decode client attestation jwt: %v", err)
+	}
+	if got := strings.TrimSpace(asString(decodedAttestation.Header["typ"])); got != typOAuthClientAttestationJWT {
+		t.Fatalf("client attestation typ = %q", got)
+	}
+	if asString(decodedAttestation.Payload["sub"]) != clientID {
+		t.Fatalf("client attestation sub = %q", decodedAttestation.Payload["sub"])
+	}
+
+	popJWT, err := buildClientAttestationPoPJWT(instanceKey, "https://issuer.example/oid4vci", "pop-jti-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("buildClientAttestationPoPJWT: %v", err)
+	}
+	decodedPoP, err := intcrypto.DecodeTokenWithoutValidation(popJWT)
+	if err != nil {
+		t.Fatalf("decode client attestation pop jwt: %v", err)
+	}
+	if got := strings.TrimSpace(asString(decodedPoP.Header["typ"])); got != typOAuthClientAttestationPoPJWT {
+		t.Fatalf("client attestation pop typ = %q", got)
+	}
+
+	keyAttestationJWT, err := buildKeyAttestationJWT(
+		keyAttesterKey,
+		encodeCertificateChain(keyAttesterChain),
+		[]intcrypto.JWK{holderJWK},
+		[]string{"iso_18045_moderate"},
+		[]string{"iso_18045_moderate"},
+		"test-c-nonce",
+	)
+	if err != nil {
+		t.Fatalf("buildKeyAttestationJWT: %v", err)
+	}
+	decodedKeyAttestation, err := intcrypto.DecodeTokenWithoutValidation(keyAttestationJWT)
+	if err != nil {
+		t.Fatalf("decode key attestation jwt: %v", err)
+	}
+	if got := strings.TrimSpace(asString(decodedKeyAttestation.Header["typ"])); got != typKeyAttestationJWT {
+		t.Fatalf("key attestation typ = %q", got)
+	}
+	if asString(decodedKeyAttestation.Payload["nonce"]) != "test-c-nonce" {
+		t.Fatalf("key attestation nonce = %q", decodedKeyAttestation.Payload["nonce"])
+	}
+
+	proofJWT, err := createCredentialProofJWTWithKeyAttestation(
+		holderKey,
+		holderJWK,
+		"test-c-nonce",
+		"did:example:wallet:alice",
+		"https://issuer.example/oid4vci",
+		keyAttestationJWT,
+	)
+	if err != nil {
+		t.Fatalf("createCredentialProofJWTWithKeyAttestation: %v", err)
+	}
+	decodedProof, err := intcrypto.DecodeTokenWithoutValidation(proofJWT)
+	if err != nil {
+		t.Fatalf("decode proof jwt: %v", err)
+	}
+	if got := strings.TrimSpace(asString(decodedProof.Header["typ"])); got != "openid4vci-proof+jwt" {
+		t.Fatalf("proof typ = %q", got)
+	}
+	if _, ok := decodedProof.Header["key_attestation"]; !ok {
+		t.Fatal("proof must carry key_attestation header")
+	}
+	if asString(decodedProof.Payload["nonce"]) != "test-c-nonce" {
+		t.Fatalf("proof nonce = %q", decodedProof.Payload["nonce"])
+	}
+}
+
+func TestPreferHAIPBootstrapConfigurationID(t *testing.T) {
+	if got := preferHAIPBootstrapConfigurationID("UniversityDegreeCredential", true); got != "UniversityDegreeCredentialSDJWTHAIP" {
+		t.Fatalf("unexpected haip bootstrap config id %q", got)
+	}
+	if got := preferHAIPBootstrapConfigurationID("UniversityDegreeCredential", false); got != "UniversityDegreeCredential" {
+		t.Fatalf("unexpected non-haip bootstrap config id %q", got)
+	}
+}
+
+func TestIsHAIPCredentialConfigurationID(t *testing.T) {
+	if !isHAIPCredentialConfigurationID("UniversityDegreeCredentialSDJWTHAIP") {
+		t.Fatal("expected SD-JWT HAIP configuration to be detected")
+	}
+	if !isHAIPCredentialConfigurationID("MobileDrivingLicenceMsoMdocHAIP") {
+		t.Fatal("expected mdoc HAIP configuration to be detected")
+	}
+	if isHAIPCredentialConfigurationID("UniversityDegreeCredential") {
+		t.Fatal("did not expect non-HAIP configuration to match")
+	}
+}
+
+func TestHAIPDPoPProofBuilderIncludesHTMHTU(t *testing.T) {
+	session, err := (&walletHarnessServer{}).newHAIPIssuanceSession()
+	if err != nil {
+		t.Fatalf("newHAIPIssuanceSession: %v", err)
+	}
+	proof, err := session.buildDPoPProof(http.MethodPost, "https://issuer.example/oid4vci/token", jwt.MapClaims{"nonce": "server-nonce"})
+	if err != nil {
+		t.Fatalf("buildDPoPProof: %v", err)
+	}
+	decoded, err := intcrypto.DecodeTokenWithoutValidation(proof)
+	if err != nil {
+		t.Fatalf("decode dpop proof: %v", err)
+	}
+	if asString(decoded.Payload["htm"]) != "POST" {
+		t.Fatalf("dpop htm = %q", decoded.Payload["htm"])
+	}
+	if asString(decoded.Payload["htu"]) != "https://issuer.example/oid4vci/token" {
+		t.Fatalf("dpop htu = %q", decoded.Payload["htu"])
+	}
+	if asString(decoded.Payload["nonce"]) != "server-nonce" {
+		t.Fatalf("dpop nonce = %q", decoded.Payload["nonce"])
+	}
+}
+
+func TestAuthorizationHeaderForAccessTokenUsesDPoPScheme(t *testing.T) {
+	got := authorizationHeaderForAccessToken("DPoP", "access-token")
+	if got != "DPoP access-token" {
+		t.Fatalf("authorization header = %q", got)
 	}
 }
 
@@ -1434,3 +1915,15 @@ func containsString(values []string, target string) bool {
 	}
 	return false
 }
+
+func TestParseAttestationJWKInputPreservesX5C(t *testing.T) {
+	raw := `{"keys":[{"kty":"EC","crv":"P-256","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","y":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","d":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","x5c":["MIIB"]}]}`
+	_, x5c, err := parseAttestationJWKInput(raw)
+	if err != nil {
+		t.Fatalf("parseAttestationJWKInput: %v", err)
+	}
+	if len(x5c) != 1 || x5c[0] != "MIIB" {
+		t.Fatalf("x5c = %#v", x5c)
+	}
+}
+

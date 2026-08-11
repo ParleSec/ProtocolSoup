@@ -52,6 +52,9 @@ type walletHarnessServer struct {
 	trustedVerifierAttestationIssuers map[string]struct{}
 	oid4vciClientID                   string
 	oid4vciClientSecret               string
+	haipClientAttestation             *attestationJWKMaterial
+	haipKeyAttestation                *attestationJWKMaterial
+	haipAttestedClientID              string
 	walletSessionTTL                  time.Duration
 	strictIsolation                   bool
 	allowedCORSOrigins                map[string]struct{}
@@ -156,6 +159,7 @@ type resolvedRequestContext struct {
 type resolvedRequestEnvelope struct {
 	RequestJWT       string
 	RequestURI       string
+	RequestURIMethod string
 	RequestID        string
 	URIClientID      string
 	DecodedHeader    map[string]interface{}
@@ -166,11 +170,13 @@ type resolvedRequestEnvelope struct {
 var errInvalidTransactionData = errors.New("invalid_transaction_data")
 
 type apiResolveRequest struct {
-	RequestURI  string `json:"request_uri,omitempty"`
-	OpenID4VP   string `json:"openid4vp_uri,omitempty"`
-	RequestJWT  string `json:"request,omitempty"`
-	RequestID   string `json:"request_id,omitempty"`
-	TrustAccept bool   `json:"approve_external_trust,omitempty"`
+	RequestURI       string `json:"request_uri,omitempty"`
+	RequestURIMethod string `json:"request_uri_method,omitempty"`
+	ClientID         string `json:"client_id,omitempty"`
+	OpenID4VP        string `json:"openid4vp_uri,omitempty"`
+	RequestJWT       string `json:"request,omitempty"`
+	RequestID        string `json:"request_id,omitempty"`
+	TrustAccept      bool   `json:"approve_external_trust,omitempty"`
 }
 
 type apiWalletRequest struct {
@@ -182,6 +188,8 @@ type apiWalletRequest struct {
 	CredentialConfigID    string   `json:"credential_configuration_id,omitempty"`
 	DisclosureClaims      []string `json:"disclosure_claims,omitempty"`
 	RequestURI            string   `json:"request_uri,omitempty"`
+	RequestURIMethod      string   `json:"request_uri_method,omitempty"`
+	ClientID              string   `json:"client_id,omitempty"`
 	OpenID4VP             string   `json:"openid4vp_uri,omitempty"`
 	RequestJWT            string   `json:"request,omitempty"`
 	RequestID             string   `json:"request_id,omitempty"`
@@ -206,6 +214,7 @@ type issuedWalletCredential struct {
 	NotificationURL    string
 	AccessToken        string
 	TokenType          string
+	HAIPDPoPSession    *haipIssuanceSession
 }
 
 type didWebResolutionResult struct {
@@ -282,7 +291,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid WALLET_DEFAULT_CREDENTIAL_FORMAT: %v", err)
 	}
-	oid4vciClientID := strings.TrimSpace(envOrDefault("WALLET_OID4VCI_CLIENT_ID", "public-app"))
+	haipClientAttestation, haipKeyAttestation, haipAttestedClientID, err := loadHAIPAttestationConfig()
+	if err != nil {
+		// Misconfigured attestation secrets must not crash the wallet; HAIP
+		// issuance simply stays unavailable until the JWKs are corrected.
+		log.Printf("load haip attestation config: %v", err)
+		haipClientAttestation = nil
+		haipKeyAttestation = nil
+		haipAttestedClientID = ""
+	}
+	defaultOID4VCIClientID := "public-app"
+	if haipClientAttestation != nil && haipKeyAttestation != nil {
+		defaultOID4VCIClientID = haipAttestedClientID
+	}
+	oid4vciClientID := strings.TrimSpace(envOrDefault("WALLET_OID4VCI_CLIENT_ID", defaultOID4VCIClientID))
 	oid4vciClientSecret := strings.TrimSpace(os.Getenv("WALLET_OID4VCI_CLIENT_SECRET"))
 	walletSessionTTL := 20 * time.Minute
 	if ttlRaw := strings.TrimSpace(os.Getenv("WALLET_SESSION_TTL")); ttlRaw != "" {
@@ -357,6 +379,9 @@ func main() {
 		trustedVerifierAttestationIssuers: trustedVerifierAttestationIssuers,
 		oid4vciClientID:                   oid4vciClientID,
 		oid4vciClientSecret:               oid4vciClientSecret,
+		haipClientAttestation:             haipClientAttestation,
+		haipKeyAttestation:                haipKeyAttestation,
+		haipAttestedClientID:              haipAttestedClientID,
 		walletSessionTTL:                  walletSessionTTL,
 		strictIsolation:                   strictIsolation,
 		allowedCORSOrigins:                allowedCORSOrigins,
@@ -370,6 +395,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", server.handleHealth)
+	mux.HandleFunc("/authorize", server.handleAuthorize)
 	mux.HandleFunc("/submit", server.handleSubmit)
 	mux.HandleFunc("/api/resolve", server.handleAPIResolve)
 	mux.HandleFunc("/api/session", server.handleAPISession)
@@ -420,6 +446,59 @@ func (s *walletHarnessServer) handleHealth(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, response)
 }
 
+// handleAuthorize is the suite-facing wallet authorization endpoint (OID4VP
+// authorization_endpoint). It accepts client_id, request_uri, and
+// request_uri_method, then redirects into the wallet SPA consent flow rather
+// than auto-presenting.
+func (s *walletHarnessServer) handleAuthorize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		return
+	}
+	clientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
+	requestURI := strings.TrimSpace(r.URL.Query().Get("request_uri"))
+	requestURIMethod := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("request_uri_method")))
+	if requestURI == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": "request_uri is required",
+		})
+		return
+	}
+	if requestURIMethod == "" {
+		requestURIMethod = "get"
+	}
+	if requestURIMethod != "get" && requestURIMethod != "post" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": fmt.Sprintf("request_uri_method %q is not supported", requestURIMethod),
+		})
+		return
+	}
+	if _, err := s.validateExternalURL(requestURI); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": fmt.Sprintf("request_uri is not allowed: %v", err),
+		})
+		return
+	}
+
+	openidValues := url.Values{}
+	openidValues.Set("request_uri", requestURI)
+	openidValues.Set("request_uri_method", requestURIMethod)
+	if clientID != "" {
+		openidValues.Set("client_id", clientID)
+	}
+	redirectValues := url.Values{}
+	redirectValues.Set("request_uri", requestURI)
+	redirectValues.Set("request_uri_method", requestURIMethod)
+	if clientID != "" {
+		redirectValues.Set("client_id", clientID)
+	}
+	redirectValues.Set("uri", "openid4vp://authorize?"+openidValues.Encode())
+	http.Redirect(w, r, "/?"+redirectValues.Encode(), http.StatusFound)
+}
+
 func (s *walletHarnessServer) handleWalletApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
@@ -458,7 +537,7 @@ func (s *walletHarnessServer) handleWalletApp(w http.ResponseWriter, r *http.Req
 		serveIndex()
 		return
 	}
-	if strings.HasPrefix(relativePath, "api/") || relativePath == "submit" || relativePath == "health" {
+	if strings.HasPrefix(relativePath, "api/") || relativePath == "submit" || relativePath == "health" || relativePath == "authorize" {
 		http.NotFound(w, r)
 		return
 	}
@@ -589,7 +668,7 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 		"trust":                 trust,
 		"_looking_glass_events": lgEvents,
 	}
-	if inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope); inferredFormat != "" {
+	if inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled()); inferredFormat != "" {
 		resolveResponse["inferred_credential_format"] = inferredFormat
 		resolveResponse["inferred_credential_configuration_id"] = inferredConfigID
 	}
@@ -800,7 +879,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
 	}
 	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
-		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
 		if inferredFormat != "" {
 			credOpts.CredentialFormat = inferredFormat
 			credOpts.CredentialConfigID = inferredConfigID
@@ -808,7 +887,11 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 	}
 	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		// This is a request/credential-selection failure, not a gateway failure.
+		// Returning 502 makes Cloudflare replace the useful JSON error with its
+		// generic error page, which the cross-origin Looking Glass client reports
+		// only as “Failed to fetch”.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -833,7 +916,8 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, req.DisclosureClaims)
+	disclosureClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
+	presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, disclosureClaims, exactDisclosureSelection)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
@@ -979,7 +1063,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
 	}
 	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
-		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
 		if inferredFormat != "" {
 			credOpts.CredentialFormat = inferredFormat
 			credOpts.CredentialConfigID = inferredConfigID
@@ -987,7 +1071,10 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 	}
 	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		// Credential-selection failures are client-actionable. Do not return a
+		// 502 here: Cloudflare replaces it with a generic error page, causing the
+		// Looking Glass caller to lose the diagnostic as “Failed to fetch”.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -1012,7 +1099,8 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, req.DisclosureClaims)
+	disclosureClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
+	presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, disclosureClaims, exactDisclosureSelection)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
@@ -1064,7 +1152,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		"response_mode":   requestContext.ResponseMode,
 	}))
 
-	writeJSON(w, upstreamStatus, map[string]interface{}{
+	presentResponse := map[string]interface{}{
 		"mode":                        "present",
 		"request_id":                  requestContext.RequestID,
 		"request_uri":                 envelope.RequestURI,
@@ -1083,7 +1171,15 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		"external_trust_approved":     req.ApproveExternalTrust,
 		"trust":                       trust,
 		"_looking_glass_events":       lgEvents,
-	})
+	}
+	if redirectURI := extractVerifierRedirectURI(upstreamBody); redirectURI != "" {
+		if safeRedirectURI, err := validateBrowserRedirectURI(redirectURI); err == nil {
+			presentResponse["redirect_uri"] = safeRedirectURI
+		} else {
+			log.Printf("ignoring unsafe verifier redirect_uri: %v", err)
+		}
+	}
+	writeJSON(w, upstreamStatus, presentResponse)
 }
 
 func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Request) {
@@ -1190,7 +1286,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		LookingGlassSessionID: req.LookingGlassSessionID,
 	}
 	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
-		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
 		if inferredFormat != "" {
 			credOpts.CredentialFormat = inferredFormat
 			credOpts.CredentialConfigID = inferredConfigID
@@ -1198,7 +1294,10 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	}
 	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		// Credential-selection failures are client-actionable. Do not return a
+		// 502 here: Cloudflare replaces it with a generic error page, causing the
+		// Looking Glass caller to lose the diagnostic as “Failed to fetch”.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -1226,7 +1325,8 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	vpToken := req.VPToken
 	disclosureClaims := req.DisclosureClaims
 	if vpToken == "" {
-		presentedCredential, selectedDisclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, req.DisclosureClaims)
+		selectedClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
+		presentedCredential, selectedDisclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, selectedClaims, exactDisclosureSelection)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
@@ -1267,7 +1367,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		"response_mode":   requestContext.ResponseMode,
 	}))
 
-	writeJSON(w, upstreamStatus, map[string]interface{}{
+	presentResponse := map[string]interface{}{
 		"mode":                        "one_click",
 		"request_id":                  requestContext.RequestID,
 		"response_mode":               requestContext.ResponseMode,
@@ -1286,7 +1386,15 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		"trust":                       trust,
 		"wallet_stepwise_hint":        "use mode=stepwise for keygen/issuance/presentation ceremony controls",
 		"_looking_glass_events":       lgEvents,
-	})
+	}
+	if redirectURI := extractVerifierRedirectURI(upstreamBody); redirectURI != "" {
+		if safeRedirectURI, err := validateBrowserRedirectURI(redirectURI); err == nil {
+			presentResponse["redirect_uri"] = safeRedirectURI
+		} else {
+			log.Printf("ignoring unsafe verifier redirect_uri: %v", err)
+		}
+	}
+	writeJSON(w, upstreamStatus, presentResponse)
 }
 
 func decodeJSONBody(r *http.Request, target interface{}) error {
@@ -1366,10 +1474,12 @@ func (s *walletHarnessServer) resolveWalletPresentationContext(
 	req apiWalletRequest,
 ) (*resolvedRequestEnvelope, *resolvedRequestContext, trustEvaluation, error) {
 	envelope, err := s.resolveRequestEnvelope(ctx, apiResolveRequest{
-		RequestURI: req.RequestURI,
-		OpenID4VP:  req.OpenID4VP,
-		RequestJWT: req.RequestJWT,
-		RequestID:  req.RequestID,
+		RequestURI:       req.RequestURI,
+		RequestURIMethod: req.RequestURIMethod,
+		ClientID:         req.ClientID,
+		OpenID4VP:        req.OpenID4VP,
+		RequestJWT:       req.RequestJWT,
+		RequestID:        req.RequestID,
 	})
 	if err != nil {
 		return nil, nil, trustEvaluation{}, err
@@ -1433,15 +1543,21 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 	openID4VPURI := strings.TrimSpace(req.OpenID4VP)
 	requestJWT := strings.TrimSpace(req.RequestJWT)
 	requestID := strings.TrimSpace(req.RequestID)
+	requestURIMethod := strings.ToLower(strings.TrimSpace(req.RequestURIMethod))
 	requestSource := ""
 
-	uriClientID := ""
+	uriClientID := strings.TrimSpace(req.ClientID)
 	if openID4VPURI != "" {
-		uriRequestURI, uriRequestJWT, parsedClientID, err := parseOpenID4VPURI(openID4VPURI)
+		uriRequestURI, uriRequestJWT, parsedClientID, parsedMethod, err := parseOpenID4VPURI(openID4VPURI)
 		if err != nil {
 			return nil, err
 		}
-		uriClientID = parsedClientID
+		if uriClientID == "" {
+			uriClientID = parsedClientID
+		}
+		if requestURIMethod == "" {
+			requestURIMethod = parsedMethod
+		}
 		if requestURI == "" && uriRequestURI != "" {
 			requestURI = uriRequestURI
 			requestSource = "openid4vp_uri"
@@ -1453,6 +1569,12 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 			}
 		}
 	}
+	if requestURIMethod == "" {
+		requestURIMethod = "get"
+	}
+	if requestURIMethod != "get" && requestURIMethod != "post" {
+		return nil, fmt.Errorf("request_uri_method %q is not supported", requestURIMethod)
+	}
 	if requestJWT == "" && requestURI == "" {
 		return nil, fmt.Errorf("openid4vp_uri or request_uri or request is required")
 	}
@@ -1462,7 +1584,7 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 			return nil, fmt.Errorf("request_uri is not allowed: %w", err)
 		}
 		requestURI = normalizedRequestURI
-		fetchedRequestJWT, fetchedRequestID, err := s.fetchRequestObject(ctx, requestURI)
+		fetchedRequestJWT, fetchedRequestID, err := s.fetchRequestObject(ctx, requestURI, requestURIMethod)
 		if err != nil {
 			return nil, err
 		}
@@ -1507,6 +1629,7 @@ func (s *walletHarnessServer) resolveRequestEnvelope(ctx context.Context, req ap
 	return &resolvedRequestEnvelope{
 		RequestJWT:       requestJWT,
 		RequestURI:       requestURI,
+		RequestURIMethod: requestURIMethod,
 		RequestID:        requestID,
 		URIClientID:      uriClientID,
 		DecodedHeader:    header,
@@ -1546,30 +1669,33 @@ func rejectUnsupportedTransactionData(payload map[string]interface{}) error {
 	return fmt.Errorf("%w: transaction data type %q is not supported", errInvalidTransactionData, transactionType)
 }
 
-func parseOpenID4VPURI(raw string) (requestURI string, requestJWT string, clientID string, err error) {
+func parseOpenID4VPURI(raw string) (requestURI string, requestJWT string, clientID string, requestURIMethod string, err error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", "", "", fmt.Errorf("openid4vp_uri is required")
+		return "", "", "", "", fmt.Errorf("openid4vp_uri is required")
 	}
 	parsedURI, parseErr := url.Parse(trimmed)
 	if parseErr != nil {
-		return "", "", "", fmt.Errorf("invalid openid4vp_uri: %w", parseErr)
+		return "", "", "", "", fmt.Errorf("invalid openid4vp_uri: %w", parseErr)
 	}
 	if !strings.EqualFold(parsedURI.Scheme, "openid4vp") {
-		return "", "", "", fmt.Errorf("unsupported URI scheme %q expected openid4vp", parsedURI.Scheme)
+		return "", "", "", "", fmt.Errorf("unsupported URI scheme %q expected openid4vp", parsedURI.Scheme)
 	}
 	query := parsedURI.Query()
 	requestURI = strings.TrimSpace(query.Get("request_uri"))
 	requestJWT = strings.TrimSpace(query.Get("request"))
 	clientID = strings.TrimSpace(query.Get("client_id"))
-	requestURIMethod := strings.ToLower(strings.TrimSpace(query.Get("request_uri_method")))
-	if requestURIMethod != "" && requestURIMethod != "get" {
-		return "", "", "", fmt.Errorf("request_uri_method %q is not supported", requestURIMethod)
+	requestURIMethod = strings.ToLower(strings.TrimSpace(query.Get("request_uri_method")))
+	if requestURIMethod == "" {
+		requestURIMethod = "get"
+	}
+	if requestURIMethod != "get" && requestURIMethod != "post" {
+		return "", "", "", "", fmt.Errorf("request_uri_method %q is not supported", requestURIMethod)
 	}
 	if requestURI == "" && requestJWT == "" {
-		return "", "", "", fmt.Errorf("openid4vp_uri must include request_uri or request parameter")
+		return "", "", "", "", fmt.Errorf("openid4vp_uri must include request_uri or request parameter")
 	}
-	return requestURI, requestJWT, clientID, nil
+	return requestURI, requestJWT, clientID, requestURIMethod, nil
 }
 
 func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
@@ -1619,15 +1745,39 @@ func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI string) (string, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURI, nil)
-	if err != nil {
-		return "", "", fmt.Errorf("request_uri GET build failed: %w", err)
+func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI string, method string) (string, string, error) {
+	normalizedMethod := strings.ToLower(strings.TrimSpace(method))
+	if normalizedMethod == "" {
+		normalizedMethod = "get"
+	}
+
+	var (
+		req *http.Request
+		err error
+	)
+	switch normalizedMethod {
+	case "get":
+		req, err = http.NewRequestWithContext(ctx, http.MethodGet, requestURI, nil)
+		if err != nil {
+			return "", "", fmt.Errorf("request_uri GET build failed: %w", err)
+		}
+	case "post":
+		// OID4VP 1.0 §5.10.2 / RFC 9101: POST request_uri retrieval includes a
+		// wallet_nonce that the verifier binds into the returned request object.
+		form := url.Values{}
+		form.Set("wallet_nonce", randomValue(32))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, requestURI, strings.NewReader(form.Encode()))
+		if err != nil {
+			return "", "", fmt.Errorf("request_uri POST build failed: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	default:
+		return "", "", fmt.Errorf("request_uri_method %q is not supported", method)
 	}
 	req.Header.Set("Accept", "application/oauth-authz-req+jwt")
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", "", fmt.Errorf("request_uri GET failed: %w", err)
+		return "", "", fmt.Errorf("request_uri %s failed: %w", strings.ToUpper(normalizedMethod), err)
 	}
 	defer resp.Body.Close()
 	responseBytes, readErr := io.ReadAll(resp.Body)
@@ -1635,15 +1785,15 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 		return "", "", fmt.Errorf("read request_uri response: %w", readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", fmt.Errorf("request_uri GET returned %d: %s", resp.StatusCode, oneLine(string(responseBytes)))
+		return "", "", fmt.Errorf("request_uri %s returned %d: %s", strings.ToUpper(normalizedMethod), resp.StatusCode, oneLine(string(responseBytes)))
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
 	if contentType != "application/oauth-authz-req+jwt" {
-		return "", "", fmt.Errorf("request_uri GET returned unsupported Content-Type %q", resp.Header.Get("Content-Type"))
+		return "", "", fmt.Errorf("request_uri %s returned unsupported Content-Type %q", strings.ToUpper(normalizedMethod), resp.Header.Get("Content-Type"))
 	}
 	requestJWT := strings.TrimSpace(string(responseBytes))
 	if strings.Count(requestJWT, ".") != 2 {
-		return "", "", fmt.Errorf("request_uri GET body is not a compact signed JWT")
+		return "", "", fmt.Errorf("request_uri %s body is not a compact signed JWT", strings.ToUpper(normalizedMethod))
 	}
 	return requestJWT, "", nil
 }
@@ -1679,13 +1829,38 @@ func inferClientIDScheme(clientID string, _ map[string]interface{}) string {
 		return "decentralized_identifier"
 	case strings.HasPrefix(normalizedClientID, "redirect_uri:"):
 		return "redirect_uri"
+	case strings.HasPrefix(normalizedClientID, "https://"), strings.HasPrefix(normalizedClientID, "http://"):
+		// URL-shaped pre-registered identifiers are legitimate without a Client
+		// Identifier Prefix (OID4VP 1.0 §5.9.2).
+		return "pre_registered"
 	default:
-		// OID4VP 1.0 Final §5.9.2 allows unknown prefixes (including the
-		// "https" portion of a URL-shaped identifier) to fall back to a
-		// pre-registered client. Trust is derived exclusively from client_id;
-		// the removed client_id_scheme request claim cannot override it.
+		if _, ok := clientIDSchemePrefix(normalizedClientID); ok {
+			// Syntactically prefixed but unrecognized schemes must be rejected
+			// rather than silently falling through to pre_registered.
+			return "unknown"
+		}
 		return "pre_registered"
 	}
+}
+
+// clientIDSchemePrefix reports whether clientID uses a Client Identifier Prefix
+// shape (name:value) rather than a bare pre-registered identifier or URL.
+func clientIDSchemePrefix(clientID string) (string, bool) {
+	idx := strings.Index(clientID, ":")
+	if idx <= 0 {
+		return "", false
+	}
+	prefix := clientID[:idx]
+	if strings.EqualFold(prefix, "http") || strings.EqualFold(prefix, "https") || strings.EqualFold(prefix, "did") {
+		return "", false
+	}
+	for _, r := range prefix {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-'
+		if !isAlphaNum {
+			return "", false
+		}
+	}
+	return prefix, true
 }
 
 func extractDidWebIdentifier(clientID string) string {
@@ -1790,6 +1965,8 @@ func (s *walletHarnessServer) verifyRequestObjectSignature(
 	switch trust.ClientIDScheme {
 	case "", "pre_registered", "redirect_uri":
 		return "", nil
+	case "unknown":
+		return "", fmt.Errorf("unsupported client_id scheme prefix")
 	case "x509_san_dns":
 		return s.verifyX509SANDNSRequestObjectSignature(envelope, requestContext)
 	case "x509_hash":
@@ -2541,7 +2718,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			LookingGlassSessionID: req.LookingGlassSessionID,
 		}
 		if buildCredOpts.CredentialFormat == "" && buildCredOpts.CredentialConfigID == "" {
-			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
 			if inferredFormat != "" {
 				buildCredOpts.CredentialFormat = inferredFormat
 				buildCredOpts.CredentialConfigID = inferredConfigID
@@ -2572,7 +2749,8 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			})
 			return
 		}
-		presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, req.DisclosureClaims)
+		disclosureClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
+		presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, disclosureClaims, exactDisclosureSelection)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
@@ -2651,7 +2829,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			LookingGlassSessionID: req.LookingGlassSessionID,
 		}
 		if submitCredOpts.CredentialFormat == "" && submitCredOpts.CredentialConfigID == "" {
-			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope)
+			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
 			if inferredFormat != "" {
 				submitCredOpts.CredentialFormat = inferredFormat
 				submitCredOpts.CredentialConfigID = inferredConfigID
@@ -2685,7 +2863,8 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		vpToken := strings.TrimSpace(req.VPToken)
 		disclosureClaims := req.DisclosureClaims
 		if vpToken == "" {
-			presentedCredential, selectedClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, req.DisclosureClaims)
+			selectedClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
+			presentedCredential, selectedClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, selectedClaims, exactDisclosureSelection)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{
 					"error":             "invalid_request",
@@ -2717,7 +2896,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"response_uri":    requestContext.ResponseURI,
 			"response_mode":   requestContext.ResponseMode,
 		}))
-		writeJSON(w, upstreamStatus, map[string]interface{}{
+		presentResponse := map[string]interface{}{
 			"mode":                        "stepwise",
 			"step":                        "submit_response",
 			"request_id":                  requestContext.RequestID,
@@ -2736,7 +2915,15 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"external_trust_approved":     req.ApproveExternalTrust,
 			"trust":                       trust,
 			"_looking_glass_events":       submitLGEvents,
-		})
+		}
+		if redirectURI := extractVerifierRedirectURI(upstreamBody); redirectURI != "" {
+			if safeRedirectURI, err := validateBrowserRedirectURI(redirectURI); err == nil {
+				presentResponse["redirect_uri"] = safeRedirectURI
+			} else {
+				log.Printf("ignoring unsafe verifier redirect_uri: %v", err)
+			}
+		}
+		writeJSON(w, upstreamStatus, presentResponse)
 		return
 
 	default:
@@ -2885,7 +3072,7 @@ func activateWalletCredential(wallet *walletMaterial, selected walletCredentialM
 	wallet.CredentialConfigurationID = strings.TrimSpace(selected.CredentialConfigurationID)
 }
 
-func filterSDJWTDisclosures(rawCredential string, requestedClaims []string) (string, []string, error) {
+func filterSDJWTDisclosures(rawCredential string, requestedClaims []string, exactSelection bool) (string, []string, error) {
 	normalized := strings.TrimSpace(rawCredential)
 	if normalized == "" {
 		return "", nil, fmt.Errorf("wallet credential is required")
@@ -2904,6 +3091,12 @@ func filterSDJWTDisclosures(rawCredential string, requestedClaims []string) (str
 	requestedSet := make(map[string]struct{}, len(requestedClaims))
 	for _, claimName := range normalizeDisclosureClaims(requestedClaims) {
 		requestedSet[claimName] = struct{}{}
+	}
+	// exactSelection (DCQL-driven or explicit UI selection): an empty claim set
+	// means disclose no optional claims. Legacy callers without DCQL keep the
+	// disclose-all-when-empty behavior.
+	if exactSelection && len(requestedSet) == 0 {
+		return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, nil, envelope.KeyBindingJWT), nil, nil
 	}
 
 	for _, disclosure := range envelope.Disclosures {
@@ -2927,9 +3120,141 @@ func filterSDJWTDisclosures(rawCredential string, requestedClaims []string) (str
 	return vc.BuildSDJWTSerialization(envelope.IssuerSignedJWT, selectedDisclosures, envelope.KeyBindingJWT), selectedClaims, nil
 }
 
+// resolvePresentationDisclosureClaims chooses SD-JWT disclosure names for a
+// presentation. Explicit request claims win; otherwise DCQL required claim
+// paths drive an exact selection (empty claims => disclose none).
+func resolvePresentationDisclosureClaims(requested []string, dcqlQuery string) (claims []string, exactSelection bool) {
+	normalized := normalizeDisclosureClaims(requested)
+	if len(normalized) > 0 {
+		return normalized, true
+	}
+	if strings.TrimSpace(dcqlQuery) == "" {
+		return nil, false
+	}
+	return disclosureClaimsFromDCQL(dcqlQuery), true
+}
+
+func disclosureClaimsFromDCQL(dcqlQuery string) []string {
+	requirements := vc.ParseDCQLCredentialRequirements(dcqlQuery)
+	claims := make([]string, 0)
+	for _, requirement := range requirements {
+		format := strings.TrimSpace(requirement.Format)
+		if format != "" && !strings.EqualFold(format, "dc+sd-jwt") && !strings.EqualFold(format, "vc+sd-jwt") {
+			continue
+		}
+		for _, path := range requirement.RequiredClaimPaths {
+			trimmed := strings.TrimSpace(path)
+			if trimmed == "" {
+				continue
+			}
+			claims = append(claims, trimmed)
+			if parts := strings.Split(trimmed, "."); len(parts) > 1 {
+				claims = append(claims, parts[len(parts)-1])
+			}
+		}
+	}
+	return normalizeDisclosureClaims(claims)
+}
+
+// wrapDCQLKeyedVPToken builds the OID4VP 1.0 DCQL vp_token object keyed by
+// credential query id. Only matchedQueryIDs receive the presentation — never
+// every same-format Credential Query (OID4VP §8.1 / optional credential_sets:
+// an unmatchable optional entry must not appear as a second vp_token key).
+func wrapDCQLKeyedVPToken(
+	dcqlQuery string,
+	presentation string,
+	credentialFormat string,
+	matchedQueryIDs map[string]bool,
+) (string, error) {
+	presentation = strings.TrimSpace(presentation)
+	if presentation == "" {
+		return "", fmt.Errorf("presentation is required")
+	}
+	requirements := vc.ParseDCQLCredentialRequirements(dcqlQuery)
+	if len(requirements) == 0 {
+		return presentation, nil
+	}
+	vpToken := make(map[string][]string)
+	for _, requirement := range requirements {
+		queryID := strings.TrimSpace(requirement.ID)
+		if queryID == "" {
+			return "", fmt.Errorf("DCQL credential query is missing id")
+		}
+		if len(matchedQueryIDs) > 0 {
+			if !matchedQueryIDs[queryID] {
+				continue
+			}
+		} else {
+			// No match set supplied: keep a single format-compatible key only.
+			reqFormat := strings.TrimSpace(requirement.Format)
+			if reqFormat != "" && credentialFormat != "" && !strings.EqualFold(reqFormat, credentialFormat) {
+				continue
+			}
+			if len(vpToken) > 0 {
+				continue
+			}
+		}
+		vpToken[queryID] = []string{presentation}
+	}
+	if len(vpToken) == 0 {
+		return "", fmt.Errorf("presentation does not satisfy any DCQL credential query")
+	}
+	encoded, err := json.Marshal(vpToken)
+	if err != nil {
+		return "", fmt.Errorf("encode DCQL vp_token: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func extractVerifierRedirectURI(upstreamBody interface{}) string {
+	payload, ok := upstreamBody.(map[string]interface{})
+	if !ok || payload == nil {
+		return ""
+	}
+	return strings.TrimSpace(asString(payload["redirect_uri"]))
+}
+
+func validateBrowserRedirectURI(raw string) (string, error) {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return "", fmt.Errorf("redirect_uri is empty")
+	}
+	// Suite alternate-happy-flow returns redirect_uri with a fragment-bound
+	// code_verifier. Some intermediaries percent-encode '#' as %23 inside the
+	// path; restore a real fragment so browsers/HTTP clients strip it correctly.
+	if !strings.Contains(normalized, "#") {
+		if idx := strings.Index(strings.ToLower(normalized), "%23"); idx >= 0 {
+			normalized = normalized[:idx] + "#" + normalized[idx+3:]
+		}
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return "", fmt.Errorf("invalid redirect_uri: %w", err)
+	}
+	if parsed.Scheme != "https" {
+		return "", fmt.Errorf("redirect_uri scheme %q is not allowed", parsed.Scheme)
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("redirect_uri must not include userinfo")
+	}
+	hostName := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if hostName == "" {
+		return "", fmt.Errorf("redirect_uri host is required")
+	}
+	if hostName == "localhost" || strings.HasSuffix(hostName, ".local") || strings.HasSuffix(hostName, ".internal") {
+		return "", fmt.Errorf("redirect_uri host %q is not allowed", hostName)
+	}
+	if parsedIP := net.ParseIP(hostName); parsedIP != nil {
+		if parsedIP.IsLoopback() || parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsUnspecified() {
+			return "", fmt.Errorf("redirect_uri host %q is not allowed", hostName)
+		}
+	}
+	return parsed.String(), nil
+}
+
 // inferCredentialFormatFromVPRequest extracts the expected credential format and configuration ID from a resolved VP request envelope.
 // It examines the DCQL query for an explicit format constraint, and falls back to vp_formats_supported in client_metadata to pick the most specific match.
-func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope) (format string, configID string) {
+func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope, haipEnabled bool) (format string, configID string) {
 	if envelope == nil || envelope.DecodedPayload == nil {
 		return "", ""
 	}
@@ -2940,7 +3265,7 @@ func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope) (form
 			requirements := vc.ParseDCQLCredentialRequirements(string(queryBytes))
 			for _, req := range requirements {
 				if req.Format != "" {
-					return req.Format, formatToDefaultConfigurationID(req.Format)
+					return req.Format, formatToDefaultConfigurationID(req.Format, haipEnabled)
 				}
 			}
 		}
@@ -2950,7 +3275,7 @@ func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope) (form
 		if vpFormats, ok := clientMetadata["vp_formats_supported"].(map[string]interface{}); ok {
 			for _, candidate := range []string{"dc+sd-jwt", "jwt_vc_json", "jwt_vc_json-ld", "ldp_vc"} {
 				if _, supported := vpFormats[candidate]; supported {
-					return candidate, formatToDefaultConfigurationID(candidate)
+					return candidate, formatToDefaultConfigurationID(candidate, haipEnabled)
 				}
 			}
 		}
@@ -2958,12 +3283,15 @@ func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope) (form
 	return "", ""
 }
 
-func formatToDefaultConfigurationID(format string) string {
+func formatToDefaultConfigurationID(format string, haipEnabled bool) string {
 	switch format {
 	case credentialFormatMsoMdoc:
+		if haipEnabled {
+			return "MobileDrivingLicenceMsoMdocHAIP"
+		}
 		return "MobileDrivingLicenceMsoMdoc"
 	case "dc+sd-jwt":
-		return "UniversityDegreeCredential"
+		return preferHAIPBootstrapConfigurationID("UniversityDegreeCredential", haipEnabled)
 	case "jwt_vc_json":
 		return "UniversityDegreeCredentialJWT"
 	case "jwt_vc_json-ld":
@@ -3260,25 +3588,23 @@ func (s *walletHarnessServer) submitToVerifier(
 	}
 
 	form := url.Values{}
-	if requestContext.State != "" {
-		form.Set("state", requestContext.State)
-	}
 	if requestContext.ResponseMode == "direct_post.jwt" {
-		if !requestContext.Trusted {
-			return 0, nil, fmt.Errorf("direct_post.jwt is only supported for trusted verifier callbacks")
-		}
 		if requestContext.ResponseEncryptionJWK != nil {
 			// OID4VP 1.0 Section 8.3 / HAIP 1.0 Section 5: encrypt the
 			// Authorization Response (vp_token + state) to the verifier's
-			// ephemeral ECDH-ES key. mso_mdoc additionally binds this key's
-			// thumbprint into the SessionTranscript handover.
+			// ephemeral ECDH-ES key. Used for both mso_mdoc and dc+sd-jwt when
+			// client_metadata advertises the key (including external suite
+			// verifiers after x509_hash trust + user approval).
+			//
+			// OID4VP §8.3.1: the HTTP form must contain only `response` —
+			// state travels inside the JWE, never as a sibling form field.
 			enc := selectMdocResponseEnc(requestContext.ResponseEncValues)
 			encryptedResponse, err := encryptMdocResponseForVerifier(*requestContext.ResponseEncryptionJWK, normalizedVPToken, requestContext.State, enc)
 			if err != nil {
 				return 0, nil, fmt.Errorf("encrypt direct_post.jwt response with ECDH-ES: %w", err)
 			}
 			form.Set("response", encryptedResponse)
-		} else {
+		} else if requestContext.Trusted {
 			responseJWT, err := s.createDirectPostResponseJWT(wallet, requestContext, normalizedVPToken)
 			if err != nil {
 				return 0, nil, fmt.Errorf("create direct_post.jwt response: %w", err)
@@ -3288,8 +3614,13 @@ func (s *walletHarnessServer) submitToVerifier(
 				return 0, nil, fmt.Errorf("encrypt direct_post.jwt response: %w", err)
 			}
 			form.Set("response", encryptedResponse)
+		} else {
+			return 0, nil, fmt.Errorf("direct_post.jwt requires a client_metadata response encryption key for external verifiers")
 		}
 	} else {
+		if requestContext.State != "" {
+			form.Set("state", requestContext.State)
+		}
 		form.Set("vp_token", normalizedVPToken)
 		ps, err := buildPresentationSubmission(requestContext.PresentationDefinition, normalizedVPToken)
 		if err != nil {
@@ -3352,13 +3683,16 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		return nil, fmt.Errorf("unsupported response_mode %q", responseMode)
 	}
 	responseURI := strings.TrimSpace(asString(decodedRequest.Payload["response_uri"]))
-	if responseURI == "" {
-		responseURI = strings.TrimSpace(asString(decodedRequest.Payload["redirect_uri"]))
+	redirectURI := strings.TrimSpace(asString(decodedRequest.Payload["redirect_uri"]))
+	// OID4VP 1.0 §5: redirect_uri MUST NOT be present when response_uri is used
+	// for direct_post / direct_post.jwt.
+	if responseURI != "" && redirectURI != "" {
+		return nil, fmt.Errorf("request object must not include redirect_uri when response_uri is present")
 	}
-	clientID := strings.TrimSpace(asString(decodedRequest.Payload["client_id"]))
 	if responseURI == "" {
 		return nil, fmt.Errorf("request object is missing response_uri")
 	}
+	clientID := strings.TrimSpace(asString(decodedRequest.Payload["client_id"]))
 	parsedResponseURI, err := url.ParseRequestURI(responseURI)
 	if err != nil {
 		return nil, fmt.Errorf("request object response_uri is invalid: %w", err)
@@ -3387,6 +3721,9 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 	nonce := strings.TrimSpace(asString(decodedRequest.Payload["nonce"]))
 	if clientID == "" {
 		return nil, fmt.Errorf("request object is missing client_id")
+	}
+	if inferClientIDScheme(clientID, decodedRequest.Payload) == "unknown" {
+		return nil, fmt.Errorf("unsupported client_id scheme prefix in %q", clientID)
 	}
 	// OID4VP Section 5.10: URI client_id and request object client_id MUST be identical
 	if len(uriClientID) > 0 && uriClientID[0] != "" {
@@ -3564,7 +3901,16 @@ func walletSignToken(wallet *walletMaterial, claims jwt.MapClaims, headerOverrid
 		return "", fmt.Errorf("unsupported signing algorithm %q", wallet.SigningAlgorithm)
 	}
 	token := jwt.NewWithClaims(signingMethod, claims)
-	token.Header["kid"] = kid
+	// OID4VCI proof JWTs identify their verification key with an embedded JWK.
+	// OID4VCI 1.0 permits exactly one of kid, jwk, or x5c in that header, so do
+	// not add the default wallet kid when the caller selected jwk.
+	//
+	// SD-JWT key-binding JWTs (typ=kb+jwt) likewise omit kid: SD-JWT §4.3
+	// only allows alg+typ in the binding JWT header.
+	typOverride := strings.TrimSpace(asString(headerOverrides["typ"]))
+	if _, embedsJWK := headerOverrides["jwk"]; !embedsJWK && !strings.EqualFold(typOverride, "kb+jwt") {
+		token.Header["kid"] = kid
+	}
 	for key, value := range headerOverrides {
 		token.Header[key] = value
 	}
@@ -3703,7 +4049,26 @@ func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestConte
 	if err != nil {
 		return "", "", err
 	}
-	return vpResult.VPToken, firstNonEmpty(vpResult.CredentialFormat, credentialFormat), nil
+	credentialFormat = firstNonEmpty(vpResult.CredentialFormat, credentialFormat)
+	vpToken := vpResult.VPToken
+	if strings.TrimSpace(requestContext.DCQLQuery) != "" {
+		matchedQueryIDs, _ := matchedDCQLRequirementIDsForCredential(
+			activeCredential.CredentialID,
+			activeCredential,
+			vc.ParseDCQLCredentialRequirements(requestContext.DCQLQuery),
+		)
+		wrapped, wrapErr := wrapDCQLKeyedVPToken(
+			requestContext.DCQLQuery,
+			vpToken,
+			credentialFormat,
+			matchedQueryIDs,
+		)
+		if wrapErr != nil {
+			return "", "", wrapErr
+		}
+		vpToken = wrapped
+	}
+	return vpToken, credentialFormat, nil
 }
 
 func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wallet *walletMaterial, options credentialSelectionOptions) (*issuedWalletCredential, error) {
@@ -3720,9 +4085,19 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	if options.CredentialConfigID == "" && options.CredentialFormat == "" {
 		options.CredentialFormat = s.defaultCredentialFormat()
 	}
-	credentialConfigID, err := s.resolveCredentialConfigurationForIssue(ctx, options.CredentialConfigID, options.CredentialFormat, strings.TrimSpace(options.LookingGlassSessionID))
+	credentialConfigID, proofSigningAlgorithm, err := s.resolveCredentialConfigurationForIssue(
+		ctx,
+		preferHAIPBootstrapConfigurationID(options.CredentialConfigID, s.haipIssuanceEnabled()),
+		options.CredentialFormat,
+		strings.TrimSpace(options.LookingGlassSessionID),
+	)
 	if err != nil {
 		return nil, err
+	}
+	if proofSigningAlgorithm != "" && !strings.EqualFold(options.CredentialFormat, credentialFormatMsoMdoc) {
+		if err := selectWalletSigningAlgorithm(wallet, proofSigningAlgorithm); err != nil {
+			return nil, fmt.Errorf("select credential proof signing algorithm: %w", err)
+		}
 	}
 
 	offerPayload, err := func() (map[string]interface{}, error) {
@@ -3781,38 +4156,61 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		}
 	}
 	if credentialConfigID == "" {
-		credentialConfigID = "UniversityDegreeCredential"
+		credentialConfigID = preferHAIPBootstrapConfigurationID("UniversityDegreeCredential", s.haipIssuanceEnabled())
 	}
 
-	tokenPayload, err := func() (map[string]interface{}, error) {
-		tokenURL := s.issuerBaseURL + "/oid4vci/token"
-		form := url.Values{}
-		form.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
-		form.Set("pre-authorized_code", preAuthorizedCode)
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	haipIssuance := isHAIPCredentialConfigurationID(credentialConfigID)
+	var haipSession *haipIssuanceSession
+	if haipIssuance {
+		if !s.haipIssuanceEnabled() {
+			return nil, fmt.Errorf("credential configuration %q requires haip attestation material", credentialConfigID)
+		}
+		haipSession, err = s.newHAIPIssuanceSession()
 		if err != nil {
-			return nil, fmt.Errorf("build token request: %w", err)
+			return nil, err
 		}
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		if strings.TrimSpace(options.LookingGlassSessionID) != "" {
-			req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
-		}
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("token request failed: %w", err)
-		}
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("token request returned %d: %s", resp.StatusCode, oneLine(string(body)))
-		}
-		var payload map[string]interface{}
-		if err := json.Unmarshal(body, &payload); err != nil {
-			return nil, fmt.Errorf("decode token response: %w", err)
-		}
-		return payload, nil
-	}()
+	}
+
+	tokenURL := s.issuerBaseURL + "/oid4vci/token"
+	tokenForm := url.Values{}
+	tokenForm.Set("grant_type", "urn:ietf:params:oauth:grant-type:pre-authorized_code")
+	tokenForm.Set("pre-authorized_code", preAuthorizedCode)
+
+	var tokenPayload map[string]interface{}
+	if haipIssuance {
+		tokenPayload, err = s.exchangeHAIPPreAuthorizedToken(ctx, haipTokenExchangeInput{
+			TokenEndpoint:         tokenURL,
+			Form:                  tokenForm,
+			LookingGlassSessionID: options.LookingGlassSessionID,
+			Session:               haipSession,
+		})
+	} else {
+		tokenPayload, err = func() (map[string]interface{}, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(tokenForm.Encode()))
+			if err != nil {
+				return nil, fmt.Errorf("build token request: %w", err)
+			}
+			req.Header.Set("Accept", "application/json")
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if strings.TrimSpace(options.LookingGlassSessionID) != "" {
+				req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
+			}
+			resp, err := s.httpClient.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("token request failed: %w", err)
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK {
+				return nil, fmt.Errorf("token request returned %d: %s", resp.StatusCode, oneLine(string(body)))
+			}
+			var payload map[string]interface{}
+			if err := json.Unmarshal(body, &payload); err != nil {
+				return nil, fmt.Errorf("decode token response: %w", err)
+			}
+			return payload, nil
+		}()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -3832,55 +4230,89 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	}
 
 	var proofJWT string
-	if strings.EqualFold(strings.TrimSpace(options.CredentialFormat), credentialFormatMsoMdoc) {
+	issuerAudience := s.oid4vciIssuerAudience()
+	if haipIssuance {
+		proofJWT, err = s.createHAIPCredentialProofJWT(
+			wallet,
+			offerWalletSubject,
+			cNonce,
+			issuerAudience,
+			credentialConfigID,
+			strings.TrimSpace(options.CredentialFormat),
+		)
+	} else if strings.EqualFold(strings.TrimSpace(options.CredentialFormat), credentialFormatMsoMdoc) {
 		// mso_mdoc binds the persistent device key (ISO/IEC 18013-5 clause
 		// 9.1.2): the proof carries and is signed by the device key, so the
 		// issuer binds that exact key into the MSO deviceKeyInfo.deviceKey.
-		proofJWT, err = s.createMdocDeviceProofJWT(offerWalletSubject, cNonce, s.issuerBaseURL+"/oid4vci")
+		proofJWT, err = s.createMdocDeviceProofJWT(offerWalletSubject, cNonce, issuerAudience)
 	} else {
-		proofJWT, err = s.createCredentialProofJWT(wallet, offerWalletSubject, cNonce, s.issuerBaseURL+"/oid4vci")
+		proofJWT, err = s.createCredentialProofJWT(wallet, offerWalletSubject, cNonce, issuerAudience)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	credentialURL := s.issuerBaseURL + "/oid4vci/credential"
-	credentialRequestBody := map[string]interface{}{
-		"credential_configuration_id": credentialConfigID,
-		"proofs": map[string]interface{}{
-			"jwt": []string{proofJWT},
-		},
-	}
-	rawCredentialBody, err := json.Marshal(credentialRequestBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal credential request: %w", err)
-	}
-	credentialReq, err := http.NewRequestWithContext(ctx, http.MethodPost, credentialURL, strings.NewReader(string(rawCredentialBody)))
-	if err != nil {
-		return nil, fmt.Errorf("build credential request: %w", err)
-	}
-	credentialReq.Header.Set("Accept", "application/json")
-	credentialReq.Header.Set("Content-Type", "application/json")
-	credentialReq.Header.Set("Authorization", "Bearer "+accessToken)
-	if strings.TrimSpace(options.LookingGlassSessionID) != "" {
-		credentialReq.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
-	}
-	credentialResp, err := s.httpClient.Do(credentialReq)
-	if err != nil {
-		return nil, fmt.Errorf("credential request failed: %w", err)
-	}
-	defer credentialResp.Body.Close()
-	credentialBody, _ := io.ReadAll(credentialResp.Body)
-	if credentialResp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("credential request returned %d: %s", credentialResp.StatusCode, oneLine(string(credentialBody)))
-	}
+	tokenType := firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer")
 	var credentialPayload map[string]interface{}
-	if err := json.Unmarshal(credentialBody, &credentialPayload); err != nil {
-		return nil, fmt.Errorf("decode credential response: %w", err)
+	if haipIssuance {
+		credentialPayload, err = s.requestHAIPCredential(
+			ctx,
+			credentialURL,
+			credentialConfigID,
+			accessToken,
+			tokenType,
+			proofJWT,
+			haipSession,
+			options.LookingGlassSessionID,
+		)
+	} else {
+		credentialRequestBody := map[string]interface{}{
+			"credential_configuration_id": credentialConfigID,
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
+			},
+		}
+		rawCredentialBody, marshalErr := json.Marshal(credentialRequestBody)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("marshal credential request: %w", marshalErr)
+		}
+		credentialReq, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, credentialURL, strings.NewReader(string(rawCredentialBody)))
+		if buildErr != nil {
+			return nil, fmt.Errorf("build credential request: %w", buildErr)
+		}
+		credentialReq.Header.Set("Accept", "application/json")
+		credentialReq.Header.Set("Content-Type", "application/json")
+		credentialReq.Header.Set("Authorization", authorizationHeaderForAccessToken(tokenType, accessToken))
+		if strings.TrimSpace(options.LookingGlassSessionID) != "" {
+			credentialReq.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
+		}
+		credentialResp, doErr := s.httpClient.Do(credentialReq)
+		if doErr != nil {
+			return nil, fmt.Errorf("credential request failed: %w", doErr)
+		}
+		defer credentialResp.Body.Close()
+		credentialBody, _ := io.ReadAll(credentialResp.Body)
+		if credentialResp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("credential request returned %d: %s", credentialResp.StatusCode, oneLine(string(credentialBody)))
+		}
+		if decodeErr := json.Unmarshal(credentialBody, &credentialPayload); decodeErr != nil {
+			return nil, fmt.Errorf("decode credential response: %w", decodeErr)
+		}
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	if txID := strings.TrimSpace(asString(credentialPayload["transaction_id"])); txID != "" {
-		deferredPayload, err := s.pollDeferredCredential(ctx, accessToken, txID, options.LookingGlassSessionID)
+		deferredPayload, err := s.pollDeferredCredential(
+			ctx,
+			accessToken,
+			tokenType,
+			txID,
+			options.LookingGlassSessionID,
+			haipSession,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("deferred credential polling failed: %w", err)
 		}
@@ -3912,7 +4344,8 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		NotificationID:     strings.TrimSpace(asString(credentialPayload["notification_id"])),
 		NotificationURL:    s.issuerBaseURL + "/oid4vci/notification",
 		AccessToken:        accessToken,
-		TokenType:          firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer"),
+		TokenType:          tokenType,
+		HAIPDPoPSession:    haipSession,
 	}, nil
 }
 
@@ -3922,8 +4355,10 @@ const deferredDefaultBackoff = 5 * time.Second
 func (s *walletHarnessServer) pollDeferredCredential(
 	ctx context.Context,
 	accessToken string,
+	tokenType string,
 	transactionID string,
 	lookingGlassSessionID string,
+	haipSession *haipIssuanceSession,
 ) (map[string]interface{}, error) {
 	deferredURL := s.issuerBaseURL + "/oid4vci/deferred_credential"
 
@@ -3935,7 +4370,9 @@ func (s *walletHarnessServer) pollDeferredCredential(
 			return nil, fmt.Errorf("build deferred request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+accessToken)
+		if err := attachHAIPDPoPHeaders(req, tokenType, accessToken, haipSession, deferredURL); err != nil {
+			return nil, fmt.Errorf("attach deferred credential authorization: %w", err)
+		}
 		if strings.TrimSpace(lookingGlassSessionID) != "" {
 			req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
 		}
@@ -3979,12 +4416,9 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 	requestedCredentialConfigID string,
 	requestedCredentialFormat string,
 	lookingGlassSessionID string,
-) (string, error) {
+) (string, string, error) {
 	normalizedCredentialConfigID := strings.TrimSpace(requestedCredentialConfigID)
 	normalizedCredentialFormat := strings.TrimSpace(requestedCredentialFormat)
-	if normalizedCredentialConfigID != "" {
-		return normalizedCredentialConfigID, nil
-	}
 	if normalizedCredentialFormat == "" {
 		// No explicit selection: resolve the configuration for the wallet's
 		// default credential format (mso_mdoc) from issuer
@@ -3995,7 +4429,7 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 	metadataURL := s.issuerBaseURL + "/oid4vci/.well-known/openid-credential-issuer"
 	metadataReq, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
 	if err != nil {
-		return "", fmt.Errorf("build issuer metadata request: %w", err)
+		return "", "", fmt.Errorf("build issuer metadata request: %w", err)
 	}
 	metadataReq.Header.Set("Accept", "application/json")
 	if strings.TrimSpace(lookingGlassSessionID) != "" {
@@ -4003,20 +4437,27 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 	}
 	metadataResp, err := s.httpClient.Do(metadataReq)
 	if err != nil {
-		return "", fmt.Errorf("issuer metadata request failed: %w", err)
+		return "", "", fmt.Errorf("issuer metadata request failed: %w", err)
 	}
 	defer metadataResp.Body.Close()
 	metadataBody, _ := io.ReadAll(metadataResp.Body)
 	if metadataResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("issuer metadata request returned %d: %s", metadataResp.StatusCode, oneLine(string(metadataBody)))
+		return "", "", fmt.Errorf("issuer metadata request returned %d: %s", metadataResp.StatusCode, oneLine(string(metadataBody)))
 	}
 	var metadataPayload map[string]interface{}
 	if err := json.Unmarshal(metadataBody, &metadataPayload); err != nil {
-		return "", fmt.Errorf("decode issuer metadata response: %w", err)
+		return "", "", fmt.Errorf("decode issuer metadata response: %w", err)
 	}
 	rawSupportedConfigurations, _ := metadataPayload["credential_configurations_supported"].(map[string]interface{})
 	if len(rawSupportedConfigurations) == 0 {
-		return "", fmt.Errorf("issuer metadata missing credential_configurations_supported")
+		return "", "", fmt.Errorf("issuer metadata missing credential_configurations_supported")
+	}
+	if normalizedCredentialConfigID != "" {
+		rawConfiguration, found := rawSupportedConfigurations[normalizedCredentialConfigID].(map[string]interface{})
+		if !found {
+			return "", "", fmt.Errorf("issuer metadata does not advertise credential configuration %q", normalizedCredentialConfigID)
+		}
+		return normalizedCredentialConfigID, preferredCredentialProofSigningAlgorithm(rawConfiguration), nil
 	}
 	configurationIDs := make([]string, 0, len(rawSupportedConfigurations))
 	for configurationID := range rawSupportedConfigurations {
@@ -4028,9 +4469,47 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 		if strings.TrimSpace(asString(rawConfiguration["format"])) != normalizedCredentialFormat {
 			continue
 		}
-		return configurationID, nil
+		return preferHAIPBootstrapConfigurationID(configurationID, s.haipIssuanceEnabled()), preferredCredentialProofSigningAlgorithm(rawConfiguration), nil
 	}
-	return "", fmt.Errorf("no credential configuration supports requested format %q", normalizedCredentialFormat)
+	return "", "", fmt.Errorf("no credential configuration supports requested format %q", normalizedCredentialFormat)
+}
+
+func preferredCredentialProofSigningAlgorithm(configuration map[string]interface{}) string {
+	proofTypes, _ := configuration["proof_types_supported"].(map[string]interface{})
+	jwtProof, _ := proofTypes["jwt"].(map[string]interface{})
+	rawAlgorithms, _ := jwtProof["proof_signing_alg_values_supported"].([]interface{})
+	for _, rawAlgorithm := range rawAlgorithms {
+		algorithm := strings.TrimSpace(asString(rawAlgorithm))
+		switch algorithm {
+		case "ES256", "RS256", "EdDSA":
+			return algorithm
+		}
+	}
+	return ""
+}
+
+func selectWalletSigningAlgorithm(wallet *walletMaterial, algorithm string) error {
+	if wallet == nil || wallet.KeySet == nil {
+		return fmt.Errorf("wallet key material is unavailable")
+	}
+	switch algorithm {
+	case "ES256":
+		if wallet.KeySet.ECPrivateKey() == nil {
+			return fmt.Errorf("wallet has no ES256 signing key")
+		}
+	case "RS256":
+		if wallet.KeySet.RSAPrivateKey() == nil {
+			return fmt.Errorf("wallet has no RS256 signing key")
+		}
+	case "EdDSA":
+		if wallet.KeySet.Ed25519PrivateKey() == nil {
+			return fmt.Errorf("wallet has no EdDSA signing key")
+		}
+	default:
+		return fmt.Errorf("unsupported credential proof signing algorithm %q", algorithm)
+	}
+	wallet.SigningAlgorithm = algorithm
+	return nil
 }
 
 func credentialPayloadToString(raw interface{}) (string, error) {
@@ -4107,10 +4586,15 @@ func (s *walletHarnessServer) notifyCredentialAccepted(
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(
-		"Authorization",
-		firstNonEmpty(strings.TrimSpace(credential.TokenType), "Bearer")+" "+credential.AccessToken,
-	)
+	if err := attachHAIPDPoPHeaders(
+		req,
+		credential.TokenType,
+		credential.AccessToken,
+		credential.HAIPDPoPSession,
+		notificationURL,
+	); err != nil {
+		return fmt.Errorf("attach credential notification authorization: %w", err)
+	}
 	if sessionID := strings.TrimSpace(lookingGlassSessionID); sessionID != "" {
 		req.Header.Set("X-Looking-Glass-Session", sessionID)
 	}
