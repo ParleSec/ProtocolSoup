@@ -62,6 +62,23 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 - `prompt=none` returns `login_required` when no end-user session is present;
   `prompt=login` and an exceeded `max_age` force re-authentication and set
   `auth_time`.
+- The interactive login page includes a **Cancel** control in its own form
+  (separate from Sign In). Submitting it redirects to the registered
+  `redirect_uri` with `error=access_denied` (and echoes `state` / `iss`) so
+  relying parties can treat user rejection as a normal OAuth/OIDC error
+  (OIDC Core §3.1.2.6, RFC 6749 §4.1.2.1). An existing OP session that
+  completes authorization returns a code instead of `access_denied`.
+- RFC 9126 PAR handles (`request_uri` values under
+  `urn:ietf:params:oauth:request_uri:`) stay redeemable across repeated
+  visits to `/oidc/authorize` until authorization **completes**. The OP
+  consumes the handle only when it issues the authorization response, not
+  when the login page is first shown (FAPI 2.0 Security Profile §5.3.2.2
+  Note 3). PAR-backed authorize requests never silently finish via an
+  existing session cookie. When a session is already present, the OP shows a
+  Continue confirmation (no password fields) so a browser preload or
+  password-manager auto-submit cannot complete the first visit; authorization
+  proceeds only after an explicit Continue (or a fresh password login when no
+  session exists).
 - Public clients must use PKCE: an authorization code request without a
   `code_challenge` is rejected (RFC 7636 Section 4.4.1).
 - Authorization codes are bound to the client they were issued to; a different
@@ -85,14 +102,17 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 - The UserInfo endpoint accepts the access token in the `Authorization: Bearer`
   header or, for a form-encoded `POST`, in an `access_token` body parameter
   (RFC 6750 Section 2). Presenting both in one request is an `invalid_request`.
-- The `request` and `request_uri` parameters are not supported. A request
-  carrying `request` is rejected with `request_not_supported` and one carrying
-  `request_uri` with `request_uri_not_supported` rather than being ignored
-  (OIDC Core 1.0 Section 6.2.1, 6.3.1). Discovery advertises
-  `request_parameter_supported` and `request_uri_parameter_supported` as `false`.
-  Because that rejection is an authorization error response, it is delivered to
-  the validated redirect URI using the requested `response_mode` and echoes
-  `state` (RFC 6749 Section 4.1.2.1). When a by-value request object carries
+- By-value `request` objects are not supported and are rejected with
+  `request_not_supported` (OIDC Core 1.0 Section 6.3.1). Discovery always
+  advertises `request_parameter_supported` as `false`. HTTPS `request_uri`
+  Request Objects (OIDC Core §6.2) are available only when Dynamic Client
+  Registration is enabled (`request_uri_parameter_supported`); otherwise they
+  are rejected with `request_uri_not_supported`. Separately, RFC 9126 PAR
+  `request_uri` values (`urn:ietf:params:oauth:request_uri:…`) are always
+  accepted and merged at `/oidc/authorize`. Authorization error responses for
+  unsupported or invalid request objects are delivered to the validated
+  redirect URI using the requested `response_mode` and echo `state`
+  (RFC 6749 Section 4.1.2.1). When a by-value request object carries
   `response_mode` and `state` inside the JWT, the OP reads only those two
   delivery values from the object (without verifying it or using any other
   claim) so the error reaches the client in the correct channel, for example as

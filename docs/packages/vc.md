@@ -68,8 +68,10 @@
 `/oid4vci/token` optionally accepts a `DPoP` proof header (RFC 9449); when
 present and valid, the issued access token is bound to the proof's key
 (`cnf.jkt`, `token_type: DPoP`) and enforced at `/oid4vci/credential`,
-`/oid4vci/nonce`, and `/oid4vci/deferred_credential`. This issuer never
-issues refresh tokens, so DPoP binding applies to the access token only.
+`/oid4vci/nonce`, and `/oid4vci/deferred_credential`. The
+`authorization_code` grant issues a refresh token (with DPoP / Client
+Instance Key binding when those were used at issuance); pre-authorized
+code grants do not.
 
 ### OID4VP (Verifier)
 

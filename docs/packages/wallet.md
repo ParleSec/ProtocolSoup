@@ -35,8 +35,8 @@
 ### Storage And Volumes
 
 - Session wallet key material and credential cache are in-memory per scope key, expiring based on `WALLET_SESSION_TTL`.
-- Automatic OID4VCI bootstrap omits `wallet_user_id`, allowing the issuer to select its designated default identity record. Anonymous pre-authorized proof JWTs omit `iss`; the wallet key is carried in the JOSE `jwk` header and signs the proof.
-- `WALLET_MDOC_IACA_ROOT_PEM` must contain the public IACA root for the configured issuer. Production CI reads the main app's persisted `/data/mdoc/iaca_root.pem`, validates it as a self-anchored certificate, and installs it as a Fly secret on `protocolsoup-wallet` before deploying the wallet.
+- Automatic OID4VCI bootstrap omits `wallet_user_id`, allowing the issuer to select its designated default identity record. It selects a wallet signing key from the configuration's advertised JWT proof algorithms; anonymous pre-authorized proof JWTs omit `iss`, carry that public key in the JOSE `jwk` header, and sign the proof with it.
+- `WALLET_MDOC_IACA_ROOT_PEM` must contain the public IACA root for the configured issuer. Hosts typically copy the issuer's persisted public `iaca_root.pem` into that wallet environment variable or secret before deploying the wallet.
 - When `WALLET_DEVICE_KEY_PATH` is set, the `mso_mdoc` (ISO/IEC 18013-5) holder device key is persisted to that file so the device binding of issued mdoc credentials survives restarts; mount a durable volume for it. `fly.wallet.toml` uses `/data/device-key.pem` on the `protocolsoup_wallet_data` volume. Otherwise the device key is ephemeral.
 - The wallet stores an issued `mso_mdoc` only after its document-signer chain,
   Annex B profile, signature, tagged MSO, digests, validity interval, document
@@ -57,9 +57,19 @@
 ## API Surface
 
 - `GET /health`
+- `GET /authorize`
+  - Public OID4VP authorization endpoint (`client_id`, `request_uri`, `request_uri_method`)
+  - Redirects into the wallet SPA consent flow (does not auto-present)
+  - SPA resolve auto-issues the request-inferred credential profile when the
+    current wallet store has no DCQL match (for example after switching from
+    an mdoc plan to an SD-JWT plan)
+  - Result UI treats `response_uri` 2xx replies (`redirect_uri` or empty
+    body) as accepted; Looking Glass `result.policy.allowed` remains the denial
+    signal for ProtocolSoup verifiers
 - `POST /submit`
   - Supports `mode=one_click` (default)
   - Supports `mode=stepwise` with steps: `bootstrap`, `issue_credential`, `build_presentation`, `submit_response`
+- `POST /api/resolve`, `POST /api/present`, `POST /api/preview`, `GET /api/session`, OID4VCI import/issue helpers
 
 ## Quick Start
 
@@ -95,6 +105,7 @@ services:
 ## Troubleshooting
 
 - **`session isolation key is required`:** supply `looking_glass_session_id` or `request_id` in `/submit`.
+- **`wallet_submission_failed`:** `/submit` returns `422 Unprocessable Content` with the issuer or credential-selection error; select a credential profile compatible with the request, or provide a matching `credential_jwt`.
 - **`response_uri ... does not match trusted verifier callback`:** request object callback does not match `WALLET_TARGET_BASE_URL`.
 - **`credential_jwt sub does not match wallet_subject`:** provided credential is bound to a different holder.
 - **`wallet does not have a credential that satisfies the presentation request`:** ensure the selected OID4VCI credential profile issues a format requested by the OID4VP DCQL preset, or provide a matching `credential_jwt`.

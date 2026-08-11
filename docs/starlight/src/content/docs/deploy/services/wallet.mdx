@@ -17,6 +17,7 @@ Use wallet service to simulate wallet-side OID4VP presentation submission agains
 |----------|-------|
 | Internal port | `8080` (commonly mapped to host `8081`) |
 | Health | `GET /health` |
+| Authorize | `GET /authorize` (OID4VP wallet authorization endpoint → SPA consent; auto-issues the request-inferred credential when the store has no DCQL match) |
 | Submit | `POST /submit` |
 
 ## Configuration
@@ -49,10 +50,12 @@ docker run -p 8081:8080 \
 
 - `WALLET_TARGET_BASE_URL` must point to the VC service or federation service running OID4VP.
 - During automatic OID4VCI bootstrap, the wallet leaves identity selection to the issuer's designated default record. The issuer-authorized subject returned in the credential offer remains separate from the wallet's holder DID.
-- The wallet must independently trust the issuer's mdoc IACA root through `WALLET_MDOC_IACA_ROOT_PEM`. The production workflow validates the main issuer's persisted `/data/mdoc/iaca_root.pem` and installs that public certificate as a wallet Fly secret before deployment.
+- The wallet must independently trust the issuer's mdoc IACA root through `WALLET_MDOC_IACA_ROOT_PEM`. Copy the issuer's public `iaca_root.pem` (for example from the issuer data volume at `/data/mdoc/iaca_root.pem`) into that wallet env var or secret before issuing or storing `mso_mdoc` credentials.
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
+- When the browser-based Looking Glass uses a separately hosted wallet, keep at least one wallet instance warm. A cold-start proxy failure occurs before the wallet can return the configured CORS headers.
 - Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.
 - Set `WALLET_DEVICE_KEY_PATH` to a durable file for `mso_mdoc` (ISO/IEC 18013-5) credentials: the device key bound at issuance must be reused to sign the `DeviceResponse`, so regenerating it silently breaks every stored mdoc credential's device binding.
 - Set `WALLET_MDOC_IACA_ROOT_PEM` to an independently obtained IACA root. The wallet rejects mdoc issuance when no root is configured or when the credential's document-signer chain, signature, digests, or validity fail verification.
-- The harness presents to encrypted `mso_mdoc` requests (`response_mode=direct_post.jwt`): it reads the verifier's ephemeral ECDH-ES response-encryption key from `client_metadata.jwks`, binds its RFC 7638 thumbprint into the `OpenID4VPHandover`, and returns an ECDH-ES JWE (A256GCM when the verifier advertises it, else A128GCM). For `x509_hash`, the request object's `x5c` chain must validate to system roots or a root configured in `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`; the chain cannot establish its own trust.
+- The harness presents to encrypted `mso_mdoc` and HAIP `dc+sd-jwt` requests (`response_mode=direct_post.jwt`): it reads the verifier's ephemeral ECDH-ES response-encryption key from `client_metadata.jwks`, binds its RFC 7638 thumbprint into the `OpenID4VPHandover` for mdoc, and returns an ECDH-ES JWE (A256GCM when the verifier advertises it, else A128GCM). For `x509_hash`, the request object's `x5c` chain must validate to system roots or a root configured in `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`; the chain cannot establish its own trust.
+- After a successful HAIP presentation, the wallet follows a verifier-provided HTTPS `redirect_uri` when present.

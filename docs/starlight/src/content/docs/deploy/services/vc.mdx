@@ -50,7 +50,7 @@ Use VC service when you want standalone OID4VCI and OID4VP capabilities without 
 |----------|----------|---------|-------------|
 | `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer/verifier metadata |
 | `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
-| `SHOWCASE_DATA_DIR` | No | - | State directory for wallet credentials and sessions |
+| `SHOWCASE_DATA_DIR` | No | - | State directory for wallet credentials, verifier sessions, and the auto-provisioned OID4VP X.509 request signer |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |
@@ -75,4 +75,4 @@ docker run -p 8080:8080 \
 - Wallet credentials persist at `{SHOWCASE_DATA_DIR}/vc/wallet_credentials.json`.
 - Client ID schemes supported: `redirect_uri`, `did:web`, `verifier_attestation`, and `x509_san_dns`. Both `verifier_attestation` and `x509_san_dns` auto-provision ephemeral keys/certificates when their PEM env vars are unset.
 - Set `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` in production so verifier attestation JWKS and signed request objects remain verifiable across restarts and deploys.
-- Set `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` and `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` in production for stable x509_san_dns certificate continuity.
+- Set `OID4VP_X509_SANDNS_CERT_CHAIN_PEM` and `OID4VP_X509_SANDNS_PRIVATE_KEY_PEM` in production for stable x509_san_dns certificate continuity. Alternatively, set `SHOWCASE_DATA_DIR` to a durable volume: the generated signer is persisted at `{SHOWCASE_DATA_DIR}/oid4vp/`, and its CA root must be configured in every wallet through `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`.

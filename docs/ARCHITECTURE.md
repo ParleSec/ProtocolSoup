@@ -252,7 +252,7 @@ The showcase uses appropriate security for demonstration purposes:
 
 - Keys generated at startup (rotatable)
 - Sessions expire after 24 hours
-- Authorization codes expire after 10 minutes
+- Authorization codes expire after 60 seconds (FAPI 2.0 Security Profile)
 - PKCE required for public clients
 - State parameter for CSRF protection
 

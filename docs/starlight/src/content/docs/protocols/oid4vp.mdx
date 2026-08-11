@@ -24,8 +24,9 @@ description: "OpenID4VP verifier flows with DCQL request contracts, direct_post 
 
 The table lists the flows available in Looking Glass. `profile: "haip"` and
 `dc_api.jwt` are backend API capabilities covered by Go tests; there is no
-Looking Glass DC API flow, and the wallet harness currently accepts only
-`direct_post` and `direct_post.jwt`.
+Looking Glass DC API flow. The hosted wallet harness accepts `direct_post` and
+`direct_post.jwt`, and exposes a public `/authorize` authorization endpoint for
+HAIP `direct_post.jwt` wallet handoff.
 
 ## Demo Scenarios
 
@@ -125,7 +126,10 @@ unchanged.
   configured ISO/IEC 18013-5 IACA trust anchor (`MDOC_IACA_ROOT_PEM` /
   `MDOC_IACA_ROOT_PEM_FILE`); the digests, `validityInfo`, and the detached
   `deviceSignature` over the reconstructed `DeviceAuthenticationBytes` are all
-  verified.
+  verified. Annex B DS profile checks apply to IACA→DS chains; when the
+  configured trust anchor itself signs IssuerAuth (self-signed
+  trust-anchor-as-document-signer), those DS-only checks are skipped after path
+  validation.
 
 Example DCQL query requesting an mdoc mobile driving licence:
 
@@ -146,8 +150,33 @@ Example DCQL query requesting an mdoc mobile driving licence:
 ## HAIP mode and the W3C Digital Credentials API
 
 ProtocolSoup implements verifier-side HAIP constraints as an opt-in mode.
-Browser-mediated W3C Digital Credentials API invocation and the HAIP wallet role
-remain unsupported and are excluded from the current certification scope.
+The hosted web wallet implements the OID4VP wallet HAIP profile for
+`response_mode=direct_post.jwt` with `client_id_prefix=x509_hash` and
+`request_method=request_uri_signed` for both `sd_jwt_vc` and `iso_mdl`.
+Browser-mediated W3C Digital Credentials API wallet invocation (`dc_api.jwt`)
+remains deferred: it requires a native wallet provider (for example Android
+Credential Manager), not a hosted web wallet.
+
+### Wallet HAIP (`direct_post.jwt`)
+
+- Public authorization endpoint: `https://wallet.protocolsoup.com/authorize`
+  (`client_id`, `request_uri`, `request_uri_method`).
+- Request-object retrieval supports GET and RFC-compatible POST (with
+  `wallet_nonce`).
+- External `x509_hash` verifiers are accepted only after the request object's
+  `x5c` chain validates to `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` (or system
+  roots), the leaf hash matches the `x509_hash:` `client_id`, and the holder
+  approves the external verifier in the consent UI.
+- Presentations return DCQL-keyed `vp_token` objects. SD-JWT disclosures and
+  mdoc IssuerSigned elements are derived from DCQL claim paths (OID4VP §6.4.1:
+  absent/empty `claims` returns only mandatory material — no SD-JWT disclosures
+  and no selectively disclosable mdoc elements). Only Credential Query ids the
+  presented credential actually satisfies are included as `vp_token` keys
+  (optional `credential_sets` entries that do not match are omitted).
+  Encrypted responses use ECDH-ES JWE (`response=<compact JWE>`).
+- After a successful HAIP response, the wallet navigates a verifier-provided
+  `redirect_uri` when present and safe (`https` only).
+- `dc_api.jwt` remains deferred pending a native wallet provider.
 
 ### HAIP mode (`profile: "haip"`)
 
@@ -166,10 +195,12 @@ out-of-profile choices at request creation:
   encryption is provisioned for both `mso_mdoc` and `dc+sd-jwt`.
 - Each `mso_mdoc` credential in the `dcql_query` gains an **AKI Trusted
   Authorities Query** (OID4VP 1.0 Section 6.1.1, `aki`), with the value set to
-  the base64url `SubjectKeyIdentifier` of the configured IACA root. The wallet
+  the base64url `SubjectKeyIdentifier` of each configured IACA root. The wallet
   uses it to select an issuer the verifier trusts; the verifier validates both
   that the document-signer chains to a configured IACA root and that its
-  certificate Authority Key Identifier is one of the requested values. An explicit
+  Authority Key Identifier is one of the requested values. When IssuerAuth is
+  signed by a self-signed trust anchor that omits AuthorityKeyIdentifier, the
+  leaf SubjectKeyIdentifier is used for that match. An explicit
   `trusted_authorities` on a credential is preserved, and non-mdoc credentials
   are left untouched.
 
@@ -177,8 +208,9 @@ out-of-profile choices at request creation:
 
 The backend contains request-object, handover, audience, decryption, and policy
 building blocks for this path. The repository does not invoke the browser's
-Digital Credentials API, and the wallet harness rejects these response modes.
-These private APIs are implementation scaffolding, not a conforming DC API flow.
+Digital Credentials API, and the hosted wallet explicitly defers `dc_api.jwt`
+pending a native provider. These private APIs are implementation scaffolding,
+not a conforming DC API wallet flow.
 
 In a conforming browser invocation, the request is delivered browser-mediated rather than by redirect / `direct_post`.
 The verifier sets `response_mode: "dc_api.jwt"` and the Verifier Web `origin`
@@ -244,8 +276,8 @@ default scheme for HAIP
 requests and reuses the same X.509 signer as `x509_san_dns`. When a persistence
 root (data dir) is configured the auto-provisioned signing certificate is
 persisted and reloaded across restarts, so the `x509_hash` `client_id` stays
-stable for a certification window rather than churning every process start; the
-wallet trusts the request signature by that leaf hash.
+stable across process restarts instead of changing every boot; wallets that
+pin trust by leaf hash can keep a stable verifier identity.
 
 The wallet harness performs PKIX validation against its independently configured
 trust store (`WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`); an `x5c` chain cannot
@@ -258,7 +290,7 @@ appoint its own trust root.
 
 ## Verifier Evaluation Flow (OID4VP §5, §6, §8)
 
-1. **Create Authorization Request** — Verifier builds a signed request object (`typ=oauth-authz-req+jwt`) containing `client_id`, `response_type=vp_token`, `response_mode`, `response_uri`, `dcql_query` (or `scope`), `nonce`, `state`, and `exp`. Publishes it at a `request_uri`.
+1. **Create Authorization Request** — Verifier builds a signed request object (`typ=oauth-authz-req+jwt`, `aud=https://self-issued.me/v2`) containing `client_id`, `response_type=vp_token`, `response_mode`, `response_uri`, `dcql_query` (or `scope`), `nonce`, `state`, and `exp`. Publishes it at a `request_uri`.
 2. **Wallet Fetches Request Object** — Wallet fetches the compact signed JWT
    from `request_uri` via GET with media type
    `application/oauth-authz-req+jwt`. POST retrieval is explicitly unsupported
@@ -267,7 +299,9 @@ appoint its own trust root.
    - `direct_post`: form-post `vp_token` + `state`
    - `direct_post.jwt`: form-post encrypted `response` JWE containing signed inner JWT (`typ=oauth-authz-resp+jwt`) with `vp_token`, `state`, and audience bound to `response_uri`
 4. **Verifier Validates + Policy Decision** — Verifier requires exact `state`
-   correlation for redirect response modes, then validates:
+   correlation for redirect response modes. When `direct_post.jwt` omits an
+   outer `state`, the JWE `kid` selects the request's ephemeral decryption key
+   and the decrypted `state` must then match that request exactly. It validates:
    - nonce binding (VP token nonce matches request nonce)
    - audience binding (VP token audience includes `client_id`, or `origin:<origin>` on the DC API path)
    - token expiry

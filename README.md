@@ -98,7 +98,6 @@ Every flow runs against the real specification. Each protocol links to a guide l
 | [OID4VCI](https://docs.protocolsoup.com/protocols/oid4vci) | OID4VCI, SD-JWT VC, JSON-LD Data Integrity, ISO mdoc |
 | [OID4VP](https://docs.protocolsoup.com/protocols/oid4vp) | OID4VP, DCQL, ISO 18013-5 |
 
-Conformance tests run on every push and on a nightly schedule, covering OID4VCI and OID4VP runtime behavior plus optional interop against an external wallet. The OpenID Provider carries its own conformance suite and can register dedicated clients for external OIDF certification runs.
 
 <br>
 
