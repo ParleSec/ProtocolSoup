@@ -12,13 +12,17 @@ primary_region = "syd"
   WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS = "https://protocolsoup.com/oid4vp/verifier-attestation"
   # Keep the mdoc holder key stable across machine replacement and cold starts.
   WALLET_DEVICE_KEY_PATH = "/data/device-key.pem"
+  # WALLET_MDOC_IACA_ROOT_PEM is staged as a Fly secret by CI from the live
+  # issuer IACA (/data/mdoc/iaca_root.pem), not baked into this file.
+  # Optional WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM may be set the same way when
+  # the wallet must trust additional x509_hash / x509_san_dns request CAs.
 
 [http_service]
   internal_port = 8080
   force_https = true
   auto_stop_machines = "stop"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
   [http_service.concurrency]

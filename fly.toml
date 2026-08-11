@@ -24,25 +24,18 @@ primary_region = 'syd'
   SHOWCASE_MOCK_IDP = 'true'
   SHOWCASE_PALETTE_DB = '/app/palette.db'
 
-  # Persistent OP signing keys on the shared /data volume. Required for OIDF
-  # certification: signing keys and their kids must survive restarts and retired
-  # public keys are retained in JWKS so previously issued tokens stay verifiable.
+  # Persistent OP signing keys on the shared /data volume so kids survive
+  # restarts and retired public keys remain in JWKS for previously issued tokens.
   SHOWCASE_KEY_STORE_PATH = '/data/keys'
 
   # Persistent ISO/IEC 18013-5 mso_mdoc issuer PKI on the shared /data volume.
-
   SHOWCASE_MDOC_PKI_PATH = '/data/mdoc'
-
-  # OIDF conformance suite callback URLs registered for the hosted static
-  # profiles (Basic / Implicit / Hybrid / Form Post). Do NOT add Dynamic OP or
-  # Third-Party Initiated Login aliases here: those plans register their
-  # callback URI through Dynamic Client Registration, and static pre-registration
-  # would mask redirect_uri defects.
-
-  OIDC_CONFORMANCE_REDIRECT_URIS = 'https://www.certification.openid.net/test/a/protocolsoup-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-basic-post/callback,https://www.certification.openid.net/test/a/protocolsoup-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-basic/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-implicit/callback,https://www.certification.openid.net/test/a/protocolsoup-formpost-hybrid/callback,https://www.certification.openid.net/test/a/protocolsoup-postimplicit/callback'
+  # Persist OID4VP request sessions and the auto-provisioned x509_hash request
+  # signer so its CA root can be configured in the wallet trust store.
+  SHOWCASE_DATA_DIR = '/data'
 
   # Dynamic Client Registration defaults (open, ephemeral). Override via secrets
-  # or env if tightening limits for a certification window.
+  # or env if tightening registration limits.
   OIDC_DYNAMIC_REGISTRATION_ENABLED = 'true'
   OIDC_DYNAMIC_REGISTRATION_TTL = '2h'
   OIDC_DYNAMIC_REGISTRATION_MAX_CLIENTS = '200'
@@ -67,16 +60,9 @@ primary_region = 'syd'
 #   SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED (both default false) enable the DPoP
 #   nonce challenge; see docs/starlight/.../deploy/environment-variables.mdx.
 #
-# OIDF conformance secrets (set only when running certification; without them the
-# conformance clients are never registered, so production is unaffected):
-# - OIDC_CONFORMANCE_CLIENT_SECRET: secret for the conformance clients. Must match
-#   the secret the harness/suite presents (OIDC_CONFORMANCE_CLIENT_SECRET).
-# - OIDC_CONFORMANCE_CLIENT2_SECRET (optional): distinct secret for the second
-#   client; defaults to OIDC_CONFORMANCE_CLIENT_SECRET when unset.
-# - The conformance end user (alice@example.com) password used by the suite is the
-#   demo user's password; align OIDC_CONFORMANCE_PASSWORD in the harness with it.
-# - OIDC_KEY_ROTATION_TOKEN (optional): enables POST /oidc/admin/rotate-keys for
-#   the OIDF OP-rotation module. Leave unset in normal production.
+# Optional OIDC operational secrets:
+# - OIDC_KEY_ROTATION_TOKEN: enables POST /oidc/admin/rotate-keys. Leave unset to
+#   keep the rotation endpoint disabled.
 # - OIDC_PAIRWISE_SUBJECT_SALT: durable random secret that keeps pairwise
 #   subjects stable across restarts. Required when advertising pairwise subjects.
 #
