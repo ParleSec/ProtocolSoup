@@ -777,8 +777,10 @@ paths:
         weaker method. Also optionally accepts a DPoP proof header (RFC 9449
         Section 4.3, htm=POST against this endpoint's URL); when present and
         valid, the issued access token is bound to the proof's key
-        (cnf.jkt) and token_type becomes DPoP. This issuer never issues a
-        refresh token, so DPoP binding applies to the access token only.
+        (cnf.jkt) and token_type becomes DPoP. The authorization_code grant
+        also issues a refresh_token (DPoP-bound when applicable; Client
+        Instance Key-bound under attestation). Pre-authorized code grants do
+        not issue refresh tokens.
         Absent that header, behavior is unchanged Bearer issuance. If the
         deployment has DPoP nonce enforcement enabled for this endpoint, a
         proof lacking the current server nonce is rejected with
