@@ -44,6 +44,7 @@ export { TokenRevocationExecutor, type TokenRevocationConfig } from './token-rev
 export { OIDCUserInfoExecutor, type OIDCUserInfoConfig } from './oidc-userinfo'
 export { OIDCDiscoveryExecutor } from './oidc-discovery'
 export { OID4VCIPreAuthorizedExecutor, type OID4VCIPreAuthorizedConfig } from './oid4vci-pre-authorized'
+export { OID4VCIIssuerInitiatedExecutor, type OID4VCIIssuerInitiatedConfig } from './oid4vci-issuer-initiated'
 export { OID4VPDirectPostExecutor, type OID4VPDirectPostConfig } from './oid4vp-direct-post'
 
 // SAML executors

@@ -500,6 +500,8 @@ export interface UseRealFlowExecutorOptions {
   oid4vciCredentialConfigurationID?: string
   /** OID4VCI credential format override */
   oid4vciCredentialFormat?: string
+  /** OID4VCI issuer-initiated: external wallet credential_offer_endpoint to deliver the offer to */
+  oid4vciWalletOfferEndpoint?: string
   /** OID4VP dcql_query JSON override (advanced editor) */
   oid4vpDCQLQueryJSON?: string
   /** OID4VP scope alias override (mutually exclusive with dcql_query) */
@@ -508,6 +510,8 @@ export interface UseRealFlowExecutorOptions {
   oid4vpClientID?: string
   /** OID4VP verifier client_id_scheme override */
   oid4vpClientIDScheme?: string
+  /** OID4VP request_uri_method override ('get' or 'post') */
+  oid4vpRequestURIMethod?: string
   /** Looking Glass session ID for wire capture */
   lookingGlassSessionId?: string
   /** Owner capability for owner-only Looking Glass actions */
@@ -787,10 +791,12 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       accessToken: options.accessToken,
       oid4vciCredentialConfigurationID: options.oid4vciCredentialConfigurationID,
       oid4vciCredentialFormat: options.oid4vciCredentialFormat,
+      oid4vciWalletOfferEndpoint: options.oid4vciWalletOfferEndpoint,
       oid4vpDCQLQueryJSON: options.oid4vpDCQLQueryJSON,
       oid4vpScopeAlias: options.oid4vpScopeAlias,
       oid4vpClientID: options.oid4vpClientID,
       oid4vpClientIDScheme: options.oid4vpClientIDScheme,
+      oid4vpRequestURIMethod: options.oid4vpRequestURIMethod,
       lookingGlassSessionId: options.lookingGlassSessionId,
       lookingGlassSessionToken: options.lookingGlassSessionToken,
     }
@@ -841,10 +847,12 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     options.accessToken,
     options.oid4vciCredentialConfigurationID,
     options.oid4vciCredentialFormat,
+    options.oid4vciWalletOfferEndpoint,
     options.oid4vpDCQLQueryJSON,
     options.oid4vpScopeAlias,
     options.oid4vpClientID,
     options.oid4vpClientIDScheme,
+    options.oid4vpRequestURIMethod,
     options.lookingGlassSessionId,
     options.lookingGlassSessionToken,
   ])

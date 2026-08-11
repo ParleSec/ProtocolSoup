@@ -24,6 +24,7 @@ import { TokenRevocationExecutor, type TokenRevocationConfig } from './token-rev
 import { OIDCUserInfoExecutor, type OIDCUserInfoConfig } from './oidc-userinfo'
 import { OIDCDiscoveryExecutor } from './oidc-discovery'
 import { OID4VCIPreAuthorizedExecutor, type OID4VCIPreAuthorizedConfig } from './oid4vci-pre-authorized'
+import { OID4VCIIssuerInitiatedExecutor, type OID4VCIIssuerInitiatedConfig } from './oid4vci-issuer-initiated'
 import { OID4VPDirectPostExecutor } from './oid4vp-direct-post'
 import { SPInitiatedSSOExecutor, IdPInitiatedSSOExecutor, type SAMLSSOConfig } from './saml-sso'
 import { SAMLLogoutExecutor, type SAMLLogoutConfig } from './saml-logout'
@@ -217,6 +218,13 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     requiresUserInteraction: false,
     additionalConfig: { txCodeRequired: false, deferred: true },
   },
+  'oid4vci-issuer-initiated': {
+    executorClass: OID4VCIIssuerInitiatedExecutor,
+    description: 'Issuer-initiated authorization_code offer, deliverable to an external wallet endpoint',
+    rfcReference: 'OpenID4VCI 1.0 Section 4.1',
+    requiresUserInteraction: true,
+    additionalConfig: {},
+  },
 
   // OID4VP flows
   'oid4vp-direct-post': {
@@ -400,6 +408,8 @@ export interface ExecutorFactoryConfig {
   oid4vciCredentialConfigurationID?: string
   /** OID4VCI credential format override */
   oid4vciCredentialFormat?: string
+  /** OID4VCI issuer-initiated: external wallet credential_offer_endpoint to deliver the offer to */
+  oid4vciWalletOfferEndpoint?: string
   /** OID4VP dcql_query JSON override */
   oid4vpDCQLQueryJSON?: string
   /** OID4VP scope alias override */
@@ -408,6 +418,8 @@ export interface ExecutorFactoryConfig {
   oid4vpClientID?: string
   /** OID4VP verifier client_id_scheme override */
   oid4vpClientIDScheme?: string
+  /** OID4VP request_uri_method override ('get' or 'post') */
+  oid4vpRequestURIMethod?: string
 }
 
 /**
@@ -450,6 +462,9 @@ export function createFlowExecutor(
   }
   if (typeof config.oid4vpClientIDScheme === 'string' && config.oid4vpClientIDScheme.trim().length > 0) {
     extraParams.oid4vp_client_id_scheme = config.oid4vpClientIDScheme.trim()
+  }
+  if (typeof config.oid4vpRequestURIMethod === 'string' && config.oid4vpRequestURIMethod.trim().length > 0) {
+    extraParams.oid4vp_request_uri_method = config.oid4vpRequestURIMethod.trim()
   }
   if (Object.keys(extraParams).length > 0) {
     baseConfig.extraParams = extraParams
@@ -523,36 +538,52 @@ export function createFlowExecutor(
     }
   }
 
+  if (flowId === 'oid4vci-issuer-initiated' && config.oid4vciWalletOfferEndpoint) {
+    (fullConfig as OID4VCIIssuerInitiatedConfig).walletOfferEndpoint = config.oid4vciWalletOfferEndpoint
+  }
+
   // Handle OID4VP dcql_query/scope alias overrides
   if (flowId.startsWith('oid4vp-')) {
     const dcqlQueryJSON = baseConfig.extraParams?.oid4vp_dcql_query
     const scopeAlias = baseConfig.extraParams?.oid4vp_scope_alias
     const clientID = baseConfig.extraParams?.oid4vp_client_id
     const clientIDScheme = baseConfig.extraParams?.oid4vp_client_id_scheme
+    const requestURIMethod = baseConfig.extraParams?.oid4vp_request_uri_method
     ;(fullConfig as {
       dcqlQueryJSON?: string
       scopeAlias?: string
       clientID?: string
       clientIDScheme?: string
+      requestURIMethod?: string
     }).dcqlQueryJSON = dcqlQueryJSON
     ;(fullConfig as {
       dcqlQueryJSON?: string
       scopeAlias?: string
       clientID?: string
       clientIDScheme?: string
+      requestURIMethod?: string
     }).scopeAlias = scopeAlias
     ;(fullConfig as {
       dcqlQueryJSON?: string
       scopeAlias?: string
       clientID?: string
       clientIDScheme?: string
+      requestURIMethod?: string
     }).clientID = clientID
     ;(fullConfig as {
       dcqlQueryJSON?: string
       scopeAlias?: string
       clientID?: string
       clientIDScheme?: string
+      requestURIMethod?: string
     }).clientIDScheme = clientIDScheme
+    ;(fullConfig as {
+      dcqlQueryJSON?: string
+      scopeAlias?: string
+      clientID?: string
+      clientIDScheme?: string
+      requestURIMethod?: string
+    }).requestURIMethod = requestURIMethod
   }
 
   // Handle Token Introspection flow

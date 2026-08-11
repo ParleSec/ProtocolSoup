@@ -69,6 +69,10 @@ export interface FlowExecutorState {
     deviceCode?: string
     transactionId?: string
     deferredAccessToken?: string
+    /** Opaque poll target for issuer-observed async lifecycles (e.g. OID4VCI issuer-initiated status_uri). */
+    statusUri?: string
+    /** Epoch milliseconds after which the status_uri context is considered expired, as a string. */
+    statusDeadline?: string
   }
   /** Error details if any */
   error?: {
