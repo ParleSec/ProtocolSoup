@@ -12,8 +12,10 @@ import (
 
 	"github.com/ParleSec/ProtocolSoup/internal/core"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/oauth2"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oid4vci"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/oid4vp"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/oidc"
 )
 
 func main() {
@@ -30,6 +32,21 @@ func main() {
 
 	registry := plugin.NewRegistry()
 	pluginConfig := bootstrap.PluginConfig
+
+	// OID4VCI's authorization_code grant (including the HAIP PAR flow) issues
+	// codes through the shared OIDC authorize/login/token endpoints
+	// (authorization_server_metadata.go advertises /oidc/authorize), so both
+	// plugins must be registered for that grant to be reachable, even though
+	// this binary otherwise serves only the VC protocols.
+	oauth2Plugin := oauth2.NewPlugin()
+	if err := registry.Register(oauth2Plugin); err != nil {
+		log.Fatalf("Failed to register OAuth 2.0 plugin: %v", err)
+	}
+
+	oidcPlugin := oidc.NewPlugin(oauth2Plugin)
+	if err := registry.Register(oidcPlugin); err != nil {
+		log.Fatalf("Failed to register OIDC plugin: %v", err)
+	}
 
 	oid4vciPlugin := oid4vci.NewPlugin()
 	if err := registry.Register(oid4vciPlugin); err != nil {

@@ -2,6 +2,7 @@ package oid4vci
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
@@ -42,11 +43,17 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"response_types_supported": []string{"code"},
 		"grant_types_supported": []string{
 			"authorization_code",
+			"refresh_token",
 			"urn:ietf:params:oauth:grant-type:pre-authorized_code",
 		},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": tokenEndpointAuthMethods,
 		"authorization_details_types_supported": []string{"openid_credential"},
+		"pushed_authorization_request_endpoint": p.pushedAuthorizationRequestEndpointURL(),
+		"require_pushed_authorization_requests": true,
+		// RFC 9207 / FAPI 2.0 SP §5.3.2.2: advertise and return iss on
+		// authorization responses so clients can detect mix-up attacks.
+		"authorization_response_iss_parameter_supported": true,
 		// RFC 9449 Section 5.1: signals DPoP support and the acceptable
 		// proof JWS algorithms at this issuer's own token endpoint. DPoP is
 		// opt-in per request (no separate on/off switch to reflect here);
@@ -56,6 +63,23 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		// accepted algorithms.
 		"dpop_signing_alg_values_supported": dpop.AllowedAlgorithmsList,
 	}
+	if p.clientAttestationTrustAnchors != nil {
+		metadata["client_attestation_signing_alg_values_supported"] = []string{"ES256"}
+		metadata["client_attestation_pop_signing_alg_values_supported"] = []string{"ES256"}
+	}
+	scopeSet := make(map[string]struct{})
+	for id := range p.credentialConfigurationsSupported() {
+		configuration := p.credentialConfigurations[id]
+		if configuration.Scope != "" {
+			scopeSet[configuration.Scope] = struct{}{}
+		}
+	}
+	scopes := make([]string, 0, len(scopeSet))
+	for scope := range scopeSet {
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+	metadata["scopes_supported"] = scopes
 
 	p.emitEvent(
 		sessionID,
