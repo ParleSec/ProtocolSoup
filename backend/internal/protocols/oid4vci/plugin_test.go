@@ -25,6 +25,263 @@ import (
 
 const testIssuerAudience = "http://localhost:8080/oid4vci"
 
+func TestIssuerInitiatedOfferTracksRealLifecycle(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	offerResp := postJSONWithHeaders(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+	}, map[string]string{"X-Looking-Glass-Session": "issuer-session"})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	issuerState := asString(t, offer["issuer_state"])
+	statusURI, err := url.Parse(asString(t, offer["status_uri"]))
+	if err != nil {
+		t.Fatalf("parse status_uri: %v", err)
+	}
+
+	readStatus := func() map[string]interface{} {
+		resp, err := http.Get(env.Server.URL + statusURI.Path)
+		if err != nil {
+			t.Fatalf("get issuer-initiated status: %v", err)
+		}
+		assertStatus(t, resp, http.StatusOK)
+		return decodeJSONMap(t, resp)
+	}
+	if got := asString(t, readStatus()["status"]); got != issuerInitiatedStatusWaitingForWallet {
+		t.Fatalf("initial status = %q, want %q", got, issuerInitiatedStatusWaitingForWallet)
+	}
+
+	transaction, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		issuerState,
+		"attested-wallet",
+		[]string{"MobileDrivingLicenceMsoMdocHAIP"},
+	)
+	if err != nil {
+		t.Fatalf("accept issuer_state: %v", err)
+	}
+	if transaction.SessionID != "issuer-session" {
+		t.Fatalf("session ID = %q, want issuer-session", transaction.SessionID)
+	}
+	if got := asString(t, readStatus()["status"]); got != issuerInitiatedStatusAuthorizationRequestReceived {
+		t.Fatalf("PAR status = %q, want %q", got, issuerInitiatedStatusAuthorizationRequestReceived)
+	}
+	// Multi-client happy flow reuses the same issuer_state for a
+	// consecutive second client. The offer context stays redeemable until TTL.
+	second, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		issuerState,
+		"attested-wallet-2",
+		[]string{"MobileDrivingLicenceMsoMdocHAIP"},
+	)
+	if err != nil {
+		t.Fatalf("second-client issuer_state reuse: %v", err)
+	}
+	if second.ClientID != "attested-wallet-2" {
+		t.Fatalf("second client ID = %q, want attested-wallet-2", second.ClientID)
+	}
+
+	env.Plugin.updateIssuerInitiatedTransaction(issuerState, issuerInitiatedStatusTokenIssued)
+	if got := asString(t, readStatus()["status"]); got != issuerInitiatedStatusTokenIssued {
+		t.Fatalf("token status = %q, want %q", got, issuerInitiatedStatusTokenIssued)
+	}
+	env.Plugin.updateIssuerInitiatedTransaction(issuerState, issuerInitiatedStatusCredentialIssued)
+	completed := readStatus()
+	if got := asString(t, completed["status"]); got != issuerInitiatedStatusCredentialIssued {
+		t.Fatalf("terminal status = %q, want %q", got, issuerInitiatedStatusCredentialIssued)
+	}
+	if terminal, ok := completed["terminal"].(bool); !ok || !terminal {
+		t.Fatalf("terminal = %v, want true", completed["terminal"])
+	}
+}
+
+func TestIssuerInitiatedOfferDeliversToWalletCredentialOfferEndpoint(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	var receivedOffer string
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("wallet endpoint method = %s, want GET", r.Method)
+		}
+		receivedOffer = r.URL.Query().Get("credential_offer")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"received"}`))
+	}))
+	defer wallet.Close()
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+		"credential_offer_endpoint":    wallet.URL + "/credential_offer",
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	if delivered, ok := offer["credential_offer_delivered"].(bool); !ok || !delivered {
+		t.Fatalf("credential_offer_delivered = %v, want true", offer["credential_offer_delivered"])
+	}
+	if asString(t, offer["credential_offer_endpoint"]) != wallet.URL+"/credential_offer" {
+		t.Fatalf("unexpected credential_offer_endpoint %v", offer["credential_offer_endpoint"])
+	}
+	if receivedOffer == "" {
+		t.Fatal("wallet credential_offer_endpoint was not invoked with credential_offer")
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(receivedOffer), &parsed); err != nil {
+		t.Fatalf("decode delivered credential_offer: %v", err)
+	}
+	if asString(t, parsed["credential_issuer"]) == "" {
+		t.Fatal("delivered credential_offer missing credential_issuer")
+	}
+	if _, present := parsed["created_at"]; present {
+		t.Fatal("delivered credential_offer must omit non-spec created_at")
+	}
+}
+
+func TestIssuerInitiatedOfferDeliveryAcceptsRedirectWithoutFollowing(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	var hits int
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path == "/after" {
+			t.Fatal("issuer followed credential_offer_endpoint redirect")
+		}
+		if r.URL.Query().Get("credential_offer") == "" {
+			t.Fatal("wallet credential_offer_endpoint missing credential_offer")
+		}
+		http.Redirect(w, r, "/after", http.StatusFound)
+	}))
+	defer wallet.Close()
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+		"credential_offer_endpoint":    wallet.URL + "/credential_offer",
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	if delivered, ok := offer["credential_offer_delivered"].(bool); !ok || !delivered {
+		t.Fatalf("credential_offer_delivered = %v, want true", offer["credential_offer_delivered"])
+	}
+	if status, ok := offer["credential_offer_delivery_status"].(float64); !ok || int(status) != http.StatusFound {
+		t.Fatalf("credential_offer_delivery_status = %v, want %d", offer["credential_offer_delivery_status"], http.StatusFound)
+	}
+	if hits != 1 {
+		t.Fatalf("wallet endpoint hits = %d, want 1", hits)
+	}
+}
+
+func TestIssuerInitiatedScopeIntersectsOfferedConfigurations(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	issuerState := asString(t, offer["issuer_state"])
+
+	fromScope := env.Plugin.credentialConfigurationIDsForScope("vc:mdl")
+	if len(fromScope) < 2 {
+		t.Fatalf("scope vc:mdl mapped to %v, want both educational and HAIP mdoc configs", fromScope)
+	}
+	offered := env.Plugin.issuerInitiatedOfferedConfigurationIDs(issuerState)
+	bound := intersectCredentialConfigurationIDs(fromScope, offered)
+	if len(bound) != 1 || bound[0] != "MobileDrivingLicenceMsoMdocHAIP" {
+		t.Fatalf("intersection = %v, want [MobileDrivingLicenceMsoMdocHAIP]", bound)
+	}
+	transaction, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		issuerState,
+		"attested-wallet",
+		bound,
+	)
+	if err != nil {
+		t.Fatalf("accept intersected issuer_state: %v", err)
+	}
+	if len(transaction.CredentialConfigurationIDs) != 1 || transaction.CredentialConfigurationIDs[0] != "MobileDrivingLicenceMsoMdocHAIP" {
+		t.Fatalf("bound configurations = %v", transaction.CredentialConfigurationIDs)
+	}
+}
+
+func TestIssuerInitiatedOfferRejectsPrivateCredentialOfferEndpoint(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+		"credential_offer_endpoint":    "https://10.0.0.8/credential_offer",
+	})
+	assertStatus(t, offerResp, http.StatusBadRequest)
+	payload := decodeJSONMap(t, offerResp)
+	if asString(t, payload["error"]) != "invalid_request" {
+		t.Fatalf("error = %q, want invalid_request", asString(t, payload["error"]))
+	}
+}
+
+func TestIssuerInitiatedOfferAllowsConsecutiveClientReuseUntilExpiry(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	issuerState := asString(t, offer["issuer_state"])
+
+	if _, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		issuerState,
+		"client-1",
+		[]string{"MobileDrivingLicenceMsoMdocHAIP"},
+	); err != nil {
+		t.Fatalf("client-1 accept: %v", err)
+	}
+	env.Plugin.updateIssuerInitiatedTransaction(issuerState, issuerInitiatedStatusCredentialIssued)
+
+	// Suite second-client step appends ?dummy1=lorem&dummy2=ipsum to redirect_uri
+	// and reuses the same issuer_state after client 1 has already obtained a credential.
+	second, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		issuerState,
+		"client-2",
+		[]string{"MobileDrivingLicenceMsoMdocHAIP"},
+	)
+	if err != nil {
+		t.Fatalf("client-2 reuse after credential_issued: %v", err)
+	}
+	if second.Status != issuerInitiatedStatusAuthorizationRequestReceived {
+		t.Fatalf("status after client-2 PAR = %q, want %q", second.Status, issuerInitiatedStatusAuthorizationRequestReceived)
+	}
+	if second.ClientID != "client-2" {
+		t.Fatalf("client ID = %q, want client-2", second.ClientID)
+	}
+}
+
+func TestIssuerInitiatedOfferRejectsInjectedOrMismatchedIssuerState(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	if _, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		"attacker-injected",
+		"attested-wallet",
+		[]string{"MobileDrivingLicenceMsoMdocHAIP"},
+	); err == nil {
+		t.Fatal("unknown issuer_state was accepted")
+	}
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/authorization-code", map[string]interface{}{
+		"credential_configuration_ids": []string{"MobileDrivingLicenceMsoMdocHAIP"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	if _, err := env.Plugin.acceptIssuerInitiatedAuthorizationRequest(
+		asString(t, offer["issuer_state"]),
+		"attested-wallet",
+		[]string{"UniversityDegreeCredentialSDJWTHAIP"},
+	); err == nil {
+		t.Fatal("issuer_state was accepted for a Credential Configuration not present in the offer")
+	}
+}
+
 func TestPreAuthorizedGrantRejectsUnexpectedTxCode(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
@@ -258,8 +515,13 @@ func TestCredentialIssuerMetadataWellKnown(t *testing.T) {
 	if _, advertised := payload["batch_credential_endpoint"]; advertised {
 		t.Fatal("issuer must not advertise an unsupported Batch Credential Endpoint")
 	}
-	if _, advertised := payload["batch_credential_issuance"]; advertised {
-		t.Fatal("issuer must not advertise unsupported multi-proof issuance")
+	batchIssuance, ok := payload["batch_credential_issuance"].(map[string]interface{})
+	if !ok {
+		t.Fatal("issuer must advertise batch_credential_issuance for multi-proof Credential Endpoint issuance")
+	}
+	batchSize, ok := batchIssuance["batch_size"].(float64)
+	if !ok || int(batchSize) != batchCredentialIssuanceBatchSize {
+		t.Fatalf("batch_credential_issuance.batch_size = %#v, want %d", batchIssuance["batch_size"], batchCredentialIssuanceBatchSize)
 	}
 
 	authorizationServers, ok := payload["authorization_servers"].([]interface{})
@@ -292,11 +554,14 @@ func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T)
 	if !ok || len(configurations) == 0 {
 		t.Fatalf("expected credential_configurations_supported map")
 	}
+	// HAIP issuer profiles only accept dc+sd-jwt and mso_mdoc in metadata.
+	// W3C formats remain issuable via the registry but are not advertised here.
 	expectedFormats := map[string]string{
-		"UniversityDegreeCredential":      "dc+sd-jwt",
-		"UniversityDegreeCredentialJWT":   "jwt_vc_json",
-		"UniversityDegreeCredentialJWTLD": "jwt_vc_json-ld",
-		"UniversityDegreeCredentialLDP":   "ldp_vc",
+		"UniversityDegreeCredential":          "dc+sd-jwt",
+		"UniversityDegreeCredentialSDJWT":     "dc+sd-jwt",
+		"UniversityDegreeCredentialSDJWTHAIP": "dc+sd-jwt",
+		"MobileDrivingLicenceMsoMdoc":         "mso_mdoc",
+		"MobileDrivingLicenceMsoMdocHAIP":     "mso_mdoc",
 	}
 	for configurationID, expectedFormat := range expectedFormats {
 		rawConfiguration, ok := configurations[configurationID]
@@ -309,6 +574,26 @@ func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T)
 		}
 		if asString(t, configuration["format"]) != expectedFormat {
 			t.Fatalf("expected configuration %q format %q, got %q", configurationID, expectedFormat, asString(t, configuration["format"]))
+		}
+		if _, present := configuration["claims"]; present {
+			t.Fatalf("configuration %q must nest claims under credential_metadata (OID4VCI 1.0 Final)", configurationID)
+		}
+		if expectedFormat == credentialFormatDCSdJWT {
+			if _, present := configuration["credential_definition"]; present {
+				t.Fatalf("dc+sd-jwt configuration %q must use vct, not credential_definition", configurationID)
+			}
+			if asString(t, configuration["vct"]) == "" {
+				t.Fatalf("dc+sd-jwt configuration %q missing vct", configurationID)
+			}
+		}
+	}
+	for _, configurationID := range []string{
+		"UniversityDegreeCredentialJWT",
+		"UniversityDegreeCredentialJWTLD",
+		"UniversityDegreeCredentialLDP",
+	} {
+		if _, present := configurations[configurationID]; present {
+			t.Fatalf("W3C configuration %q must not be advertised in Credential Issuer Metadata", configurationID)
 		}
 	}
 	for _, configurationID := range []string{"MobileDrivingLicenceMsoMdoc", "MobileDrivingLicenceMsoMdocHAIP"} {
@@ -323,6 +608,17 @@ func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T)
 				configurationID,
 				configuration["credential_signing_alg_values_supported"],
 			)
+		}
+		if _, present := configuration["claims"]; present {
+			t.Fatalf("mdoc configuration %q must nest claims under credential_metadata", configurationID)
+		}
+		credentialMetadata, ok := configuration["credential_metadata"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("mdoc configuration %q credential_metadata = %#v", configurationID, configuration["credential_metadata"])
+		}
+		claims, ok := credentialMetadata["claims"].([]interface{})
+		if !ok || len(claims) == 0 {
+			t.Fatalf("mdoc configuration %q credential_metadata.claims = %#v", configurationID, credentialMetadata["claims"])
 		}
 	}
 }
@@ -412,10 +708,15 @@ func TestCredentialIssuanceSupportsMultipleFormats(t *testing.T) {
 				if got := asString(t, decoded.Payload["_sd_alg"]); got != "sha-256" {
 					t.Fatalf("top-level _sd_alg = %q, want sha-256", got)
 				}
-				vcObject, _ := decoded.Payload["vc"].(map[string]interface{})
-				subject, _ := vcObject["credentialSubject"].(map[string]interface{})
-				if _, nested := subject["_sd_alg"]; nested {
-					t.Fatal("issuer placed _sd_alg below the payload top level")
+				if _, legacy := decoded.Payload["vc"]; legacy {
+					t.Fatal("dc+sd-jwt payload must not use the legacy vc claim")
+				}
+				if _, ok := decoded.Payload["_sd"].([]interface{}); !ok {
+					t.Fatalf("top-level _sd = %#v, want disclosure digest array", decoded.Payload["_sd"])
+				}
+				cnf, _ := decoded.Payload["cnf"].(map[string]interface{})
+				if _, unexpected := cnf["jkt"]; unexpected {
+					t.Fatal("dc+sd-jwt cnf must carry jwk without the redundant jkt extension")
 				}
 				if _, _, err := vc.ProcessSDJWTDisclosures(
 					map[string]interface{}(decoded.Payload),
@@ -1033,6 +1334,67 @@ func TestAuthorizationDetailsIssuesTokenBoundCredentialIdentifiers(t *testing.T)
 	}
 }
 
+func TestCredentialRejectsUnknownConfigurationBeforeIdentifierRequirement(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+	accessToken, walletSubject, _, _ := issuePreAuthorizedGrantWithAuthorizationDetails(
+		t,
+		server.URL,
+		[]string{"UniversityDegreeCredential"},
+		[]string{"UniversityDegreeCredential"},
+	)
+	proofJWT := createWalletProofJWT(t, fetchCNonce(t, server.URL, accessToken), walletSubject, testIssuerAudience)
+	resp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": "DoesNotExistInIssuerMetadata",
+			"proofs":                      map[string]interface{}{"jwt": []string{proofJWT}},
+		},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, resp, http.StatusBadRequest)
+	payload := decodeJSONMap(t, resp)
+	if asString(t, payload["error"]) != "unknown_credential_configuration" {
+		t.Fatalf("error = %q, want unknown_credential_configuration (OID4VCI precedence over missing credential_identifier)", payload["error"])
+	}
+}
+
+func TestCredentialRejectsUnknownConfigurationWithoutAuthorizationDetails(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+	offerResp := postJSONWithHeaders(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	}, nil)
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	preAuthorizedCode := asString(t, offer["pre_authorized_code"])
+	walletSubject := asString(t, offer["wallet_subject"])
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {preAuthorizedCode},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	accessToken := asString(t, decodeJSONMap(t, tokenResp)["access_token"])
+	proofJWT := createWalletProofJWT(t, fetchCNonce(t, server.URL, accessToken), walletSubject, testIssuerAudience)
+	resp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": "DoesNotExistInIssuerMetadata",
+			"proofs":                      map[string]interface{}{"jwt": []string{proofJWT}},
+		},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, resp, http.StatusBadRequest)
+	if asString(t, decodeJSONMap(t, resp)["error"]) != "unknown_credential_configuration" {
+		t.Fatalf("expected unknown_credential_configuration")
+	}
+}
+
 func TestCredentialIdentifierRejectsMixedUnknownAndCrossTokenValues(t *testing.T) {
 	env := newTestEnvironment(t)
 	defer env.Server.Close()
@@ -1100,7 +1462,10 @@ func TestCredentialIdentifierRejectsMixedUnknownAndCrossTokenValues(t *testing.T
 	}
 }
 
-func TestCredentialIdentifierMustNotBeUsedWithoutTokenAuthorizationDetails(t *testing.T) {
+func TestCredentialIdentifierUnknownWithoutTokenAuthorizationDetails(t *testing.T) {
+	// OID4VCI §8.3.1.2 unknown_credential_identifier: an unbound
+	// credential_identifier yields unknown_credential_identifier even when the
+	// Token Response never returned credential_identifiers.
 	server := newTestServer(t)
 	defer server.Close()
 	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
@@ -1118,13 +1483,13 @@ func TestCredentialIdentifierMustNotBeUsedWithoutTokenAuthorizationDetails(t *te
 	resp := postJSONWithHeaders(
 		t,
 		server.URL+"/oid4vci/credential",
-		map[string]interface{}{"credential_identifier": "not-issued"},
+		map[string]interface{}{"credential_identifier": "unknown:" + t.Name()},
 		map[string]string{"Authorization": "Bearer " + asString(t, token["access_token"])},
 	)
 	assertStatus(t, resp, http.StatusBadRequest)
 	payload := decodeJSONMap(t, resp)
-	if asString(t, payload["error"]) != "invalid_credential_request" {
-		t.Fatalf("expected invalid_credential_request, got %v", payload["error"])
+	if asString(t, payload["error"]) != "unknown_credential_identifier" {
+		t.Fatalf("expected unknown_credential_identifier, got %v", payload["error"])
 	}
 }
 
@@ -1167,6 +1532,37 @@ func TestAuthorizationCodeGrantReturnsCredentialIdentifiers(t *testing.T) {
 	env.Plugin.mu.RUnlock()
 	if grant == nil || grant.CredentialIdentifiers[credentialIdentifier] != "UniversityDegreeCredential" {
 		t.Fatal("authorization-code credential_identifier was not bound to the real access grant")
+	}
+
+	replayResp, err := http.PostForm(env.Server.URL+"/oid4vci/token", url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {authCode.Code},
+		"client_id":    {clientID},
+		"redirect_uri": {redirectURI},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, replayResp, http.StatusBadRequest)
+	_ = decodeJSONMap(t, replayResp)
+	if !env.IDP.IsTokenRevoked(accessToken) {
+		t.Fatal("authorization-code replay did not revoke the previously issued OID4VCI access token")
+	}
+
+	// FAPI2 attempt-reuse-authorization-code: the resource endpoint MUST reject
+	// the revoked access token with HTTP 4xx (RFC 6749 §4.1.2 SHOULD + RFC 6750).
+	resourceResp := postJSONWithHeaders(
+		t,
+		env.Server.URL+"/oid4vci/credential",
+		map[string]interface{}{"credential_identifier": credentialIdentifier},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	if resourceResp.StatusCode < 400 || resourceResp.StatusCode > 499 {
+		t.Fatalf("credential endpoint status = %d after code replay, want 4xx", resourceResp.StatusCode)
+	}
+	resourcePayload := decodeJSONMap(t, resourceResp)
+	if asString(t, resourcePayload["error"]) != "invalid_token" {
+		t.Fatalf("credential endpoint error = %v, want invalid_token", resourcePayload["error"])
 	}
 }
 
@@ -1397,7 +1793,77 @@ func TestCredentialMalformedJSONUsesCredentialErrorCode(t *testing.T) {
 	}
 }
 
-func TestCredentialRejectsUnadvertisedMultipleProofs(t *testing.T) {
+func TestCredentialIssuesBatchBoundToDistinctProofKeys(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+	accessToken, walletSubject, identifier, _ := issuePreAuthorizedGrantWithAuthorizationDetails(
+		t,
+		server.URL,
+		[]string{"UniversityDegreeCredential"},
+		[]string{"UniversityDegreeCredential"},
+	)
+	cNonce := fetchCNonce(t, server.URL, accessToken)
+	proofA := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
+	proofB := createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience)
+	resp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_identifier": identifier,
+			"proofs":                map[string]interface{}{"jwt": []string{proofA, proofB}},
+		},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, resp, http.StatusOK)
+	payload := decodeJSONMap(t, resp)
+	credentials, ok := payload["credentials"].([]interface{})
+	if !ok || len(credentials) != 2 {
+		t.Fatalf("credentials = %#v, want 2 issued credentials", payload["credentials"])
+	}
+
+	thumbprints := make(map[string]struct{}, 2)
+	subjects := make(map[string]struct{}, 2)
+	vcts := make(map[string]struct{}, 2)
+	for _, entry := range credentials {
+		entryMap, ok := entry.(map[string]interface{})
+		if !ok {
+			t.Fatalf("credential entry = %#v", entry)
+		}
+		compact := asString(t, entryMap["credential"])
+		envelope, err := vc.ParseSDJWTEnvelope(compact)
+		if err != nil {
+			t.Fatalf("ParseSDJWTEnvelope: %v", err)
+		}
+		decoded, err := crypto.DecodeTokenWithoutValidation(envelope.IssuerSignedJWT)
+		if err != nil {
+			t.Fatalf("decode issuer-signed jwt: %v", err)
+		}
+		subjects[asString(t, decoded.Payload["sub"])] = struct{}{}
+		vcts[asString(t, decoded.Payload["vct"])] = struct{}{}
+		cnf, _ := decoded.Payload["cnf"].(map[string]interface{})
+		jwkRaw, ok := cnf["jwk"]
+		if !ok {
+			t.Fatal("batch credential missing cnf.jwk binding")
+		}
+		raw, err := json.Marshal(jwkRaw)
+		if err != nil {
+			t.Fatalf("marshal cnf.jwk: %v", err)
+		}
+		var holder crypto.JWK
+		if err := json.Unmarshal(raw, &holder); err != nil {
+			t.Fatalf("decode cnf.jwk: %v", err)
+		}
+		thumbprints[holder.Thumbprint()] = struct{}{}
+	}
+	if len(thumbprints) != 2 {
+		t.Fatalf("expected distinct cnf.jwk bindings, got %d unique thumbprints", len(thumbprints))
+	}
+	if len(subjects) != 1 || len(vcts) != 1 {
+		t.Fatalf("batch credentials must share subject/vct dataset; subjects=%v vcts=%v", subjects, vcts)
+	}
+}
+
+func TestCredentialRejectsDuplicateProofKeysInBatch(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
 	accessToken, walletSubject, identifier, _ := issuePreAuthorizedGrantWithAuthorizationDetails(
@@ -1418,7 +1884,36 @@ func TestCredentialRejectsUnadvertisedMultipleProofs(t *testing.T) {
 	)
 	assertStatus(t, resp, http.StatusBadRequest)
 	if errorCode := asString(t, decodeJSONMap(t, resp)["error"]); errorCode != "invalid_proof" {
-		t.Fatalf("multiple proof error = %q, want invalid_proof", errorCode)
+		t.Fatalf("duplicate proof key error = %q, want invalid_proof", errorCode)
+	}
+}
+
+func TestCredentialRejectsProofsExceedingBatchSize(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+	accessToken, walletSubject, identifier, _ := issuePreAuthorizedGrantWithAuthorizationDetails(
+		t,
+		server.URL,
+		[]string{"UniversityDegreeCredential"},
+		[]string{"UniversityDegreeCredential"},
+	)
+	cNonce := fetchCNonce(t, server.URL, accessToken)
+	proofs := make([]string, 0, batchCredentialIssuanceBatchSize+1)
+	for i := 0; i < batchCredentialIssuanceBatchSize+1; i++ {
+		proofs = append(proofs, createWalletProofJWT(t, cNonce, walletSubject, testIssuerAudience))
+	}
+	resp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_identifier": identifier,
+			"proofs":                map[string]interface{}{"jwt": proofs},
+		},
+		map[string]string{"Authorization": "Bearer " + accessToken},
+	)
+	assertStatus(t, resp, http.StatusBadRequest)
+	if errorCode := asString(t, decodeJSONMap(t, resp)["error"]); errorCode != "invalid_proof" {
+		t.Fatalf("oversize batch error = %q, want invalid_proof", errorCode)
 	}
 }
 
