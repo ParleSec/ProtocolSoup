@@ -536,7 +536,23 @@ jobs:
         run: |
           curl -fsS "https://wallet.protocolsoup.com/health" \
             | jq -e '.status == "ok"' > /dev/null
-      
+
+      - name: Canary wallet authorize endpoint
+        run: |
+          set -euo pipefail
+          # Public /authorize must redirect into the consent SPA with request_uri preserved.
+          headers="${RUNNER_TEMP}/wallet-authorize-headers.txt"
+          code="$(curl -sS -o /dev/null -D "$headers" -w '%{http_code}' \
+            "https://wallet.protocolsoup.com/authorize?client_id=x509_hash%3Acanary&request_uri=https%3A%2F%2Fwww.example.com%2Frequest&request_uri_method=get")"
+          if [ "$code" != "302" ]; then
+            echo "expected /authorize to redirect with 302, got ${code}"
+            cat "$headers"
+            exit 1
+          fi
+          location="$(awk 'tolower($1)=="location:" {print substr($0, index($0,$2))}' "$headers" | tr -d '\r')"
+          echo "$location" | grep -F "request_uri=https%3A%2F%2Fwww.example.com%2Frequest" >/dev/null
+          echo "$location" | grep -F "openid4vp://" >/dev/null
+          echo "wallet /authorize canary passed"
       - name: Smoke test OID4VP wallet bootstrap
         run: |
           set -euo pipefail
