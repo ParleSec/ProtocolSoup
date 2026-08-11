@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"os"
@@ -137,14 +136,13 @@ func ecPrivateKeyFromJWK(jwk intcrypto.JWK) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode EC private d: %w", err)
 	}
-	curve := elliptic.P256()
 	if crv := strings.TrimSpace(jwk.Crv); crv != "" && !strings.EqualFold(crv, "P-256") {
 		return nil, fmt.Errorf("unsupported EC curve %q", crv)
 	}
-	priv := new(ecdsa.PrivateKey)
-	priv.PublicKey.Curve = curve
-	priv.D = new(big.Int).SetBytes(dBytes)
-	priv.PublicKey.X, priv.PublicKey.Y = curve.ScalarBaseMult(dBytes)
+	priv, err := ecdsa.ParseRawPrivateKey(elliptic.P256(), dBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse EC private d: %w", err)
+	}
 	if !priv.PublicKey.Equal(pub) {
 		return nil, fmt.Errorf("EC private d does not match the JWK public coordinates")
 	}
