@@ -61,18 +61,6 @@ type Config struct {
 	// path so issued tokens remain verifiable after a restart.
 	KeyStorePath string
 
-	// Conformance client provisioning. When ConformanceRedirectURIs is set AND
-	// both client secrets are present, two confidential clients are registered
-	// for OIDF conformance testing. The second client is required by tests that
-	// verify authorization codes are bound to the client they were issued to.
-	// Without an explicit secret no client is registered, so production is
-	// unaffected unless conformance is deliberately enabled.
-	ConformanceRedirectURIs  []string
-	ConformanceClientID      string
-	ConformanceClientSecret  string
-	ConformanceClient2ID     string
-	ConformanceClient2Secret string
-
 	// OIDC Dynamic Client Registration (open, ephemeral by default).
 	OIDCDynamicRegistrationEnabled    bool
 	OIDCDynamicRegistrationTTL        time.Duration
@@ -104,12 +92,6 @@ func LoadConfig() *Config {
 
 		DPoPNonceRequired:         getEnvBool("SHOWCASE_DPOP_NONCE_REQUIRED", false),
 		DPoPResourceNonceRequired: getEnvBool("SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED", false),
-
-		ConformanceRedirectURIs:  getEnvList("OIDC_CONFORMANCE_REDIRECT_URIS", nil),
-		ConformanceClientID:      getEnv("OIDC_CONFORMANCE_CLIENT_ID", "conformance-client"),
-		ConformanceClientSecret:  getEnv("OIDC_CONFORMANCE_CLIENT_SECRET", ""),
-		ConformanceClient2ID:     getEnv("OIDC_CONFORMANCE_CLIENT2_ID", "conformance-client-2"),
-		ConformanceClient2Secret: getEnv("OIDC_CONFORMANCE_CLIENT2_SECRET", ""),
 
 		OIDCDynamicRegistrationEnabled:    getEnvBool("OIDC_DYNAMIC_REGISTRATION_ENABLED", true),
 		OIDCDynamicRegistrationTTL:        getEnvDuration("OIDC_DYNAMIC_REGISTRATION_TTL", 2*time.Hour),

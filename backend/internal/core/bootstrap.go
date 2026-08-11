@@ -11,7 +11,6 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
-	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
 // BootstrapOptions controls which shared dependencies are initialized.
@@ -45,8 +44,8 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 	var keySet *crypto.KeySet
 	if opts.EnableKeySet {
 		// Persist keys under KeyStorePath when configured so signing keys and
-		// their kids survive restarts (required for a certified deployment).
-		// An empty path yields ephemeral in-memory keys for development.
+		// their kids survive restarts. An empty path yields ephemeral in-memory
+		// keys for development.
 		ks, err := crypto.LoadOrCreateKeySet(cfg.KeyStorePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize key set: %w", err)
@@ -67,7 +66,6 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		idp = mockidp.NewMockIdP(keySet)
 		idp.SetIssuer(cfg.BaseURL)
 		log.Printf("Mock Identity Provider initialized with issuer: %s", cfg.BaseURL)
-		registerConformanceClients(idp, cfg)
 	}
 
 	var lg *lookingglass.Engine
@@ -150,66 +148,4 @@ func validateProductionBaseURL(cfg *Config) error {
 		return fmt.Errorf("SHOWCASE_BASE_URL must be a pathless HTTPS origin in production")
 	}
 	return nil
-}
-
-// registerConformanceClients provisions the static confidential clients the
-// OIDF OP conformance suite requires. Two clients are registered because the
-// suite tests that an authorization code issued to one client cannot be
-// redeemed by another (client binding). They are only registered when the
-// redirect URIs and both secrets are supplied, so a production deployment that
-// has not opted in is unaffected, and a secretless confidential client (which
-// would accept anyone) is never created.
-func registerConformanceClients(idp *mockidp.MockIdP, cfg *Config) {
-	uris := trimmedNonEmpty(cfg.ConformanceRedirectURIs)
-	if len(uris) == 0 {
-		return
-	}
-	if cfg.ConformanceClientSecret == "" {
-		log.Println("Conformance redirect URIs are set but OIDC_CONFORMANCE_CLIENT_SECRET is missing; conformance clients NOT registered")
-		return
-	}
-	// The second client needs a valid secret to authenticate at the token
-	// endpoint. When no distinct secret is supplied it reuses the first, which
-	// keeps it a separate registration (distinct client_id) while requiring only
-	// one secret to be provisioned.
-	client2Secret := cfg.ConformanceClient2Secret
-	if client2Secret == "" {
-		client2Secret = cfg.ConformanceClientSecret
-	}
-
-	scopes := []string{"openid", "profile", "email"}
-	grants := []string{"authorization_code", "refresh_token"}
-
-	idp.RegisterClient(&models.Client{
-		ID:           cfg.ConformanceClientID,
-		Secret:       cfg.ConformanceClientSecret,
-		Name:         "OIDF Conformance Client",
-		RedirectURIs: uris,
-		GrantTypes:   grants,
-		Scopes:       scopes,
-		Public:       false,
-	})
-	idp.RegisterClient(&models.Client{
-		ID:           cfg.ConformanceClient2ID,
-		Secret:       client2Secret,
-		Name:         "OIDF Conformance Client 2",
-		RedirectURIs: uris,
-		GrantTypes:   grants,
-		Scopes:       scopes,
-		Public:       false,
-	})
-	log.Printf("Registered OIDF conformance clients %q and %q with %d redirect URI(s)",
-		cfg.ConformanceClientID, cfg.ConformanceClient2ID, len(uris))
-}
-
-// trimmedNonEmpty trims surrounding whitespace from each value and drops empty
-// entries, so a comma-separated env list tolerates spaces after commas.
-func trimmedNonEmpty(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		if t := strings.TrimSpace(v); t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
 }
