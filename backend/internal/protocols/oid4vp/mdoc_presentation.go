@@ -28,11 +28,12 @@ type verifiedMdocPresentation struct {
 // PKI), never the document-signer certificate; the DS cert arrives in the
 // IssuerAuth x5chain and chains to this root.
 //
-// Resolution order: an explicit PEM in MDOC_IACA_ROOT_PEM, then a PEM file in
-// MDOC_IACA_ROOT_PEM_FILE, then the issuer-persisted iaca_root.pem under
-// SHOWCASE_MDOC_PKI_PATH or {DataDir}/mdoc. When no anchor is configured the
-// pool stays nil and the mdoc branch reports a clear policy reason rather than
-// trusting anything implicitly.
+// Every configured source is additive: external ecosystem roots from the
+// environment are combined with the issuer-persisted iaca_root.pem under
+// SHOWCASE_MDOC_PKI_PATH or {DataDir}/mdoc. This lets a combined
+// issuer/verifier deployment validate both external suite credentials and the
+// real mdocs it issued itself. When no anchor is configured the pool stays nil
+// and the mdoc branch reports a clear policy reason.
 func (p *Plugin) initMdocTrustAnchors(dataDir string) error {
 	pemBytes, source := mdocIACARootPEM(dataDir)
 	if len(pemBytes) == 0 {
@@ -55,14 +56,16 @@ func (p *Plugin) initMdocTrustAnchors(dataDir string) error {
 }
 
 // mdocIACARootPEM resolves the configured ISO/IEC 18013-5 IACA root PEM and the
-// label of the source it came from (for error messages). Resolution order: an
-// explicit PEM in MDOC_IACA_ROOT_PEM, then a PEM file in MDOC_IACA_ROOT_PEM_FILE,
-// then the issuer-persisted iaca_root.pem under SHOWCASE_MDOC_PKI_PATH or
-// {DataDir}/mdoc. It returns nil bytes when no anchor is configured, leaving the
-// verifier to report a clear policy reason rather than trusting anything.
+// labels of the sources they came from (for error messages). Explicit
+// ecosystem roots and the local issuer-persisted root are additive. It returns
+// nil bytes when no anchor is configured, leaving the verifier to report a
+// clear policy reason rather than trusting anything.
 func mdocIACARootPEM(dataDir string) ([]byte, string) {
+	var combined []byte
+	var sources []string
 	if pemEnv := strings.TrimSpace(os.Getenv("MDOC_IACA_ROOT_PEM")); pemEnv != "" {
-		return []byte(pemEnv), "MDOC_IACA_ROOT_PEM"
+		combined = appendPEM(combined, []byte(pemEnv))
+		sources = append(sources, "MDOC_IACA_ROOT_PEM")
 	}
 	candidates := make([]string, 0, 3)
 	if path := strings.TrimSpace(os.Getenv("MDOC_IACA_ROOT_PEM_FILE")); path != "" {
@@ -74,14 +77,28 @@ func mdocIACARootPEM(dataDir string) ([]byte, string) {
 	if dataDir != "" {
 		candidates = append(candidates, filepath.Join(dataDir, "mdoc", "iaca_root.pem"))
 	}
+	seenPaths := make(map[string]struct{}, len(candidates))
 	for _, path := range candidates {
+		cleanPath := filepath.Clean(path)
+		if _, duplicate := seenPaths[cleanPath]; duplicate {
+			continue
+		}
+		seenPaths[cleanPath] = struct{}{}
 		pemBytes, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		return pemBytes, fmt.Sprintf("load mso_mdoc IACA trust anchor %q", path)
+		combined = appendPEM(combined, pemBytes)
+		sources = append(sources, fmt.Sprintf("mso_mdoc IACA trust anchor %q", path))
 	}
-	return nil, ""
+	return combined, strings.Join(sources, ", ")
+}
+
+func appendPEM(destination, pemBytes []byte) []byte {
+	if len(destination) > 0 && destination[len(destination)-1] != '\n' {
+		destination = append(destination, '\n')
+	}
+	return append(destination, pemBytes...)
 }
 
 // looksLikeMdocDeviceResponse reports whether a vp_token carries an mso_mdoc
@@ -223,7 +240,10 @@ func (p *Plugin) matchMdocAgainstDCQL(session *requestSession, verified []verifi
 			nsClaims := make(map[string]interface{}, len(elements))
 			for element, value := range elements {
 				set[element] = struct{}{}
-				nsClaims[element] = value
+				// CBOR decoders use map[interface{}]interface{} for nested
+				// values. Convert it before storing verifier evidence because
+				// completed OID4VP request sessions are persisted as JSON.
+				nsClaims[element] = mdoc.JSONSafeValue(value)
 			}
 			namespaces[ns] = set
 			disclosed[ns] = nsClaims

@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -24,6 +26,37 @@ const mdocDCQLQuery = `{
 		]
 	}]
 }`
+
+func TestMdocTrustAnchorsCombineExternalAndLocalIssuerRoots(t *testing.T) {
+	externalPKI, err := mdoc.GenerateIssuerPKI(mdoc.DefaultPKIParams("https://external-issuer.example"))
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI external: %v", err)
+	}
+	localPKI, err := mdoc.GenerateIssuerPKI(mdoc.DefaultPKIParams("https://protocolsoup.example"))
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI local: %v", err)
+	}
+	dataDir := t.TempDir()
+	localPKIDir := filepath.Join(dataDir, "mdoc")
+	if err := os.MkdirAll(localPKIDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(localPKIDir, "iaca_root.pem"), localPKI.IACARootPEM(), 0o600); err != nil {
+		t.Fatalf("WriteFile local IACA: %v", err)
+	}
+	t.Setenv("MDOC_IACA_ROOT_PEM", string(externalPKI.IACARootPEM()))
+	t.Setenv("MDOC_IACA_ROOT_PEM_FILE", "")
+	t.Setenv("SHOWCASE_MDOC_PKI_PATH", "")
+
+	pemBytes, source := mdocIACARootPEM(dataDir)
+	certificates, err := mdoc.TrustAnchorCertificatesFromPEM(pemBytes)
+	if err != nil {
+		t.Fatalf("TrustAnchorCertificatesFromPEM: %v", err)
+	}
+	if len(certificates) != 2 {
+		t.Fatalf("trust anchor count = %d, want external + local roots (source %q)", len(certificates), source)
+	}
+}
 
 // issueMdocForVerifier issues a real mDL IssuerSigned bound to deviceKey, signed
 // by a fresh IACA document signer, returning the credential and the IssuerPKI

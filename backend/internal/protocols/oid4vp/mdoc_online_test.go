@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
@@ -141,6 +142,30 @@ func TestEncryptDecryptMdocResponseRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEncryptedResponseSessionCorrelationDoesNotRequireKid(t *testing.T) {
+	privateJWK, publicJWK, err := newMdocResponseEncryptionKey("session-key")
+	if err != nil {
+		t.Fatalf("newMdocResponseEncryptionKey: %v", err)
+	}
+	publicJWK.Kid = ""
+	compactJWE, err := encryptMdocResponse(publicJWK, `{"credential":["example"]}`, "state-123")
+	if err != nil {
+		t.Fatalf("encryptMdocResponse: %v", err)
+	}
+
+	verifier := NewPlugin()
+	verifier.requests["request-123"] = &requestSession{
+		ID:                    "request-123",
+		State:                 "state-123",
+		ResponseEncryptionJWK: &privateJWK,
+		ExpiresAt:             time.Now().Add(time.Minute),
+	}
+	requestID, session := verifier.requestSessionForEncryptedResponse(compactJWE)
+	if requestID != "request-123" || session == nil || session.ID != "request-123" {
+		t.Fatalf("correlated request = %q, %#v", requestID, session)
+	}
+}
+
 // newMdocVerifierServer initializes a single OID4VP verifier plugin behind an
 // httptest server, with the supplied IACA trust anchor.
 func newMdocVerifierServer(t *testing.T, trust *mdoc.IssuerPKI) (*Plugin, *httptest.Server) {
@@ -247,18 +272,11 @@ func TestMdocOnlineProfileEncryptedRoundTrip(t *testing.T) {
 		_, _ = body.ReadFrom(respond.Body)
 		t.Fatalf("response status %d: %s", respond.StatusCode, body.String())
 	}
-	var outcome struct {
-		Policy struct {
-			Allowed     bool     `json:"allowed"`
-			Code        string   `json:"code"`
-			ReasonCodes []string `json:"reason_codes"`
-		} `json:"policy"`
-	}
-	if err := json.NewDecoder(respond.Body).Decode(&outcome); err != nil {
-		t.Fatalf("decode outcome: %v", err)
-	}
-	if !outcome.Policy.Allowed {
-		t.Fatalf("expected encrypted mdoc presentation to be allowed, got code=%q reasons=%v", outcome.Policy.Code, outcome.Policy.ReasonCodes)
+	p.mu.RLock()
+	result := p.requests[created.RequestID].Result
+	p.mu.RUnlock()
+	if result == nil || !result.Policy.Allowed {
+		t.Fatalf("expected encrypted mdoc presentation to be allowed, got result=%+v", result)
 	}
 }
 
@@ -325,16 +343,10 @@ func TestMdocOnlineProfileThumbprintCouplingRejected(t *testing.T) {
 	if respond.StatusCode != http.StatusOK {
 		t.Fatalf("response status %d", respond.StatusCode)
 	}
-	var outcome struct {
-		Policy struct {
-			Allowed     bool     `json:"allowed"`
-			ReasonCodes []string `json:"reason_codes"`
-		} `json:"policy"`
-	}
-	if err := json.NewDecoder(respond.Body).Decode(&outcome); err != nil {
-		t.Fatalf("decode outcome: %v", err)
-	}
-	if outcome.Policy.Allowed {
+	p.mu.RLock()
+	result := p.requests[created.RequestID].Result
+	p.mu.RUnlock()
+	if result == nil || result.Policy.Allowed {
 		t.Fatal("expected denial when the handover thumbprint does not match the verifier encryption key")
 	}
 }
