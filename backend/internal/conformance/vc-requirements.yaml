@@ -117,7 +117,9 @@ requirements:
     level: MUST
     statement: >-
       Redirect response modes require exact correlation to the state issued in
-      the Authorization Request; a private request_id cannot bypass it.
+      the Authorization Request; a private request_id cannot bypass it. An
+      encrypted response without an outer state is selected only by its
+      ephemeral JWE kid before the decrypted state is compared exactly.
     roles: [verifier]
     applicability: applicable
     implementation:
@@ -126,6 +128,9 @@ requirements:
       - package: ./internal/protocols/oid4vp
         file: backend/internal/protocols/oid4vp/plugin_test.go
         name: TestRedirectWalletResponseRequiresExactStateEvenWithRequestID
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/haip_test.go
+        name: TestHAIPDirectPostJWTSDJWTProvisionsECDHESEncryption
 
   - id: VP-007
     specification: oid4vp
@@ -143,6 +148,23 @@ requirements:
         file: backend/internal/protocols/oid4vp/plugin_test.go
         name: TestRequestObjectContainsClientMetadataWithVPFormats
 
+  - id: VP-008
+    specification: oid4vp
+    section: "5.10.2"
+    level: MUST
+    statement: >-
+      A request_uri_method=post endpoint binds wallet_nonce into the signed
+      request object, permits exact repeated retrieval, and rejects a changed
+      nonce.
+    roles: [verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestAuthorizationRequestPOSTBindsWalletNonceAndIsSafelyRepeatable
+
   - id: HAIP-VP-001
     specification: haip
     section: "5"
@@ -157,6 +179,24 @@ requirements:
       - package: ./internal/protocols/oid4vp
         file: backend/internal/protocols/oid4vp/plugin_test.go
         name: TestCreateAuthorizationRequestBuildsX509SANDNSRequestObject
+
+  - id: HAIP-VP-002
+    specification: haip
+    section: "6.1.1"
+    level: MUST
+    statement: >-
+      Independently issued SD-JWT VCs are accepted only after their issuer
+      signature and leaf-only x5c chain validate to an explicitly configured
+      trust anchor.
+    roles: [verifier]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vp/external_issuer_trust.go
+      - backend/internal/protocols/oid4vp/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vp
+        file: backend/internal/protocols/oid4vp/plugin_test.go
+        name: TestExternalSDJWTIssuerRequiresTrustedLeafOnlyX5C
 
   - id: VP-011
     specification: oid4vp
@@ -451,6 +491,78 @@ requirements:
         file: backend/internal/protocols/oid4vci/plugin_test.go
         name: TestCredentialIssuerMetadataIncludesMultiFormatConfigurations
 
+  - id: CI-019
+    specification: oid4vci
+    section: "RFC 9126 Sections 2 and 4"
+    level: MUST
+    statement: >-
+      A pushed authorization request is client-attestation authenticated,
+      PKCE-bound, and represented by a short-lived request_uri bound to the
+      exact client and redirect URI. An optional PAR DPoP binding is retained,
+      while HAIP wallets may introduce DPoP at token redemption. Authorization
+      Server Metadata advertises the enforced client-attestation authentication
+      and signing algorithms.
+    roles: [issuer, authorization_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/par.go
+      - backend/internal/protocols/oid4vci/authorization_server_metadata.go
+      - backend/internal/protocols/oidc/request_uri.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestPushedAuthorizationRequestBindsAttestationDPoPAndCredentialDetails
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestAuthorizationServerMetadataAdvertisesAttestationWhenConfigured
+
+  - id: CI-020
+    specification: oid4vci
+    section: "11.2 and HAIP 6"
+    level: MUST
+    statement: >-
+      HAIP SD-JWT VC metadata and credentials use an asymmetric
+      certificate-backed signer, and issued credentials carry unique OAuth
+      Status List references. URL-based vct values resolve to matching Type
+      Metadata, and SD-JWT claims use the top-level claim model.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/handlers.go
+      - backend/internal/protocols/oid4vci/issuance_drivers.go
+      - backend/internal/protocols/oid4vci/status_list.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestSignedCredentialIssuerMetadataUsesTrustedX5CSigner
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestHAIPSDJWTCredentialUsesTrustedX5CSigner
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestHAIPStatusListAllocatesUniqueIndicesAndServesSignedToken
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestUniversityDegreeTypeMetadataMatchesAdvertisedVCT
+
+  - id: CI-021
+    specification: oid4vci
+    section: "8.3"
+    level: MUST
+    statement: >-
+      Advertised Credential Request Encryption is implemented with the
+      advertised algorithms and decrypts to the same validated Credential
+      Request contract.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/credential_request_encryption.go
+      - backend/internal/protocols/oid4vci/handlers.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/haip_conformance_test.go
+        name: TestCredentialRequestEncryptionRoundTrip
+
   - id: DP-001
     specification: rfc9449
     section: "4.3"
@@ -729,7 +841,10 @@ requirements:
     statement: >-
       Document-signer certificates satisfy the Annex B profile, chain to an
       independently configured IACA root, and their signing key is bound by
-      the COSE signature.
+      the COSE signature. When IssuerAuth is signed by the configured trust
+      anchor itself (verified chain length 1), as in a self-signed trust-anchor
+      mock-wallet shape, the DS-only Annex B profile checks are skipped after
+      successful path validation and P-256 key checks.
     roles: [issuer, wallet, verifier]
     applicability: applicable
     implementation:
@@ -744,6 +859,29 @@ requirements:
       - package: ./internal/mdoc
         file: backend/internal/mdoc/verify_test.go
         name: TestIssuerAuthSignatureBindsRFC9360X5ChainLeaf
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestVerifyIssuerSignedAcceptsTrustAnchorAsDocumentSigner
+      - package: ./internal/mdoc
+        file: backend/internal/mdoc/verify_test.go
+        name: TestVerifyIssuerSignedRejectsCADocumentSignerBeneathIACA
+
+  - id: MDOC-006
+    specification: iso18013-5
+    section: "7.2.1"
+    level: MUST
+    statement: >-
+      Issued mDL credentials contain every mandatory org.iso.18013.5.1 data
+      element, including a portrait carried as real JPEG bytes.
+    roles: [issuer]
+    applicability: applicable
+    implementation:
+      - backend/internal/protocols/oid4vci/issuance_drivers.go
+      - backend/internal/protocols/oid4vci/registry.go
+    tests:
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/mdoc_issuance_test.go
+        name: TestMsoMdocPreAuthorizedIssuance
 
   - id: SDJWT-001
     specification: rfc9901
