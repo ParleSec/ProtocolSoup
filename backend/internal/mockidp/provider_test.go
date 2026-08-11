@@ -2,6 +2,7 @@ package mockidp
 
 import (
 	"testing"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
@@ -58,3 +59,68 @@ func TestPairwiseSubjectIsDeterministicAndSectorBound(t *testing.T) {
 		t.Fatal("pairwise subjects matched across distinct sectors")
 	}
 }
+
+func TestAuthorizationCodeLifetimeIsAtMostSixtySeconds(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	idp.RegisterClient(&models.Client{
+		ID:           "code-ttl-client",
+		Public:       true,
+		RedirectURIs: []string{"https://client.example/callback"},
+		GrantTypes:   []string{"authorization_code"},
+	})
+
+	before := time.Now()
+	authCode, err := idp.CreateAuthorizationCode(
+		"code-ttl-client", "alice", "https://client.example/callback",
+		"openid", "", "", "", "", "", time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	after := time.Now()
+
+	if authCode.ExpiresAt.After(before.Add(AuthorizationCodeTTL + time.Second)) {
+		t.Fatalf("ExpiresAt = %s exceeds AuthorizationCodeTTL from %s", authCode.ExpiresAt, before)
+	}
+	if authCode.ExpiresAt.Before(after.Add(AuthorizationCodeTTL - 2*time.Second)) {
+		t.Fatalf("ExpiresAt = %s is shorter than expected from %s", authCode.ExpiresAt, after)
+	}
+	if AuthorizationCodeTTL > 60*time.Second {
+		t.Fatalf("AuthorizationCodeTTL = %s, FAPI2 SP Final §5.3.2.1-11 caps at 60s", AuthorizationCodeTTL)
+	}
+}
+
+func TestValidateAuthorizationCodeRejectsExpiredCode(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	const clientID = "expired-code-client"
+	const redirectURI = "https://client.example/callback"
+	idp.RegisterClient(&models.Client{
+		ID:           clientID,
+		Public:       true,
+		RedirectURIs: []string{redirectURI},
+		GrantTypes:   []string{"authorization_code"},
+	})
+
+	authCode, err := idp.CreateAuthorizationCode(
+		clientID, "alice", redirectURI, "openid", "", "", "", "", "", time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("CreateAuthorizationCode: %v", err)
+	}
+	// FAPI2 waits 62s; simulate expiry without sleeping.
+	authCode.ExpiresAt = time.Now().Add(-time.Second)
+
+	_, err = idp.ValidateAuthorizationCode(authCode.Code, clientID, redirectURI, "")
+	if err == nil || err.Error() != "authorization code expired" {
+		t.Fatalf("ValidateAuthorizationCode = %v, want authorization code expired", err)
+	}
+}
+

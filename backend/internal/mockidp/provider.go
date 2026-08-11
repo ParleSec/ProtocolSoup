@@ -16,21 +16,27 @@ import (
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
+// AuthorizationCodeTTL is the lifetime of issued authorization codes.
+// FAPI 2.0 Security Profile Final §5.3.2.1 clause 11 requires a maximum of
+// 60 seconds (stricter than RFC 6749's recommended 10 minutes).
+const AuthorizationCodeTTL = 60 * time.Second
+
 // MockIdP provides a mock identity provider for demonstrations
 type MockIdP struct {
-	users         map[string]*models.User
-	clients       map[string]*models.Client
-	authCodes     map[string]*models.AuthorizationCode
-	sessions      map[string]*models.Session
-	refreshTokens map[string]*models.RefreshToken
-	revokedTokens map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
-	usedCodes     map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
-	keySet        *crypto.KeySet
-	jwtService    *crypto.JWTService
-	issuer        string
-	defaultUserID string
-	pairwiseSalt  []byte
-	mu            sync.RWMutex
+	users          map[string]*models.User
+	clients        map[string]*models.Client
+	authCodes      map[string]*models.AuthorizationCode
+	sessions       map[string]*models.Session
+	refreshTokens  map[string]*models.RefreshToken
+	revokedTokens  map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
+	usedCodes      map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
+	pushedRequests map[string]*PushedAuthorizationRequest
+	keySet         *crypto.KeySet
+	jwtService     *crypto.JWTService
+	issuer         string
+	defaultUserID  string
+	pairwiseSalt   []byte
+	mu             sync.RWMutex
 }
 
 // usedAuthorizationCode records an authorization code that has already been
@@ -42,6 +48,30 @@ type usedAuthorizationCode struct {
 	accessTokenJTIs []string
 	refreshTokens   []string
 	usedAt          time.Time
+}
+
+// PushedAuthorizationRequest is the validated RFC 9126 request state shared
+// between the OID4VCI PAR endpoint and the OIDC authorization endpoint.
+type PushedAuthorizationRequest struct {
+	RequestURI                     string
+	ClientID                       string
+	RedirectURI                    string
+	ResponseType                   string
+	Scope                          string
+	State                          string
+	Nonce                          string
+	CodeChallenge                  string
+	CodeChallengeMethod            string
+	CredentialConfigurationIDs     []string
+	// AuthorizationDetailsUsed is true when the wallet supplied RFC 9396
+	// authorization_details in the PAR. Scope-only OID4VCI requests leave this
+	// false so the token endpoint does not invent an authorization_details
+	// response (OID4VCI §6.2: OPTIONAL for scope).
+	AuthorizationDetailsUsed       bool
+	DPoPJKT                        string
+	IssuerState                    string
+	ExpiresAt                      time.Time
+	AuthorizationResponseCompleted bool
 }
 
 // usedCodeRetention bounds how long a redeemed authorization code is remembered
@@ -56,16 +86,17 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		panic("generate pairwise subject salt: " + err.Error())
 	}
 	idp := &MockIdP{
-		users:         make(map[string]*models.User),
-		clients:       make(map[string]*models.Client),
-		authCodes:     make(map[string]*models.AuthorizationCode),
-		sessions:      make(map[string]*models.Session),
-		refreshTokens: make(map[string]*models.RefreshToken),
-		revokedTokens: make(map[string]time.Time),              // RFC 7009: Revoked token tracking
-		usedCodes:     make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
-		keySet:        keySet,
-		issuer:        "http://localhost:8080",
-		pairwiseSalt:  pairwiseSalt,
+		users:          make(map[string]*models.User),
+		clients:        make(map[string]*models.Client),
+		authCodes:      make(map[string]*models.AuthorizationCode),
+		sessions:       make(map[string]*models.Session),
+		refreshTokens:  make(map[string]*models.RefreshToken),
+		revokedTokens:  make(map[string]time.Time),              // RFC 7009: Revoked token tracking
+		usedCodes:      make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
+		pushedRequests: make(map[string]*PushedAuthorizationRequest),
+		keySet:         keySet,
+		issuer:         "http://localhost:8080",
+		pairwiseSalt:   pairwiseSalt,
 	}
 
 	idp.jwtService = crypto.NewJWTService(keySet, idp.issuer)
@@ -566,7 +597,7 @@ func (idp *MockIdP) CreateAuthorizationCode(
 		CodeChallengeMethod: codeChallengeMethod,
 		Claims:              claims,
 		AuthTime:            authTime,
-		ExpiresAt:           time.Now().Add(10 * time.Minute),
+		ExpiresAt:           time.Now().Add(AuthorizationCodeTTL),
 		CreatedAt:           time.Now(),
 	}
 
@@ -575,6 +606,54 @@ func (idp *MockIdP) CreateAuthorizationCode(
 	idp.mu.Unlock()
 
 	return authCode, nil
+}
+
+// StorePushedAuthorizationRequest stores a fully validated RFC 9126 request and
+// returns its opaque urn:ietf:params:oauth:request_uri handle.
+func (idp *MockIdP) StorePushedAuthorizationRequest(request PushedAuthorizationRequest) string {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	requestURI := "urn:ietf:params:oauth:request_uri:" + generateRandomString(32)
+	request.RequestURI = requestURI
+	request.CredentialConfigurationIDs = append([]string(nil), request.CredentialConfigurationIDs...)
+	idp.pushedRequests[requestURI] = &request
+	return requestURI
+}
+
+// GetPushedAuthorizationRequest resolves a PAR handle without consuming it.
+// RFC 9126 permits retries before the authorization interaction completes.
+func (idp *MockIdP) GetPushedAuthorizationRequest(requestURI, clientID string) (*PushedAuthorizationRequest, error) {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	now := time.Now()
+	for uri, request := range idp.pushedRequests {
+		if now.After(request.ExpiresAt) {
+			delete(idp.pushedRequests, uri)
+		}
+	}
+	request, exists := idp.pushedRequests[requestURI]
+	if !exists {
+		return nil, errors.New("invalid or expired request_uri")
+	}
+	if request.AuthorizationResponseCompleted {
+		return nil, errors.New("request_uri has already completed authorization")
+	}
+	if strings.TrimSpace(clientID) != "" && request.ClientID != strings.TrimSpace(clientID) {
+		return nil, errors.New("request_uri client mismatch")
+	}
+	copy := *request
+	copy.CredentialConfigurationIDs = append([]string(nil), request.CredentialConfigurationIDs...)
+	return &copy, nil
+}
+
+// CompletePushedAuthorizationRequest prevents a PAR handle from starting a
+// second authorization after the first response has been issued.
+func (idp *MockIdP) CompletePushedAuthorizationRequest(requestURI string) {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	if request := idp.pushedRequests[requestURI]; request != nil {
+		request.AuthorizationResponseCompleted = true
+	}
 }
 
 // BindCredentialAuthorizationDetails records the OID4VCI authorization details
@@ -592,6 +671,65 @@ func (idp *MockIdP) BindCredentialAuthorizationDetails(code string, credentialCo
 	authCode.CredentialConfigurationIDs = append([]string(nil), credentialConfigurationIDs...)
 	authCode.CredentialAuthorizationDetailsUsed = true
 	return nil
+}
+
+// BindCredentialConfigurationIDs records Credential Configurations authorized
+// via scope (without RFC 9396 authorization_details). The token endpoint may
+// issue an access token bound to these configurations without returning
+// authorization_details / credential_identifiers.
+func (idp *MockIdP) BindCredentialConfigurationIDs(code string, credentialConfigurationIDs []string) error {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+
+	authCode, exists := idp.authCodes[code]
+	if !exists {
+		return errors.New("authorization code not found")
+	}
+	authCode.CredentialConfigurationIDs = append([]string(nil), credentialConfigurationIDs...)
+	authCode.CredentialAuthorizationDetailsUsed = false
+	return nil
+}
+
+// BindAuthorizationCodeDPoP records the PAR DPoP key on the authorization code
+// so the token endpoint can enforce sender-constrained code redemption.
+func (idp *MockIdP) BindAuthorizationCodeDPoP(code, jkt string) error {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	authCode, exists := idp.authCodes[code]
+	if !exists {
+		return errors.New("authorization code not found")
+	}
+	authCode.DPoPJKT = strings.TrimSpace(jkt)
+	return nil
+}
+
+// BindAuthorizationCodeIssuerState carries the OpenID4VCI issuer-created
+// processing context from the validated PAR request into code redemption.
+func (idp *MockIdP) BindAuthorizationCodeIssuerState(code, issuerState string) error {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	authCode, exists := idp.authCodes[code]
+	if !exists {
+		return errors.New("authorization code not found")
+	}
+	authCode.IssuerState = strings.TrimSpace(issuerState)
+	return nil
+}
+
+// GetAuthorizationCode returns a defensive copy of a live authorization code
+// without consuming it. Protocol extensions use this only to select the
+// security policy that must be applied before redemption; ValidateAuthorizationCode
+// remains the sole operation that validates and atomically consumes the code.
+func (idp *MockIdP) GetAuthorizationCode(code string) (*models.AuthorizationCode, bool) {
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	authCode, exists := idp.authCodes[strings.TrimSpace(code)]
+	if !exists || authCode == nil {
+		return nil, false
+	}
+	copy := *authCode
+	copy.CredentialConfigurationIDs = append([]string(nil), authCode.CredentialConfigurationIDs...)
+	return &copy, true
 }
 
 // ValidateAuthorizationCode validates and consumes an authorization code
@@ -620,13 +758,16 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 		return nil, errors.New("invalid authorization code")
 	}
 
-	// Delete code (one-time use)
-	delete(idp.authCodes, code)
-
-	if authCode.ExpiresAt.Before(time.Now()) {
+	// Reject expired codes before consuming them (RFC 6749 §4.1.2;
+	// FAPI2 SP Final §5.3.2.1-11 caps lifetime at AuthorizationCodeTTL).
+	if !authCode.ExpiresAt.After(time.Now()) {
+		delete(idp.authCodes, code)
 		return nil, errors.New("authorization code expired")
 	}
 
+	// Bind the code to the issuing client and redirect_uri before consuming
+	// it. A mismatched client must not burn the legitimate client's code
+	// (OIDCC §3.1.3.4 / FAPI2 SP §5.3.2.1).
 	if authCode.ClientID != clientID {
 		return nil, errors.New("client ID mismatch")
 	}
@@ -642,6 +783,9 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 			return nil, err
 		}
 	}
+
+	// Consume only after every binding check succeeds (one-time use).
+	delete(idp.authCodes, code)
 
 	// Remember the redeemed code so a later replay is detected and the tokens it
 	// produces can be revoked (RFC 6749 Section 4.1.2). RecordIssuedTokens fills
@@ -768,6 +912,38 @@ func (idp *MockIdP) BindRefreshTokenKey(token, jkt string) {
 	}
 }
 
+// BindRefreshTokenClientInstanceKey associates an OAuth client-attestation
+// Client Instance Key thumbprint with an already-stored refresh token
+// (draft-ietf-oauth-attestation-based-client-auth §9.3). Later refresh
+// requests MUST present attestation for that same instance key.
+func (idp *MockIdP) BindRefreshTokenClientInstanceKey(token, instanceJKT string) {
+	if instanceJKT == "" {
+		return
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	if rt, exists := idp.refreshTokens[token]; exists {
+		rt.ClientInstanceJKT = instanceJKT
+	}
+}
+
+// GetRefreshToken returns a defensive copy of a live refresh token without
+// consuming it. Binding checks (DPoP jkt, Client Instance Key) run against
+// this snapshot before ValidateRefreshToken rotates the token.
+func (idp *MockIdP) GetRefreshToken(token string) (*models.RefreshToken, bool) {
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	rt, exists := idp.refreshTokens[strings.TrimSpace(token)]
+	if !exists || rt == nil {
+		return nil, false
+	}
+	if rt.ExpiresAt.Before(time.Now()) {
+		return nil, false
+	}
+	copy := *rt
+	return &copy, true
+}
+
 // ValidateRefreshToken validates a refresh token
 func (idp *MockIdP) ValidateRefreshToken(token, clientID string) (*models.RefreshToken, error) {
 	idp.mu.Lock()
@@ -787,10 +963,12 @@ func (idp *MockIdP) ValidateRefreshToken(token, clientID string) (*models.Refres
 		return nil, errors.New("client ID mismatch")
 	}
 
-	// Implement refresh token rotation - delete old token
+	// Implement refresh token rotation - delete old token. Return a copy so
+	// binding fields remain available to the caller after removal.
+	copy := *rt
 	delete(idp.refreshTokens, token)
 
-	return rt, nil
+	return &copy, nil
 }
 
 // RevokeRefreshToken revokes a refresh token

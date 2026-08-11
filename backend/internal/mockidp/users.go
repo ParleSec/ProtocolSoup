@@ -72,8 +72,8 @@ func (idp *MockIdP) UserClaims(userID string, scopes []string) map[string]interf
 	// Custom user attributes (for example the demo "department") are NOT emitted
 	// here. Claims are governed by the requested scopes (OIDC Core 1.0 Section
 	// 5.4), and there is no scope or claims request that authorises these
-	// attributes. Returning them unrequested breaks data minimisation and is
-	// flagged by the OIDF suite (EnsureIdTokenDoesNotContainNonRequestedClaims).
+	// attributes. Returning them unrequested breaks data minimisation: the ID
+	// Token must not include unrequested claims.
 	// The attributes remain on the user record for flows that legitimately
 	// consume them directly (for example OID4VCI credential issuance).
 
@@ -165,7 +165,7 @@ func addIfNotEmpty(claims map[string]interface{}, name, value string) {
 // addressClaim builds the OIDC address claim object (OIDC Core 1.0 Section
 // 5.1.1) from the populated members of the user's address. It returns nil when
 // the user has no address or every member is empty, so a blank object is never
-// emitted (the conformance suite rejects blank address members).
+// emitted (blank address members must not be serialized).
 func addressClaim(user *models.User) map[string]interface{} {
 	if user.Address == nil {
 		return nil
