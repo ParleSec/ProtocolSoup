@@ -550,8 +550,16 @@ jobs:
             exit 1
           fi
           location="$(awk 'tolower($1)=="location:" {print substr($0, index($0,$2))}' "$headers" | tr -d '\r')"
-          echo "$location" | grep -F "request_uri=https%3A%2F%2Fwww.example.com%2Frequest" >/dev/null
-          echo "$location" | grep -F "openid4vp://" >/dev/null
+          echo "location=${location}"
+          # Location carries query params, so openid4vp:// appears as openid4vp%3A%2F%2F.
+          if ! echo "$location" | grep -F "request_uri=https%3A%2F%2Fwww.example.com%2Frequest" >/dev/null; then
+            echo "expected Location to preserve request_uri"
+            exit 1
+          fi
+          if ! echo "$location" | grep -E 'openid4vp(%3A%2F%2F|://)' >/dev/null; then
+            echo "expected Location to include openid4vp URI"
+            exit 1
+          fi
           echo "wallet /authorize canary passed"
       - name: Smoke test OID4VP wallet bootstrap
         run: |
