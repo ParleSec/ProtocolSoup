@@ -150,7 +150,7 @@ func TestReauthRequired(t *testing.T) {
 
 func TestBuildErrorRedirectQueryAndFragment(t *testing.T) {
 	// Query mode preserves an existing query and appends error params.
-	target, err := buildErrorRedirect("https://rp.example/cb?foo=bar", "query", "st8", "invalid_scope", "bad scope")
+	target, err := buildErrorRedirect("https://rp.example/cb?foo=bar", "query", "st8", "invalid_scope", "bad scope", "https://op.example")
 	if err != nil {
 		t.Fatalf("buildErrorRedirect query: %v", err)
 	}
@@ -162,12 +162,15 @@ func TestBuildErrorRedirectQueryAndFragment(t *testing.T) {
 	if q.Get("error") != "invalid_scope" || q.Get("state") != "st8" {
 		t.Errorf("query error params wrong: %q", target)
 	}
+	if q.Get("iss") != "https://op.example" {
+		t.Errorf("iss = %q, want https://op.example", q.Get("iss"))
+	}
 	if u.Fragment != "" {
 		t.Errorf("query mode must not use fragment: %q", target)
 	}
 
 	// Fragment mode places params in the fragment.
-	target, err = buildErrorRedirect("https://rp.example/cb", "fragment", "st9", "login_required", "")
+	target, err = buildErrorRedirect("https://rp.example/cb", "fragment", "st9", "login_required", "", "https://op.example")
 	if err != nil {
 		t.Fatalf("buildErrorRedirect fragment: %v", err)
 	}
@@ -178,6 +181,9 @@ func TestBuildErrorRedirectQueryAndFragment(t *testing.T) {
 	fr, _ := url.ParseQuery(u.Fragment)
 	if fr.Get("error") != "login_required" || fr.Get("state") != "st9" {
 		t.Errorf("fragment error params wrong: %q", target)
+	}
+	if fr.Get("iss") != "https://op.example" {
+		t.Errorf("fragment iss = %q, want https://op.example", fr.Get("iss"))
 	}
 	if fr.Get("error_description") != "" {
 		t.Errorf("empty error_description should be omitted: %q", target)

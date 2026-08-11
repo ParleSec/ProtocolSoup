@@ -54,6 +54,13 @@ type authParams struct {
 	Claims                     string
 	LoginHint                  string
 	CredentialConfigurationIDs []string
+	// AuthorizationDetailsUsed is true when the wallet supplied RFC 9396
+	// authorization_details (directly or via OID4VCI PAR). Scope-only OID4VCI
+	// requests leave this false.
+	AuthorizationDetailsUsed bool
+	PARRequestURI            string
+	DPoPJKT                  string
+	IssuerState              string
 }
 
 type oid4vciAuthorizationDetail struct {
@@ -101,6 +108,35 @@ func parseOID4VCIAuthorizationDetails(raw string, credentialIssuer string) ([]st
 		configurationIDs = append(configurationIDs, configurationID)
 	}
 	return configurationIDs, nil
+}
+
+// parsePushedCredentialConfigurationIDs restores configuration IDs carried from
+// an OID4VCI scope-only PAR without synthesizing authorization_details.
+func parsePushedCredentialConfigurationIDs(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var configurationIDs []string
+	if err := json.Unmarshal([]byte(raw), &configurationIDs); err != nil || len(configurationIDs) == 0 {
+		return nil, fmt.Errorf("pushed credential configuration ids are invalid")
+	}
+	cleaned := make([]string, 0, len(configurationIDs))
+	seen := make(map[string]struct{}, len(configurationIDs))
+	for _, configurationID := range configurationIDs {
+		configurationID = strings.TrimSpace(configurationID)
+		if configurationID == "" {
+			continue
+		}
+		if _, duplicate := seen[configurationID]; duplicate {
+			continue
+		}
+		seen[configurationID] = struct{}{}
+		cleaned = append(cleaned, configurationID)
+	}
+	if len(cleaned) == 0 {
+		return nil, fmt.Errorf("pushed credential configuration ids are invalid")
+	}
+	return cleaned, nil
 }
 
 // defaultResponseMode returns the default response mode for a response type per
@@ -252,8 +288,8 @@ func reauthRequired(prompts []string, maxAge int, maxAgePresent bool, authTime t
 // buildErrorRedirect constructs the redirect target for an authorization error
 // in the given response mode, preserving any pre-existing query on the
 // redirect_uri and always echoing state when present (RFC 6749 Section
-// 4.1.2.1).
-func buildErrorRedirect(redirectURI, responseMode, state, errorCode, errorDescription string) (string, error) {
+// 4.1.2.1). When iss is non-empty it is included per RFC 9207 Section 2.
+func buildErrorRedirect(redirectURI, responseMode, state, errorCode, errorDescription, iss string) (string, error) {
 	u, err := url.Parse(redirectURI)
 	if err != nil {
 		return "", err
@@ -265,6 +301,9 @@ func buildErrorRedirect(redirectURI, responseMode, state, errorCode, errorDescri
 	}
 	if state != "" {
 		params.Set("state", state)
+	}
+	if iss != "" {
+		params.Set("iss", iss)
 	}
 	if responseMode == "fragment" {
 		u.Fragment = params.Encode()
@@ -282,7 +321,8 @@ func buildErrorRedirect(redirectURI, responseMode, state, errorCode, errorDescri
 // redirecting to the validated redirect_uri, in the correct response channel,
 // echoing state. This is mandatory once client_id and redirect_uri are known to
 // be valid (RFC 6749 Section 4.1.2.1, OpenID Connect Core 1.0 Section 3.1.2.6).
-func (p *Plugin) redirectAuthError(w http.ResponseWriter, r *http.Request, redirectURI, responseType, responseMode, state, errorCode, errorDescription string) {
+// iss is the RFC 9207 authorization response issuer when support is advertised.
+func (p *Plugin) redirectAuthError(w http.ResponseWriter, r *http.Request, redirectURI, responseType, responseMode, state, errorCode, errorDescription, iss string) {
 	mode := responseMode
 	if mode == "" {
 		mode = defaultResponseMode(responseType)
@@ -299,10 +339,13 @@ func (p *Plugin) redirectAuthError(w http.ResponseWriter, r *http.Request, redir
 		if state != "" {
 			params.Set("state", state)
 		}
+		if iss != "" {
+			params.Set("iss", iss)
+		}
 		p.writeFormPost(w, redirectURI, params)
 		return
 	}
-	target, err := buildErrorRedirect(redirectURI, mode, state, errorCode, errorDescription)
+	target, err := buildErrorRedirect(redirectURI, mode, state, errorCode, errorDescription, iss)
 	if err != nil {
 		// A malformed redirect_uri should already have been rejected before
 		// this point; fail closed without redirecting.

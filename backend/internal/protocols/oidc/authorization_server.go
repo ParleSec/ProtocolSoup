@@ -62,7 +62,9 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"grant_types_supported":                 []string{"authorization_code", "implicit", "refresh_token"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
 		"code_challenge_methods_supported":      []string{"S256"},
-		"service_documentation":                 issuer + "/auth.md",
+		// RFC 9207 Section 3 / FAPI 2.0 SP §5.3.2.2
+		"authorization_response_iss_parameter_supported": true,
+		"service_documentation":                          issuer + "/auth.md",
 	}
 	if p.registrationEnabled() {
 		metadata["registration_endpoint"] = issuer + "/oidc/register"

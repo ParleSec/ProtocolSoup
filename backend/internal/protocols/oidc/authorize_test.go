@@ -36,7 +36,7 @@ func TestParseOID4VCIAuthorizationDetailsRejectsMissingIssuerLocation(t *testing
 }
 
 // These tests pin the authorization-endpoint enforcement rules to their
-// normative sources independently of the OIDF conformance suite. They are the
+// normative sources independently of any external test harness. They are the
 // regression net required by the "resilient, spec-compliant fixes only"
 // discipline: each rule is exercised across the class of inputs it governs, not
 // just the single value a test harness happens to send.

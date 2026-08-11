@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxRequestObjectBytes = 32 * 1024
+	maxRequestObjectBytes  = 32 * 1024
 	requestURIFetchTimeout = 5 * time.Second
 )
 
@@ -27,6 +27,9 @@ func (p *Plugin) applyRequestURI(query url.Values) (url.Values, string, string) 
 	requestURI := strings.TrimSpace(query.Get("request_uri"))
 	if requestURI == "" {
 		return query, "", ""
+	}
+	if strings.HasPrefix(requestURI, "urn:ietf:params:oauth:request_uri:") {
+		return p.applyPushedAuthorizationRequest(query, requestURI)
 	}
 	if !p.registrationEnabled() {
 		return nil, "request_uri_not_supported", "The request_uri parameter is not supported"
@@ -64,7 +67,7 @@ func (p *Plugin) applyRequestURI(query url.Values) (url.Values, string, string) 
 		case map[string]interface{}, []interface{}:
 			encoded, err := json.Marshal(typed)
 			if err != nil {
-				return nil, "invalid_request_object", "unable to encode request object claim "+key
+				return nil, "invalid_request_object", "unable to encode request object claim " + key
 			}
 			merged.Set(key, string(encoded))
 		default:
@@ -80,6 +83,61 @@ func (p *Plugin) applyRequestURI(query url.Values) (url.Values, string, string) 
 	if objectClientID := merged.Get("client_id"); objectClientID != "" && objectClientID != clientID {
 		return nil, "invalid_request", "client_id in request object must match the OAuth request parameter"
 	}
+	return merged, "", ""
+}
+
+func (p *Plugin) applyPushedAuthorizationRequest(query url.Values, requestURI string) (url.Values, string, string) {
+	if p.mockIdP == nil {
+		return nil, "server_error", "authorization server state is unavailable"
+	}
+	if strings.TrimSpace(query.Get("request")) != "" {
+		return nil, "invalid_request", "request and request_uri must not be used together"
+	}
+	pushed, err := p.mockIdP.GetPushedAuthorizationRequest(requestURI, query.Get("client_id"))
+	if err != nil {
+		return nil, "invalid_request_uri", err.Error()
+	}
+	merged := cloneValues(query)
+	merged.Del("request_uri")
+	merged.Set("client_id", pushed.ClientID)
+	merged.Set("redirect_uri", pushed.RedirectURI)
+	merged.Set("response_type", pushed.ResponseType)
+	merged.Set("scope", pushed.Scope)
+	merged.Set("state", pushed.State)
+	merged.Set("nonce", pushed.Nonce)
+	merged.Set("code_challenge", pushed.CodeChallenge)
+	merged.Set("code_challenge_method", pushed.CodeChallengeMethod)
+	if pushed.AuthorizationDetailsUsed {
+		// Restore the wallet's RFC 9396 authorization_details so the shared
+		// authorize endpoint validates locations and marks the code as RAR-bound.
+		details := make([]map[string]interface{}, 0, len(pushed.CredentialConfigurationIDs))
+		for _, configurationID := range pushed.CredentialConfigurationIDs {
+			details = append(details, map[string]interface{}{
+				"type":                        "openid_credential",
+				"credential_configuration_id": configurationID,
+				"locations":                   []string{strings.TrimRight(p.baseURL, "/") + "/oid4vci"},
+			})
+		}
+		encodedDetails, err := json.Marshal(details)
+		if err != nil {
+			return nil, "server_error", "unable to restore pushed authorization details"
+		}
+		merged.Set("authorization_details", string(encodedDetails))
+		merged.Set("_ps_authorization_details_used", "true")
+	} else if len(pushed.CredentialConfigurationIDs) > 0 {
+		// Scope-only OID4VCI PAR: carry authorized configuration IDs without
+		// synthesizing authorization_details. OID4VCI §6.2 token-response
+		// authorization_details is OPTIONAL for scope; inventing configuration
+		// IDs beyond what was authorized is incorrect.
+		encodedIDs, err := json.Marshal(pushed.CredentialConfigurationIDs)
+		if err != nil {
+			return nil, "server_error", "unable to restore pushed credential configuration ids"
+		}
+		merged.Set("_ps_credential_configuration_ids", string(encodedIDs))
+	}
+	merged.Set("_ps_par_request_uri", pushed.RequestURI)
+	merged.Set("_ps_dpop_jkt", pushed.DPoPJKT)
+	merged.Set("_ps_issuer_state", pushed.IssuerState)
 	return merged, "", ""
 }
 
