@@ -16,6 +16,7 @@ export interface OID4VPDirectPostConfig extends FlowExecutorConfig {
   scopeAlias?: string
   clientID?: string
   clientIDScheme?: string
+  requestURIMethod?: string
 }
 
 export class OID4VPDirectPostExecutor extends FlowExecutorBase {
@@ -135,8 +136,13 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     this.updateState({ currentStep: 'Creating verifier authorization request' })
 
     const responseMode = this.flowConfig.responseMode || 'direct_post'
-    const configuredClientID = String(this.flowConfig.clientID || '').trim()
-    const configuredClientIDScheme = String(this.flowConfig.clientIDScheme || '').trim()
+    const extraParams = this.flowConfig.extraParams || {}
+    const configuredClientID = String(
+      this.flowConfig.clientID || extraParams.oid4vp_client_id || '',
+    ).trim()
+    const configuredClientIDScheme = String(
+      this.flowConfig.clientIDScheme || extraParams.oid4vp_client_id_scheme || '',
+    ).trim()
     // Default: the canonical presentation request targets the ISO/IEC
     // 18013-5 mobile driving licence (mso_mdoc), matching the verifier's default
     // DCQL. SD-JWT VC and the W3C formats remain selectable by supplying an
@@ -147,7 +153,8 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
           id: 'mdl',
           format: 'mso_mdoc',
           meta: {
-            doctype_values: ['org.iso.18013.5.1.mDL'],
+            // OID4VP 1.0 Final Appendix B.2.2: singular string doctype_value.
+            doctype_value: 'org.iso.18013.5.1.mDL',
           },
           claims: [
             { path: ['org.iso.18013.5.1', 'family_name'] },
@@ -156,8 +163,15 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         },
       ],
     }
-    const configuredScopeAlias = String(this.flowConfig.scopeAlias || '').trim()
-    const configuredDCQLRaw = String(this.flowConfig.dcqlQueryJSON || '').trim()
+    const configuredScopeAlias = String(
+      this.flowConfig.scopeAlias || extraParams.oid4vp_scope_alias || '',
+    ).trim()
+    const configuredRequestURIMethod = String(
+      this.flowConfig.requestURIMethod || extraParams.oid4vp_request_uri_method || '',
+    ).trim().toLowerCase()
+    const configuredDCQLRaw = String(
+      this.flowConfig.dcqlQueryJSON || extraParams.oid4vp_dcql_query || '',
+    ).trim()
     let dcqlQuery: Record<string, unknown> | null = null
     if (configuredDCQLRaw) {
       try {
@@ -180,11 +194,22 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     if (configuredClientIDScheme) {
       requestPayload.client_id_scheme = configuredClientIDScheme
     }
+    if (configuredClientIDScheme === 'x509_hash') {
+      // HAIP 1.0 Section 5 requires the x509_hash Client Identifier Prefix for
+      // signed presentation requests. The backend then enforces the profile's
+      // signed-request and encrypted-response requirements.
+      requestPayload.profile = 'haip'
+    }
     if (configuredScopeAlias) {
       requestPayload.scope = configuredScopeAlias
     }
     if (dcqlQuery) {
       requestPayload.dcql_query = dcqlQuery
+    }
+    if (configuredRequestURIMethod === 'post') {
+      // OID4VP 1.0 Section 5.10: the Wallet fetches the Request Object with
+      // an HTTP POST instead of GET, binding a wallet_nonce it supplies.
+      requestPayload.request_uri_method = 'post'
     }
 
     const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/request/create`, {
@@ -214,8 +239,11 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
     const didWebAllowedHosts = Array.isArray(requestData.did_web_allowed_hosts)
       ? requestData.did_web_allowed_hosts.map(host => String(host).trim()).filter(Boolean)
       : []
-    const deepLink = requestURI
-      ? `openid4vp://authorize?request_uri=${encodeURIComponent(requestURI)}`
+    const requestClientID = String(requestData.client_id || configuredClientID || '')
+    const requestURIMethod = String(requestData.request_uri_method || '').trim().toLowerCase()
+    const deepLink = requestURI && requestClientID
+      ? `openid4vp://authorize?client_id=${encodeURIComponent(requestClientID)}&request_uri=${encodeURIComponent(requestURI)}`
+        + (requestURIMethod === 'post' ? '&request_uri_method=post' : '')
       : ''
 
     if (requestJWT) {
@@ -229,10 +257,11 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
           ? { header: decodedRequestJWT.header, payload: decodedRequestJWT.payload }
           : {},
         metadata: {
-          clientID: String(requestData.client_id || configuredClientID || ''),
+          clientID: requestClientID,
           clientIDScheme: String(requestData.client_id_scheme || configuredClientIDScheme || ''),
           responseMode,
           requestURI,
+          requestURIMethod: requestURIMethod || 'get',
           trustMode,
           didWebAllowedHosts,
           scopeAlias: configuredScopeAlias || undefined,
@@ -251,7 +280,7 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
           deepLink,
           qrPayload: deepLink || requestURI,
           requestURI,
-          clientID: String(requestData.client_id || configuredClientID || ''),
+          clientID: requestClientID,
           clientIDScheme: String(requestData.client_id_scheme || configuredClientIDScheme || ''),
           responseMode,
           trustMode,

@@ -34,7 +34,9 @@ export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
             id: 'mdl',
             format: 'mso_mdoc',
             meta: {
-              doctype_values: ['org.iso.18013.5.1.mDL'],
+              // OID4VP 1.0 Final Appendix B.2.2: singular string doctype_value
+              // (not the draft-era plural doctype_values array).
+              doctype_value: 'org.iso.18013.5.1.mDL',
             },
             claims: [
               { path: ['org.iso.18013.5.1', 'family_name'] },

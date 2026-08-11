@@ -58,6 +58,13 @@ const OID4VCI_CREDENTIAL_PROFILES = [
   { id: 'UniversityDegreeCredentialJWT', format: 'jwt_vc_json', label: 'jwt_vc_json' },
   { id: 'UniversityDegreeCredentialJWTLD', format: 'jwt_vc_json-ld', label: 'jwt_vc_json-ld' },
   { id: 'UniversityDegreeCredentialLDP', format: 'ldp_vc', label: 'ldp_vc' },
+  // HAIP key-attested configurations. Only relevant to flows that carry the
+  // request through client attestation + DPoP themselves (for example an
+  // external wallet driving the issuer-initiated offer flow); Looking Glass's
+  // own pre-authorized executor does not build the Appendix D key attestation
+  // these require.
+  { id: 'MobileDrivingLicenceMsoMdocHAIP', format: 'mso_mdoc', label: 'mso_mdoc (mDL, HAIP key-attested)' },
+  { id: 'UniversityDegreeCredentialSDJWTHAIP', format: 'dc+sd-jwt', label: 'dc+sd-jwt (HAIP key-attested)' },
 ] as const
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
@@ -133,6 +140,7 @@ export function LookingGlass() {
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
   const [oid4vciCredentialConfigurationID, setOID4VCICredentialConfigurationID] = useState('MobileDrivingLicenceMsoMdoc')
+  const [oid4vciWalletOfferEndpoint, setOID4VCIWalletOfferEndpoint] = useState('')
   const [wireSessionId, setWireSessionId] = useState<string | null>(null)
   const [wireSessionToken, setWireSessionToken] = useState<string | null>(null)
   const [wireSessionError, setWireSessionError] = useState<string | null>(null)
@@ -153,8 +161,9 @@ export function LookingGlass() {
     OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
   )
   const [oid4vpScopeAliasInput, setOID4VPScopeAliasInput] = useState('')
-  const [oid4vpClientIDScheme, setOID4VPClientIDScheme] = useState<'redirect_uri' | 'verifier_attestation' | 'x509_san_dns'>('redirect_uri')
+  const [oid4vpClientIDScheme, setOID4VPClientIDScheme] = useState<'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash'>('redirect_uri')
   const [oid4vpClientIDInput, setOID4VPClientIDInput] = useState('')
+  const [oid4vpRequestURIMethod, setOID4VPRequestURIMethod] = useState<'get' | 'post'>('get')
   const [oid4vpWalletMode, setOID4VPWalletMode] = useState<'one_click' | 'stepwise'>('one_click')
   const [oid4vpStepwiseVPToken, setOID4VPStepwiseVPToken] = useState('')
   const [oid4vpStepwiseLastStep, setOID4VPStepwiseLastStep] = useState('')
@@ -251,10 +260,22 @@ export function LookingGlass() {
   const isTokenBasedFlow = isTokenIntrospectionFlow || isTokenRevocationFlow || isUserInfoFlow
   const isSCIMFlow = selectedProtocol?.id === 'scim'
   const isOID4VCIFlow = selectedProtocol?.id === 'oid4vci'
+  const isOID4VCIIssuerInitiatedFlow = isOID4VCIFlow && flowId === 'oid4vci-issuer-initiated'
 
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
   const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
+
+  useEffect(() => {
+    if (!isOID4VCIIssuerInitiatedFlow) {
+      return
+    }
+    setOID4VCICredentialConfigurationID((current) => (
+      current === 'MobileDrivingLicenceMsoMdoc'
+        ? 'MobileDrivingLicenceMsoMdocHAIP'
+        : current
+    ))
+  }, [isOID4VCIIssuerInitiatedFlow])
 
   // Use stored token or user input for flows that need a token
   const activeToken = tokenInput || storedAccessToken || ''
@@ -362,6 +383,9 @@ export function LookingGlass() {
   const oid4vpClientIDSchemeForExecutor = isOID4VPFlow
     ? oid4vpClientIDScheme
     : undefined
+  const oid4vpRequestURIMethodForExecutor = isOID4VPFlow
+    ? oid4vpRequestURIMethod
+    : undefined
 
   const realExecutor = useRealFlowExecutor({
     protocolId: selectedProtocol?.id || null,
@@ -379,10 +403,12 @@ export function LookingGlass() {
     bearerToken: isSCIMFlow ? scimBearerToken : undefined,
     oid4vciCredentialConfigurationID: isOID4VCIFlow ? selectedOID4VCICredentialProfile.id : undefined,
     oid4vciCredentialFormat: isOID4VCIFlow ? selectedOID4VCICredentialProfile.format : undefined,
+    oid4vciWalletOfferEndpoint: isOID4VCIIssuerInitiatedFlow ? oid4vciWalletOfferEndpoint.trim() || undefined : undefined,
     oid4vpDCQLQueryJSON: oid4vpDCQLQueryForExecutor,
     oid4vpScopeAlias: oid4vpScopeAliasForExecutor,
     oid4vpClientID: oid4vpClientIDForExecutor,
     oid4vpClientIDScheme: oid4vpClientIDSchemeForExecutor,
+    oid4vpRequestURIMethod: oid4vpRequestURIMethodForExecutor,
     lookingGlassSessionId: wireSessionId || undefined,
     lookingGlassSessionToken: wireSessionToken || undefined,
   })
@@ -390,9 +416,18 @@ export function LookingGlass() {
   const isOID4VPAwaitingResult =
     selectedProtocol?.id === 'oid4vp' &&
     status === 'awaiting_user'
+  // Issuer-initiated OID4VCI reuses the OID4VP awaiting_user chrome
+  // (Check Result + shared Wallet Handoff Ready panel). Deferred issuance
+  // keeps its own amber Check Status control.
+  const isOID4VCIIssuerInitiatedAwaiting =
+    isOID4VCIIssuerInitiatedFlow &&
+    status === 'awaiting_user'
   const isOID4VCIDeferredAwaiting =
     selectedProtocol?.id === 'oid4vci' &&
+    !isOID4VCIIssuerInitiatedFlow &&
     status === 'awaiting_user'
+  const showWalletHandoffCheckResult =
+    isOID4VPAwaitingResult || isOID4VCIIssuerInitiatedAwaiting
 
   const executeFlow = realExecutor.execute
   const resetFlow = realExecutor.reset
@@ -533,7 +568,7 @@ export function LookingGlass() {
       return ''
     })
 
-    if (!isOID4VPFlow || !oid4vpWalletHandoffPayload) {
+    if ((!isOID4VPFlow && !isOID4VCIIssuerInitiatedFlow) || !oid4vpWalletHandoffPayload) {
       setOID4VPWalletHandoffQRCodeError(null)
       return
     }
@@ -585,7 +620,7 @@ export function LookingGlass() {
         URL.revokeObjectURL(generatedObjectURL)
       }
     }
-  }, [isOID4VPFlow, oid4vpWalletHandoffPayload])
+  }, [isOID4VPFlow, isOID4VCIIssuerInitiatedFlow, oid4vpWalletHandoffPayload])
 
   useEffect(() => {
     if (!isOID4VPFlow) {
@@ -1697,6 +1732,35 @@ export function LookingGlass() {
           </motion.div>
         )}
 
+        {isOID4VCIIssuerInitiatedFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              <Share2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
+              <span className="text-xs sm:text-sm font-medium text-surface-300">Wallet credential_offer_endpoint (external)</span>
+            </div>
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+              Optional. Paste an external wallet&apos;s OID4VCI 1.0 §4.1.2 Credential Offer Endpoint
+              (<code className="text-cyan-300">credential_offer_endpoint</code>).
+              When set, Execute has the issuer deliver the live <code className="text-cyan-300">credential_offer</code> to that endpoint
+              over HTTPS (no manual browser paste). When blank, Looking Glass creates an
+              <code className="text-cyan-300"> openid-credential-offer://</code> invocation URI and QR code instead. After delivery,
+              click <code className="text-cyan-300">Check Result</code> once the wallet has driven PAR, token exchange, and credential request.
+            </p>
+            <input
+              type="text"
+              value={oid4vciWalletOfferEndpoint}
+              onChange={(event) => setOID4VCIWalletOfferEndpoint(event.target.value)}
+              placeholder="https://issuer.example/credential_offer"
+              className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+            />
+          </motion.div>
+        )}
+
         {isOID4VPFlow && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
@@ -1731,12 +1795,24 @@ export function LookingGlass() {
                     <label className="text-[11px] sm:text-xs text-surface-400">Verifier trust profile</label>
                     <select
                       value={oid4vpClientIDScheme}
-                      onChange={(event) => setOID4VPClientIDScheme(event.target.value as 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns')}
+                      onChange={(event) => setOID4VPClientIDScheme(event.target.value as 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash')}
                       className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
                     >
                       <option value="redirect_uri">redirect_uri</option>
                       <option value="verifier_attestation">verifier_attestation</option>
                       <option value="x509_san_dns">x509_san_dns</option>
+                      <option value="x509_hash">x509_hash (HAIP)</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="text-[11px] sm:text-xs text-surface-400">Request URI method</label>
+                    <select
+                      value={oid4vpRequestURIMethod}
+                      onChange={(event) => setOID4VPRequestURIMethod(event.target.value as 'get' | 'post')}
+                      className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
+                    >
+                      <option value="get">GET (default)</option>
+                      <option value="post">POST</option>
                     </select>
                   </div>
                   <input
@@ -1747,7 +1823,7 @@ export function LookingGlass() {
                     className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                   />
                   <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
-                    <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS. <code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS name via X.509 certificate SAN — auto-provisions an ephemeral CA + leaf chain when no external certificates are configured.
+                    <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS. <code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS name via X.509 certificate SAN. <code className="text-violet-300">x509_hash</code> selects the HAIP signed-request profile and binds the verifier to the request certificate hash. <code className="text-violet-300">POST</code> request_uri_method (OpenID4VP 1.0 Section 5.10) has the wallet fetch the request object with an HTTP POST carrying its own <code className="text-violet-300">wallet_nonce</code>, instead of a GET.
                   </p>
                 </div>
 
@@ -1948,7 +2024,7 @@ export function LookingGlass() {
                     <span className="sm:hidden">Wallet</span>
                   </button>
                 )}
-                {isOID4VPAwaitingResult && (
+                {showWalletHandoffCheckResult && (
                   <button
                     onClick={handleExecute}
                     className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gradient-to-r from-blue-500/20 to-cyan-500/20 border border-blue-500/30 text-blue-300 text-xs sm:text-sm font-medium hover:from-blue-500/30 hover:to-cyan-500/30 transition-all"
@@ -2004,13 +2080,15 @@ export function LookingGlass() {
                       Deep-link/QR payload is generated from the live request object and can be used with an external wallet agent.
                     </p>
                   </div>
-                  <button
-                    onClick={copyWalletHandoff}
-                    className="flex items-center gap-1 px-2 py-1 rounded bg-surface-900 text-xs text-surface-300 hover:text-white border border-white/10"
-                  >
-                    {handoffCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    {handoffCopied ? 'Copied' : 'Copy'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={copyWalletHandoff}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-surface-900 text-xs text-surface-300 hover:text-white border border-white/10"
+                    >
+                      {handoffCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {handoffCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
                 </div>
                 <details className="mt-2 rounded border border-white/10 bg-surface-950/70">
                   <summary className="cursor-pointer px-2 py-1.5 text-[11px] text-surface-400 hover:text-white">
@@ -2024,7 +2102,7 @@ export function LookingGlass() {
                   <div className="mt-3 flex flex-col items-center gap-2">
                     <img
                       src={oid4vpWalletHandoffQRCodeObjectURL}
-                      alt="OID4VP wallet handoff QR"
+                      alt="Wallet handoff QR"
                       className="w-44 h-44 rounded-lg border border-white/10 bg-white p-2"
                     />
                     <p className="text-[11px] text-surface-400 text-center max-w-[260px]">

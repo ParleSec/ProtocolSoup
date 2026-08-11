@@ -5,6 +5,7 @@ import {
   Check,
   Clock,
   Copy,
+  ExternalLink,
   Eye,
   FileText,
   KeyRound,
@@ -177,13 +178,26 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
                 <div className="space-y-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-surface-400">Raw artifact</span>
-                    <button
-                      onClick={() => copyText(artifact.raw || '', artifact.id)}
-                      className="flex items-center gap-1 text-xs text-surface-300 hover:text-white"
-                    >
-                      {copiedId === artifact.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      {copiedId === artifact.id ? 'Copied' : 'Copy'}
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {artifact.type === 'wallet_handoff' && isHTTPURL(artifact.raw) && (
+                        <a
+                          href={artifact.raw}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-xs text-cyan-300 hover:text-cyan-200"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Open
+                        </a>
+                      )}
+                      <button
+                        onClick={() => copyText(artifact.raw || '', artifact.id)}
+                        className="flex items-center gap-1 text-xs text-surface-300 hover:text-white"
+                      >
+                        {copiedId === artifact.id ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedId === artifact.id ? 'Copied' : 'Copy'}
+                      </button>
+                    </div>
                   </div>
                   <pre className="p-2 rounded bg-surface-950 text-[11px] text-surface-300 overflow-x-auto">
                     {artifact.raw}
@@ -196,6 +210,19 @@ export function VCInspector({ artifacts }: VCInspectorProps) {
       })}
     </div>
   )
+}
+
+// isHTTPURL gates the "Open" link to wallet_handoff artifacts that are
+// actually a navigable https:// (or http:// for local dev) URL, e.g. the
+// issuer-initiated offer delivery URL -- never an openid4vp:// deep link
+// or other non-navigable payload, which a browser cannot open directly.
+function isHTTPURL(value: string): boolean {
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:'
+  } catch {
+    return false
+  }
 }
 
 function artifactIcon(type: VCArtifact['type']): { icon: ElementType; fg: string; bg: string } {

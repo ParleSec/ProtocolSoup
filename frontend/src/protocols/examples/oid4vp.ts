@@ -21,7 +21,7 @@ const createRequest = await fetch('/oid4vp/request/create', {
         {
           id: 'mdl',
           format: 'mso_mdoc',
-          meta: { doctype_values: ['org.iso.18013.5.1.mDL'] },
+          meta: { doctype_value: 'org.iso.18013.5.1.mDL' },
           claims: [
             { path: ['org.iso.18013.5.1', 'family_name'] },
             { path: ['org.iso.18013.5.1', 'document_number'] },
