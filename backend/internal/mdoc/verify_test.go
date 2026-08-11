@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"math/big"
 	"testing"
 	"time"
 
@@ -142,6 +143,191 @@ func TestVerifyIssuerSignedRejectsNilRoots(t *testing.T) {
 		t.Fatal("expected verification to fail closed when issuer roots are nil")
 	}
 }
+
+func TestAuthorityKeyIdentifierFromLeafFallsBackToSKIForSelfSigned(t *testing.T) {
+	ski := []byte{0x01, 0x02, 0x03, 0x04}
+	subject := pkix.Name{CommonName: "suite-iaca", Organization: []string{"Test IACA"}, Country: []string{"US"}}
+	selfSigned := &x509.Certificate{
+		RawSubject:     []byte("same-subject"),
+		RawIssuer:      []byte("same-subject"),
+		Subject:        subject,
+		Issuer:         subject,
+		SubjectKeyId:   ski,
+		AuthorityKeyId: nil,
+	}
+	got := authorityKeyIdentifierFromLeaf(selfSigned)
+	if string(got) != string(ski) {
+		t.Fatalf("expected self-signed leaf without AKI to fall back to SKI %x, got %x", ski, got)
+	}
+
+	aki := []byte{0xaa, 0xbb}
+	withAKI := &x509.Certificate{
+		RawSubject:     []byte("ds"),
+		RawIssuer:      []byte("iaca"),
+		SubjectKeyId:   ski,
+		AuthorityKeyId: aki,
+	}
+	got = authorityKeyIdentifierFromLeaf(withAKI)
+	if string(got) != string(aki) {
+		t.Fatalf("expected explicit AKI to win, got %x want %x", got, aki)
+	}
+
+	nonSelfSignedMissingAKI := &x509.Certificate{
+		RawSubject:   []byte("ds"),
+		RawIssuer:    []byte("iaca"),
+		SubjectKeyId: ski,
+	}
+	if got = authorityKeyIdentifierFromLeaf(nonSelfSignedMissingAKI); got != nil {
+		t.Fatalf("expected nil AKI for non-self-signed leaf without AKI, got %x", got)
+	}
+}
+
+// TestVerifyIssuerSignedAcceptsTrustAnchorAsDocumentSigner covers the
+// self-signed trust-anchor mock-wallet shape: IssuerAuth is signed by the
+// configured IACA itself (self-signed CA leaf alone in x5chain), which is not
+// an Annex B document-signer certificate.
+func TestVerifyIssuerSignedAcceptsTrustAnchorAsDocumentSigner(t *testing.T) {
+	iacaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate IACA key: %v", err)
+	}
+	now := time.Now().Truncate(time.Second).UTC()
+	template := &x509.Certificate{
+		SerialNumber: bigIntOne(),
+		Subject: pkix.Name{
+			Country:      []string{"US"},
+			Organization: []string{"Test IACA"},
+			CommonName:   "trust-anchor-as-ds",
+		},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            0,
+		MaxPathLenZero:        true,
+		SignatureAlgorithm:    x509.ECDSAWithSHA256,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &iacaKey.PublicKey, iacaKey)
+	if err != nil {
+		t.Fatalf("create self-signed IACA: %v", err)
+	}
+	iacaCert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse IACA: %v", err)
+	}
+
+	devKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceCOSEKey, _ := intcose.ECPublicKeyToCOSEKey(&devKey.PublicKey)
+	validity := ValidityInfo{
+		Signed:     now.Add(-2 * time.Hour),
+		ValidFrom:  now.Add(-time.Hour),
+		ValidUntil: now.Add(24 * time.Hour),
+	}
+	items := makeVerifyTestItems(t)
+	ns, _ := BuildIssuerNameSpaces(map[NameSpace][]IssuerSignedItem{NameSpaceMDL: items})
+	vd, _ := BuildValueDigests(ns, DigestAlgorithmSHA256)
+	mso := BuildMSO(vd, deviceCOSEKey, DocTypeMDL, validity)
+	msoBytes, _ := EncodeMSOBytes(mso)
+
+	issuerAuth, err := BuildIssuerAuth(msoBytes, iacaKey, []*x509.Certificate{iacaCert})
+	if err != nil {
+		t.Fatalf("BuildIssuerAuth with trust-anchor leaf: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(iacaCert)
+	if _, err := VerifyIssuerSigned(IssuerSigned{NameSpaces: ns, IssuerAuth: issuerAuth}, roots, now); err != nil {
+		t.Fatalf("expected trust-anchor IssuerAuth signer to verify: %v", err)
+	}
+}
+
+func TestVerifyIssuerSignedRejectsCADocumentSignerBeneathIACA(t *testing.T) {
+	// A CA=true leaf that chains beneath a separate IACA must still fail the
+	// Annex B document-signer profile. Only a verified chain of length 1
+	// (leaf is itself the trust anchor) is exempt.
+	iacaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate IACA key: %v", err)
+	}
+	caLeafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate CA leaf key: %v", err)
+	}
+	now := time.Now().Truncate(time.Second).UTC()
+	iacaTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Country:      []string{"US"},
+			Organization: []string{"Test IACA"},
+			CommonName:   "iaca-root",
+		},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            0,
+		MaxPathLenZero:        true,
+		SignatureAlgorithm:    x509.ECDSAWithSHA256,
+	}
+	iacaDER, err := x509.CreateCertificate(rand.Reader, iacaTemplate, iacaTemplate, &iacaKey.PublicKey, iacaKey)
+	if err != nil {
+		t.Fatalf("create IACA: %v", err)
+	}
+	iacaCert, err := x509.ParseCertificate(iacaDER)
+	if err != nil {
+		t.Fatalf("parse IACA: %v", err)
+	}
+	caLeafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			Country:      []string{"US"},
+			Organization: []string{"Bad Intermediate CA"},
+			CommonName:   "should-not-sign-mso",
+		},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(30 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            0,
+		MaxPathLenZero:        true,
+		SignatureAlgorithm:    x509.ECDSAWithSHA256,
+		AuthorityKeyId:        iacaCert.SubjectKeyId,
+	}
+	caLeafDER, err := x509.CreateCertificate(rand.Reader, caLeafTemplate, iacaCert, &caLeafKey.PublicKey, iacaKey)
+	if err != nil {
+		t.Fatalf("create CA leaf: %v", err)
+	}
+	caLeafCert, err := x509.ParseCertificate(caLeafDER)
+	if err != nil {
+		t.Fatalf("parse CA leaf: %v", err)
+	}
+
+	devKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	deviceCOSEKey, _ := intcose.ECPublicKeyToCOSEKey(&devKey.PublicKey)
+	validity := ValidityInfo{
+		Signed:     now.Add(-2 * time.Hour),
+		ValidFrom:  now.Add(-time.Hour),
+		ValidUntil: now.Add(24 * time.Hour),
+	}
+	items := makeVerifyTestItems(t)
+	ns, _ := BuildIssuerNameSpaces(map[NameSpace][]IssuerSignedItem{NameSpaceMDL: items})
+	vd, _ := BuildValueDigests(ns, DigestAlgorithmSHA256)
+	mso := BuildMSO(vd, deviceCOSEKey, DocTypeMDL, validity)
+	msoBytes, _ := EncodeMSOBytes(mso)
+	issuerAuth, err := BuildIssuerAuth(msoBytes, caLeafKey, []*x509.Certificate{caLeafCert})
+	if err != nil {
+		t.Fatalf("BuildIssuerAuth: %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(iacaCert)
+	if _, err := VerifyIssuerSigned(IssuerSigned{NameSpaces: ns, IssuerAuth: issuerAuth}, roots, now); err == nil {
+		t.Fatal("expected CA=true document-signer beneath a separate IACA to be rejected")
+	}
+}
+
+func bigIntOne() *big.Int { return big.NewInt(1) }
 
 func TestVerifyIssuerSignedRejectsBareMSOPayload(t *testing.T) {
 	dsKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

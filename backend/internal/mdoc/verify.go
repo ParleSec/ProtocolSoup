@@ -1,6 +1,7 @@
 package mdoc
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/x509"
@@ -101,10 +102,16 @@ func VerifyIssuerSignedWithKey(is IssuerSigned, dsKey *ecdsa.PublicKey, now time
 	return &mso, nil
 }
 
-// IssuerAuthorityKeyIdentifier returns the Authority Key Identifier carried by
-// the document-signer certificate in IssuerAuth. Callers use it only after
+// IssuerAuthorityKeyIdentifier returns the Authority Key Identifier used for
+// DCQL trusted_authorities (type=aki) matching. Callers use it only after
 // VerifyIssuerSigned succeeds, so the certificate and identifier are anchored
 // in the independently configured issuer trust store.
+//
+// Prefer the leaf certificate's AuthorityKeyIdentifier (RFC 5280), which for a
+// normal IACA→DS chain equals the IACA SubjectKeyIdentifier that HAIP
+// advertises. When IssuerAuth is signed by a self-signed trust anchor that
+// omits AKI (self-signed trust-anchor mock-wallet shape), fall back to the
+// leaf SubjectKeyIdentifier — that is the authority's key identifier.
 func IssuerAuthorityKeyIdentifier(is IssuerSigned) ([]byte, error) {
 	_, msg, err := ParseIssuerAuth(is.IssuerAuth)
 	if err != nil {
@@ -120,10 +127,22 @@ func IssuerAuthorityKeyIdentifier(is IssuerSigned) ([]byte, error) {
 	if len(chain) == 0 {
 		return nil, fmt.Errorf("mdoc: empty x5chain in IssuerAuth")
 	}
-	if len(chain[0].AuthorityKeyId) == 0 {
-		return nil, nil
+	return authorityKeyIdentifierFromLeaf(chain[0]), nil
+}
+
+// authorityKeyIdentifierFromLeaf returns the AKI used for DCQL trusted_authorities
+// matching. See IssuerAuthorityKeyIdentifier.
+func authorityKeyIdentifierFromLeaf(leaf *x509.Certificate) []byte {
+	if leaf == nil {
+		return nil
 	}
-	return append([]byte(nil), chain[0].AuthorityKeyId...), nil
+	if len(leaf.AuthorityKeyId) > 0 {
+		return append([]byte(nil), leaf.AuthorityKeyId...)
+	}
+	if bytes.Equal(leaf.RawSubject, leaf.RawIssuer) && len(leaf.SubjectKeyId) > 0 {
+		return append([]byte(nil), leaf.SubjectKeyId...)
+	}
+	return nil
 }
 
 func extractAndVerifyDocSignerKey(msg *intcose.Sign1Message, roots *x509.CertPool, now time.Time) (*ecdsa.PublicKey, error) {
@@ -142,20 +161,29 @@ func extractAndVerifyDocSignerKey(msg *intcose.Sign1Message, roots *x509.CertPoo
 	}
 
 	leaf := chain[0]
-	if err := validateDocumentSignerCertificate(leaf); err != nil {
-		return nil, err
-	}
 	intermediates := x509.NewCertPool()
 	for _, cert := range chain[1:] {
 		intermediates.AddCert(cert)
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{
+	verifiedChains, err := leaf.Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediates,
 		CurrentTime:   now,
 		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("mdoc: x5chain certificate path validation failed: %w", err)
+	}
+
+	// ISO/IEC 18013-5 Annex B profiles a distinct document-signer leaf
+	// (CA=false, digitalSignature, mDL DS EKU). Some mock wallets sign
+	// IssuerAuth with the configured IACA itself (a self-signed CA placed
+	// alone in x5chain). When path validation shows the leaf is the trust
+	// anchor, skip DS-only profile checks; keep them for real IACA→DS chains.
+	if !leafIsConfiguredTrustAnchor(verifiedChains) {
+		if err := validateDocumentSignerCertificate(leaf); err != nil {
+			return nil, err
+		}
 	}
 
 	ecdsaKey, ok := leaf.PublicKey.(*ecdsa.PublicKey)
@@ -169,6 +197,18 @@ func extractAndVerifyDocSignerKey(msg *intcose.Sign1Message, roots *x509.CertPoo
 	// thumbprint contract. VerifyIssuerSigned uses this exact leaf key to verify
 	// the COSE_Sign1, which proves possession and binds IssuerAuth to the leaf.
 	return ecdsaKey, nil
+}
+
+// leafIsConfiguredTrustAnchor reports whether path validation accepted the
+// IssuerAuth leaf as the trust anchor itself (verified chain length 1), rather
+// than as an Annex B document-signer certificate beneath a separate IACA.
+func leafIsConfiguredTrustAnchor(chains [][]*x509.Certificate) bool {
+	for _, chain := range chains {
+		if len(chain) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeMSOFromPayload(payload []byte) (MobileSecurityObject, error) {
