@@ -55,12 +55,16 @@ paths:
       operationId: getVcIssuerMetadataCanonical
       responses:
         "200":
-          description: Credential issuer metadata.
+          description: Credential issuer metadata as JSON, or as a signed JWT when requested with Accept application/jwt.
           content:
             application/json:
               schema:
                 type: object
                 additionalProperties: true
+            application/jwt:
+              schema:
+                type: string
+                description: Signed metadata JWT with typ openidvci-issuer-metadata+jwt and a leaf-first x5c chain excluding the trust anchor.
         "404":
           description: Metadata path not available.
           content:
@@ -230,6 +234,133 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+  /oid4vci/offers/authorization-code:
+    post:
+      tags: [OID4VCI]
+      summary: Create a tracked issuer-initiated authorization code offer
+      description: >
+        Creates an OpenID4VCI issuer-initiated Credential Offer containing an
+        authorization_code grant and a fresh issuer_state. The issuer persists
+        that processing context, validates it when returned in PAR, and exposes
+        a separate opaque status_uri for observing real issuance milestones.
+        When credential_offer_endpoint is supplied, the issuer also performs the
+        OID4VCI §4.1.2 HTTPS GET that delivers credential_offer to that wallet
+        endpoint.
+      operationId: createVcAuthorizationCodeOffer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential_configuration_ids]
+              properties:
+                credential_configuration_ids:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                credential_offer_endpoint:
+                  type: string
+                  format: uri
+                  description: >
+                    Wallet Credential Offer Endpoint (OID4VCI §4.1.2). When present,
+                    the issuer delivers the offer with a real HTTPS GET using the
+                    credential_offer query parameter.
+      responses:
+        "201":
+          description: Issuer-initiated offer and lifecycle status reference.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [credential_issuer, credential_configuration_ids, issuer_state, credential_offer, status_uri, expires_in]
+                properties:
+                  credential_issuer:
+                    type: string
+                    format: uri
+                  credential_configuration_ids:
+                    type: array
+                    items:
+                      type: string
+                  issuer_state:
+                    type: string
+                  credential_offer:
+                    type: object
+                    additionalProperties: true
+                  status_uri:
+                    type: string
+                    format: uri
+                  expires_in:
+                    type: integer
+                    minimum: 1
+                  credential_offer_endpoint:
+                    type: string
+                    format: uri
+                  credential_offer_delivery_url:
+                    type: string
+                    format: uri
+                  credential_offer_delivered:
+                    type: boolean
+                  credential_offer_delivery_status:
+                    type: integer
+                    minimum: 100
+                    maximum: 599
+        "400":
+          description: Invalid offer payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/offers/authorization-code/status/{statusID}:
+    get:
+      tags: [OID4VCI]
+      summary: Read issuer-initiated issuance lifecycle status
+      description: >
+        Returns the server-observed lifecycle for the opaque status reference:
+        waiting_for_wallet, authorization_request_received, token_issued,
+        credential_issued, or expired. The issuer_state itself is not used as
+        the status reference.
+      operationId: getVcAuthorizationCodeOfferStatus
+      parameters:
+        - in: path
+          name: statusID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Current issuer-observed lifecycle state.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, terminal, credential_configuration_ids, created_at, updated_at, expires_at]
+                properties:
+                  status:
+                    type: string
+                    enum: [waiting_for_wallet, authorization_request_received, token_issued, credential_issued, expired]
+                  terminal:
+                    type: boolean
+                  credential_configuration_ids:
+                    type: array
+                    items:
+                      type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+                  expires_at:
+                    type: string
+                    format: date-time
+        "404":
+          description: Status reference not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oid4vci/token:
     post:
       tags: [OID4VCI]
@@ -339,6 +470,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+  /oid4vci/par:
+    post:
+      tags: [OID4VCI]
+      summary: Push a HAIP authorization request
+      description: >
+        RFC 9126 PAR endpoint. Requires form encoding, OAuth client
+        attestation headers, PKCE S256, exact client binding, and either
+        openid_credential authorization_details or a supported VC scope. An
+        optional DPoP proof is validated and retained when supplied; HAIP
+        wallets may instead introduce DPoP at token redemption.
+      operationId: vcPushAuthorizationRequest
+      security: []
+      parameters:
+        - in: header
+          name: OAuth-Client-Attestation
+          required: true
+          schema: {type: string}
+        - in: header
+          name: OAuth-Client-Attestation-PoP
+          required: true
+          schema: {type: string}
+        - in: header
+          name: DPoP
+          required: false
+          schema: {type: string}
+          description: Optional RFC 9449 proof that pre-binds the authorization interaction to a DPoP key.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [client_id, redirect_uri, response_type, code_challenge, code_challenge_method]
+              properties:
+                client_id: {type: string}
+                redirect_uri: {type: string, format: uri}
+                response_type: {type: string, enum: [code]}
+                scope: {type: string}
+                state: {type: string}
+                nonce: {type: string}
+                code_challenge: {type: string}
+                code_challenge_method: {type: string, enum: [S256]}
+                authorization_details:
+                  type: string
+                  description: JSON-encoded RFC 9396 authorization details array.
+              additionalProperties: true
+      responses:
+        "201":
+          description: Short-lived pushed authorization request handle.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request_uri, expires_in]
+                properties:
+                  request_uri: {type: string}
+                  expires_in: {type: integer}
+        "400":
+          description: Invalid request, DPoP proof, authorization details, redirect URI, or PKCE binding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: Missing or invalid OAuth client attestation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+  /oid4vci/status-lists/{listID}:
+    get:
+      tags: [OID4VCI]
+      summary: Retrieve an OAuth Status List Token
+      operationId: vcGetStatusList
+      security: []
+      parameters:
+        - in: path
+          name: listID
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Signed Status List Token for HAIP SD-JWT VC credentials.
+          content:
+            application/statuslist+jwt:
+              schema: {type: string}
+        "404":
+          description: Unknown status list.
+  /oid4vci/credential-types/university-degree:
+    get:
+      tags: [OID4VCI]
+      summary: Retrieve HAIP SD-JWT VC Type Metadata
+      description: Type Metadata for ProtocolSoup's advertised HAIP university-degree vct.
+      operationId: vcGetUniversityDegreeTypeMetadata
+      security: []
+      responses:
+        "200":
+          description: SD-JWT VC Type Metadata document.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vct]
+                properties:
+                  vct: {type: string, format: uri}
+                  name: {type: string}
+                  description: {type: string}
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "404":
+          description: Type metadata is unavailable outside certification mode.
   /oid4vci/nonce:
     post:
       tags: [OID4VCI]
@@ -387,6 +632,10 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/CredentialRequest"
+          application/jwt:
+            schema:
+              type: string
+              description: Compact ECDH-ES JWE containing a CredentialRequest JSON object.
       responses:
         "200":
           description: Credential issued or deferred transaction created, as JSON or (when credential_response_encryption was requested) a compact JWE.
@@ -666,7 +915,7 @@ paths:
                 $ref: "#/components/schemas/OAuthError"
     post:
       tags: [OID4VP]
-      summary: Unsupported request_uri POST retrieval
+      summary: Retrieve and wallet-nonce-bind an OID4VP request object
       operationId: vcPostOid4vpRequest
       parameters:
         - in: path
@@ -674,9 +923,33 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [wallet_nonce]
+              properties:
+                wallet_nonce:
+                  type: string
+                wallet_metadata:
+                  type: string
+                  description: Optional JSON-encoded wallet metadata object.
       responses:
+        "200":
+          description: Compact signed Authorization Request JWT bound to wallet_nonce. Repeating the same request is safe and returns the same JWT.
+          content:
+            application/oauth-authz-req+jwt:
+              schema: {type: string}
+        "400":
+          description: Missing, changed, or invalid wallet nonce/metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
         "405":
-          description: request_uri_method=post is not supported.
+          description: This request URI was created for GET retrieval.
           content:
             application/json:
               schema:
@@ -786,9 +1059,12 @@ components:
             jwt:
               type: array
               minItems: 1
-              maxItems: 1
+              maxItems: 20
               items:
                 type: string
+              description: >-
+                One JWT proof per requested credential copy. Length is capped
+                by batch_credential_issuance.batch_size (20).
           additionalProperties: false
         credential_response_encryption:
           type: object
@@ -876,6 +1152,11 @@ components:
           type: string
           format: uri
           description: URI where the wallet submits the VP response. Required for direct_post / direct_post.jwt; not used for dc_api / dc_api.jwt.
+        request_uri_method:
+          type: string
+          enum: [get, post]
+          default: get
+          description: POST enables wallet_nonce binding at the request URI endpoint; GET returns the pre-created request object directly.
         redirect_uri:
           type: string
           format: uri
@@ -925,7 +1206,7 @@ components:
           description: URI the wallet fetches to retrieve the signed request object.
         request_uri_method:
           type: string
-          example: get
+          enum: [get, post]
         request:
           type: string
           description: Compact JWS of the signed authorization request object (typ=oauth-authz-req+jwt).
