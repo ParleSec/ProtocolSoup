@@ -3,7 +3,7 @@
 
 FROM ghcr.io/spiffe/spire-server:1.15.2 AS spire
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 # Copy SPIRE server binary for registration commands
 COPY --from=spire /opt/spire/bin/spire-server /opt/spire/bin/spire-server
