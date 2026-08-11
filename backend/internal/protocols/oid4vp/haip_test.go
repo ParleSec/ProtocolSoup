@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	pscrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	jose "github.com/go-jose/go-jose/v4"
@@ -122,6 +123,24 @@ func TestExtractDCQLKeyedSDJWT(t *testing.T) {
 	// must not match it (it does not start with "{").
 	if _, ok := extractDCQLKeyedSDJWT(sdjwt); ok {
 		t.Fatal("bare SD-JWT must not be matched by the keyed unwrapper")
+	}
+}
+
+func TestHAIPDirectPostAcknowledgementIncludesRedirectURI(t *testing.T) {
+	p := NewPlugin()
+	p.baseURL = "https://verifier.example"
+
+	acknowledgement := p.directPostAcknowledgement(&requestSession{
+		ID:      "request-123",
+		Profile: profileHAIP,
+	})
+	if got := acknowledgement["redirect_uri"]; got != "https://verifier.example/oid4vp/result/request-123" {
+		t.Fatalf("redirect_uri = %v, want HAIP result URI", got)
+	}
+
+	generalAcknowledgement := p.directPostAcknowledgement(&requestSession{ID: "request-456"})
+	if _, exists := generalAcknowledgement["redirect_uri"]; exists {
+		t.Fatal("general-profile direct_post acknowledgement must not include redirect_uri")
 	}
 }
 
@@ -240,6 +259,19 @@ func TestHAIPDirectPostJWTSDJWTProvisionsECDHESEncryption(t *testing.T) {
 	}
 	if len(created.EncValues) != 2 || created.EncValues[0] != encA128GCM || created.EncValues[1] != encA256GCM {
 		t.Fatalf("HAIP must advertise both AES-GCM values, got %v", created.EncValues)
+	}
+	header, _ := json.Marshal(map[string]interface{}{"kid": session.ResponseEncryptionJWK.Kid})
+	compactJWE := base64.RawURLEncoding.EncodeToString(header) + "...."
+	requestID, correlated := p.requestSessionForEncryptedResponse(compactJWE)
+	if correlated != session || requestID != created.RequestID {
+		t.Fatalf("encrypted response correlated to request %q, want %q", requestID, created.RequestID)
+	}
+	requestObject, err := pscrypto.DecodeTokenWithoutValidation(session.RequestJWT)
+	if err != nil {
+		t.Fatalf("decode request object: %v", err)
+	}
+	if requestObject.Payload["aud"] != "https://self-issued.me/v2" {
+		t.Fatalf("request object aud = %v, want self-issued wallet audience", requestObject.Payload["aud"])
 	}
 }
 

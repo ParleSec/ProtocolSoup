@@ -50,17 +50,20 @@ var defaultDCQLQuery = map[string]interface{}{
 }
 
 type requestSession struct {
-	ID             string
-	ClientID       string
-	ClientIDScheme ClientIDScheme
-	Nonce          string
-	State          string
-	ResponseMode   string
-	ResponseURI    string
-	RedirectURI    string
-	ScopeAlias     string
-	DCQLQuery      string
-	RequestJWT     string
+	ID               string
+	ClientID         string
+	ClientIDScheme   ClientIDScheme
+	Nonce            string
+	State            string
+	ResponseMode     string
+	ResponseURI      string
+	RedirectURI      string
+	ScopeAlias       string
+	DCQLQuery        string
+	RequestJWT       string
+	RequestURIMethod string `json:",omitempty"`
+	WalletNonce      string `json:",omitempty"`
+	WalletMetadata   string `json:",omitempty"`
 	// MdocHandover is an optional pre-encoded CBOR Handover override for the
 	// shared mdoc SessionTranscript ([null, null, Handover]). The
 	// production path reconstructs the real OID4VP 1.0 OpenID4VPHandover from the
@@ -137,6 +140,10 @@ type Plugin struct {
 	// presented mso_mdoc document-signer certificates to (issuer PKI).
 	// The trust anchor is the IACA root, never the DS certificate.
 	mdocTrustAnchors *x509.CertPool
+	// sdJWTIssuerTrustAnchors is used only for independently issued
+	// certificate-backed SD-JWT VCs. First-party credentials retain lineage
+	// validation against their issuance-time key.
+	sdJWTIssuerTrustAnchors *x509.CertPool
 	// mdocTrustAnchorCerts retains the same IACA root(s) in parsed form so the
 	// verifier can read each root's SubjectKeyIdentifier for the HAIP mso_mdoc
 	// Authority Key Identifier Trusted Authorities Query (HAIP 1.0 Section 5).
@@ -204,6 +211,9 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	}
 	if err := p.initMdocTrustAnchors(strings.TrimSpace(config.DataDir)); err != nil {
 		return fmt.Errorf("configure mso_mdoc trust anchors: %w", err)
+	}
+	if err := p.initSDJWTIssuerTrustAnchors(); err != nil {
+		return fmt.Errorf("configure SD-JWT issuer trust anchors: %w", err)
 	}
 	if dataDir := strings.TrimSpace(config.DataDir); dataDir != "" {
 		requestPath := filepath.Join(dataDir, "vc", "oid4vp_request_sessions.json")
@@ -634,6 +644,17 @@ func (p *Plugin) randomValue(size int) string {
 	raw := make([]byte, size)
 	_, _ = rand.Read(raw)
 	return base64.RawURLEncoding.EncodeToString(raw)[:size]
+}
+
+func randomAuthorizationNonce() (string, error) {
+	// OID4VP 1.0 §5.2 requires a fresh, cryptographically random nonce with
+	// sufficient entropy. Encode all 32 random bytes (256 bits) so empirical
+	// entropy estimators remain above 128 bits.
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate authorization nonce: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload interface{}) {

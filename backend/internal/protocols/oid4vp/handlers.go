@@ -41,14 +41,15 @@ func kbJWTIatWithinFreshnessWindow(issuedAt, now time.Time) bool {
 }
 
 type createAuthorizationRequest struct {
-	ClientID       string                 `json:"client_id"`
-	ClientIDScheme string                 `json:"client_id_scheme,omitempty"`
-	ResponseMode   string                 `json:"response_mode"`
-	ResponseURI    string                 `json:"response_uri"`
-	RedirectURI    string                 `json:"redirect_uri,omitempty"`
-	Scope          string                 `json:"scope,omitempty"`
-	DCQLQuery      json.RawMessage        `json:"dcql_query,omitempty"`
-	ClientMetadata map[string]interface{} `json:"client_metadata,omitempty"`
+	ClientID         string                 `json:"client_id"`
+	ClientIDScheme   string                 `json:"client_id_scheme,omitempty"`
+	ResponseMode     string                 `json:"response_mode"`
+	ResponseURI      string                 `json:"response_uri"`
+	RedirectURI      string                 `json:"redirect_uri,omitempty"`
+	Scope            string                 `json:"scope,omitempty"`
+	DCQLQuery        json.RawMessage        `json:"dcql_query,omitempty"`
+	ClientMetadata   map[string]interface{} `json:"client_metadata,omitempty"`
+	RequestURIMethod string                 `json:"request_uri_method,omitempty"`
 	// Profile, when "haip", enforces the OpenID4VC HAIP 1.0 presentation
 	// constraints and rejects out-of-profile choices.
 	Profile string `json:"profile,omitempty"`
@@ -90,6 +91,14 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	var req createAuthorizationRequest
 	if err := jsonDecode(r, &req); err != nil {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	requestURIMethod := strings.ToLower(strings.TrimSpace(req.RequestURIMethod))
+	if requestURIMethod == "" {
+		requestURIMethod = "get"
+	}
+	if requestURIMethod != "get" && requestURIMethod != "post" {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "request_uri_method must be get or post")
 		return
 	}
 
@@ -228,7 +237,11 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		}
 	}
 
-	nonce := p.randomValue(24)
+	nonce, err := randomAuthorizationNonce()
+	if err != nil {
+		writeServerError(w, "generate authorization nonce", err)
+		return
+	}
 	state := p.randomValue(24)
 	if err := ValidateNoncePresence(nonce); err != nil {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -239,7 +252,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	requestID := p.randomValue(24)
 	requestClaims := jwt.MapClaims{
 		"iss":           req.ClientID,
-		"aud":           "wallet",
+		"aud":           "https://self-issued.me/v2",
 		"client_id":     req.ClientID,
 		"response_type": "vp_token",
 		"response_mode": req.ResponseMode,
@@ -330,6 +343,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 		ScopeAlias:            req.Scope,
 		DCQLQuery:             dcqlQuery,
 		RequestJWT:            requestJWT,
+		RequestURIMethod:      requestURIMethod,
 		ResponseEncryptionJWK: responseEncKey,
 		Profile:               req.Profile,
 		Origin:                verifierOrigin,
@@ -398,7 +412,7 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	responsePayload := map[string]interface{}{
 		"request_id":            requestID,
 		"request_uri":           p.verifierBaseURL() + "/request/" + requestID,
-		"request_uri_method":    "get",
+		"request_uri_method":    requestURIMethod,
 		"request":               requestJWT,
 		"response_mode":         req.ResponseMode,
 		"response_uri":          req.ResponseURI,
@@ -444,6 +458,11 @@ func (p *Plugin) handleGetAuthorizationRequest(w http.ResponseWriter, r *http.Re
 		writeOID4VPError(w, http.StatusNotFound, "invalid_request_uri", "request object not found")
 		return
 	}
+	if session.RequestURIMethod == "post" {
+		w.Header().Set("Allow", http.MethodPost)
+		writeOID4VPError(w, http.StatusMethodNotAllowed, "invalid_request", "this request_uri requires POST")
+		return
+	}
 	if time.Now().UTC().After(session.ExpiresAt) {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_uri", "request object expired")
 		return
@@ -461,11 +480,104 @@ func (p *Plugin) handleGetAuthorizationRequest(w http.ResponseWriter, r *http.Re
 }
 
 func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.Request) {
-	// request_uri_method=post requires the full wallet_nonce/wallet_metadata
-	// protocol. This verifier advertises only GET and fails explicitly instead
-	// of returning the legacy non-conformant JSON wrapper.
-	w.Header().Set("Allow", http.MethodGet)
-	writeOID4VPError(w, http.StatusMethodNotAllowed, "invalid_request", "request_uri_method=post is not supported")
+	if err := r.ParseForm(); err != nil {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "invalid form body")
+		return
+	}
+	requestID := strings.TrimSpace(chi.URLParam(r, "requestID"))
+	walletNonce := strings.TrimSpace(r.Form.Get("wallet_nonce"))
+	if requestID == "" {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "requestID is required")
+		return
+	}
+	p.mu.RLock()
+	routeSession, exists := p.requests[requestID]
+	p.mu.RUnlock()
+	if !exists {
+		writeOID4VPError(w, http.StatusNotFound, "invalid_request_uri", "request object not found")
+		return
+	}
+	if routeSession.RequestURIMethod != "post" {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOID4VPError(w, http.StatusMethodNotAllowed, "invalid_request", "this request_uri uses GET")
+		return
+	}
+	if walletNonce == "" {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_nonce is required")
+		return
+	}
+	if len(walletNonce) > 256 {
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_nonce is too long")
+		return
+	}
+	walletMetadata := strings.TrimSpace(r.Form.Get("wallet_metadata"))
+	if walletMetadata != "" {
+		var metadata map[string]interface{}
+		if len(walletMetadata) > 32*1024 || json.Unmarshal([]byte(walletMetadata), &metadata) != nil {
+			writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_metadata must be a JSON object")
+			return
+		}
+	}
+
+	p.mu.Lock()
+	session, ok := p.requests[requestID]
+	if !ok {
+		p.mu.Unlock()
+		writeOID4VPError(w, http.StatusNotFound, "invalid_request_uri", "request object not found")
+		return
+	}
+	if session.RequestURIMethod != "post" {
+		p.mu.Unlock()
+		w.Header().Set("Allow", http.MethodGet)
+		writeOID4VPError(w, http.StatusMethodNotAllowed, "invalid_request", "this request_uri uses GET")
+		return
+	}
+	if time.Now().UTC().After(session.ExpiresAt) {
+		p.mu.Unlock()
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_uri", "request object expired")
+		return
+	}
+	if session.WalletNonce != "" && session.WalletNonce != walletNonce {
+		p.mu.Unlock()
+		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_nonce does not match the first request")
+		return
+	}
+	if session.WalletNonce == "" {
+		decoded, err := crypto.DecodeTokenWithoutValidation(session.RequestJWT)
+		if err != nil {
+			p.mu.Unlock()
+			writeOID4VPError(w, http.StatusInternalServerError, "server_error", "stored request object is invalid")
+			return
+		}
+		claims := jwt.MapClaims(decoded.Payload)
+		claims["wallet_nonce"] = walletNonce
+		requestJWT, err := p.signAuthorizationRequestObject(
+			session.ClientIDScheme,
+			session.ClientID,
+			claims,
+			session.ResponseURI,
+		)
+		if err != nil {
+			p.mu.Unlock()
+			writeOID4VPError(w, http.StatusInternalServerError, "server_error", "failed to bind wallet_nonce")
+			return
+		}
+		session.WalletNonce = walletNonce
+		session.WalletMetadata = walletMetadata
+		session.RequestJWT = requestJWT
+	}
+	requestJWT := session.RequestJWT
+	if err := p.persistRequestStateLocked(); err != nil {
+		p.mu.Unlock()
+		writeServerError(w, "persist request state", err)
+		return
+	}
+	p.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(requestJWT))
 }
 
 func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
@@ -489,11 +601,19 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 	state := strings.TrimSpace(payload.State)
 	requestID := strings.TrimSpace(payload.RequestID)
 
-	p.mu.RLock()
 	var session *requestSession
+	if state == "" && requestID == "" && strings.TrimSpace(payload.Response) != "" {
+		requestID, session = p.requestSessionForEncryptedResponse(payload.Response)
+		if session != nil {
+			state = session.State
+		}
+	}
+	p.mu.RLock()
 	if state != "" {
-		requestID = p.requestsByState[state]
-		session = p.requests[requestID]
+		if session == nil {
+			requestID = p.requestsByState[state]
+			session = p.requests[requestID]
+		}
 	} else if requestID != "" {
 		session = p.requests[requestID]
 	}
@@ -609,11 +729,35 @@ func (p *Plugin) handleWalletResponse(w http.ResponseWriter, r *http.Request) {
 		)...,
 	)
 
+	// The browser-mediated direct_post response endpoint is an
+	// authorization-response receiver, not a result API. Keep the full
+	// verification result in the request session (and expose it through
+	// GET /result/{requestID}). Return a JSON object without internal policy
+	// fields: OID4VP wallets require a response body, while extra result keys
+	// are not part of the direct_post contract.
+	if !session.isDCAPI() {
+		writeJSON(w, http.StatusOK, p.directPostAcknowledgement(session))
+		return
+	}
+
+	// The DC API uses the same callback endpoint, but its caller is the
+	// verifier's browser context rather than an OID4VP wallet authorization
+	// endpoint. Preserve its local result payload for the Looking Glass flow.
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"request_id": requestID,
 		"policy":     result.Policy,
 		"result":     result,
 	})
+}
+
+func (p *Plugin) directPostAcknowledgement(session *requestSession) map[string]interface{} {
+	acknowledgement := map[string]interface{}{}
+	if session != nil && session.Profile == profileHAIP {
+		// HAIP 1.0 §5.1 requires redirect_uri in the response to the Wallet's
+		// POST to response_uri.
+		acknowledgement["redirect_uri"] = strings.TrimRight(p.baseURL, "/") + "/oid4vp/result/" + session.ID
+	}
+	return acknowledgement
 }
 
 func (p *Plugin) handleGetVerificationResult(w http.ResponseWriter, r *http.Request) {
@@ -648,6 +792,78 @@ func (p *Plugin) handleGetVerificationResult(w http.ResponseWriter, r *http.Requ
 		"status":     "completed",
 		"result":     session.Result,
 	})
+}
+
+func (p *Plugin) requestSessionForEncryptedResponse(compactJWE string) (string, *requestSession) {
+	parts := strings.Split(strings.TrimSpace(compactJWE), ".")
+	if len(parts) != 5 || len(parts[0]) > 4096 {
+		return "", nil
+	}
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", nil
+	}
+	var header struct {
+		KeyID string `json:"kid"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return "", nil
+	}
+
+	p.mu.RLock()
+	candidates := make(map[string]*requestSession)
+	for candidateID, candidate := range p.requests {
+		if candidate == nil || candidate.ResponseEncryptionJWK == nil {
+			continue
+		}
+		if time.Now().UTC().After(candidate.ExpiresAt) {
+			continue
+		}
+		candidates[candidateID] = candidate
+	}
+	p.mu.RUnlock()
+
+	keyID := strings.TrimSpace(header.KeyID)
+	if keyID != "" {
+		var (
+			matchedID      string
+			matchedSession *requestSession
+		)
+		for candidateID, candidate := range candidates {
+			if strings.TrimSpace(candidate.ResponseEncryptionJWK.Kid) != keyID {
+				continue
+			}
+			if matchedSession != nil {
+				return "", nil
+			}
+			matchedID = candidateID
+			matchedSession = candidate
+		}
+		if matchedSession != nil {
+			return matchedID, matchedSession
+		}
+	}
+
+	// OID4VP does not require the wallet to copy the recipient JWK kid into
+	// the JWE protected header. If kid is absent or unknown, identify the
+	// request by successful authenticated decryption and exact state binding.
+	// This remains unambiguous because each request has a fresh ECDH key.
+	var (
+		matchedID      string
+		matchedSession *requestSession
+	)
+	for candidateID, candidate := range candidates {
+		_, extractedState, err := decryptMdocResponse(compactJWE, *candidate.ResponseEncryptionJWK)
+		if err != nil || extractedState != candidate.State {
+			continue
+		}
+		if matchedSession != nil {
+			return "", nil
+		}
+		matchedID = candidateID
+		matchedSession = candidate
+	}
+	return matchedID, matchedSession
 }
 
 func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *models.OID4VPVerificationResult {
@@ -906,7 +1122,6 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 			addPolicyReason(result, "credential_expired", "issuer credential expired")
 		}
 	}
-
 	disclosedClaims := vc.DisclosedClaimMap(decodedDisclosures)
 	fullClaims := processedPayload
 	if fullClaims == nil {
@@ -1369,12 +1584,9 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 	if normalizedSubject == "" {
 		return nil, newVerifierPolicyError("holder_binding_mismatch", "wallet subject is missing", nil)
 	}
-	if p.walletStore == nil {
-		return nil, newVerifierPolicyError("missing_lineage", "wallet credential lineage store is unavailable", nil)
-	}
-	storedCredentials := p.walletStore.List(normalizedSubject)
-	if len(storedCredentials) == 0 {
-		return nil, newVerifierPolicyError("missing_lineage", "presented credential lineage was not found", nil)
+	var storedCredentials []vc.WalletCredentialRecord
+	if p.walletStore != nil {
+		storedCredentials = p.walletStore.List(normalizedSubject)
 	}
 
 	registry := vc.DefaultCredentialFormatRegistry()
@@ -1396,7 +1608,8 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 		if strings.TrimSpace(presented.Format) != "" && strings.TrimSpace(parsedCredential.Format) != "" && strings.TrimSpace(presented.Format) != strings.TrimSpace(parsedCredential.Format) {
 			return nil, newVerifierPolicyError("credential_format_mismatch", "presented credential format does not match actual credential format", nil)
 		}
-		if strings.TrimSpace(parsedCredential.Subject) != normalizedSubject {
+		credentialSubject := strings.TrimSpace(parsedCredential.Subject)
+		if credentialSubject != "" && credentialSubject != normalizedSubject {
 			return nil, newVerifierPolicyError("credential_subject_mismatch", "presented credential subject mismatch", nil)
 		}
 
@@ -1414,10 +1627,6 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 			strings.TrimSpace(parsedCredential.VCT),
 			strings.TrimSpace(parsedCredential.Doctype),
 		)
-		if !found {
-			return nil, newVerifierPolicyError("missing_lineage", "presented credential does not match stored issuance lineage", nil)
-		}
-
 		formatHandler, ok := registry.Lookup(credentialFormat)
 		if !ok {
 			return nil, newVerifierPolicyError("credential_format_mismatch", "presented credential format is unsupported", nil)
@@ -1425,6 +1634,19 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 		issuerKeys := []crypto.JWK{}
 		if strings.TrimSpace(storedRecord.IssuerJWK.Kty) != "" {
 			issuerKeys = append(issuerKeys, storedRecord.IssuerJWK)
+		}
+		if !found {
+			if credentialFormat != credentialFormatDCSdJWT {
+				return nil, newVerifierPolicyError("missing_lineage", "presented credential does not match stored issuance lineage", nil)
+			}
+			if p.sdJWTIssuerTrustAnchors == nil {
+				return nil, newVerifierPolicyError("missing_lineage", "presented credential lineage was not found and no external SD-JWT issuer trust anchor is configured", nil)
+			}
+			externalIssuerKey, err := p.externalSDJWTIssuerJWK(rawCredential)
+			if err != nil {
+				return nil, newVerifierPolicyError("credential_signature_invalid", "external SD-JWT issuer trust validation failed", err)
+			}
+			issuerKeys = append(issuerKeys, externalIssuerKey)
 		}
 		// Any non-Verified status carries a non-nil error (see
 		// vc.IssuerTrustStatus), so this keeps hard-failing on both a
@@ -1440,8 +1662,23 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 		}); err != nil {
 			return nil, newVerifierPolicyError("credential_signature_invalid", fmt.Sprintf("presented credential signature validation failed (issuer_trust=%s)", trustStatus), err)
 		}
+		if credentialFormat == credentialFormatDCSdJWT {
+			envelope, err := vc.ParseSDJWTEnvelope(rawCredential)
+			if err != nil {
+				return nil, newVerifierPolicyError("credential_malformed", "presented SD-JWT could not be parsed for status validation", err)
+			}
+			issuerToken, err := crypto.DecodeTokenWithoutValidation(envelope.IssuerSignedJWT)
+			if err != nil {
+				return nil, newVerifierPolicyError("credential_malformed", "presented SD-JWT issuer token could not be decoded", err)
+			}
+			if statusClaim, present := issuerToken.Payload["status"]; present {
+				if err := p.validateSDJWTCredentialStatus(statusClaim); err != nil {
+					return nil, newVerifierPolicyError("credential_status_invalid", "presented credential status validation failed", err)
+				}
+			}
+		}
 		issuer := strings.TrimSpace(parsedCredential.Issuer)
-		if strings.TrimSpace(storedRecord.Issuer) != "" && strings.TrimSpace(issuer) != strings.TrimSpace(storedRecord.Issuer) {
+		if found && strings.TrimSpace(storedRecord.Issuer) != "" && strings.TrimSpace(issuer) != strings.TrimSpace(storedRecord.Issuer) {
 			return nil, newVerifierPolicyError("credential_issuer_mismatch", "presented credential issuer mismatch", nil)
 		}
 		if !parsedCredential.ExpiresAt.IsZero() && !parsedCredential.ExpiresAt.After(time.Now().UTC()) {
@@ -1449,7 +1686,7 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 		}
 
 		credentialTypes := append([]string{}, parsedCredential.CredentialTypes...)
-		if len(credentialTypes) == 0 {
+		if len(credentialTypes) == 0 && found {
 			credentialTypes = append(credentialTypes, storedRecord.CredentialTypes...)
 		}
 

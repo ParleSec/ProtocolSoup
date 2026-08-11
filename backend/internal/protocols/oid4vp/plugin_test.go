@@ -84,6 +84,20 @@ func TestParseClientIDSchemeUsesFinalPrefixFallback(t *testing.T) {
 	}
 }
 
+func TestAuthorizationNonceContainsFull256Bits(t *testing.T) {
+	nonce, err := randomAuthorizationNonce()
+	if err != nil {
+		t.Fatalf("randomAuthorizationNonce: %v", err)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(nonce)
+	if err != nil {
+		t.Fatalf("decode nonce: %v", err)
+	}
+	if len(raw) != 32 {
+		t.Fatalf("nonce entropy bytes = %d, want 32", len(raw))
+	}
+}
+
 func TestValidateSupportedClientIDSchemeUsesConfiguredAllowlist(t *testing.T) {
 	supported := DefaultClientIDSchemeSet()
 	if err := ValidateSupportedClientIDScheme("redirect_uri:https://verifier.example/callback", supported); err != nil {
@@ -1482,6 +1496,14 @@ func postWalletResponse(
 		t.Fatalf("post wallet response failed: %v", err)
 	}
 	assertVPStatus(t, formResp, http.StatusOK)
+	body, err := io.ReadAll(formResp.Body)
+	if err != nil {
+		t.Fatalf("read direct_post acknowledgement: %v", err)
+	}
+	_ = formResp.Body.Close()
+	if strings.TrimSpace(string(body)) != "{}" {
+		t.Fatalf("direct_post acknowledgement body = %q, want {}", string(body))
+	}
 }
 
 func createVPToken(t *testing.T, createPayload map[string]interface{}, wallet *walletFixture, nonceOverride string) string {
@@ -2330,6 +2352,70 @@ func TestAuthorizationRequestGETReturnsCompactJWTBody(t *testing.T) {
 	}
 }
 
+func TestAuthorizationRequestPOSTBindsWalletNonceAndIsSafelyRepeatable(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequestPayload(t, env.Server.URL, map[string]interface{}{
+		"response_mode":      "direct_post",
+		"response_uri":       env.Server.URL + "/oid4vp/response",
+		"request_uri_method": "post",
+		"dcql_query": map[string]interface{}{
+			"credentials": []map[string]interface{}{{
+				"id":     "degree",
+				"format": "dc+sd-jwt",
+				"meta": map[string]interface{}{
+					"vct_values": []string{"https://protocolsoup.com/credentials/university_degree"},
+				},
+			}},
+		},
+	})
+	requestID := asVPString(createPayload["request_id"])
+	endpoint := env.Server.URL + "/oid4vp/request/" + requestID
+
+	getResp, err := http.Get(endpoint)
+	if err != nil {
+		t.Fatalf("GET request object: %v", err)
+	}
+	_ = getResp.Body.Close()
+	if getResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET status = %d, want 405", getResp.StatusCode)
+	}
+
+	fetch := func(walletNonce string) (int, string) {
+		t.Helper()
+		resp, err := http.PostForm(endpoint, url.Values{"wallet_nonce": {walletNonce}})
+		if err != nil {
+			t.Fatalf("POST request object: %v", err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read request object: %v", err)
+		}
+		return resp.StatusCode, string(body)
+	}
+	status, first := fetch("wallet-nonce-123")
+	if status != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200: %s", status, first)
+	}
+	decoded, err := crypto.DecodeTokenWithoutValidation(first)
+	if err != nil {
+		t.Fatalf("decode request object: %v", err)
+	}
+	if decoded.Payload["wallet_nonce"] != "wallet-nonce-123" {
+		t.Fatalf("wallet_nonce = %v", decoded.Payload["wallet_nonce"])
+	}
+	status, repeated := fetch("wallet-nonce-123")
+	if status != http.StatusOK || repeated != first {
+		t.Fatalf("repeated fetch was not stable: status=%d", status)
+	}
+	status, _ = fetch("different-wallet-nonce")
+	if status != http.StatusBadRequest {
+		t.Fatalf("different nonce status = %d, want 400", status)
+	}
+}
+
 func TestRequestObjectTypHeaderValidatedByVerifier(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -2453,6 +2539,56 @@ func TestSessionExpiryPruningEvictsOldSessions(t *testing.T) {
 	env.vpPlugin.mu.RUnlock()
 	if exists {
 		t.Fatalf("expected expired session to be evicted")
+	}
+}
+
+func TestExternalSDJWTIssuerRequiresTrustedLeafOnlyX5C(t *testing.T) {
+	leafKey, chainDER := createECDSACertificateChain(t, []string{"issuer.example"}, "External VC Issuer")
+	root, err := x509.ParseCertificate(chainDER[1])
+	if err != nil {
+		t.Fatalf("ParseCertificate(root): %v", err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	verifier := &Plugin{sdJWTIssuerTrustAnchors: roots}
+
+	build := func(x5c [][]byte) string {
+		t.Helper()
+		token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
+			"iss": "https://issuer.example",
+			"sub": "wallet-subject",
+			"iat": time.Now().Unix(),
+			"exp": time.Now().Add(time.Hour).Unix(),
+			"vct": "urn:example:credential",
+		})
+		encoded := make([]string, 0, len(x5c))
+		for _, certificate := range x5c {
+			encoded = append(encoded, base64.StdEncoding.EncodeToString(certificate))
+		}
+		token.Header["typ"] = "dc+sd-jwt"
+		token.Header["x5c"] = encoded
+		signed, err := token.SignedString(leafKey)
+		if err != nil {
+			t.Fatalf("SignedString: %v", err)
+		}
+		return signed + "~"
+	}
+
+	issuerJWK, err := verifier.externalSDJWTIssuerJWK(build(chainDER[:1]))
+	if err != nil {
+		t.Fatalf("externalSDJWTIssuerJWK: %v", err)
+	}
+	publicKey, err := issuerJWK.ToPublicKey()
+	if err != nil {
+		t.Fatalf("ToPublicKey: %v", err)
+	}
+	valid, err := crypto.VerifySignatureWithKey(strings.TrimSuffix(build(chainDER[:1]), "~"), publicKey)
+	if err != nil || !valid {
+		t.Fatalf("issuer key did not verify credential: valid=%v err=%v", valid, err)
+	}
+	if _, err := verifier.externalSDJWTIssuerJWK(build(chainDER)); err == nil ||
+		!strings.Contains(err.Error(), "exclude the trust anchor") {
+		t.Fatalf("root-inclusive x5c error = %v", err)
 	}
 }
 
