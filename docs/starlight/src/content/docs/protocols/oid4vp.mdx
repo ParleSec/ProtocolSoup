@@ -175,7 +175,9 @@ Credential Manager), not a hosted web wallet.
   (optional `credential_sets` entries that do not match are omitted).
   Encrypted responses use ECDH-ES JWE (`response=<compact JWE>`).
 - After a successful HAIP response, the wallet navigates a verifier-provided
-  `redirect_uri` when present and safe (`https` only).
+  `redirect_uri` when present and safe (`https` only, no userinfo, no loopback,
+  private, or internal host). The SPA applies the same check before
+  `window.location.assign`.
 - `dc_api.jwt` remains deferred pending a native wallet provider.
 
 ### HAIP mode (`profile: "haip"`)

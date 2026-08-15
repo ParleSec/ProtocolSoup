@@ -274,13 +274,57 @@ function toErrorMessage(error: unknown): string {
   return String(error || 'Unexpected error')
 }
 
+function isLoopbackHostname(host: string): boolean {
+  const hostname = host.toLowerCase()
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+}
+
+function isBlockedNavigationHostname(host: string): boolean {
+  const hostname = host.toLowerCase()
+  if (!hostname) return true
+  if (isLoopbackHostname(hostname) || hostname === '0.0.0.0' || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+    return true
+  }
+  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) return false
+  const octets = hostname.split('.').map(Number)
+  if (octets.some((octet) => octet > 255)) return false
+  const [first, second] = octets
+  return first === 10
+    || first === 127
+    || (first === 169 && second === 254)
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168)
+    || first >= 224
+}
+
+function requireSafeBrowserNavigationURL(rawURL: string, mode: 'https' | 'https-or-local-http' = 'https'): string {
+  let parsed: URL
+  try {
+    parsed = new URL(String(rawURL || '').trim())
+  } catch {
+    throw new Error('Redirect URL is invalid')
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('Redirect URL must not include userinfo')
+  }
+  const hostname = parsed.hostname.toLowerCase()
+  if (!hostname) {
+    throw new Error('Redirect URL host is required')
+  }
+  if (parsed.protocol === 'https:') {
+    if (mode === 'https' && isBlockedNavigationHostname(hostname)) {
+      throw new Error(`Redirect URL host ${hostname} is not allowed`)
+    }
+    return parsed.toString()
+  }
+  if (mode === 'https-or-local-http' && parsed.protocol === 'http:' && isLoopbackHostname(hostname)) {
+    return parsed.toString()
+  }
+  throw new Error('Redirect URL must use HTTPS')
+}
+
 function normalizeAuthorizationRedirectTarget(rawURL: string): string {
-  let parsedURL: URL
-  try { parsedURL = new URL(String(rawURL || '').trim()) } catch { throw new Error('Issuer authorization URL is invalid') }
-  if (parsedURL.protocol === 'https:') return parsedURL.toString()
-  const isLocalHTTP = parsedURL.protocol === 'http:' && (parsedURL.hostname === 'localhost' || parsedURL.hostname === '127.0.0.1' || parsedURL.hostname === '::1')
-  if (isLocalHTTP) return parsedURL.toString()
-  throw new Error('Issuer authorization URL must use HTTPS')
+  return requireSafeBrowserNavigationURL(rawURL, 'https-or-local-http')
 }
 
 function tryParseAbsoluteURL(rawURL: unknown): URL | null {
@@ -389,12 +433,13 @@ function clearDiscoveredIssuerState(): void {
 }
 
 function openOID4VCIAuthorizationPopup(authorizationURL: string): Window | null {
+  const safeURL = requireSafeBrowserNavigationURL(authorizationURL, 'https-or-local-http')
   const width = Math.min(560, window.screen.availWidth || 560)
   const height = Math.min(720, window.screen.availHeight || 720)
   const left = Math.max(0, Math.floor(((window.screen.availWidth || width) - width) / 2))
   const top = Math.max(0, Math.floor(((window.screen.availHeight || height) - height) / 2))
   return window.open(
-    authorizationURL,
+    safeURL,
     'protocolsoup_oid4vci_authorize',
     `popup=yes,width=${width},height=${height},left=${left},top=${top}`,
   )
@@ -1161,8 +1206,13 @@ export default function WalletApp() {
   }, [apiRequest, setBanner])
 
   const continueIssuerAuthorization = useCallback(() => {
-    const target = String(pendingAuthorizationURL || '').trim()
-    if (!target) return
+    let target = ''
+    try {
+      target = requireSafeBrowserNavigationURL(pendingAuthorizationURL, 'https-or-local-http')
+    } catch (error) {
+      setBanner(toErrorMessage(error), 'error')
+      return
+    }
     savePendingOID4VCIAuthorization({
       authorizationURL: target,
       uriInput,
@@ -1502,9 +1552,15 @@ export default function WalletApp() {
       setResult(response); setActiveView('result')
       const redirectURI = String(response.redirect_uri || '').trim()
       if (redirectURI) {
-        setBanner('Presentation accepted; continuing to verifier redirect', 'success')
-        window.location.assign(redirectURI)
-        return
+        try {
+          const safeRedirectURI = requireSafeBrowserNavigationURL(redirectURI, 'https')
+          setBanner('Presentation accepted; continuing to verifier redirect', 'success')
+          window.location.assign(safeRedirectURI)
+          return
+        } catch (error) {
+          setBanner(toErrorMessage(error), 'error')
+          return
+        }
       }
       setBanner('Verifier response received', 'success')
     } finally { setActionPending('') }
@@ -1587,7 +1643,7 @@ export default function WalletApp() {
           setProtocolMode('oid4vci')
           setURIInput(pending.uriInput || '')
           if (pending.importSnapshot) setLastImport(pending.importSnapshot)
-          setPendingAuthorizationURL(pending.authorizationURL)
+          setPendingAuthorizationURL(requireSafeBrowserNavigationURL(pending.authorizationURL, 'https-or-local-http'))
           setIssuanceProgress('authorization_required')
           setActiveView('home')
         }

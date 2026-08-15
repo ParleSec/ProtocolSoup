@@ -104,7 +104,8 @@ wallet-driven authorization-code / HAIP issuance path is exercised.
     an mdoc plan to an SD-JWT plan)
   - Result UI treats `response_uri` 2xx replies (`redirect_uri` or empty
     body) as accepted; Looking Glass `result.policy.allowed` remains the denial
-    signal for ProtocolSoup verifiers
+    signal for ProtocolSoup verifiers. The SPA follows a verifier `redirect_uri`
+    only when it is `https` without userinfo or a loopback, private, or internal host.
 - `POST /submit`
   - Supports `mode=one_click` (default)
   - Supports `mode=stepwise` with steps: `bootstrap`, `issue_credential`, `build_presentation`, `submit_response`
