@@ -9,8 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -22,8 +20,9 @@ import (
 )
 
 const (
-	headerOAuthClientAttestation    = "OAuth-Client-Attestation"
-	headerOAuthClientAttestationPoP = "OAuth-Client-Attestation-PoP"
+	headerOAuthClientAttestation          = "OAuth-Client-Attestation"
+	headerOAuthClientAttestationPoP       = "OAuth-Client-Attestation-PoP"
+	headerOAuthClientAttestationChallenge = "OAuth-Client-Attestation-Challenge"
 
 	typOAuthClientAttestationJWT    = "oauth-client-attestation+jwt"
 	typOAuthClientAttestationPoPJWT = "oauth-client-attestation-pop+jwt"
@@ -213,7 +212,7 @@ func buildClientAttestationJWT(
 		return "", fmt.Errorf("attester private key is required")
 	}
 	claims := jwt.MapClaims{
-		"iss": "https://wallet.protocolsoup.com/attester",
+		"iss": clientAttestationIssuer(),
 		"sub": strings.TrimSpace(clientID),
 		"exp": exp.Unix(),
 		"cnf": map[string]interface{}{"jwk": cnfJWK},
@@ -224,14 +223,29 @@ func buildClientAttestationJWT(
 	return token.SignedString(attesterKey)
 }
 
-func buildClientAttestationPoPJWT(instanceKey *ecdsa.PrivateKey, audience string, jti string, iat time.Time) (string, error) {
+func buildClientAttestationPoPJWT(instanceKey *ecdsa.PrivateKey, clientID string, audience string, jti string, iat time.Time, challenge string) (string, error) {
 	if instanceKey == nil {
 		return "", fmt.Errorf("client instance private key is required")
 	}
+	normalizedClientID := strings.TrimSpace(clientID)
+	if normalizedClientID == "" {
+		return "", fmt.Errorf("client_id is required for client attestation PoP iss")
+	}
+	// OAuth 2.0 Attestation-Based Client Authentication draft-07 §5.2
+	// requires PoP iss = client_id. Later drafts remove iss; including it
+	// remains compatible with receivers that ignore unknown claims
+	// (including ProtocolSoup's draft-09+ issuer validator).
 	claims := jwt.MapClaims{
+		"iss": normalizedClientID,
 		"aud": strings.TrimSpace(audience),
 		"jti": strings.TrimSpace(jti),
 		"iat": iat.Unix(),
+	}
+	// OAuth 2.0 Attestation-Based Client Authentication §5 / §6.1:
+	// when the AS provides a challenge (challenge_endpoint or header), the
+	// Client Attestation PoP JWT MUST include it as the challenge claim.
+	if normalizedChallenge := strings.TrimSpace(challenge); normalizedChallenge != "" {
+		claims["challenge"] = normalizedChallenge
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = typOAuthClientAttestationPoPJWT
@@ -340,38 +354,13 @@ func isDPoPBoundTokenType(tokenType string) bool {
 	return strings.EqualFold(strings.TrimSpace(tokenType), dpop.HeaderName)
 }
 
-func attachHAIPDPoPHeaders(
-	req *http.Request,
-	tokenType string,
-	accessToken string,
-	session *haipIssuanceSession,
-	targetURL string,
-) error {
-	if req == nil {
-		return fmt.Errorf("http request is required")
-	}
-	req.Header.Set("Authorization", authorizationHeaderForAccessToken(tokenType, accessToken))
-	if !isDPoPBoundTokenType(tokenType) {
-		return nil
-	}
-	if session == nil {
-		return fmt.Errorf("dpop-bound access token requires haip issuance session")
-	}
-	dpopProof, err := session.buildDPoPProof(req.Method, targetURL, jwt.MapClaims{
-		"ath": computeAccessTokenHash(accessToken),
-	})
-	if err != nil {
-		return err
-	}
-	req.Header.Set(dpop.HeaderName, dpopProof)
-	return nil
-}
-
 type haipTokenExchangeInput struct {
 	TokenEndpoint         string
 	Form                  url.Values
 	LookingGlassSessionID string
 	Session               *haipIssuanceSession
+	PopAudience           string
+	ChallengeEndpoint     string
 }
 
 func (s *walletHarnessServer) exchangeHAIPPreAuthorizedToken(
@@ -389,24 +378,15 @@ func (s *walletHarnessServer) exchangeHAIPPreAuthorizedToken(
 		return nil, fmt.Errorf("token endpoint is required")
 	}
 
-	attestationJWT, err := buildClientAttestationJWT(
-		s.haipClientAttestation.PrivateKey,
-		s.haipClientAttestation.X5C,
-		s.haipAttestedClientID,
-		intcrypto.JWKFromECPublicKey(&input.Session.clientInstanceKey.PublicKey, "wallet-client-instance"),
-		time.Now().UTC().Add(5*time.Minute),
+	attestationJWT, popJWT, err := s.buildClientAttestationHeaderPair(
+		ctx,
+		input.Session,
+		input.PopAudience,
+		input.ChallengeEndpoint,
+		input.LookingGlassSessionID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("build client attestation jwt: %w", err)
-	}
-	popJWT, err := buildClientAttestationPoPJWT(
-		input.Session.clientInstanceKey,
-		s.oid4vciIssuerAudience(),
-		"wallet-attestation-pop-"+randomValue(12),
-		time.Now().UTC(),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("build client attestation pop jwt: %w", err)
+		return nil, err
 	}
 
 	form := cloneURLValues(input.Form)
@@ -414,7 +394,18 @@ func (s *walletHarnessServer) exchangeHAIPPreAuthorizedToken(
 		form.Set("client_id", strings.TrimSpace(s.haipAttestedClientID))
 	}
 
-	payload, err := s.postHAIPTokenRequest(ctx, tokenEndpoint, form, input.Session, attestationJWT, popJWT, input.LookingGlassSessionID)
+	payload, err := s.postHAIPFormWithDPoP(
+		ctx,
+		tokenEndpoint,
+		form,
+		input.Session,
+		attestationJWT,
+		popJWT,
+		input.PopAudience,
+		input.ChallengeEndpoint,
+		input.LookingGlassSessionID,
+		false,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -427,83 +418,6 @@ func cloneURLValues(values url.Values) url.Values {
 		cloned[key] = append([]string(nil), entries...)
 	}
 	return cloned
-}
-
-func (s *walletHarnessServer) postHAIPTokenRequest(
-	ctx context.Context,
-	tokenEndpoint string,
-	form url.Values,
-	session *haipIssuanceSession,
-	attestationJWT string,
-	popJWT string,
-	lookingGlassSessionID string,
-) (map[string]interface{}, error) {
-	dpopProof, err := session.buildDPoPProof(http.MethodPost, tokenEndpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	payload, status, headers, body, err := s.doHAIPTokenRequest(ctx, tokenEndpoint, form, attestationJWT, popJWT, dpopProof, lookingGlassSessionID)
-	if err != nil {
-		return nil, err
-	}
-	if status == http.StatusOK {
-		return payload, nil
-	}
-	if status != http.StatusBadRequest || strings.TrimSpace(asString(payload["error"])) != dpop.ErrorUseDPoPNonce {
-		return nil, fmt.Errorf("token request returned %d: %s", status, oneLine(string(body)))
-	}
-	nonce := strings.TrimSpace(headers.Get(dpop.NonceHeaderName))
-	if nonce == "" {
-		return nil, fmt.Errorf("token request returned use_dpop_nonce without %s header", dpop.NonceHeaderName)
-	}
-	retryProof, err := session.buildDPoPProof(http.MethodPost, tokenEndpoint, jwt.MapClaims{"nonce": nonce})
-	if err != nil {
-		return nil, err
-	}
-	payload, status, _, body, err = s.doHAIPTokenRequest(ctx, tokenEndpoint, form, attestationJWT, popJWT, retryProof, lookingGlassSessionID)
-	if err != nil {
-		return nil, err
-	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("token request retry returned %d: %s", status, oneLine(string(body)))
-	}
-	return payload, nil
-}
-
-func (s *walletHarnessServer) doHAIPTokenRequest(
-	ctx context.Context,
-	tokenEndpoint string,
-	form url.Values,
-	attestationJWT string,
-	popJWT string,
-	dpopProof string,
-	lookingGlassSessionID string,
-) (map[string]interface{}, int, http.Header, []byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
-	if err != nil {
-		return nil, 0, nil, nil, fmt.Errorf("build token request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set(headerOAuthClientAttestation, attestationJWT)
-	req.Header.Set(headerOAuthClientAttestationPoP, popJWT)
-	req.Header.Set(dpop.HeaderName, dpopProof)
-	if strings.TrimSpace(lookingGlassSessionID) != "" {
-		req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
-	}
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, nil, nil, fmt.Errorf("token request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	var payload map[string]interface{}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &payload); err != nil {
-			return nil, resp.StatusCode, resp.Header, body, fmt.Errorf("decode token response: %w", err)
-		}
-	}
-	return payload, resp.StatusCode, resp.Header, body, nil
 }
 
 func (s *walletHarnessServer) createHAIPCredentialProofJWT(
@@ -544,6 +458,19 @@ func (s *walletHarnessServer) createSDJWTHAIPCredentialProofJWT(
 	if holderKey == nil {
 		return "", fmt.Errorf("wallet has no ES256 holder key")
 	}
+	return s.createSDJWTHAIPCredentialProofJWTFromKey(holderKey, holderJWK, walletSubject, cNonce, audience)
+}
+
+func (s *walletHarnessServer) createSDJWTHAIPCredentialProofJWTFromKey(
+	holderKey *ecdsa.PrivateKey,
+	holderJWK intcrypto.JWK,
+	walletSubject string,
+	cNonce string,
+	audience string,
+) (string, error) {
+	if holderKey == nil {
+		return "", fmt.Errorf("holder private key is required")
+	}
 	keyAttestationJWT, err := buildKeyAttestationJWT(
 		s.haipKeyAttestation.PrivateKey,
 		s.haipKeyAttestation.X5C,
@@ -562,18 +489,13 @@ func (s *walletHarnessServer) createMdocHAIPCredentialProofJWT(
 	walletSubject string,
 	cNonce string,
 	audience string,
-	credentialConfigID string,
+	_ string,
 ) (string, error) {
 	if s.deviceKey == nil {
 		return "", fmt.Errorf("wallet device key is unavailable")
 	}
 	deviceJWK := intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID)
-	keyStorage := []string(nil)
-	userAuthentication := []string(nil)
-	if strings.EqualFold(strings.TrimSpace(credentialConfigID), "MobileDrivingLicenceMsoMdocHAIP") {
-		keyStorage = []string{"iso_18045_moderate"}
-		userAuthentication = []string{"iso_18045_moderate"}
-	}
+	keyStorage, userAuthentication := keyAttestationClaimsFromEnv()
 	keyAttestationJWT, err := buildKeyAttestationJWT(
 		s.haipKeyAttestation.PrivateKey,
 		s.haipKeyAttestation.X5C,
@@ -601,51 +523,27 @@ func (s *walletHarnessServer) requestHAIPCredential(
 	credentialConfigurationID string,
 	accessToken string,
 	tokenType string,
-	proofJWT string,
+	proofJWTs []string,
 	session *haipIssuanceSession,
 	lookingGlassSessionID string,
+	encryption *credentialResponseEncryptionSupport,
+	requestEncryption *credentialRequestEncryptionSupport,
+	credentialIdentifiers []string,
 ) (map[string]interface{}, error) {
-	requestBody := map[string]interface{}{
-		"credential_configuration_id": strings.TrimSpace(credentialConfigurationID),
+	// Prefer encrypted responses on the HAIP path when the issuer advertises
+	// algorithms, but only when request encryption keys are also available:
+	// OID4VCI §8.2 requires encrypting the request whenever
+	// credential_response_encryption is included.
+	requireEncryption := encryption != nil && encryption.EncryptionRequired
+	if encryption != nil && len(encryption.AlgValuesSupported) > 0 && requestEncryption != nil && requestEncryption.advertised() {
+		requireEncryption = true
 	}
-	if strings.TrimSpace(proofJWT) != "" {
-		requestBody["proofs"] = map[string]interface{}{
-			"jwt": []string{strings.TrimSpace(proofJWT)},
-		}
-	}
-	rawBody, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal credential request: %w", err)
-	}
-	dpopProof, err := session.buildDPoPProof(http.MethodPost, credentialEndpoint, jwt.MapClaims{
-		"ath": computeAccessTokenHash(accessToken),
-	})
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, credentialEndpoint, strings.NewReader(string(rawBody)))
-	if err != nil {
-		return nil, fmt.Errorf("build credential request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", authorizationHeaderForAccessToken(tokenType, accessToken))
-	req.Header.Set(dpop.HeaderName, dpopProof)
-	if strings.TrimSpace(lookingGlassSessionID) != "" {
-		req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
-	}
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("credential request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("credential request returned %d: %s", resp.StatusCode, oneLine(string(body)))
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("decode credential response: %w", err)
-	}
-	return payload, nil
+	return s.requestCredentialWithLifecycle(ctx, credentialEndpoint, credentialRequestBuildInput{
+		CredentialConfigurationID: credentialConfigurationID,
+		CredentialIdentifiers:     credentialIdentifiers,
+		ProofJWTs:                 proofJWTs,
+		Encryption:                encryption,
+		RequestEncryption:         requestEncryption,
+		RequireEncryption:         requireEncryption,
+	}, accessToken, tokenType, session, lookingGlassSessionID)
 }
