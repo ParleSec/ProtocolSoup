@@ -3,12 +3,13 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   Wallet, Home, FileSearch, CreditCard, Eye, Send, CheckCircle2,
   QrCode, Search, Download, RefreshCw, Plus, RotateCw,
-  X, ChevronDown, ShieldCheck, ShieldAlert, AlertTriangle,
+  X, ChevronDown, ShieldCheck, ShieldAlert,
   XCircle, Info, Camera, ArrowRight, Copy, ExternalLink, FileCode2,
 } from 'lucide-react'
 import { createWalletScanner } from './scanner'
 
 type WalletView = 'home' | 'review' | 'credentials' | 'disclosure' | 'present' | 'result'
+type WalletProtocolMode = 'idle' | 'oid4vci' | 'oid4vp'
 type BannerLevel = 'info' | 'success' | 'error'
 
 type CredentialSummary = {
@@ -146,6 +147,9 @@ type PresentResponse = {
 type ImportResponse = SessionPayload & {
   authorization_required?: boolean
   authorization_url?: string
+  configuration_selection_required?: boolean
+  credential_configurations?: CredentialConfigurationSummary[]
+  issuance_requirements?: IssuanceRequirements
   credential_offer?: Record<string, unknown>
   credential_offer_uri?: string
   credential_offer_transport?: string
@@ -159,7 +163,54 @@ type ImportResponse = SessionPayload & {
   tx_code_description?: string
   tx_code_length?: number
   tx_code_input_mode?: string
+  error?: string
+  error_description?: string
 }
+
+type CredentialConfigurationSummary = {
+  id?: string
+  format?: string
+  vct?: string
+  doctype?: string
+  cryptographic_binding_methods_supported?: string[]
+  key_attestation_required?: boolean
+  cryptographic_holder_binding?: boolean
+  display?: unknown
+}
+
+type IssuanceRequirements = {
+  par?: boolean
+  dpop?: boolean
+  client_attestation?: boolean
+  key_attestation?: boolean
+  cryptographic_holder_binding?: boolean
+  credential_request_encryption?: boolean
+  credential_response_encryption?: boolean
+  format?: string
+  vct?: string
+  doctype?: string
+}
+
+type WalletInputKind = 'empty' | 'offer' | 'issuer' | 'credential' | 'resource' | 'presentation' | 'as_discovery' | 'unknown'
+
+type ProtocolErrorState = {
+  source: 'import' | 'issue' | 'resolve' | 'preview' | 'present' | 'session'
+  error: string
+  errorDescription: string
+  txCodeRequired?: boolean
+  txCodeDescription?: string
+  txCodeLength?: number
+  txCodeInputMode?: string
+}
+
+type IssuanceProgress =
+  | ''
+  | 'importing'
+  | 'authorization_required'
+  | 'issuing'
+  | 'deferred'
+  | 'validation_failed'
+  | 'ready'
 
 const VIEW_TABS: Array<{ id: WalletView; label: string; icon: typeof Home }> = [
   { id: 'home', label: 'Home', icon: Home },
@@ -169,6 +220,22 @@ const VIEW_TABS: Array<{ id: WalletView; label: string; icon: typeof Home }> = [
   { id: 'present', label: 'Present', icon: Send },
   { id: 'result', label: 'Result', icon: CheckCircle2 },
 ]
+
+const OID4VCI_VIEW_IDS: WalletView[] = ['home', 'credentials']
+const OID4VP_VIEW_IDS: WalletView[] = ['home', 'review', 'credentials', 'disclosure', 'present', 'result']
+const IDLE_VIEW_IDS: WalletView[] = ['home', 'credentials']
+
+function viewsForProtocolMode(mode: WalletProtocolMode): WalletView[] {
+  if (mode === 'oid4vci') return OID4VCI_VIEW_IDS
+  if (mode === 'oid4vp') return OID4VP_VIEW_IDS
+  return IDLE_VIEW_IDS
+}
+
+function homeTabLabel(mode: WalletProtocolMode): string {
+  if (mode === 'oid4vci') return 'Issue'
+  if (mode === 'oid4vp') return 'Request'
+  return 'Home'
+}
 
 const CLAIM_DESCRIPTIONS: Record<string, string> = {
   degree: 'University degree name',
@@ -184,6 +251,9 @@ const ISSUE_FORMAT_OPTIONS: Array<{ format: string; configurationID: string; lab
   { format: 'jwt_vc_json', configurationID: 'UniversityDegreeCredentialJWT', label: 'jwt_vc_json' },
   { format: 'jwt_vc_json-ld', configurationID: 'UniversityDegreeCredentialJWTLD', label: 'jwt_vc_json-ld' },
   { format: 'ldp_vc', configurationID: 'UniversityDegreeCredentialLDP', label: 'ldp_vc' },
+  // HAIP configuration IDs are real issuer profiles; the wallet rejects them when attestation material is not loaded.
+  { format: 'mso_mdoc', configurationID: 'MobileDrivingLicenceMsoMdocHAIP', label: 'mso_mdoc HAIP (attestation)' },
+  { format: 'dc+sd-jwt', configurationID: 'UniversityDegreeCredentialSDJWTHAIP', label: 'dc+sd-jwt HAIP (attestation)' },
 ]
 
 const viewTransition = {
@@ -242,6 +312,94 @@ function resolveAuthorizationRedirectTarget(response: ImportResponse): string {
   return targetURL.toString()
 }
 
+const OID4VCI_PENDING_STORAGE_KEY = 'protocolsoup.wallet.oid4vci.pending'
+const OID4VCI_DISCOVERED_ISSUER_STORAGE_KEY = 'protocolsoup.wallet.oid4vci.discovered-issuer'
+const OID4VCI_CALLBACK_MESSAGE_TYPE = 'protocolsoup.wallet.oid4vci.callback'
+
+type PendingOID4VCIAuthorizationState = {
+  authorizationURL: string
+  uriInput: string
+  importSnapshot: ImportResponse | null
+  savedAt: number
+}
+
+type DiscoveredIssuerState = {
+  snapshot: ImportResponse
+  selectedConfigurationID: string
+  savedAt: number
+}
+
+function savePendingOID4VCIAuthorization(state: PendingOID4VCIAuthorizationState): void {
+  try {
+    sessionStorage.setItem(OID4VCI_PENDING_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // sessionStorage may be unavailable; authorize can still proceed.
+  }
+}
+
+function loadPendingOID4VCIAuthorization(): PendingOID4VCIAuthorizationState | null {
+  try {
+    const raw = sessionStorage.getItem(OID4VCI_PENDING_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PendingOID4VCIAuthorizationState
+    if (!parsed || typeof parsed !== 'object' || !String(parsed.authorizationURL || '').trim()) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function clearPendingOID4VCIAuthorization(): void {
+  try {
+    sessionStorage.removeItem(OID4VCI_PENDING_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+function saveDiscoveredIssuerState(state: DiscoveredIssuerState): void {
+  try {
+    sessionStorage.setItem(OID4VCI_DISCOVERED_ISSUER_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // sessionStorage may be unavailable; the in-tab picker still works.
+  }
+}
+
+function loadDiscoveredIssuerState(): DiscoveredIssuerState | null {
+  try {
+    const raw = sessionStorage.getItem(OID4VCI_DISCOVERED_ISSUER_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as DiscoveredIssuerState
+    const configurations = parsed?.snapshot?.credential_configurations
+    if (!parsed?.snapshot?.credential_issuer || !Array.isArray(configurations) || configurations.length === 0) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function clearDiscoveredIssuerState(): void {
+  try {
+    sessionStorage.removeItem(OID4VCI_DISCOVERED_ISSUER_STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+function openOID4VCIAuthorizationPopup(authorizationURL: string): Window | null {
+  const width = Math.min(560, window.screen.availWidth || 560)
+  const height = Math.min(720, window.screen.availHeight || 720)
+  const left = Math.max(0, Math.floor(((window.screen.availWidth || width) - width) / 2))
+  const top = Math.max(0, Math.floor(((window.screen.availHeight || height) - height) / 2))
+  return window.open(
+    authorizationURL,
+    'protocolsoup_oid4vci_authorize',
+    `popup=yes,width=${width},height=${height},left=${left},top=${top}`,
+  )
+}
+
 function buildResolvePayloadFromInput(rawInput: string, extras?: { clientID?: string; requestURIMethod?: string }): Record<string, string> {
   const trimmed = rawInput.trim()
   if (!trimmed) throw new Error('Provide openid4vp URI or request_uri')
@@ -272,8 +430,12 @@ function looksLikeCompactJWT(rawInput: string): boolean {
 
 function buildImportPayloadFromInput(rawInput: string, txCode: string): Record<string, string> {
   const trimmed = rawInput.trim()
-  if (!trimmed) throw new Error('Provide an OID4VCI offer, raw VC JWT, or JSON-LD credential')
+  if (!trimmed) throw new Error('Provide a credential issuer URL, OID4VCI offer, raw VC JWT, or JSON-LD credential')
   const payload: Record<string, string> = {}
+  if (looksLikeCredentialIssuerInput(trimmed)) {
+    payload.credential_issuer = credentialIssuerFromInput(trimmed)
+    return payload
+  }
   if (looksLikeCredentialOfferInput(trimmed)) {
     payload.offer = trimmed
     if (txCode.trim()) payload.tx_code = txCode.trim()
@@ -283,7 +445,182 @@ function buildImportPayloadFromInput(rawInput: string, txCode: string): Record<s
     payload.credential = trimmed
     return payload
   }
-  throw new Error('Input is not a recognized OID4VCI offer or verifiable credential')
+  throw new Error('Input is not a recognized credential issuer, OID4VCI offer, or verifiable credential')
+}
+
+function looksLikeProtectedResourceAuthInput(rawInput: string): boolean {
+  try {
+    return Boolean(parseProtectedResourceAuthInput(rawInput))
+  } catch {
+    return false
+  }
+}
+
+function looksLikeASDiscoveryURL(value: string): boolean {
+  const lower = value.toLowerCase()
+  return lower.includes('oauth-authorization-server') || lower.includes('openid-configuration')
+}
+
+function looksLikeCredentialIssuerMetadataURL(value: string): boolean {
+  return value.toLowerCase().includes('/.well-known/openid-credential-issuer')
+}
+
+function looksLikeCredentialIssuerInput(rawInput: string): boolean {
+  const trimmed = rawInput.trim()
+  if (!trimmed) return false
+  if (looksLikeCredentialOfferInput(trimmed) || looksLikeProtectedResourceAuthInput(trimmed) || looksLikeRawCredentialInput(trimmed)) {
+    return false
+  }
+  const parsedJSON = tryParseJSONObject(trimmed)
+  if (parsedJSON) {
+    return Boolean(parsedJSON.credential_issuer) && !parsedJSON.credential_configuration_ids && !parsedJSON.grants
+  }
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return false
+  if (trimmed.includes('\n')) return false
+  try {
+    const parsed = new URL(trimmed.split(/\s/)[0])
+    const path = parsed.pathname.toLowerCase()
+    if (looksLikeCredentialIssuerMetadataURL(parsed.pathname)) return true
+    if (looksLikeASDiscoveryURL(parsed.pathname)) return false
+    if (parsed.searchParams.has('credential_offer') || parsed.searchParams.has('credential_offer_uri') || parsed.searchParams.has('request_uri') || parsed.searchParams.has('request')) {
+      return false
+    }
+    if (path.includes('credential-offer') || path.includes('/authorize')) return false
+    return parsed.search === ''
+  } catch {
+    return false
+  }
+}
+
+function looksLikeASDiscoveryOnlyInput(rawInput: string): boolean {
+  const trimmed = rawInput.trim()
+  if (!trimmed || trimmed.includes('\n') || looksLikeProtectedResourceAuthInput(trimmed) || looksLikeCredentialOfferInput(trimmed)) return false
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return false
+  try {
+    return looksLikeASDiscoveryURL(new URL(trimmed).pathname)
+  } catch {
+    return false
+  }
+}
+
+function credentialIssuerFromInput(rawInput: string): string {
+  const trimmed = rawInput.trim()
+  const parsedJSON = tryParseJSONObject(trimmed)
+  if (parsedJSON && parsedJSON.credential_issuer) return String(parsedJSON.credential_issuer)
+  return trimmed
+}
+
+function classifyWalletInput(rawInput: string): { kind: WalletInputKind; label: string; detail: string } {
+  const trimmed = rawInput.trim()
+  if (!trimmed) {
+    return { kind: 'empty', label: 'Waiting for input', detail: 'Paste a credential issuer URL, credential offer, presentation request, or issued credential.' }
+  }
+  if (looksLikeProtectedResourceAuthInput(trimmed)) {
+    return { kind: 'resource', label: 'Protected resource', detail: 'Import will authorize with the AS, then GET this resource with DPoP.' }
+  }
+  if (looksLikeCredentialOfferInput(trimmed)) {
+    return { kind: 'offer', label: 'Credential offer', detail: 'Import will redeem this offer with the credential issuer.' }
+  }
+  if (looksLikeCredentialIssuerInput(trimmed)) {
+    return { kind: 'issuer', label: 'Credential issuer', detail: 'Import fetches issuer metadata so you can pick a credential configuration, then authorize.' }
+  }
+  if (looksLikeASDiscoveryOnlyInput(trimmed)) {
+    return { kind: 'as_discovery', label: 'Authorization Server discovery', detail: 'This is not a credential issuer. For issuance, paste credential_issuer. For a protected resource, paste discovery URL plus resource URL.' }
+  }
+  if (looksLikeRawCredentialInput(trimmed)) {
+    return { kind: 'credential', label: 'Issued credential', detail: 'Import will store this credential in the wallet session.' }
+  }
+  if (looksLikeOID4VPInput(trimmed) || trimmed.startsWith('openid4vp://')) {
+    return { kind: 'presentation', label: 'Presentation request', detail: 'Use Resolve to review the verifier request and present.' }
+  }
+  return { kind: 'unknown', label: 'Unrecognized input', detail: 'Expected a credential issuer URL, offer, presentation request, or credential.' }
+}
+
+function issuanceRequirementChips(requirements?: IssuanceRequirements | null): string[] {
+  if (!requirements) return []
+  const chips: string[] = []
+  if (requirements.par) chips.push('PAR')
+  if (requirements.dpop) chips.push('DPoP')
+  if (requirements.client_attestation) chips.push('Client attestation')
+  if (requirements.key_attestation) chips.push('Key attestation')
+  if (requirements.cryptographic_holder_binding) chips.push('Holder binding (cnf)')
+  if (requirements.credential_request_encryption) chips.push('Request encryption')
+  if (requirements.credential_response_encryption) chips.push('Response encryption')
+  return chips
+}
+
+function parseProtectedResourceAuthInput(rawInput: string): { discovery_url: string; resource_endpoint: string; scope: string } | null {
+  const trimmed = rawInput.trim()
+  if (!trimmed) return null
+  const parsedJSON = tryParseJSONObject(trimmed)
+  if (parsedJSON) {
+    const discovery = firstNonEmptyString(
+      String(parsedJSON.discovery_url || ''),
+      String(parsedJSON.discoveryUrl || ''),
+    )
+    const resource = firstNonEmptyString(
+      String(parsedJSON.resource_endpoint || ''),
+      String(parsedJSON.resourceEndpoint || ''),
+      String(parsedJSON.accounts_endpoint || ''),
+      String(parsedJSON.accountsEndpoint || ''),
+    )
+    const scope = firstNonEmptyString(String(parsedJSON.scope || '')) || (
+      resource ? 'accounts' : ''
+    )
+    if (discovery && resource && scope && looksLikeASDiscoveryURL(discovery)) {
+      return { discovery_url: discovery, resource_endpoint: resource, scope }
+    }
+    return null
+  }
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  if (lines.length < 2) return null
+  let discovery = ''
+  let resource = ''
+  let scope = ''
+  for (const line of lines) {
+    const lower = line.toLowerCase()
+    if (lower.startsWith('discovery') || looksLikeASDiscoveryURL(line)) {
+      const next = line.replace(/^discovery(_url|Url)?\s*[:=]\s*/i, '').trim()
+      if (!discovery || (next.includes('openid-configuration') && !discovery.includes('openid-configuration'))) {
+        discovery = next
+      }
+      continue
+    }
+    if (lower.startsWith('resource') || lower.startsWith('accounts') || lower.includes('open-banking') || lower.includes('/accounts') || lower.includes('userinfo')) {
+      const next = line.replace(/^(resource|accounts)(_endpoint|Endpoint)?\s*[:=]\s*/i, '').trim()
+      if (next.startsWith('http')) {
+        resource = next
+      } else if (!scope && next && !next.includes('/')) {
+        // Bare "accounts" is the OAuth scope, not a resource URL.
+        scope = next
+      }
+      continue
+    }
+    if (lower.startsWith('scope')) {
+      scope = line.replace(/^scope\s*[:=]\s*/i, '').trim()
+      continue
+    }
+    if (!discovery && line.startsWith('http') && looksLikeASDiscoveryURL(line)) {
+      discovery = line
+      continue
+    }
+    if (!resource && line.startsWith('http') && (line.includes('/accounts') || line.includes('open-banking') || line.includes('userinfo'))) {
+      resource = line
+      continue
+    }
+    if (!scope && !line.startsWith('http')) {
+      scope = line
+    }
+  }
+  // VCI HAIP FAPI client modules use fapi_client_type=plain_oauth, which rejects
+  // the openid scope — default to accounts only for Open Banking accounts URLs.
+  if (discovery && resource && !scope) {
+    scope = 'accounts'
+  }
+  if (discovery && resource && scope) {
+    return { discovery_url: discovery, resource_endpoint: resource, scope }
+  }
+  return null
 }
 
 function looksLikeCredentialOfferInput(rawInput: string): boolean {
@@ -308,6 +645,32 @@ function looksLikeRawCredentialInput(rawInput: string): boolean {
   return Boolean(parsedJSON['@context'] || parsedJSON.credentialSubject || parsedJSON.proof || parsedJSON.issuer || parsedJSON.vc)
 }
 
+function looksLikeOID4VPInput(rawInput: string): boolean {
+  const trimmed = rawInput.trim()
+  if (!trimmed) return false
+  if (trimmed.startsWith('openid4vp://')) return true
+  if (looksLikeProtectedResourceAuthInput(trimmed) || looksLikeCredentialOfferInput(trimmed) || looksLikeRawCredentialInput(trimmed)) return false
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return false
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.searchParams.has('request_uri') || parsed.searchParams.has('request')) return true
+    if (parsed.pathname.toLowerCase().includes('authorize')) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+function detectWalletProtocolMode(rawInput: string): WalletProtocolMode {
+  const trimmed = rawInput.trim()
+  if (!trimmed) return 'idle'
+  if (looksLikeProtectedResourceAuthInput(trimmed) || looksLikeCredentialOfferInput(trimmed) || looksLikeRawCredentialInput(trimmed) || looksLikeCredentialIssuerInput(trimmed)) return 'oid4vci'
+  if (looksLikeASDiscoveryOnlyInput(trimmed)) return 'idle'
+  if (looksLikeOID4VPInput(trimmed) || trimmed.startsWith('openid4vp://')) return 'oid4vp'
+  // Bare request JWTs / opaque request blobs go through OID4VP resolve.
+  return 'oid4vp'
+}
+
 function normalizeClaims(rawClaims: unknown): string[] {
   if (!Array.isArray(rawClaims)) return []
   return rawClaims.map((claim) => String(claim).trim()).filter(Boolean)
@@ -330,6 +693,72 @@ function mergeCredentialSession(previous: SessionPayload | null, response: Sessi
     credential_configuration_id: response.credential_configuration_id || previous?.credential_configuration_id,
     credentials: response.credentials || previous?.credentials,
   }
+}
+
+type IssueFocus = 'input' | 'picker' | 'authorize' | 'request' | 'done'
+type IssueStepID = 'input' | 'picker' | 'authorize' | 'offer' | 'request'
+
+function IssueStep({
+  title,
+  summary,
+  open,
+  onToggle,
+  tone = 'neutral',
+  actions,
+  children,
+}: {
+  title: string
+  summary?: string
+  open: boolean
+  onToggle: () => void
+  tone?: 'cyan' | 'amber' | 'neutral'
+  actions?: React.ReactNode
+  children: React.ReactNode
+}) {
+  const toneClass = tone === 'cyan'
+    ? 'border-cyan-500/30 bg-cyan-500/5'
+    : tone === 'amber'
+      ? 'border-amber-500/30 bg-amber-500/5'
+      : 'border-white/10 bg-surface-900/40'
+  const titleClass = tone === 'cyan'
+    ? 'text-cyan-200'
+    : tone === 'amber'
+      ? 'text-amber-300'
+      : 'text-surface-200'
+  return (
+    <div className={`rounded-lg border overflow-hidden ${toneClass}`}>
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={onToggle}
+          aria-expanded={open}
+        >
+          <span className={`text-xs sm:text-sm font-medium shrink-0 ${titleClass}`}>{title}</span>
+          {!open && summary ? (
+            <span className="min-w-0 truncate text-[11px] text-surface-500 font-mono">{summary}</span>
+          ) : null}
+          <ChevronDown className={`ml-auto w-3.5 h-3.5 shrink-0 text-surface-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {actions ? <div className="shrink-0 flex items-center gap-2">{actions}</div> : null}
+      </div>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-white/10 px-3 py-3 space-y-3">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 
 function Expandable({ title, icon: Icon, defaultOpen, children }: { title: string; icon?: typeof FileCode2; defaultOpen?: boolean; children: React.ReactNode }) {
@@ -414,19 +843,26 @@ export default function WalletApp() {
   const scanner = useMemo(() => createWalletScanner(), [])
   const scannerViewportRef = useRef<HTMLDivElement | null>(null)
   const resolveInFlightRef = useRef(false)
+  const importInFlightRef = useRef(false)
+  const bootstrapOfferHandledRef = useRef(false)
 
   const [activeView, setActiveView] = useState<WalletView>('home')
+  const [protocolMode, setProtocolMode] = useState<WalletProtocolMode>('idle')
   const [statusBanner, setStatusBanner] = useState<{ message: string; level: BannerLevel } | null>(null)
   const [session, setSession] = useState<SessionPayload | null>(null)
   const [walletSessionID, setWalletSessionID] = useState('')
   const [selectedCredentialID, setSelectedCredentialID] = useState('')
-  const [selectedIssueFormat, setSelectedIssueFormat] = useState(ISSUE_FORMAT_OPTIONS[0]?.format || 'dc+sd-jwt')
+  const [selectedIssueFormat, setSelectedIssueFormat] = useState(ISSUE_FORMAT_OPTIONS[0]?.configurationID || 'MobileDrivingLicenceMsoMdoc')
   const [uriInput, setURIInput] = useState('')
   const [importTxCodeInput, setImportTxCodeInput] = useState('')
   const [resolved, setResolved] = useState<ResolveResponse | null>(null)
   const [preview, setPreview] = useState<PreviewResponse | null>(null)
   const [result, setResult] = useState<PresentResponse | null>(null)
   const [lastImport, setLastImport] = useState<ImportResponse | null>(null)
+  const [discoveredIssuer, setDiscoveredIssuer] = useState<ImportResponse | null>(null)
+  const [selectedIssuerConfigurationID, setSelectedIssuerConfigurationID] = useState('')
+  const [lastProtocolError, setLastProtocolError] = useState<ProtocolErrorState | null>(null)
+  const [issuanceProgress, setIssuanceProgress] = useState<IssuanceProgress>('')
   const [pendingAuthorizationURL, setPendingAuthorizationURL] = useState('')
   const [selectedDisclosureClaims, setSelectedDisclosureClaims] = useState<string[]>([])
   const [externalTrustApproval, setExternalTrustApproval] = useState(false)
@@ -435,11 +871,118 @@ export default function WalletApp() {
   const [scannerStartRequestID, setScannerStartRequestID] = useState(0)
   const [resolveInFlight, setResolveInFlight] = useState(false)
   const [actionPending, setActionPending] = useState<'refresh' | 'issue' | 'import' | 'preview' | 'present' | ''>('')
+  const [authorizationContinued, setAuthorizationContinued] = useState(false)
+  const [stepExpanded, setStepExpanded] = useState<Partial<Record<IssueStepID, boolean>>>({})
+
+  const inputClassification = useMemo(() => classifyWalletInput(uriInput), [uriInput])
+  const discoveredConfigurations = useMemo(
+    () => Array.isArray(discoveredIssuer?.credential_configurations) ? discoveredIssuer.credential_configurations : [],
+    [discoveredIssuer],
+  )
+  const canRetryDiscoveredIssuance = Boolean(
+    discoveredIssuer?.credential_issuer
+    && selectedIssuerConfigurationID
+    && (
+      pendingAuthorizationURL
+      || lastProtocolError?.source === 'import'
+      || issuanceProgress === 'authorization_required'
+      || issuanceProgress === 'validation_failed'
+      || issuanceProgress === 'ready'
+    ),
+  )
+  const issueFocus = useMemo<IssueFocus>(() => {
+    if (protocolMode === 'oid4vp') return resolved ? 'request' : 'input'
+    if (pendingAuthorizationURL && !authorizationContinued) return 'authorize'
+    const pickerActive = discoveredConfigurations.length > 0
+      && !pendingAuthorizationURL
+      && actionPending !== 'import'
+      && issuanceProgress !== 'ready'
+      && issuanceProgress !== 'validation_failed'
+      && issuanceProgress !== 'authorization_required'
+      && !lastProtocolError
+    if (pickerActive) return 'picker'
+    if (discoveredConfigurations.length > 0 || pendingAuthorizationURL || lastImport || issuanceProgress) return 'done'
+    return 'input'
+  }, [
+    actionPending,
+    authorizationContinued,
+    discoveredConfigurations.length,
+    issuanceProgress,
+    lastImport,
+    lastProtocolError,
+    pendingAuthorizationURL,
+    protocolMode,
+    resolved,
+  ])
+  const stepDerivedOpen = useMemo<Record<IssueStepID, boolean>>(() => ({
+    input: issueFocus === 'input',
+    picker: issueFocus === 'picker',
+    authorize: issueFocus === 'authorize',
+    offer: false,
+    request: issueFocus === 'request',
+  }), [issueFocus])
+  const stepIsOpen = (id: IssueStepID) => stepExpanded[id] ?? stepDerivedOpen[id]
+  const toggleStep = (id: IssueStepID) => {
+    setStepExpanded((current) => ({ ...current, [id]: !(current[id] ?? stepDerivedOpen[id]) }))
+  }
+
+  const visibleTabs = useMemo(() => {
+    const allowed = new Set(viewsForProtocolMode(protocolMode))
+    return VIEW_TABS.filter((tab) => allowed.has(tab.id)).map((tab) => (
+      tab.id === 'home' ? { ...tab, label: homeTabLabel(protocolMode) } : tab
+    ))
+  }, [protocolMode])
+
+  const selectedIssueOption = useMemo(
+    () => ISSUE_FORMAT_OPTIONS.find((option) => option.configurationID === selectedIssueFormat) || ISSUE_FORMAT_OPTIONS[0],
+    [selectedIssueFormat],
+  )
+
+  const txCodeGuidance = useMemo(() => {
+    if (lastProtocolError?.txCodeRequired) {
+      return {
+        description: lastProtocolError.txCodeDescription || '',
+        length: lastProtocolError.txCodeLength || 0,
+        inputMode: lastProtocolError.txCodeInputMode || '',
+      }
+    }
+    if (lastImport?.tx_code_required) {
+      return {
+        description: String(lastImport.tx_code_description || ''),
+        length: Number(lastImport.tx_code_length || 0),
+        inputMode: String(lastImport.tx_code_input_mode || ''),
+      }
+    }
+    return null
+  }, [lastImport, lastProtocolError])
 
   const setBanner = useCallback((message: string, level: BannerLevel = 'info') => {
     const normalized = String(message || '').trim()
     if (!normalized) { setStatusBanner(null); return }
     setStatusBanner({ message: normalized, level })
+  }, [])
+
+  const recordProtocolError = useCallback((
+    source: ProtocolErrorState['source'],
+    payloadObject: Record<string, unknown>,
+    fallback: string,
+  ) => {
+    const errorCode = String(payloadObject.error || '').trim()
+    const errorDescription = String(payloadObject.error_description || payloadObject.error || fallback).trim() || fallback
+    const nextError: ProtocolErrorState = {
+      source,
+      error: errorCode || 'request_failed',
+      errorDescription,
+      txCodeRequired: Boolean(payloadObject.tx_code_required),
+      txCodeDescription: String(payloadObject.tx_code_description || '').trim() || undefined,
+      txCodeLength: Number(payloadObject.tx_code_length || 0) || undefined,
+      txCodeInputMode: String(payloadObject.tx_code_input_mode || '').trim() || undefined,
+    }
+    setLastProtocolError(nextError)
+    if (String(payloadObject.error || '').includes('invalid') || String(payloadObject.error || '').includes('validation')) {
+      setIssuanceProgress('validation_failed')
+    }
+    return nextError
   }, [])
 
   const credentialEntries = useMemo(() => {
@@ -487,8 +1030,57 @@ export default function WalletApp() {
     if (!resolved?.trust?.requires_external_approval) setExternalTrustApproval(false)
   }, [resolved?.trust?.requires_external_approval])
 
+  useEffect(() => {
+    const allowed = viewsForProtocolMode(protocolMode)
+    if (!allowed.includes(activeView)) setActiveView(allowed[0] || 'home')
+  }, [activeView, protocolMode])
+
+  const clearOID4VPFlowState = useCallback(() => {
+    setResolved(null)
+    setPreview(null)
+    setResult(null)
+    setSelectedDisclosureClaims([])
+    setExternalTrustApproval(false)
+  }, [])
+
+  const clearOID4VCIFlowState = useCallback(() => {
+    setPendingAuthorizationURL('')
+    setIssuanceProgress('')
+    setLastImport(null)
+    setDiscoveredIssuer(null)
+    setSelectedIssuerConfigurationID('')
+    setImportTxCodeInput('')
+    setAuthorizationContinued(false)
+    setStepExpanded({})
+    clearPendingOID4VCIAuthorization()
+    clearDiscoveredIssuerState()
+  }, [])
+
+  const enterOID4VCIMode = useCallback(() => {
+    clearOID4VPFlowState()
+    setProtocolMode('oid4vci')
+  }, [clearOID4VPFlowState])
+
+  const enterOID4VPMode = useCallback(() => {
+    clearOID4VCIFlowState()
+    setProtocolMode('oid4vp')
+  }, [clearOID4VCIFlowState])
+
+  const resetProtocolMode = useCallback(() => {
+    clearOID4VPFlowState()
+    clearOID4VCIFlowState()
+    setProtocolMode('idle')
+    setActiveView('home')
+    setBanner('Returned to idle wallet mode')
+  }, [clearOID4VCIFlowState, clearOID4VPFlowState, setBanner])
+
   const apiRequest = useCallback(
-    async <TResponse,>(endpoint: string, method: 'GET' | 'POST', payload?: unknown): Promise<TResponse> => {
+    async <TResponse,>(
+      endpoint: string,
+      method: 'GET' | 'POST',
+      payload?: unknown,
+      errorSource: ProtocolErrorState['source'] = 'session',
+    ): Promise<TResponse> => {
       const headers: Record<string, string> = { Accept: 'application/json' }
       if (walletSessionID.trim()) headers['X-Wallet-Session'] = walletSessionID.trim()
       const requestInit: RequestInit = { method, headers, credentials: 'same-origin' }
@@ -501,20 +1093,25 @@ export default function WalletApp() {
       try { body = await response.json() } catch { body = {} }
       if (!response.ok) {
         const payloadObject = (body && typeof body === 'object') ? body as Record<string, unknown> : {}
-        let errorDescription = String(payloadObject.error_description || payloadObject.error || `Request failed with HTTP ${response.status}`)
-        if (payloadObject.tx_code_required) {
+        const protocolError = recordProtocolError(errorSource, payloadObject, `Request failed with HTTP ${response.status}`)
+        let errorDescription = protocolError.errorDescription
+        if (protocolError.error && protocolError.error !== 'request_failed') {
+          errorDescription = `${protocolError.error}: ${errorDescription}`
+        }
+        if (protocolError.txCodeRequired) {
           const txCodeHints = [
-            String(payloadObject.tx_code_description || '').trim(),
-            payloadObject.tx_code_length ? `Length: ${String(payloadObject.tx_code_length)}` : '',
-            String(payloadObject.tx_code_input_mode || '').trim() ? `Input mode: ${String(payloadObject.tx_code_input_mode).trim()}` : '',
+            protocolError.txCodeDescription || '',
+            protocolError.txCodeLength ? `Length: ${String(protocolError.txCodeLength)}` : '',
+            protocolError.txCodeInputMode ? `Input mode: ${protocolError.txCodeInputMode}` : '',
           ].filter(Boolean)
           if (txCodeHints.length > 0) errorDescription = `${errorDescription} (${txCodeHints.join(', ')})`
         }
         throw new Error(errorDescription)
       }
+      setLastProtocolError(null)
       return body as TResponse
     },
-    [walletSessionID],
+    [recordProtocolError, walletSessionID],
   )
 
   const stopScanner = useCallback(
@@ -547,6 +1144,10 @@ export default function WalletApp() {
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [scannerOpen, stopScanner])
 
+  useEffect(() => {
+    setStepExpanded({})
+  }, [issueFocus])
+
   const refreshSession = useCallback(async () => {
     setActionPending('refresh')
     setBanner('Loading wallet session')
@@ -559,20 +1160,57 @@ export default function WalletApp() {
     } finally { setActionPending('') }
   }, [apiRequest, setBanner])
 
-  const clearResolvedState = useCallback(() => {
-    setResolved(null); setPreview(null); setResult(null)
-    setPendingAuthorizationURL(''); setSelectedDisclosureClaims([]); setExternalTrustApproval(false)
-  }, [])
+  const continueIssuerAuthorization = useCallback(() => {
+    const target = String(pendingAuthorizationURL || '').trim()
+    if (!target) return
+    savePendingOID4VCIAuthorization({
+      authorizationURL: target,
+      uriInput,
+      importSnapshot: lastImport,
+      savedAt: Date.now(),
+    })
+    setAuthorizationContinued(true)
+    const popup = openOID4VCIAuthorizationPopup(target)
+    if (popup) {
+      setBanner('Complete issuer authorization in the popup. This wallet tab will stay on the offer.', 'info')
+      return
+    }
+    // Popup blocked: fall back to same-tab navigation; sessionStorage restores context on return.
+    setBanner('Popup blocked — continuing in this tab. Offer context will be restored when you return.', 'info')
+    window.location.assign(target)
+  }, [lastImport, pendingAuthorizationURL, setBanner, uriInput])
+
+  const applyOID4VCICallbackResult = useCallback(async (status: string, message: string) => {
+    clearPendingOID4VCIAuthorization()
+    setPendingAuthorizationURL('')
+    setProtocolMode('oid4vci')
+    await refreshSession()
+    if (status === 'success') {
+      setIssuanceProgress('ready')
+      const normalized = String(message || '').toLowerCase()
+      if (normalized.includes('fapi')) {
+        setActiveView('home')
+        setBanner(firstNonEmptyString(message, 'FAPI resource request completed'), 'success')
+        return
+      }
+      setActiveView('credentials')
+      setBanner(firstNonEmptyString(message, 'Credential imported'), 'success')
+      return
+    }
+    setIssuanceProgress('validation_failed')
+    setBanner(firstNonEmptyString(message, 'OID4VCI authorization failed'), 'error')
+  }, [refreshSession, setBanner])
 
   const resolveRequest = useCallback(
     async (rawInput: string, extras?: { clientID?: string; requestURIMethod?: string }) => {
       if (resolveInFlightRef.current) return
       resolveInFlightRef.current = true
       setResolveInFlight(true)
+      enterOID4VPMode()
       setBanner('Resolving request object')
       try {
         const payload = buildResolvePayloadFromInput(rawInput, extras)
-        const response = await apiRequest<ResolveResponse>('/api/resolve', 'POST', payload)
+        const response = await apiRequest<ResolveResponse>('/api/resolve', 'POST', payload, 'resolve')
         setResolved(response); setPreview(null); setResult(null)
         setPendingAuthorizationURL('')
         const dcqlClaims: string[] = []
@@ -588,54 +1226,188 @@ export default function WalletApp() {
         }
         setSelectedDisclosureClaims(Array.from(new Set(dcqlClaims)))
         setExternalTrustApproval(false)
-        if (response.inferred_credential_format) {
-          const match = ISSUE_FORMAT_OPTIONS.find((opt) => opt.format === response.inferred_credential_format)
-          if (match) setSelectedIssueFormat(match.format)
+        if (response.inferred_credential_configuration_id) {
+          const match = ISSUE_FORMAT_OPTIONS.find((opt) => opt.configurationID === response.inferred_credential_configuration_id)
+            || ISSUE_FORMAT_OPTIONS.find((opt) => opt.format === response.inferred_credential_format)
+          if (match) setSelectedIssueFormat(match.configurationID)
         }
         const matched = Boolean(response.credential_matches?.matched)
         if (!matched && response.inferred_credential_format) {
           setBanner('Issuing a credential that matches the presentation request')
+          setIssuanceProgress('issuing')
           const issued = await apiRequest<SessionPayload>('/api/issue', 'POST', {
             force_issue: true,
             credential_format: response.inferred_credential_format,
             credential_configuration_id: response.inferred_credential_configuration_id || undefined,
-          })
+          }, 'issue')
           setSession((previous) => mergeCredentialSession(previous, issued))
           if (issued.credential_id) setSelectedCredentialID(String(issued.credential_id))
+          setIssuanceProgress('ready')
         }
         setActiveView('review')
         setBanner('Request object resolved', 'success')
       } finally { resolveInFlightRef.current = false; setResolveInFlight(false) }
     },
-    [apiRequest, setBanner],
+    [apiRequest, enterOID4VPMode, setBanner],
   )
 
   const importCredentialOffer = useCallback(
     async (rawInput: string) => {
+      if (importInFlightRef.current) return
+      importInFlightRef.current = true
       setActionPending('import')
+      enterOID4VCIMode()
+      setIssuanceProgress('importing')
       setBanner('Importing credential into wallet')
       try {
+        const classification = classifyWalletInput(rawInput)
+        if (classification.kind === 'as_discovery') {
+          throw new Error(classification.detail)
+        }
+        if (classification.kind === 'presentation') {
+          throw new Error('This looks like a presentation request. Use Resolve, not Import.')
+        }
+        const resourceAuth = parseProtectedResourceAuthInput(rawInput)
+        if (resourceAuth) {
+          setBanner('Authorizing with AS, then calling protected resource with DPoP')
+          const response = await apiRequest<ImportResponse>('/api/import', 'POST', {
+            discovery_url: resourceAuth.discovery_url,
+            resource_endpoint: resourceAuth.resource_endpoint,
+            scope: resourceAuth.scope,
+            wallet_base_url: window.location.origin,
+          }, 'import')
+          setLastImport(response)
+          setDiscoveredIssuer(null)
+          clearDiscoveredIssuerState()
+          if (response.authorization_required && response.authorization_url) {
+            const target = resolveAuthorizationRedirectTarget(response)
+            setPendingAuthorizationURL(target)
+            setIssuanceProgress('authorization_required')
+            setAuthorizationContinued(false)
+            setBanner('AS authorization required. Continue in the popup.', 'info')
+            setActiveView('home')
+            savePendingOID4VCIAuthorization({
+              authorizationURL: target,
+              uriInput: rawInput,
+              importSnapshot: response,
+              savedAt: Date.now(),
+            })
+            return
+          }
+          throw new Error('Protected resource authorization did not return an authorization URL')
+        }
         const payload = buildImportPayloadFromInput(rawInput, importTxCodeInput)
-        const response = await apiRequest<ImportResponse>('/api/import', 'POST', payload)
+        payload.wallet_base_url = window.location.origin
+        const response = await apiRequest<ImportResponse>('/api/import', 'POST', payload, 'import')
+        setLastImport(response)
+        if (response.configuration_selection_required) {
+          const configurations = Array.isArray(response.credential_configurations) ? response.credential_configurations : []
+          const nextSelectedID = (() => {
+            const currentID = String(selectedIssuerConfigurationID || '').trim()
+            if (currentID && configurations.some((configuration) => String(configuration.id || '') === currentID)) {
+              return currentID
+            }
+            return String(configurations[0]?.id || '')
+          })()
+          setDiscoveredIssuer(response)
+          setSelectedIssuerConfigurationID(nextSelectedID)
+          saveDiscoveredIssuerState({
+            snapshot: response,
+            selectedConfigurationID: nextSelectedID,
+            savedAt: Date.now(),
+          })
+          setPendingAuthorizationURL('')
+          setIssuanceProgress('')
+          setAuthorizationContinued(false)
+          setActiveView('home')
+          setBanner('Select a credential configuration from this issuer, then request it.', 'info')
+          return
+        }
+        setDiscoveredIssuer(null)
+        clearDiscoveredIssuerState()
         if (response.authorization_required && response.authorization_url) {
-          setPendingAuthorizationURL(resolveAuthorizationRedirectTarget(response))
-          setBanner('Issuer authorization required. Review the destination and continue when ready.', 'info')
+          const target = resolveAuthorizationRedirectTarget(response)
+          setPendingAuthorizationURL(target)
+          setIssuanceProgress('authorization_required')
+          setAuthorizationContinued(false)
+          setBanner('Review issuer authorization below, then continue in the popup so this wallet tab keeps the offer context.', 'info')
+          setActiveView('home')
+          savePendingOID4VCIAuthorization({
+            authorizationURL: target,
+            uriInput: rawInput,
+            importSnapshot: response,
+            savedAt: Date.now(),
+          })
           return
         }
         setPendingAuthorizationURL('')
         setSession((previous) => mergeCredentialSession(previous, response))
-        setLastImport(response); setPreview(null); setResult(null); setSelectedDisclosureClaims([])
+        setPreview(null); setResult(null); setSelectedDisclosureClaims([])
         if (response.credential_id) setSelectedCredentialID(String(response.credential_id))
+        setIssuanceProgress('ready')
         setActiveView('credentials')
         setBanner(`Credential imported from ${String(response.credential_issuer || response.credential_source || 'wallet import')}`, 'success')
-      } finally { setActionPending('') }
+      } catch (error) {
+        if (String((error as Error)?.message || '').toLowerCase().includes('deferred') || String((error as Error)?.message || '').includes('issuance_pending')) {
+          setIssuanceProgress('deferred')
+        }
+        throw error
+      } finally {
+        importInFlightRef.current = false
+        setActionPending('')
+      }
     },
-    [apiRequest, importTxCodeInput, setBanner],
+    [apiRequest, enterOID4VCIMode, importTxCodeInput, selectedIssuerConfigurationID, setBanner],
   )
+
+  const requestSelectedIssuerConfiguration = useCallback(async () => {
+    const issuer = String(discoveredIssuer?.credential_issuer || '').trim()
+    const configurationID = String(selectedIssuerConfigurationID || '').trim()
+    if (!issuer) throw new Error('credential_issuer is missing from the discovered issuer')
+    if (!configurationID) throw new Error('Select a credential configuration first')
+    if (importInFlightRef.current) return
+    importInFlightRef.current = true
+    setActionPending('import')
+    setIssuanceProgress('importing')
+    setPendingAuthorizationURL('')
+    clearPendingOID4VCIAuthorization()
+    setAuthorizationContinued(false)
+    setBanner('Starting authorization_code issuance for the selected configuration')
+    try {
+      const response = await apiRequest<ImportResponse>('/api/import', 'POST', {
+        credential_issuer: issuer,
+        credential_configuration_id: configurationID,
+        wallet_base_url: window.location.origin,
+      }, 'import')
+      setLastImport(response)
+      if (response.authorization_required && response.authorization_url) {
+        const target = resolveAuthorizationRedirectTarget(response)
+        setPendingAuthorizationURL(target)
+        setIssuanceProgress('authorization_required')
+        setAuthorizationContinued(false)
+        setBanner('Review what this issuer will require, then continue to the authorization server.', 'info')
+        savePendingOID4VCIAuthorization({
+          authorizationURL: target,
+          uriInput,
+          importSnapshot: response,
+          savedAt: Date.now(),
+        })
+        return
+      }
+      throw new Error('Issuer did not return an authorization URL for the selected configuration')
+    } catch (error) {
+      setIssuanceProgress((current) => (current === 'importing' ? 'validation_failed' : current))
+      throw error
+    } finally {
+      importInFlightRef.current = false
+      setActionPending('')
+    }
+  }, [apiRequest, discoveredIssuer, selectedIssuerConfigurationID, setBanner, uriInput])
 
   const routeWalletInput = useCallback(
     async (rawInput: string) => {
-      if (looksLikeCredentialOfferInput(rawInput) || looksLikeRawCredentialInput(rawInput)) { await importCredentialOffer(rawInput); return }
+      const mode = detectWalletProtocolMode(rawInput)
+      if (mode === 'oid4vci') { await importCredentialOffer(rawInput); return }
       await resolveRequest(rawInput)
     },
     [importCredentialOffer, resolveRequest],
@@ -643,7 +1415,7 @@ export default function WalletApp() {
 
   const buildWalletPayload = useCallback(() => {
     if (!resolved) throw new Error('Resolve a request first')
-    const selectedFormatEntry = ISSUE_FORMAT_OPTIONS.find((option) => option.format === selectedIssueFormat) || ISSUE_FORMAT_OPTIONS[0]
+    const selectedFormatEntry = selectedIssueOption || ISSUE_FORMAT_OPTIONS[0]
     const inferredFormat = String(resolved.inferred_credential_format || '').trim()
     const inferredConfigID = String(resolved.inferred_credential_configuration_id || '').trim()
     const activeFormat = String(activeCredentialEntry?.credential_format || '').trim()
@@ -676,28 +1448,36 @@ export default function WalletApp() {
     }
     if (resolved.client_id) payload.client_id = String(resolved.client_id)
     return payload
-  }, [activeCredentialEntry, externalTrustApproval, resolved, selectedCredentialID, selectedDisclosureClaims, selectedIssueFormat])
+  }, [activeCredentialEntry, externalTrustApproval, resolved, selectedCredentialID, selectedDisclosureClaims, selectedIssueOption])
 
   const issueCredential = useCallback(
     async (forceIssue: boolean, overrides?: { format?: string; configurationID?: string }) => {
       setActionPending('issue')
+      if (protocolMode === 'idle') setProtocolMode('oid4vci')
+      setIssuanceProgress('issuing')
       setBanner('Issuing credential via OID4VCI')
       try {
-        const selectedFormatEntry = ISSUE_FORMAT_OPTIONS.find((option) => option.format === selectedIssueFormat) || ISSUE_FORMAT_OPTIONS[0]
+        const selectedFormatEntry = selectedIssueOption || ISSUE_FORMAT_OPTIONS[0]
         const response = await apiRequest<SessionPayload>('/api/issue', 'POST', {
           force_issue: forceIssue,
           credential_format: overrides?.format || selectedFormatEntry?.format,
           credential_configuration_id: overrides?.configurationID || selectedFormatEntry?.configurationID,
           credential_id: overrides ? undefined : (selectedCredentialID || undefined),
-        })
+        }, 'issue')
         setSession((previous) => mergeCredentialSession(previous, response))
         if (response.credential_id) setSelectedCredentialID(String(response.credential_id))
+        setIssuanceProgress('ready')
         setActiveView('credentials')
         setBanner(`Credential ready from ${String(response.credential_source || 'wallet')}`, 'success')
         return response
+      } catch (error) {
+        if (String((error as Error)?.message || '').toLowerCase().includes('deferred') || String((error as Error)?.message || '').includes('issuance_pending')) {
+          setIssuanceProgress('deferred')
+        }
+        throw error
       } finally { setActionPending('') }
     },
-    [apiRequest, selectedCredentialID, selectedIssueFormat, setBanner],
+    [apiRequest, protocolMode, selectedCredentialID, selectedIssueOption, setBanner],
   )
 
   const hasBlockingVerificationFailure = Boolean(resolved?.trust?.request_object_verification && !resolved?.trust?.request_object_verification?.verified)
@@ -707,7 +1487,7 @@ export default function WalletApp() {
     setBanner('Building VP token preview')
     try {
       const payload = buildWalletPayload()
-      const response = await apiRequest<PreviewResponse>('/api/preview', 'POST', payload)
+      const response = await apiRequest<PreviewResponse>('/api/preview', 'POST', payload, 'preview')
       setPreview(response); setActiveView('present')
       setBanner('VP preview ready', 'success')
     } finally { setActionPending('') }
@@ -718,7 +1498,7 @@ export default function WalletApp() {
     setBanner('Submitting presentation to verifier')
     try {
       const payload = buildWalletPayload()
-      const response = await apiRequest<PresentResponse>('/api/present', 'POST', payload)
+      const response = await apiRequest<PresentResponse>('/api/present', 'POST', payload, 'present')
       setResult(response); setActiveView('result')
       const redirectURI = String(response.redirect_uri || '').trim()
       if (redirectURI) {
@@ -769,17 +1549,61 @@ export default function WalletApp() {
         const oid4vciStatus = String(query.get('oid4vci_status') || '').trim()
         const oid4vciMessage = String(query.get('oid4vci_message') || '').trim()
         if (oid4vciStatus) {
-          setPendingAuthorizationURL('')
-          await refreshSession()
+          const pending = loadPendingOID4VCIAuthorization()
+          if (pending?.uriInput) setURIInput(pending.uriInput)
+          if (pending?.importSnapshot) setLastImport(pending.importSnapshot)
+          const discovered = loadDiscoveredIssuerState()
+          if (discovered) {
+            setDiscoveredIssuer(discovered.snapshot)
+            setSelectedIssuerConfigurationID(String(discovered.selectedConfigurationID || discovered.snapshot.credential_configurations?.[0]?.id || ''))
+          }
+          // Popup return path: notify the opener wallet tab and close.
+          if (window.opener && !window.opener.closed) {
+            try {
+              window.opener.postMessage(
+                {
+                  type: OID4VCI_CALLBACK_MESSAGE_TYPE,
+                  status: oid4vciStatus,
+                  message: oid4vciMessage,
+                  pending,
+                },
+                window.location.origin,
+              )
+            } catch {
+              // opener may be cross-origin after AS hops; fall through to local handling
+            }
+            window.history.replaceState({}, document.title, window.location.pathname)
+            window.close()
+            // If the browser ignores close(), still apply locally.
+          }
+          await applyOID4VCICallbackResult(oid4vciStatus, oid4vciMessage)
           if (cancelled) return
-          if (oid4vciStatus === 'success') { setActiveView('credentials'); setBanner(firstNonEmptyString(oid4vciMessage, 'Credential imported'), 'success') }
-          else setBanner(firstNonEmptyString(oid4vciMessage, 'OID4VCI authorization failed'), 'error')
           window.history.replaceState({}, document.title, window.location.pathname)
           return
         }
+
+        const pending = loadPendingOID4VCIAuthorization()
+        if (pending) {
+          setProtocolMode('oid4vci')
+          setURIInput(pending.uriInput || '')
+          if (pending.importSnapshot) setLastImport(pending.importSnapshot)
+          setPendingAuthorizationURL(pending.authorizationURL)
+          setIssuanceProgress('authorization_required')
+          setActiveView('home')
+        }
+        const discovered = loadDiscoveredIssuerState()
+        if (discovered) {
+          setProtocolMode('oid4vci')
+          setDiscoveredIssuer(discovered.snapshot)
+          setSelectedIssuerConfigurationID(String(discovered.selectedConfigurationID || discovered.snapshot.credential_configurations?.[0]?.id || ''))
+          setActiveView('home')
+        }
+
         const initialOfferURI = String(query.get('credential_offer_uri') || '').trim()
         const initialOffer = String(query.get('credential_offer') || '').trim()
         if (initialOfferURI || initialOffer) {
+          if (bootstrapOfferHandledRef.current) return
+          bootstrapOfferHandledRef.current = true
           const importInput = window.location.href
           setURIInput(importInput)
           await importCredentialOffer(importInput)
@@ -799,7 +1623,22 @@ export default function WalletApp() {
     }
     void init()
     return () => { cancelled = true }
-  }, [importCredentialOffer, refreshSession, resolveRequest, setBanner])
+  }, [applyOID4VCICallbackResult, importCredentialOffer, refreshSession, resolveRequest, setBanner])
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      const data = event.data
+      if (!data || typeof data !== 'object' || data.type !== OID4VCI_CALLBACK_MESSAGE_TYPE) return
+      const pending = data.pending as PendingOID4VCIAuthorizationState | null | undefined
+      if (pending?.uriInput) setURIInput(pending.uriInput)
+      if (pending?.importSnapshot) setLastImport(pending.importSnapshot)
+      setProtocolMode('oid4vci')
+      void applyOID4VCICallbackResult(String(data.status || ''), String(data.message || ''))
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [applyOID4VCICallbackResult])
 
   const credentialSummary = activeCredentialSummary
   const supportsSelectiveDisclosure = Boolean(credentialSummary?.is_sd_jwt)
@@ -860,11 +1699,31 @@ export default function WalletApp() {
               <div className="min-w-0 flex-1">
                 <h1 className="text-base sm:text-lg font-semibold text-white">{appTitle}</h1>
                 <p className="text-[11px] sm:text-xs text-surface-400 mt-0.5 leading-relaxed">
-                  Ephemeral OID4VP and OID4VCI web wallet with real key material, external offer import, and full protocol visibility
+                  {protocolMode === 'oid4vci'
+                    ? 'OID4VCI issuance — add from a credential issuer, redeem an offer, authorize when required, and store the credential'
+                    : protocolMode === 'oid4vp'
+                      ? 'OID4VP presentation — review the verifier request, choose disclosures, and submit a real VP'
+                      : 'Ephemeral OID4VP and OID4VCI web wallet: add from an issuer, redeem offers, present to verifiers'}
                 </p>
               </div>
             </div>
-            <p className="text-[10px] sm:text-[11px] text-surface-500">No credential data is persisted beyond this wallet session</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`inline-flex items-center rounded-md border px-2 py-1 text-[10px] sm:text-[11px] font-medium tracking-wide ${
+                protocolMode === 'oid4vci'
+                  ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'
+                  : protocolMode === 'oid4vp'
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                    : 'border-white/10 bg-surface-900/50 text-surface-400'
+              }`}>
+                {protocolMode === 'oid4vci' ? 'Mode: OID4VCI' : protocolMode === 'oid4vp' ? 'Mode: OID4VP' : 'Mode: Idle'}
+              </span>
+              {protocolMode !== 'idle' && (
+                <button type="button" className="btn-secondary !px-2 !py-1 text-[10px] sm:text-[11px]" onClick={resetProtocolMode}>
+                  Reset mode
+                </button>
+              )}
+              <p className="text-[10px] sm:text-[11px] text-surface-500">No credential data is persisted beyond this wallet session</p>
+            </div>
           </div>
         </header>
 
@@ -887,7 +1746,7 @@ export default function WalletApp() {
 
         {/* Tab Navigation */}
         <nav className="flex gap-1 p-1 rounded-lg bg-surface-900/50 overflow-x-auto scrollbar-hide" aria-label="Wallet views">
-          {VIEW_TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const isActive = activeView === tab.id
             return (
               <button
@@ -911,44 +1770,267 @@ export default function WalletApp() {
         <AnimatePresence mode="wait">
           {activeView === 'home' && (
             <motion.section key="home" {...viewTransition} className="rounded-xl border border-white/10 bg-surface-900/20 p-3 sm:p-4 space-y-3 sm:space-y-4">
-              <SectionHeading icon={Home} title="Wallet Input" subtitle="Paste an openid4vp:// request, openid-credential-offer:// offer, https:// deeplink, raw VC JWT, or JSON-LD credential" />
-              <textarea
-                className="glass-input min-h-[120px] resize-y"
-                value={uriInput}
-                onChange={(event) => setURIInput(event.target.value)}
-                placeholder="openid4vp://authorize?request_uri=...&#10;openid-credential-offer://?credential_offer_uri=...&#10;eyJhbGciOiJFUzI1NiIsInR5cCI6InZjK2p3dCJ9..."
+              <SectionHeading
+                icon={Home}
+                title={protocolMode === 'oid4vci' ? 'Issue' : protocolMode === 'oid4vp' ? 'Presentation Request' : 'Wallet Input'}
+                subtitle={
+                  protocolMode === 'oid4vci'
+                    ? 'Paste a credential issuer URL, credential offer, or an issued credential'
+                    : protocolMode === 'oid4vp'
+                      ? 'Paste or scan an openid4vp:// URI or https request_uri deeplink'
+                      : 'Paste a credential issuer URL, openid-credential-offer:// offer, openid4vp:// request, or an issued credential'
+                }
               />
-              <input
-                className="glass-input"
-                type="text"
-                value={importTxCodeInput}
-                onChange={(event) => setImportTxCodeInput(event.target.value)}
-                placeholder="Optional tx_code for OID4VCI pre-authorized offers"
-              />
-              <div className="flex flex-wrap gap-2">
-                <button className="btn-primary" disabled={resolveInFlight} onClick={() => { void resolveRequest(uriInput).catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
-                  <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Resolve
-                </button>
-                <button className="btn-secondary" disabled={actionPending === 'import'} onClick={() => { void importCredentialOffer(uriInput).catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
-                  <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Import
-                </button>
-                <button className="btn-secondary" disabled={actionPending === 'refresh'} onClick={() => { void refreshSession().catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
-                  <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Refresh
-                </button>
-                <button className="btn-secondary" disabled={scannerActive} onClick={() => { setScannerOpen(true); setScannerStartRequestID((p) => p + 1) }}>
-                  <QrCode className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Scan QR
-                </button>
-              </div>
-              {pendingAuthorizationURL && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-                  <div className="flex items-center gap-2 text-xs sm:text-sm font-medium text-amber-300">
-                    <AlertTriangle className="w-4 h-4 shrink-0" /> Issuer authorization required
+              <IssueStep
+                title={protocolMode === 'oid4vp' ? 'Request input' : 'Issuer / offer'}
+                summary={String(discoveredIssuer?.credential_issuer || uriInput.trim().split('\n')[0] || '').trim() || undefined}
+                open={stepIsOpen('input')}
+                onToggle={() => toggleStep('input')}
+              >
+                <textarea
+                  className="glass-input min-h-[120px] resize-y"
+                  value={uriInput}
+                  onChange={(event) => setURIInput(event.target.value)}
+                  placeholder={
+                    protocolMode === 'oid4vci'
+                      ? 'https://issuer.example/oid4vci/&#10;openid-credential-offer://?credential_offer_uri=...&#10;https://issuer.example/...?credential_offer=...'
+                      : protocolMode === 'oid4vp'
+                        ? 'openid4vp://authorize?request_uri=...&#10;https://verifier.example/authorize?request_uri=...'
+                        : 'https://issuer.example/oid4vci/&#10;openid-credential-offer://?credential_offer_uri=...&#10;openid4vp://authorize?request_uri=...'
+                  }
+                />
+                {inputClassification.kind !== 'empty' && (
+                  <div className={`rounded-lg border px-3 py-2 text-[11px] sm:text-xs leading-relaxed ${
+                    inputClassification.kind === 'as_discovery' || inputClassification.kind === 'unknown'
+                      ? 'border-amber-500/30 bg-amber-500/5 text-amber-200'
+                      : 'border-white/10 bg-surface-900/50 text-surface-300'
+                  }`}>
+                    <span className="font-medium text-surface-100">{inputClassification.label}.</span>{' '}
+                    {inputClassification.detail}
                   </div>
-                  <div className="text-[11px] sm:text-xs text-surface-400 break-all font-mono">{pendingAuthorizationURL}</div>
-                  <a className="btn-primary !inline-flex w-fit" href={pendingAuthorizationURL} rel="noreferrer">
-                    <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Continue to Issuer
-                  </a>
+                )}
+                {protocolMode !== 'oid4vp' && (
+                  <input
+                    className="glass-input"
+                    type="text"
+                    value={importTxCodeInput}
+                    onChange={(event) => setImportTxCodeInput(event.target.value)}
+                    inputMode={txCodeGuidance?.inputMode === 'numeric' ? 'numeric' : undefined}
+                    maxLength={txCodeGuidance?.length && txCodeGuidance.length > 0 ? txCodeGuidance.length : undefined}
+                    placeholder={txCodeGuidance
+                      ? `tx_code required${txCodeGuidance.length ? ` (${txCodeGuidance.length} chars)` : ''}`
+                      : 'Optional tx_code for OID4VCI pre-authorized offers'}
+                  />
+                )}
+                {protocolMode !== 'oid4vp' && txCodeGuidance && (
+                  <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 space-y-1.5 text-[11px] sm:text-xs text-surface-300">
+                    <div className="font-medium text-cyan-300">tx_code guidance from issuer</div>
+                    {txCodeGuidance.description && <div>{txCodeGuidance.description}</div>}
+                    <div className="text-surface-500">
+                      {[
+                        txCodeGuidance.length ? `length=${txCodeGuidance.length}` : '',
+                        txCodeGuidance.inputMode ? `input_mode=${txCodeGuidance.inputMode}` : '',
+                      ].filter(Boolean).join(' · ') || 'Enter the out-of-band transaction code, then Import again'}
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {protocolMode !== 'oid4vci' && (
+                    <button className="btn-primary" disabled={resolveInFlight} onClick={() => { void resolveRequest(uriInput).catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
+                      <Search className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Resolve
+                    </button>
+                  )}
+                  {protocolMode !== 'oid4vp' && (
+                    <button className={protocolMode === 'oid4vci' ? 'btn-primary' : 'btn-secondary'} disabled={actionPending === 'import'} onClick={() => { void importCredentialOffer(uriInput).catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
+                      <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> {inputClassification.kind === 'issuer' ? 'Discover issuer' : 'Import'}
+                    </button>
+                  )}
+                  {protocolMode === 'idle' && (
+                    <button className="btn-secondary" disabled={!uriInput.trim() || resolveInFlight || actionPending === 'import'} onClick={() => { void routeWalletInput(uriInput).catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
+                      <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Auto-route
+                    </button>
+                  )}
+                  <button className="btn-secondary" disabled={actionPending === 'refresh'} onClick={() => { void refreshSession().catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
+                    <RefreshCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Refresh
+                  </button>
+                  <button className="btn-secondary" disabled={scannerActive} onClick={() => { setScannerOpen(true); setScannerStartRequestID((p) => p + 1) }}>
+                    <QrCode className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Scan QR
+                  </button>
                 </div>
+              </IssueStep>
+              {protocolMode !== 'oid4vp' && issuanceProgress && (
+                <div className="rounded-lg border border-white/10 bg-surface-900/50 px-3 py-2 text-[11px] sm:text-xs text-surface-400">
+                  Issuance status:{' '}
+                  <span className="text-surface-200 font-medium">
+                    {issuanceProgress === 'importing' && 'Importing offer / redeeming with issuer'}
+                    {issuanceProgress === 'authorization_required' && 'Authorization required — continue at issuer'}
+                    {issuanceProgress === 'issuing' && 'Issuing via OID4VCI bootstrap'}
+                    {issuanceProgress === 'deferred' && 'Deferred issuance pending'}
+                    {issuanceProgress === 'validation_failed' && 'Credential or offer validation failed'}
+                    {issuanceProgress === 'ready' && 'Credential ready in wallet store'}
+                  </span>
+                </div>
+              )}
+              {lastProtocolError && (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs sm:text-sm font-medium text-red-300">
+                    <XCircle className="w-4 h-4 shrink-0" /> Protocol error from /api/{lastProtocolError.source}
+                  </div>
+                  <div className="text-[11px] sm:text-xs font-mono text-red-200/90 break-all">{lastProtocolError.error}</div>
+                  <div className="text-[11px] sm:text-xs text-surface-300 leading-relaxed">{lastProtocolError.errorDescription}</div>
+                  {lastProtocolError.txCodeRequired && protocolMode !== 'oid4vp' && (
+                    <div className="text-[11px] text-amber-300">Provide the required tx_code above and retry Import.</div>
+                  )}
+                </div>
+              )}
+              {protocolMode !== 'oid4vp' && discoveredConfigurations.length > 0 && (
+                <IssueStep
+                  title="Credential configuration"
+                  summary={selectedIssuerConfigurationID || String(discoveredIssuer?.credential_issuer || '')}
+                  open={stepIsOpen('picker')}
+                  onToggle={() => toggleStep('picker')}
+                  tone="cyan"
+                  actions={(
+                    <button
+                      type="button"
+                      className="btn-primary !inline-flex !px-2 !py-1.5 text-[11px]"
+                      disabled={!selectedIssuerConfigurationID || actionPending === 'import'}
+                      onClick={() => { void requestSelectedIssuerConfiguration().catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}
+                    >
+                      {canRetryDiscoveredIssuance
+                        ? <><RotateCw className="w-3.5 h-3.5" /> Request again</>
+                        : <><ShieldCheck className="w-3.5 h-3.5" /> Request this credential</>}
+                    </button>
+                  )}
+                >
+                  <div className="text-[11px] sm:text-xs text-surface-400 font-mono break-all">{String(discoveredIssuer?.credential_issuer || '')}</div>
+                  {issuanceRequirementChips(discoveredIssuer?.issuance_requirements).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {issuanceRequirementChips(discoveredIssuer?.issuance_requirements).map((chip) => (
+                        <span key={chip} className="rounded-md border border-cyan-500/20 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-200">{chip}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    {discoveredConfigurations.map((configuration) => {
+                      const configurationID = String(configuration.id || '')
+                      const selected = configurationID === selectedIssuerConfigurationID
+                      return (
+                        <button
+                          key={configurationID}
+                          type="button"
+                          onClick={() => {
+                            setSelectedIssuerConfigurationID(configurationID)
+                            if (discoveredIssuer) {
+                              saveDiscoveredIssuerState({
+                                snapshot: discoveredIssuer,
+                                selectedConfigurationID: configurationID,
+                                savedAt: Date.now(),
+                              })
+                            }
+                          }}
+                          className={`w-full text-left rounded-lg border px-3 py-2 space-y-1 transition-colors ${
+                            selected
+                              ? 'border-cyan-400/50 bg-cyan-500/10'
+                              : 'border-white/10 bg-surface-900/40 hover:border-white/20'
+                          }`}
+                        >
+                          <div className="text-xs font-medium text-surface-100 font-mono break-all">{configurationID}</div>
+                          <div className="text-[11px] text-surface-400">
+                            {[configuration.format, configuration.vct, configuration.doctype].filter(Boolean).join(' · ') || 'credential configuration'}
+                          </div>
+                          {(configuration.cryptographic_holder_binding || configuration.key_attestation_required) && (
+                            <div className="text-[10px] text-cyan-300">
+                              {[configuration.cryptographic_holder_binding ? 'holder binding' : '', configuration.key_attestation_required ? 'key attestation' : ''].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </IssueStep>
+              )}
+              {protocolMode !== 'oid4vp' && pendingAuthorizationURL && (
+                <IssueStep
+                  title="Issuer authorization"
+                  summary={String(lastImport?.credential_configuration_id || lastImport?.credential_format || 'authorization_code')}
+                  open={stepIsOpen('authorize')}
+                  onToggle={() => toggleStep('authorize')}
+                  tone="amber"
+                  actions={(
+                    <button type="button" className="btn-primary !inline-flex !px-2 !py-1.5 text-[11px]" onClick={continueIssuerAuthorization}>
+                      <ExternalLink className="w-3.5 h-3.5" /> Continue to Issuer
+                    </button>
+                  )}
+                >
+                  {lastImport?.credential_issuer && (
+                    <div className="text-[11px] sm:text-xs text-surface-300">
+                      Issuer: <span className="font-mono break-all text-surface-200">{String(lastImport.credential_issuer)}</span>
+                    </div>
+                  )}
+                  {(lastImport?.credential_configuration_id || lastImport?.credential_format || lastImport?.issuance_requirements?.vct) && (
+                    <div className="text-[11px] sm:text-xs text-surface-300">
+                      {[lastImport.credential_configuration_id, lastImport.credential_format || lastImport.issuance_requirements?.format, lastImport.issuance_requirements?.vct || lastImport.issuance_requirements?.doctype].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                  {issuanceRequirementChips(lastImport?.issuance_requirements).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {issuanceRequirementChips(lastImport?.issuance_requirements).map((chip) => (
+                        <span key={chip} className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-100">{chip}</span>
+                      ))}
+                    </div>
+                  )}
+                  <div className="text-[11px] sm:text-xs text-surface-400 break-all font-mono">{pendingAuthorizationURL}</div>
+                  <p className="text-[11px] text-surface-500 leading-relaxed">
+                    This wallet will send an <span className="font-mono">authorization_code</span> request (PAR when the AS requires it).
+                    Continue opens the issuer authorization server in a popup so this tab keeps the issuance context.
+                  </p>
+                </IssueStep>
+              )}
+              {protocolMode !== 'oid4vp' && !lastImport?.configuration_selection_required && (lastImport?.credential_issuer || lastImport?.credential_offer) && (
+                <IssueStep
+                  title="Offer review"
+                  summary={String(lastImport.credential_issuer || lastImport.credential_offer_transport || '')}
+                  open={stepIsOpen('offer')}
+                  onToggle={() => toggleStep('offer')}
+                >
+                  <div className="space-y-0.5">
+                    <MetricRow label="credential_issuer" value={String(lastImport.credential_issuer || 'n/a')} mono />
+                    <MetricRow label="offer_transport" value={String(lastImport.credential_offer_transport || 'n/a')} />
+                    <MetricRow label="credential_offer_uri" value={String(lastImport.credential_offer_uri || 'n/a')} mono />
+                    <MetricRow label="tx_code_required" value={String(Boolean(lastImport.tx_code_required))} />
+                    {lastImport.tx_code_required && (
+                      <>
+                        <MetricRow label="tx_code_description" value={String(lastImport.tx_code_description || 'n/a')} />
+                        <MetricRow label="tx_code_length" value={String(lastImport.tx_code_length || 'n/a')} />
+                        <MetricRow label="tx_code_input_mode" value={String(lastImport.tx_code_input_mode || 'n/a')} />
+                      </>
+                    )}
+                    <MetricRow label="token_endpoint" value={String(lastImport.token_endpoint || 'n/a')} mono />
+                    <MetricRow label="credential_endpoint" value={String(lastImport.credential_endpoint || 'n/a')} mono />
+                    <MetricRow label="nonce_endpoint" value={String(lastImport.nonce_endpoint || 'n/a')} mono />
+                  </div>
+                </IssueStep>
+              )}
+              {protocolMode === 'oid4vp' && resolved && (
+                <IssueStep
+                  title="Request summary"
+                  summary={String(resolved.client_id || resolved.request_id || '')}
+                  open={stepIsOpen('request')}
+                  onToggle={() => toggleStep('request')}
+                  actions={(
+                    <button type="button" className="btn-primary !inline-flex !px-2 !py-1.5 text-[11px]" onClick={() => setActiveView('review')}>
+                      <ArrowRight className="w-3.5 h-3.5" /> Continue to Review
+                    </button>
+                  )}
+                >
+                  <div className="space-y-0.5">
+                    <MetricRow label="request_id" value={String(resolved.request_id || 'n/a')} mono />
+                    <MetricRow label="client_id" value={String(resolved.client_id || 'n/a')} mono />
+                    <MetricRow label="response_mode" value={String(resolved.response_mode || 'n/a')} />
+                    <MetricRow label="matched" value={String(Boolean(resolved.credential_matches?.matched))} />
+                  </div>
+                </IssueStep>
               )}
               {scannerActive && (
                 <div className="flex items-center gap-2 text-xs text-cyan-400">
@@ -1007,7 +2089,7 @@ export default function WalletApp() {
                   <button className="btn-secondary" onClick={() => setActiveView('credentials')}>
                     <CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Credentials
                   </button>
-                  <button className="btn-danger" onClick={() => { clearResolvedState(); setActiveView('home'); setBanner('Request declined') }}>
+                  <button className="btn-danger" onClick={() => { resetProtocolMode(); setBanner('Request declined') }}>
                     <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Decline
                   </button>
                 </div>
@@ -1017,12 +2099,23 @@ export default function WalletApp() {
 
           {activeView === 'credentials' && (
             <motion.section key="credentials" {...viewTransition} className="rounded-xl border border-white/10 bg-surface-900/20 p-3 sm:p-4 space-y-3 sm:space-y-4">
-              <SectionHeading icon={CreditCard} title="Credential Store" subtitle="Session-scoped credentials from internal issuance or imported OID4VCI offers" />
+              <SectionHeading
+                icon={CreditCard}
+                title="Credential Store"
+                subtitle={
+                  protocolMode === 'oid4vp'
+                    ? 'Choose which session credential to present to the verifier'
+                    : protocolMode === 'oid4vci'
+                      ? 'Credentials imported or issued via OID4VCI in this wallet session'
+                      : 'Session-scoped credentials from internal issuance or imported OID4VCI offers'
+                }
+              />
+              {protocolMode !== 'oid4vp' && (
               <div className="flex flex-wrap items-end gap-2">
                 <div className="flex flex-col gap-1">
                   <label className="text-[10px] sm:text-[11px] text-surface-500 uppercase tracking-wider" htmlFor="issue-format-select">Format</label>
                   <select id="issue-format-select" className="px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm text-white focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-all" value={selectedIssueFormat} onChange={(e) => setSelectedIssueFormat(e.target.value)}>
-                    {ISSUE_FORMAT_OPTIONS.map((opt) => <option key={opt.format} value={opt.format}>{opt.label}</option>)}
+                    {ISSUE_FORMAT_OPTIONS.map((opt) => <option key={opt.configurationID} value={opt.configurationID}>{opt.label}</option>)}
                   </select>
                 </div>
                 <button className="btn-primary" disabled={actionPending === 'issue'} onClick={() => { void issueCredential(false).catch((e: unknown) => setBanner(toErrorMessage(e), 'error')) }}>
@@ -1032,6 +2125,7 @@ export default function WalletApp() {
                   <RotateCw className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> Re-Issue
                 </button>
               </div>
+              )}
 
               <div className="rounded-lg border border-white/10 bg-surface-900/50 p-3 space-y-0.5">
                 <MetricRow label="credential_count" value={String(credentialEntries.length)} />
@@ -1199,7 +2293,7 @@ export default function WalletApp() {
 
           {activeView === 'result' && (
             <motion.section key="result" {...viewTransition} className="rounded-xl border border-white/10 bg-surface-900/20 p-3 sm:p-4 space-y-3 sm:space-y-4">
-              <SectionHeading icon={CheckCircle2} title="Result" subtitle="HTTP outcome from response_uri (suite redirect or Looking Glass policy)" />
+              <SectionHeading icon={CheckCircle2} title="Result" subtitle="HTTP outcome from response_uri (verifier redirect or Looking Glass policy)" />
               {!result && (
                 <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-center">
                   <CheckCircle2 className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600 mb-3" />
@@ -1248,16 +2342,52 @@ export default function WalletApp() {
               </div>
               <div>
                 <h2 className="text-sm font-semibold text-white">Protocol Details</h2>
-                <p className="text-[10px] sm:text-xs text-surface-500">OID4VP and OID4VCI transparency: request objects, trust context, and VP construction artifacts</p>
+                <p className="text-[10px] sm:text-xs text-surface-500">
+                  {protocolMode === 'oid4vci'
+                    ? 'OID4VCI transparency: offer, issuer metadata, and authorization-server discovery'
+                    : protocolMode === 'oid4vp'
+                      ? 'OID4VP transparency: request objects, trust context, and VP construction artifacts'
+                      : 'OID4VP and OID4VCI transparency: request objects, offers, trust context, and VP artifacts'}
+                </p>
               </div>
             </div>
           </div>
           <div className="p-3 sm:p-4 space-y-3">
-            {!resolved && !preview ? (
+            {protocolMode === 'oid4vci' ? (
+              !lastImport ? (
+                <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-center">
+                  <FileCode2 className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600 mb-3" />
+                  <p className="text-surface-400 text-sm">No offer data yet</p>
+                  <p className="text-surface-400 text-xs sm:text-sm mt-1">Import a credential offer to inspect issuer and AS metadata</p>
+                </div>
+              ) : (
+                <>
+                  <Expandable title="Credential Offer" icon={Download} defaultOpen>
+                    {formatJSON({
+                      credential_offer_uri: lastImport.credential_offer_uri || '',
+                      credential_offer_transport: lastImport.credential_offer_transport || '',
+                      credential_issuer: lastImport.credential_issuer || '',
+                      credential_offer: lastImport.credential_offer || {},
+                    })}
+                  </Expandable>
+                  <Expandable title="Issuer + AS Metadata" icon={FileCode2}>
+                    {formatJSON({
+                      issuer_metadata: lastImport.issuer_metadata || {},
+                      authorization_server_metadata: lastImport.authorization_server_metadata || {},
+                      token_endpoint: lastImport.token_endpoint || '',
+                      credential_endpoint: lastImport.credential_endpoint || '',
+                      nonce_endpoint: lastImport.nonce_endpoint || '',
+                    })}
+                  </Expandable>
+                </>
+              )
+            ) : !resolved && !preview ? (
               <div className="flex flex-col items-center justify-center py-8 sm:py-12 text-center">
                 <FileCode2 className="w-10 h-10 sm:w-12 sm:h-12 text-surface-600 mb-3" />
                 <p className="text-surface-400 text-sm">No protocol data yet</p>
-                <p className="text-surface-400 text-xs sm:text-sm mt-1">Resolve a request to see JWT objects, headers, and payloads</p>
+                <p className="text-surface-400 text-xs sm:text-sm mt-1">
+                  {protocolMode === 'oid4vp' ? 'Resolve a request to see JWT objects, headers, and payloads' : 'Resolve a request or import an offer to inspect protocol artifacts'}
+                </p>
               </div>
             ) : (
               <>
