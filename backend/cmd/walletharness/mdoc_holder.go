@@ -182,22 +182,6 @@ func (s *walletHarnessServer) mdocCredentialMatchesWalletDeviceKey(credentialB64
 	return s.assertMdocBoundToWalletDeviceKey(mso) == nil
 }
 
-// verifyMdocDeviceBinding verifies issuer authentication and confirms that
-// deviceKeyInfo.deviceKey is this wallet's persistent device key.
-func (s *walletHarnessServer) verifyMdocDeviceBinding(issuerSigned mdoc.IssuerSigned) (*mdoc.MobileSecurityObject, error) {
-	if s.deviceKey == nil {
-		return nil, fmt.Errorf("wallet device key is unavailable")
-	}
-	mso, err := s.verifyMdocIssuerSigned(issuerSigned)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.assertMdocBoundToWalletDeviceKey(mso); err != nil {
-		return nil, err
-	}
-	return mso, nil
-}
-
 // buildMdocDeviceResponse produces an ISO/IEC 18013-5 DeviceResponse for a stored
 // mso_mdoc credential, disclosing the requested elements and authenticating the
 // device with the persistent device key over the shared SessionTranscript. The
