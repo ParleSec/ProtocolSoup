@@ -70,6 +70,7 @@ The wallet's metadata-driven OID4VCI client supports:
 
 ## Operational Notes
 
+- Credentials and session key material are in-memory (`WALLET_SESSION_TTL`). Durable encrypted at-rest storage (OID4VCI 1.0 §15.3 SHOULD) is deferred until the platform vault initiative; only the mdoc device key at `WALLET_DEVICE_KEY_PATH` persists across restarts.
 - `WALLET_TARGET_BASE_URL` must point to the VC service or federation service running OID4VP (and typically OID4VCI).
 - During automatic OID4VCI bootstrap, the wallet leaves identity selection to the issuer's designated default record. The issuer-authorized subject returned in the credential offer remains separate from the wallet's holder DID.
 - The wallet must independently trust the issuer's mdoc IACA root through `WALLET_MDOC_IACA_ROOT_PEM`. Copy the issuer's public `iaca_root.pem` (for example from the issuer data volume at `/data/mdoc/iaca_root.pem`) into that wallet env var or secret before issuing or storing `mso_mdoc` credentials.

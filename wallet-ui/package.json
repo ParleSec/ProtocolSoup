@@ -29,6 +29,7 @@
     "typescript": "^7.0.2"
   },
   "overrides": {
+    "nanoid": "^3.3.18",
     "postcss": "$postcss",
     "sharp": "$sharp"
   }

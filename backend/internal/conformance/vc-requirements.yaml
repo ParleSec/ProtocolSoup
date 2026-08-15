@@ -1198,10 +1198,10 @@ requirements:
       Credentials longer than needed.
     roles: [wallet]
     applicability: deviation
-    adr: docs/adr/001-wallet-credential-storage-deferred.md
+    adr: docs/packages/wallet.md
     implementation:
       - backend/cmd/walletharness/main.go
-      - docs/adr/001-wallet-credential-storage-deferred.md
+      - docs/packages/wallet.md
     tests:
       - package: ./cmd/walletharness
         file: backend/cmd/walletharness/oid4vci_client_test.go
@@ -1210,7 +1210,8 @@ requirements:
       Session-scoped in-memory credential storage is retained until the
       HashiCorp platform vault initiative. Cross-protocol security limitation
       for OID4VP presentations of the same held credentials; not an OID4VP
-      normative storage deviation.
+      normative storage deviation. Decision record is docs/packages/wallet.md
+      (no separate ADR file).
 
   - id: CW-H003
     specification: haip
