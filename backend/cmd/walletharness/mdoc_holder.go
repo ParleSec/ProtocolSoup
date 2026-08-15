@@ -75,6 +75,20 @@ func (s *walletHarnessServer) createMdocDeviceProofJWT(_ string, cNonce, audienc
 // the stored credential and the device key together enable later device
 // authentication (DeviceResponse) over the same persistent key.
 func (s *walletHarnessServer) bindMdocCredential(wallet *walletMaterial, credentialB64 string, credentialConfigID string) error {
+	return s.bindMdocCredentialWithPolicy(wallet, credentialB64, credentialConfigID, true)
+}
+
+// bindMdocCredentialWithPolicy verifies issuer authentication, then optionally
+// requires deviceKeyInfo.deviceKey to match this wallet's persistent device key.
+// Batch OID4VCI responses may include additional mdocs bound to ephemeral proof
+// keys; those are stored for protocol visibility but cannot be presented with
+// DeviceResponse until/unless their holder key is retained separately.
+func (s *walletHarnessServer) bindMdocCredentialWithPolicy(
+	wallet *walletMaterial,
+	credentialB64 string,
+	credentialConfigID string,
+	requireWalletDeviceKey bool,
+) error {
 	trimmed := strings.TrimSpace(credentialB64)
 	if trimmed == "" {
 		return fmt.Errorf("mso_mdoc credential is required")
@@ -87,9 +101,14 @@ func (s *walletHarnessServer) bindMdocCredential(wallet *walletMaterial, credent
 	if err != nil {
 		return fmt.Errorf("decode mso_mdoc IssuerSigned: %w", err)
 	}
-	mso, err := s.verifyMdocDeviceBinding(issuerSigned)
+	mso, err := s.verifyMdocIssuerSigned(issuerSigned)
 	if err != nil {
 		return err
+	}
+	if requireWalletDeviceKey {
+		if err := s.assertMdocBoundToWalletDeviceKey(mso); err != nil {
+			return err
+		}
 	}
 
 	now := time.Now().UTC()
@@ -111,18 +130,17 @@ func (s *walletHarnessServer) bindMdocCredential(wallet *walletMaterial, credent
 		record.IssuedAt = existing.IssuedAt
 	}
 	wallet.Credentials[credentialID] = record
-	activateWalletCredential(wallet, record)
+	if requireWalletDeviceKey {
+		activateWalletCredential(wallet, record)
+	}
 	return nil
 }
 
-// verifyMdocDeviceBinding verifies the complete issuer-authenticated credential
-// before confirming that deviceKeyInfo.deviceKey is this wallet's persistent
-// device key. The wallet must trust the issuer independently; an x5chain carried
-// by the credential cannot appoint its own root.
-func (s *walletHarnessServer) verifyMdocDeviceBinding(issuerSigned mdoc.IssuerSigned) (*mdoc.MobileSecurityObject, error) {
-	if s.deviceKey == nil {
-		return nil, fmt.Errorf("wallet device key is unavailable")
-	}
+// verifyMdocIssuerSigned verifies the complete issuer-authenticated credential
+// against the wallet's independently configured IACA trust anchors. The wallet
+// must trust the issuer independently; an x5chain carried by the credential
+// cannot appoint its own root.
+func (s *walletHarnessServer) verifyMdocIssuerSigned(issuerSigned mdoc.IssuerSigned) (*mdoc.MobileSecurityObject, error) {
 	if s.mdocIssuerRoots == nil {
 		return nil, fmt.Errorf("wallet has no configured mso_mdoc IACA trust anchor")
 	}
@@ -130,12 +148,52 @@ func (s *walletHarnessServer) verifyMdocDeviceBinding(issuerSigned mdoc.IssuerSi
 	if err != nil {
 		return nil, fmt.Errorf("verify mso_mdoc issuer authentication: %w", err)
 	}
+	return mso, nil
+}
+
+func (s *walletHarnessServer) assertMdocBoundToWalletDeviceKey(mso *mdoc.MobileSecurityObject) error {
+	if s.deviceKey == nil {
+		return fmt.Errorf("wallet device key is unavailable")
+	}
+	if mso == nil {
+		return fmt.Errorf("mso_mdoc MobileSecurityObject is required")
+	}
 	boundKey, err := intcose.COSEKeyToECPublicKey(mso.DeviceKeyInfo.DeviceKey)
 	if err != nil {
-		return nil, fmt.Errorf("decode bound device key: %w", err)
+		return fmt.Errorf("decode bound device key: %w", err)
 	}
 	if !boundKey.Equal(&s.deviceKey.PublicKey) {
-		return nil, fmt.Errorf("mso_mdoc credential is not bound to this wallet's device key")
+		return fmt.Errorf("mso_mdoc credential is not bound to this wallet's device key")
+	}
+	return nil
+}
+
+// mdocCredentialMatchesWalletDeviceKey reports whether an issued mso_mdoc is
+// bound to this wallet's persistent device key (ISO/IEC 18013-5 deviceKeyInfo).
+func (s *walletHarnessServer) mdocCredentialMatchesWalletDeviceKey(credentialB64 string) bool {
+	issuerSigned, err := decodeMdocIssuerSignedB64(credentialB64)
+	if err != nil {
+		return false
+	}
+	mso, err := s.verifyMdocIssuerSigned(issuerSigned)
+	if err != nil {
+		return false
+	}
+	return s.assertMdocBoundToWalletDeviceKey(mso) == nil
+}
+
+// verifyMdocDeviceBinding verifies issuer authentication and confirms that
+// deviceKeyInfo.deviceKey is this wallet's persistent device key.
+func (s *walletHarnessServer) verifyMdocDeviceBinding(issuerSigned mdoc.IssuerSigned) (*mdoc.MobileSecurityObject, error) {
+	if s.deviceKey == nil {
+		return nil, fmt.Errorf("wallet device key is unavailable")
+	}
+	mso, err := s.verifyMdocIssuerSigned(issuerSigned)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.assertMdocBoundToWalletDeviceKey(mso); err != nil {
+		return nil, err
 	}
 	return mso, nil
 }
