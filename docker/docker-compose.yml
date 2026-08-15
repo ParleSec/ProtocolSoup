@@ -193,6 +193,7 @@ services:
       dockerfile: docker/Dockerfile.frontend
       args:
         BACKEND_ORIGIN: http://gateway:8080
+        WALLET_BACKEND_ORIGIN: https://wallet.protocolsoup.com
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
         NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8080
     # For using published GHCR images, comment 'build:' above and uncomment:
@@ -203,6 +204,7 @@ services:
       - "3000:3000"
     environment:
       - BACKEND_ORIGIN=http://gateway:8080
+      - WALLET_BACKEND_ORIGIN=https://wallet.protocolsoup.com
       - NEXT_PUBLIC_SITE_URL=http://localhost:3000
       - NEXT_PUBLIC_WS_BASE_URL=ws://localhost:8080
     depends_on:
