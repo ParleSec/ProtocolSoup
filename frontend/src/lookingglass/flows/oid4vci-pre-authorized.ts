@@ -1,22 +1,24 @@
 /**
  * OID4VCI Pre-Authorized Code Flow Executor
  *
- * Executes real OID4VCI calls:
- * - Create credential offer
- * - Exchange pre-authorized code for access token
- * - Build proof JWT bound to c_nonce
- * - Request credential
- * - Optionally poll deferred endpoint
+ * Looking Glass is a glass box over the real OID4VCI stages:
+ * 1. Create Credential Offer (issuer)
+ * 2. Wallet→issuer hops returned as `_protocol_exchanges`:
+ *    metadata, token, nonce, proof JWT, credential (and deferred/notification)
+ *
+ * The hosted wallet performs wallet-role crypto; Looking Glass does not invent
+ * those hops — it surfaces the real request/response transcript the wallet recorded.
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig, type CredentialInspectionMetadata } from './base'
-import {
-  decodeJWTWithoutValidation,
-  generateRS256SigningMaterial,
-  signRS256JWT,
-  type RS256SigningMaterial,
-} from '../../utils/crypto'
+import { decodeJWTWithoutValidation } from '../../utils/crypto'
 import { api } from '../../utils/api'
+import {
+  walletImportOffer,
+  WalletAPIRequestError,
+  type WalletImportResponse,
+  type WalletProtocolExchange,
+} from '../wallet-client'
 
 export interface OID4VCIPreAuthorizedConfig extends FlowExecutorConfig {
   txCodeRequired?: boolean
@@ -31,8 +33,6 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
   readonly rfcReference = 'OpenID4VCI 1.0'
 
   private flowConfig: OID4VCIPreAuthorizedConfig
-  private walletSigningMaterialPromise?: Promise<RS256SigningMaterial>
-  private walletDeviceKeyPairPromise?: Promise<CryptoKeyPair>
 
   constructor(config: OID4VCIPreAuthorizedConfig) {
     super(config)
@@ -45,46 +45,19 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     }
 
     if (this.state.status === 'awaiting_user') {
-      const transactionId = String(this.state.securityParams.transactionId || '').trim()
-      const accessToken = String(this.state.securityParams.deferredAccessToken || '').trim()
-      if (!transactionId || !accessToken) {
-        this.updateState({
-          status: 'error',
-          currentStep: 'OID4VCI flow failed',
-          error: {
-            code: 'oid4vci_flow_failed',
-            description: 'Missing transaction_id or access_token for deferred check',
-          },
-        })
-        return
-      }
-      this.abortController = new AbortController()
+      // Authorization-code continuation: the wallet completes PAR/auth in its
+      // own UI. Re-check only emits guidance; the issuer wire stream carries
+      // the real protocol exchanges once the wallet resumes.
       this.updateState({
-        status: 'executing',
-        currentStep: 'Checking deferred credential status',
+        status: 'awaiting_user',
+        currentStep: 'Waiting for wallet authorization continuation',
       })
-      try {
-        const ready = await this.checkDeferredCredential(accessToken, transactionId)
-        if (!ready) {
-          this.updateState({
-            status: 'awaiting_user',
-            currentStep: 'Deferred credential not ready -- check again when ready',
-          })
-          return
-        }
-        this.updateState({
-          status: 'completed',
-          currentStep: 'OID4VCI flow completed',
-        })
-      } catch (error) {
-        const description = error instanceof Error ? error.message : 'Deferred credential check failed'
-        this.updateState({
-          status: 'error',
-          currentStep: 'OID4VCI flow failed',
-          error: { code: 'oid4vci_flow_failed', description },
-        })
-        this.addEvent({ type: 'error', title: 'OID4VCI Execution Failed', description })
-      }
+      this.addEvent({
+        type: 'info',
+        title: 'Still Waiting for Wallet Authorization',
+        description:
+          'Complete authorization in the wallet harness (Continue to Issuer), then re-run this flow or refresh Looking Glass events. Looking Glass does not redeem authorization codes in-browser.',
+      })
       return
     }
 
@@ -97,47 +70,108 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
 
     try {
       const offerData = await this.createOffer()
-      const resolvedOffer = await this.resolveOfferReference(offerData)
-      const credentialIssuer = this.resolveCredentialIssuer(offerData, resolvedOffer)
-      const tokenData = await this.exchangeToken(offerData)
-      const cNonce = await this.fetchNonce(tokenData.access_token)
-      const walletSubject = typeof offerData.wallet_subject === 'string' ? offerData.wallet_subject.trim() : ''
-      if (!walletSubject) {
-        throw new Error('Offer response missing wallet_subject -- cannot create proof')
-      }
-      const proofJWT = await this.createProof(cNonce, walletSubject, credentialIssuer)
-      const credentialResponse = await this.requestCredential(tokenData.access_token, proofJWT)
+      const offerInput = this.buildWalletOfferInput(offerData)
+      const txCode = this.extractTxCodeFromOffer(offerData)
 
-      if (credentialResponse.transaction_id) {
-        const transactionId = String(credentialResponse.transaction_id)
+      this.updateState({ currentStep: 'Wallet redeeming offer with issuer' })
+      this.addEvent({
+        type: 'info',
+        title: 'Offer Ready for Wallet Redemption',
+        description:
+          'Credential Offer created. Next Looking Glass steps are the real wallet→issuer protocol hops (metadata, token, nonce, proof, credential).',
+        rfcReference: 'OpenID4VCI 1.0 Sections 4, 6–8',
+        data: {
+          txCodeProvided: Boolean(txCode),
+          deferred: !!this.flowConfig.deferred,
+          credentialConfigurationID: this.selectedCredentialConfigurationID(),
+          credentialFormat: this.selectedCredentialFormat(),
+        },
+      })
+
+      const walletResponse = await this.importOfferViaWallet(offerInput, txCode)
+      this.surfaceWalletProtocolTranscript(walletResponse)
+
+      if (walletResponse.authorization_required && walletResponse.authorization_url) {
+        const authorizationURL = String(walletResponse.authorization_url).trim()
+        this.addVCArtifact({
+          type: 'wallet_handoff',
+          title: 'Issuer Authorization Required',
+          format: 'oid4vci-authorization-url',
+          rfcReference: 'OpenID4VCI 1.0 Section 3.5',
+          raw: authorizationURL,
+          metadata: {
+            credentialIssuer: walletResponse.credential_issuer,
+            authorizationRequired: true,
+          },
+        })
         this.updateState({
           status: 'awaiting_user',
-          currentStep: 'Deferred credential issued -- click Check Status when ready',
+          currentStep: 'Waiting for authorization code at wallet',
           securityParams: {
             ...this.state.securityParams,
-            transactionId,
-            deferredAccessToken: tokenData.access_token,
+            authorizationUrl: authorizationURL,
+            credentialIssuer: String(walletResponse.credential_issuer || ''),
           },
         })
         this.addEvent({
           type: 'user_action',
-          title: 'Deferred Issuance -- Awaiting Manual Check',
-          description: `Credential issuance is deferred (transaction_id: ${transactionId}). Click "Check Status" to poll the deferred endpoint.`,
-          data: { transactionId },
+          title: 'Authorization Required',
+          description:
+            'Issuer requires the authorization_code grant. Complete authorization in the wallet, then refresh Looking Glass events to see PAR/token/credential hops.',
+          rfcReference: 'OpenID4VCI 1.0 Section 3.5',
+          data: {
+            authorizationUrl: authorizationURL,
+            credentialIssuer: walletResponse.credential_issuer,
+          },
         })
         return
       }
 
-      if (typeof credentialResponse.credential === 'string') {
-        await this.captureCredential(credentialResponse.credential, {
-          format: this.selectedCredentialFormat(credentialResponse),
-          credentialConfigurationID: this.selectedCredentialConfigurationID(),
+      const credentialJWT = String(walletResponse.credential_jwt || '').trim()
+      if (!credentialJWT) {
+        throw new Error('Issuance completed without returning a credential')
+      }
+
+      if (this.flowConfig.deferred) {
+        this.addVCArtifact({
+          type: 'deferred_status',
+          title: 'Deferred Credential Issued',
+          format: 'oid4vci-deferred',
+          rfcReference: 'OpenID4VCI 1.0 Section 9',
+          metadata: {
+            deferredFlow: true,
+            deferredStatus: 'completed',
+            credentialSource: walletResponse.credential_source,
+          },
+        })
+        this.addEvent({
+          type: 'info',
+          title: 'Deferred Credential Ready',
+          description:
+            'Issuer returned transaction_id; wallet polled deferred_credential until credentials were available (OpenID4VCI 1.0 §9).',
+          rfcReference: 'OpenID4VCI 1.0 Section 9',
+          data: {
+            credentialSource: walletResponse.credential_source,
+            credentialId: walletResponse.credential_id,
+          },
         })
       }
 
+      await this.captureCredential(credentialJWT, {
+        format: this.selectedCredentialFormat(walletResponse),
+        credentialConfigurationID:
+          String(walletResponse.credential_configuration_id || '').trim() ||
+          this.selectedCredentialConfigurationID(),
+        credentialSource: walletResponse.credential_source,
+        credentialIssuer: walletResponse.credential_issuer,
+        deferredFlow: !!this.flowConfig.deferred,
+      })
+
+      this.recordOfferArtifacts(walletResponse)
+
       this.updateState({
         status: 'completed',
-        currentStep: 'OID4VCI flow completed',
+        currentStep: 'Credential issued',
       })
     } catch (error) {
       const description = error instanceof Error ? error.message : 'Unknown OID4VCI flow error'
@@ -226,331 +260,232 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return offerData
   }
 
-  private async resolveOfferReference(
-    offerData: Record<string, unknown>
-  ): Promise<Record<string, unknown> | null> {
-    const offerURI = offerData.credential_offer_uri
-    if (typeof offerURI !== 'string' || !offerURI) {
-      const inline = offerData.credential_offer
-      return inline && typeof inline === 'object' ? (inline as Record<string, unknown>) : null
+  private buildWalletOfferInput(offerData: Record<string, unknown>): string {
+    // Prefer by-value so the wallet does not need a second fetch of the offer
+    // URI (and so Looking Glass can keep the full offer payload in-session).
+    const inlineOffer = offerData.credential_offer
+    if (inlineOffer && typeof inlineOffer === 'object') {
+      return JSON.stringify(inlineOffer)
     }
-
-    this.updateState({ currentStep: 'Resolving credential_offer_uri' })
-    // The offer URI is the issuer's absolute reference (SHOWCASE_BASE_URL).
-    // Fetch via the same-origin Next.js rewrite so Looking Glass stays
-    // same-origin; proof aud still uses credential_issuer, not the proxy host.
-    const uri = new URL(offerURI, window.location.origin)
-    const fetchURL =
-      uri.origin === window.location.origin
-        ? uri.toString()
-        : `${uri.pathname}${uri.search}`
-    const { response, data } = await this.makeRequest('GET', fetchURL, {
-      headers: { Accept: 'application/json' },
-      step: 'Resolve credential offer reference',
-      rfcReference: 'OpenID4VCI 1.0 Section 4.1',
-    })
-
-    if (!response.ok) {
-      throw new Error(`Failed to resolve credential_offer_uri (${response.status})`)
+    const offerURI = String(offerData.credential_offer_uri || '').trim()
+    if (offerURI) {
+      return offerURI
     }
-
-    const resolved = data as Record<string, unknown>
-    this.addVCArtifact({
-      type: 'credential_offer',
-      title: 'Resolved Credential Offer',
-      format: 'openid4vci-offer',
-      rfcReference: 'OpenID4VCI 1.0 Section 4.1',
-      json: resolved,
-      metadata: {
-        byReference: true,
-        credentialOfferURI: offerURI,
-      },
-    })
-    return resolved
-  }
-
-  private resolveCredentialIssuer(
-    offerData: Record<string, unknown>,
-    resolvedOffer: Record<string, unknown> | null
-  ): string {
-    const candidates = [
-      offerData.credential_issuer,
-      resolvedOffer?.credential_issuer,
-      typeof offerData.credential_offer === 'object' && offerData.credential_offer !== null
-        ? (offerData.credential_offer as Record<string, unknown>).credential_issuer
-        : undefined,
-    ]
-    for (const candidate of candidates) {
-      if (typeof candidate === 'string' && candidate.trim()) {
-        return candidate.trim()
+    // Fall back to reconstructing a minimal by-value offer from the create response.
+    const credentialIssuer = String(offerData.credential_issuer || '').trim()
+    const preAuthorizedCode = String(offerData.pre_authorized_code || '').trim()
+    if (credentialIssuer && preAuthorizedCode) {
+      const grant: Record<string, unknown> = {
+        'pre-authorized_code': preAuthorizedCode,
       }
-    }
-    throw new Error('credential_issuer is required for proof audience (OID4VCI §7.2)')
-  }
-
-  private async exchangeToken(offerData: Record<string, unknown>): Promise<Record<string, string>> {
-    this.updateState({ currentStep: 'Exchanging pre-authorized code for access token' })
-
-    const preAuthorizedCode = String(offerData.pre_authorized_code || '')
-    if (!preAuthorizedCode) {
-      throw new Error('Offer response missing pre_authorized_code')
-    }
-
-    const body: Record<string, string> = {
-      grant_type: 'urn:ietf:params:oauth:grant-type:pre-authorized_code',
-      'pre-authorized_code': preAuthorizedCode,
-    }
-    if (this.flowConfig.txCodeRequired) {
-      const txCode = this.extractTxCodeFromOffer(offerData)
-      if (!txCode) {
-        throw new Error('Offer requires tx_code but issuer did not return a tx_code_oob_value')
+      if (offerData.tx_code_required) {
+        grant.tx_code = {
+          length: offerData.tx_code_length,
+          input_mode: offerData.tx_code_input_mode,
+          description: offerData.tx_code_description,
+        }
       }
-      body.tx_code = txCode
-    }
-
-    const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/token`, {
-      body,
-      step: 'Token request (pre-authorized_code)',
-      rfcReference: 'OpenID4VCI 1.0 Section 6.1',
-    })
-
-    if (!response.ok) {
-      const errorData = data as Record<string, unknown>
-      throw new Error(String(errorData.error_description || errorData.error || `Token request failed (${response.status})`))
-    }
-
-    const tokenData = data as Record<string, string>
-    this.processTokenResponse(tokenData as Record<string, unknown>)
-    if (!tokenData.access_token) {
-      throw new Error('Token response missing access_token')
-    }
-    return tokenData
-  }
-
-  private async fetchNonce(_accessToken: string): Promise<string> {
-    this.updateState({ currentStep: 'Obtaining credential proof nonce' })
-    const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/nonce`, {
-      headers: {
-        Accept: 'application/json',
-      },
-      step: 'Nonce request',
-      rfcReference: 'OpenID4VCI 1.0 Section 7',
-    })
-    if (!response.ok) {
-      const errorData = data as Record<string, unknown>
-      throw new Error(String(errorData.error_description || errorData.error || `Nonce request failed (${response.status})`))
-    }
-    const cNonce = typeof (data as Record<string, unknown>).c_nonce === 'string'
-      ? String((data as Record<string, unknown>).c_nonce)
-      : ''
-    if (!cNonce) {
-      throw new Error('Nonce response missing c_nonce')
-    }
-    return cNonce
-  }
-
-  private async createProof(
-    cNonce: string,
-    walletSubject: string,
-    credentialIssuer: string
-  ): Promise<string> {
-    this.updateState({ currentStep: 'Creating nonce-bound proof JWT' })
-    const normalizedSubject = walletSubject.trim()
-    if (!normalizedSubject) {
-      throw new Error('Wallet subject is required for proof creation but was empty')
-    }
-    // OID4VCI §7.2: proof aud MUST be the Credential Issuer identifier.
-    // Looking Glass HTTP goes through the Next.js proxy (localhost:3000), but
-    // the issuer identifier is the canonical SHOWCASE_BASE_URL value.
-    const audience = credentialIssuer.trim()
-    if (!audience) {
-      throw new Error('credential_issuer is required for proof audience')
-    }
-    const now = Math.floor(Date.now() / 1000)
-    // ISO/IEC 18013-5 mso_mdoc binds an EC P-256 device key via an ES256 proof
-    // (the issuer copies the JOSE jwk into the MSO deviceKeyInfo.deviceKey), so the
-    // mDL default issues a genuine device-key proof. The JOSE formats keep the
-    // existing RS256 proof. The proof algorithm matches the credential format.
-    const isMdoc = this.selectedCredentialFormat() === 'mso_mdoc'
-    const { privateKey, publicJWK, alg } = isMdoc
-      ? await this.getWalletDeviceSigningMaterial()
-      : await this.getWalletSigningMaterial()
-
-    const claims = {
-      aud: audience,
-      nonce: cNonce,
-      iat: now,
-      jti: this.randomValue(20),
-    }
-    const header = {
-      alg,
-      typ: 'openid4vci-proof+jwt',
-      jwk: publicJWK,
-    }
-    const proofJWT = isMdoc
-      ? await this.signES256JWT(header, claims, privateKey)
-      : await signRS256JWT(header, claims, privateKey)
-    const decodedProofJWT = decodeJWTWithoutValidation(proofJWT)
-
-    this.addVCArtifact({
-      type: 'proof_jwt',
-      title: 'Credential Proof JWT',
-      format: 'openid4vci-proof+jwt',
-      rfcReference: 'OpenID4VCI 1.0 Section 8.2',
-      raw: proofJWT,
-      json: decodedProofJWT
-        ? { header: decodedProofJWT.header, payload: decodedProofJWT.payload }
-        : {},
-      metadata: {
-        nonceBound: true,
-        walletSubject: normalizedSubject,
-        credentialIssuer: audience,
-        generatedClientSide: true,
-      },
-    })
-    return proofJWT
-  }
-
-  private async requestCredential(accessToken: string, proofJWT: string): Promise<Record<string, unknown>> {
-    this.updateState({ currentStep: 'Requesting credential from credential endpoint' })
-
-    const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/credential`, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({
-        credential_configuration_id: this.selectedCredentialConfigurationID(),
-        proofs: {
-          jwt: [proofJWT],
-        },
-      }),
-      step: 'Credential request',
-      rfcReference: 'OpenID4VCI 1.0 Section 8',
-    })
-
-    if (!response.ok) {
-      const errorData = data as Record<string, unknown>
-      throw new Error(String(errorData.error_description || errorData.error || `Credential request failed (${response.status})`))
-    }
-
-    const credentialData = data as Record<string, unknown>
-    if (credentialData.transaction_id) {
-      const transactionID = String(credentialData.transaction_id)
-      this.addVCArtifact({
-        type: 'deferred_status',
-        title: 'Deferred Issuance Transaction',
-        format: 'oid4vci-deferred',
-        rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
-        metadata: {
-          deferredFlow: true,
-          deferredStatus: 'transaction_created',
-          transactionId: transactionID,
-          deferred: true,
+      return JSON.stringify({
+        credential_issuer: credentialIssuer,
+        credential_configuration_ids: [this.selectedCredentialConfigurationID()],
+        grants: {
+          'urn:ietf:params:oauth:grant-type:pre-authorized_code': grant,
         },
       })
-      this.addEvent({
-        type: 'info',
-        title: 'Deferred Issuance Started',
-        description: `transaction_id: ${transactionID}`,
-        data: { transactionId: transactionID },
-      })
     }
-    return credentialData
+    throw new Error('Offer response missing credential_offer_uri and credential_offer')
   }
 
-  private async checkDeferredCredential(accessToken: string, transactionId: string): Promise<boolean> {
-    this.updateState({ currentStep: 'Checking deferred_credential endpoint' })
-
-    const { response, data } = await this.makeRequest('POST', `${this.config.baseUrl}/deferred_credential`, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ transaction_id: transactionId }),
-      step: 'Deferred credential check',
-      rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
-    })
-
-    const payload = data as Record<string, unknown>
-
-    if (response.status === 202) {
-      const retryAfterHeader = response.headers.get('Retry-After')
-      const retryHint = retryAfterHeader ? ` (retry-after: ${retryAfterHeader}s)` : ''
-      this.addVCArtifact({
-        type: 'deferred_status',
-        title: 'Deferred Issuance Pending',
-        format: 'oid4vci-deferred',
-        rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
-        metadata: {
-          deferredFlow: true,
-          deferredStatus: 'pending',
-          transactionId,
-          retryAfterHeader: retryAfterHeader || undefined,
-        },
-      })
-      this.addEvent({
-        type: 'info',
-        title: 'Deferred Issuance Still Pending',
-        description: `Issuer returned issuance_pending${retryHint}. Click "Check Status" to try again.`,
-        data: { transactionId, retryAfter: retryAfterHeader },
-      })
-      return false
-    }
-
-    if (response.ok && typeof payload.credential === 'string') {
-      this.addVCArtifact({
-        type: 'deferred_status',
-        title: 'Deferred Issuance Completed',
-        format: 'oid4vci-deferred',
-        rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
-        metadata: {
-          deferredFlow: true,
-          deferredStatus: 'completed',
-          transactionId,
-        },
-      })
-      await this.captureCredential(payload.credential, {
-        format: this.selectedCredentialFormat(payload),
+  private async importOfferViaWallet(
+    offerInput: string,
+    txCode: string,
+  ): Promise<WalletImportResponse> {
+    this.addEvent({
+      type: 'info',
+      title: 'Wallet Begins Offer Redemption',
+      description:
+        'Wallet accepts the Credential Offer and starts the OID4VCI redemption sequence against the issuer.',
+      rfcReference: 'OpenID4VCI 1.0 Sections 4, 6–8',
+      data: {
         credentialConfigurationID: this.selectedCredentialConfigurationID(),
-        deferredFlow: true,
-        deferredStatus: 'completed',
-        deferredTransactionId: transactionId,
-      })
-      this.addEvent({
-        type: 'info',
-        title: 'Deferred Issuance Completed',
-        description: `Deferred credential issued for transaction_id: ${transactionId}`,
-        data: { transactionId },
-      })
-      return true
-    }
+        credentialFormat: this.selectedCredentialFormat(),
+        txCodeProvided: Boolean(txCode),
+      },
+    })
 
-    if (!response.ok) {
-      const errorCode = String(payload.error || '')
-      if (errorCode === 'issuance_pending') {
-        this.addEvent({
-          type: 'info',
-          title: 'Deferred Issuance Still Pending',
-          description: 'Issuer returned issuance_pending. Click "Check Status" to try again.',
-          data: { transactionId },
-        })
-        return false
+    try {
+      return await walletImportOffer(
+        {
+          offer: offerInput,
+          tx_code: txCode || undefined,
+          credential_format: this.selectedCredentialFormat(),
+          credential_configuration_id: this.selectedCredentialConfigurationID(),
+          looking_glass_session_id: this.config.captureSessionId,
+        },
+        {
+          signal: this.abortController?.signal,
+          headers: this.config.captureSessionId
+            ? { 'X-Looking-Glass-Session': this.config.captureSessionId }
+            : undefined,
+        },
+      )
+    } catch (error) {
+      if (error instanceof WalletAPIRequestError && error.payload) {
+        this.surfaceWalletProtocolTranscript(error.payload as WalletImportResponse)
       }
-      throw new Error(String(payload.error_description || errorCode || `Deferred check failed (${response.status})`))
+      throw error
     }
-
-    throw new Error('Deferred credential response missing credential')
   }
 
-  private async captureCredential(rawCredential: string, additionalMetadata?: Record<string, unknown>): Promise<void> {
-    const credentialFormat = String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'mso_mdoc'
-    // mso_mdoc credentials are a base64url-encoded CBOR IssuerSigned structure
-    // (ISO/IEC 18013-5), not a JOSE JWT. They have no "~" disclosure tail and
-    // cannot be decoded as a JWT, so we record the raw credential as-is rather
-    // than misrepresenting it through the JWT decoder.
+  private surfaceWalletProtocolTranscript(response: WalletImportResponse): void {
+    const hops = Array.isArray(response._protocol_exchanges) ? response._protocol_exchanges : []
+    for (const hop of hops) {
+      this.addProtocolHopExchange(hop)
+    }
+
+    const events = response._looking_glass_events
+    if (Array.isArray(events)) {
+      for (const event of events) {
+        if (!event || typeof event !== 'object') continue
+        const ev = event as Record<string, unknown>
+        const eventType = String(ev.type || '')
+        if (eventType === 'http_exchange') {
+          continue
+        }
+        if (eventType === 'crypto') {
+          this.addEvent({
+            type: 'crypto',
+            title: String(ev.title || 'Credential Proof JWT'),
+            description:
+              'Wallet built the openid4vci-proof+jwt bound to c_nonce and credential_issuer audience.',
+            rfcReference: String(
+              (ev.data as Record<string, unknown> | undefined)?.rfc_reference ||
+                'OpenID4VCI 1.0 Section 8.2',
+            ),
+            data: (ev.data as Record<string, unknown>) || undefined,
+          })
+          const proof = (ev.data as Record<string, unknown> | undefined)?.proof
+          if (proof && typeof proof === 'object') {
+            this.addVCArtifact({
+              type: 'proof_jwt',
+              title: 'Credential Proof JWT',
+              format: 'openid4vci-proof+jwt',
+              rfcReference: 'OpenID4VCI 1.0 Section 8.2',
+              json: proof as Record<string, unknown>,
+            })
+          }
+          continue
+        }
+        this.addVCArtifact({
+          type: 'wallet_lifecycle',
+          title: String(ev.title || ev.type || 'Wallet Event'),
+          format: String(ev.type || ''),
+          json: (ev.data && typeof ev.data === 'object' ? ev.data : ev) as Record<string, unknown>,
+        })
+      }
+    }
+
+    if (hops.length === 0) {
+      this.addEvent({
+        type: 'info',
+        title: 'No Protocol Hops Returned',
+        description:
+          'Wallet completed without _protocol_exchanges. Check issuer Wire captures for HTTP traffic tagged with this Looking Glass session.',
+      })
+    }
+  }
+
+  private addProtocolHopExchange(hop: WalletProtocolExchange): void {
+    const step = String(hop.step || 'Issuer HTTP Exchange').trim() || 'Issuer HTTP Exchange'
+    const method = String(hop.method || 'GET').trim() || 'GET'
+    const url = String(hop.url || '').trim()
+    const status = Number(hop.response_status || 0)
+    const duration = Number(hop.duration_ms || 0)
+    this.updateState({ currentStep: step })
+    const exchange = this.addExchange({
+      step,
+      rfcReference: String(hop.rfc_reference || 'OpenID4VCI 1.0'),
+      request: {
+        method,
+        url,
+        headers: hop.request_headers || {},
+        body:
+          hop.request_body === undefined || hop.request_body === null
+            ? undefined
+            : typeof hop.request_body === 'string'
+              ? hop.request_body
+              : (hop.request_body as Record<string, string>),
+      },
+      response: {
+        status,
+        statusText: status ? String(status) : 'error',
+        headers: hop.response_headers || {},
+        body: hop.response_body ?? hop.extra ?? null,
+        duration,
+      },
+    })
+    this.addEvent({
+      type: 'request',
+      title: step,
+      description: `${method} ${url}`,
+      rfcReference: String(hop.rfc_reference || ''),
+      data: {
+        exchangeId: exchange.id,
+        actor: hop.actor || 'wallet→issuer',
+        responseStatus: status,
+        durationMs: duration,
+      },
+    })
+    this.addEvent({
+      type: 'response',
+      title: `${step} Response`,
+      description: status ? `HTTP ${status}` : 'Request failed before a response',
+      rfcReference: String(hop.rfc_reference || ''),
+      data: {
+        exchangeId: exchange.id,
+        responseStatus: status,
+      },
+    })
+  }
+
+  private recordOfferArtifacts(walletResponse: WalletImportResponse): void {
+    if (walletResponse.credential_offer && typeof walletResponse.credential_offer === 'object') {
+      this.addVCArtifact({
+        type: 'credential_offer',
+        title: 'Wallet-Resolved Credential Offer',
+        format: 'openid4vci-offer',
+        rfcReference: 'OpenID4VCI 1.0 Section 4.1',
+        json: walletResponse.credential_offer,
+        metadata: {
+          credentialOfferURI: walletResponse.credential_offer_uri,
+          transport: walletResponse.credential_offer_transport,
+          credentialIssuer: walletResponse.credential_issuer,
+        },
+      })
+    }
+    if (walletResponse.issuer_metadata && typeof walletResponse.issuer_metadata === 'object') {
+      this.addVCArtifact({
+        type: 'wallet_lifecycle',
+        title: 'Credential Issuer Metadata',
+        format: 'openid-credential-issuer',
+        rfcReference: 'OpenID4VCI 1.0 Section 11',
+        json: walletResponse.issuer_metadata,
+        metadata: {
+          credentialIssuer: walletResponse.credential_issuer,
+          tokenEndpoint: walletResponse.token_endpoint,
+          credentialEndpoint: walletResponse.credential_endpoint,
+          nonceEndpoint: walletResponse.nonce_endpoint,
+        },
+      })
+    }
+  }
+
+  private async captureCredential(
+    rawCredential: string,
+    additionalMetadata?: Record<string, unknown>,
+  ): Promise<void> {
+    const credentialFormat =
+      String(additionalMetadata?.format || this.selectedCredentialFormat()).trim() || 'mso_mdoc'
     const isMdoc = credentialFormat === 'mso_mdoc'
 
     let decodedCredentialJWT: ReturnType<typeof decodeJWTWithoutValidation> = null
@@ -563,23 +498,6 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
       decodedCredentialJWT = decodeJWTWithoutValidation(issuerJWT)
     }
 
-    // hasDisclosures/disclosureCount used to be computed here by counting
-    // "~" characters -- an SD-JWT-only mechanism that is affirmatively wrong
-    // for mdoc (whose selective disclosure lives in salted IssuerSignedItems
-    // committed through MSO valueDigests, never zero for an issued mDL) and
-    // only crudely right for SD-JWT (it cannot see decoy digests, nested
-    // disclosures, or array-element disclosures). credentialInspection below
-    // replaces both fields for every format with the backend's
-    // format-accurate selective-disclosure summary, so those two fields are
-    // gone rather than fixed only for mdoc.
-    //
-    // This is a side-channel decode of an artifact this flow already
-    // produced, not a new fabricated protocol event -- the same shape of
-    // call as the existing /lookingglass/decode precedent for JWTs. A
-    // failure here (network error, non-2xx, timeout, or a malformed body)
-    // must render as an explicit failure state in the inspector, never a
-    // silent fallback to a raw-blob-only view, so the failure is captured
-    // into the same metadata field rather than swallowed.
     let credentialInspection: CredentialInspectionMetadata
     try {
       const inspection = await api.decodeCredential(rawCredential)
@@ -608,7 +526,7 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     this.addEvent({
       type: 'token',
       title: 'Credential Received',
-      description: `Issued ${credentialFormat} credential captured from credential endpoint`,
+      description: `Issued ${credentialFormat} credential from the Credential Endpoint`,
       data: {
         format: credentialFormat,
         ...(isMdoc ? {} : { hasDisclosures: rawCredential.includes('~') }),
@@ -621,12 +539,11 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     if (configured) {
       return configured
     }
-    // Default: the ISO/IEC 18013-5 mobile driving licence (mso_mdoc).
     return 'MobileDrivingLicenceMsoMdoc'
   }
 
   private selectedCredentialFormat(responsePayload?: Record<string, unknown>): string {
-    const responseFormat = responsePayload ? String(responsePayload.format || '').trim() : ''
+    const responseFormat = responsePayload ? String(responsePayload.credential_format || responsePayload.format || '').trim() : ''
     if (responseFormat) {
       return responseFormat
     }
@@ -634,7 +551,6 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     if (configured) {
       return configured
     }
-    // Default credential format: mso_mdoc (the mDL).
     return 'mso_mdoc'
   }
 
@@ -643,96 +559,11 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
     return segments[0] || rawCredential
   }
 
-  private async getWalletSigningMaterial(): Promise<RS256SigningMaterial> {
-    if (!this.walletSigningMaterialPromise) {
-      this.walletSigningMaterialPromise = generateRS256SigningMaterial('wallet')
-    }
-    return this.walletSigningMaterialPromise
-  }
-
-  // getWalletDeviceSigningMaterial returns an EC P-256 device key for the
-  // mso_mdoc proof (ISO/IEC 18013-5 deviceKeyInfo.deviceKey). The public JWK is
-  // an EC2/P-256 key, signed with ES256, so the issuer binds this exact device
-  // key into the MSO.
-  private async getWalletDeviceSigningMaterial(): Promise<{ privateKey: CryptoKey; publicJWK: Record<string, unknown>; kid: string; alg: string }> {
-    if (!this.walletDeviceKeyPairPromise) {
-      this.walletDeviceKeyPairPromise = window.crypto.subtle.generateKey(
-        {
-          name: 'ECDSA',
-          namedCurve: 'P-256',
-        },
-        true,
-        ['sign', 'verify'],
-      ) as Promise<CryptoKeyPair>
-    }
-    const keyPair = await this.walletDeviceKeyPairPromise
-    const exported = await window.crypto.subtle.exportKey('jwk', keyPair.publicKey)
-    const publicJWK: Record<string, unknown> = {
-      kty: exported.kty,
-      crv: exported.crv,
-      x: exported.x,
-      y: exported.y,
-      alg: 'ES256',
-      use: 'sig',
-    }
-    const exportedKid = (exported as Record<string, unknown>).kid
-    const kid = typeof exportedKid === 'string' && exportedKid.length > 0
-      ? exportedKid
-      : `wallet-device-${(exported.x || '').slice(0, 12)}`
-    publicJWK.kid = kid
-    return {
-      privateKey: keyPair.privateKey,
-      publicJWK,
-      kid,
-      alg: 'ES256',
-    }
-  }
-
-  // signES256JWT signs a JWS with ECDSA P-256 + SHA-256. Web Crypto returns the
-  // signature as the raw r||s concatenation, which is exactly the JWS ES256
-  // signature encoding (RFC 7515 Appendix A.3).
-  private async signES256JWT(
-    header: Record<string, unknown>,
-    payload: Record<string, unknown>,
-    privateKey: CryptoKey,
-  ): Promise<string> {
-    const encodedHeader = this.base64UrlEncodeString(JSON.stringify(header))
-    const encodedPayload = this.base64UrlEncodeString(JSON.stringify(payload))
-    const signingInput = `${encodedHeader}.${encodedPayload}`
-    const signature = await window.crypto.subtle.sign(
-      { name: 'ECDSA', hash: { name: 'SHA-256' } },
-      privateKey,
-      new TextEncoder().encode(signingInput),
-    )
-    const encodedSignature = this.base64UrlEncodeBytes(new Uint8Array(signature))
-    return `${signingInput}.${encodedSignature}`
-  }
-
-  private base64UrlEncodeString(value: string): string {
-    return this.base64UrlEncodeBytes(new TextEncoder().encode(value))
-  }
-
-  private base64UrlEncodeBytes(bytes: Uint8Array): string {
-    let binary = ''
-    bytes.forEach(byte => {
-      binary += String.fromCharCode(byte)
-    })
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
-  }
-
-  private randomValue(length: number): string {
-    const size = length > 0 ? length : 24
-    const bytes = new Uint8Array(size)
-    window.crypto.getRandomValues(bytes)
-    return this.base64UrlEncodeBytes(bytes).slice(0, size)
-  }
-
   private extractTxCodeFromOffer(offerData: Record<string, unknown>): string {
     const direct = String(offerData.tx_code_oob_value || '').trim()
     if (direct) {
       return direct
     }
-    const fallbackTxCode = String(offerData.tx_code_value || '').trim()
-    return fallbackTxCode
+    return String(offerData.tx_code_value || '').trim()
   }
 }
