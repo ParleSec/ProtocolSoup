@@ -73,18 +73,24 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WALLET_TARGET_BASE_URL` | `https://protocolsoup.com` | URL of the VC verifier service for OID4VP submissions. |
+| `WALLET_TARGET_BASE_URL` | `https://protocolsoup.com` | URL of the VC verifier/issuer service for OID4VP submissions and the default OID4VCI target. |
 | `WALLET_ALLOWED_CORS_ORIGINS` | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | Comma-separated allowed browser origins. |
 | `WALLET_DEFAULT_SUBJECT` | `did:example:wallet:alice` | Default holder DID seed for demo sessions. It identifies wallet key material, not an issuer identity-record ID; automatic OID4VCI bootstrap uses the issuer's designated default identity. |
 | `WALLET_DEFAULT_CREDENTIAL_FORMAT` | `mso_mdoc` | Default stored and presented credential format when a request does not name a format or configuration. `mso_mdoc` is the default (the mDL); `dc+sd-jwt` and the W3C formats remain selectable. |
 | `WALLET_DID_METHOD` | `key` | DID method for the wallet holder identifier (e.g. `key`, `web`). |
 | `WALLET_DEFAULT_SIGNING_ALG` | `ES256` | Default holder-binding signing algorithm. `ES256` (EC P-256) matches the `mso_mdoc` default; other wallet-supported algorithms apply to the JOSE formats. |
-| `WALLET_SESSION_TTL` | Server default | Go duration (e.g. `30m`) for session lifetime. |
+| `WALLET_SESSION_TTL` | `20m` | Go duration for in-memory session lifetime. |
 | `WALLET_STRICT_SESSION_ISOLATION` | `true` | Enforce strict session boundaries between demo runs. |
 | `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` | `(empty)` | Comma-separated issuer URLs the wallet trusts for `verifier_attestation` request validation. |
 | `WALLET_DEVICE_KEY_PATH` | `(empty)` | File path for the persistent `mso_mdoc` holder device key (EC P-256). Empty uses an ephemeral key; set a durable path so stored mdoc device bindings survive restarts. |
 | `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` | System roots only | Additional PEM CA trust anchors used when the wallet validates `x509_san_dns` and `x509_hash` request-object chains. Certificates carried in `x5c` are untrusted chain material and are never promoted to roots. |
-| `WALLET_MDOC_IACA_ROOT_PEM` | `(unset)` | PEM IACA root certificate(s) the wallet trusts before storing an issued `mso_mdoc`. Without an explicit root the wallet rejects mdoc issuance rather than trusting the credential's own `x5chain`. |
+| `WALLET_MDOC_IACA_ROOT_PEM` | `(unset)` | PEM-encoded IACA root certificate(s) the wallet trusts before storing an issued `mso_mdoc`. Without an explicit root the wallet rejects mdoc issuance rather than trusting the credential's own `x5chain`. Multiple PEMs are additive. |
+| `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` | `(unset)` | Attester private JWK (+ `x5c`) used to mint `OAuth-Client-Attestation` JWTs. Together with `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON`, enables the wallet HAIP issuance path. |
+| `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` | `(unset)` | Attester private JWK (+ `x5c`) used to mint OID4VCI Appendix D `key_attestation` JWTs for HAIP credential proofs. |
+| `WALLET_OID4VCI_ATTESTED_CLIENT_ID` | `protocolsoup-wallet` | Attested `client_id` / attestation JWT `sub` when HAIP attestation material is configured. |
+| `WALLET_CLIENT_ATTESTATION_ISSUER` | `https://wallet.protocolsoup.com/attester` | `iss` claim on client attestation JWTs. |
+| `WALLET_KEY_ATTESTATION_KEY_STORAGE` | `(unset)` | Comma-separated `key_storage` attack-potential levels asserted in key attestation (for example `iso_18045_moderate`). Omit unless the claim is honest for this software wallet. |
+| `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` | `(unset)` | Comma-separated `user_authentication` attack-potential levels asserted in key attestation. Omit unless honest. |
 
 ## OID4VP Verifier (VC And Federation Services)
 
