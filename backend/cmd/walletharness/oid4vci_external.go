@@ -1482,14 +1482,6 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 	return result, nil
 }
 
-func buildPKCEPair(supportedMethods []string) (string, string, string) {
-	verifier, challenge, method, err := buildPKCES256Pair(supportedMethods, false)
-	if err != nil {
-		return "", "", ""
-	}
-	return verifier, challenge, method
-}
-
 func buildExternalAuthorizationURL(
 	authorizationEndpoint string,
 	clientID string,

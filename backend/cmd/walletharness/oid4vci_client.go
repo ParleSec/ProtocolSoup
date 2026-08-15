@@ -23,44 +23,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type oid4vciFlowStage string
-
-const (
-	stageOfferReceived       oid4vciFlowStage = "offer_received"
-	stageMetadataValidated   oid4vciFlowStage = "metadata_validated"
-	stageAuthorized          oid4vciFlowStage = "authorized"
-	stageTokenReceived       oid4vciFlowStage = "token_received"
-	stageNonceReceived       oid4vciFlowStage = "nonce_received"
-	stageCredentialRequested oid4vciFlowStage = "credential_requested"
-	stageDeferredOrIssued    oid4vciFlowStage = "deferred_or_issued"
-	stageValidated           oid4vciFlowStage = "validated"
-	stageStored              oid4vciFlowStage = "stored"
-	stageNotified            oid4vciFlowStage = "notified"
-)
-
-// oid4vciIssuanceRun is the shared state machine for one OID4VCI issuance
-// (bootstrap pre-authorized or external import).
-type oid4vciIssuanceRun struct {
-	Stage                       oid4vciFlowStage
-	CredentialConfigurationID   string
-	CredentialFormat            string
-	CredentialConfiguration     map[string]interface{}
-	IssuerMetadata              *resolvedExternalIssuerMetadata
-	AuthorizationServerMetadata *resolvedAuthorizationServerMetadata
-	HAIPSession                 *haipIssuanceSession
-	UseHAIP                     bool
-	CodeVerifier                string
-	State                       string
-	RedirectURI                 string
-	ExpectedIss                 string
-	PopAudience                 string
-	AccessToken                 string
-	TokenType                   string
-	CredentialIdentifiers       []string
-	LookingGlassSessionID       string
-	ResponseEncryptionKey       *ecdsa.PrivateKey
-}
-
 type credentialResponseEncryptionSupport struct {
 	AlgValuesSupported []string
 	EncValuesSupported []string
