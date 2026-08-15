@@ -23,6 +23,7 @@
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `BACKEND_ORIGIN` | Yes (outside local defaults) | `http://localhost:8080` | Upstream backend base URL for HTTP rewrites (`/api`, `/oauth2`, `/oidc`, `/oid4vci`, `/oid4vp`, `/saml`, `/spiffe`, `/scim`, `/ssf`) |
+| `WALLET_BACKEND_ORIGIN` | Yes (when Looking Glass uses a remote wallet) | `https://wallet.protocolsoup.com` | Upstream wallet harness origin for the same-origin `/wallet-harness/*` rewrite used by Looking Glass OID4VCI/OID4VP |
 | `NEXT_PUBLIC_SITE_URL` | Yes (production) | `https://protocolsoup.com` | Canonical public origin used in metadata and sitemap generation |
 | `DOCS_SITE_URL` | No | `https://docs.protocolsoup.com` | Docs host used in sitemap-index output |
 
