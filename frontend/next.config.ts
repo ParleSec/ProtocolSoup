@@ -1,6 +1,11 @@
 import type { NextConfig } from 'next'
 
 const backendOrigin = process.env.BACKEND_ORIGIN || 'http://localhost:8080'
+const walletBackendOrigin = (
+  process.env.WALLET_BACKEND_ORIGIN ||
+  process.env.WALLET_SITE_URL ||
+  'https://wallet.protocolsoup.com'
+).replace(/\/+$/, '')
 const canonicalSiteOrigin = (process.env.NEXT_PUBLIC_SITE_URL || 'https://protocolsoup.com').replace(/\/+$/, '')
 const canonicalHost = new URL(canonicalSiteOrigin).host
 const wwwHost = canonicalHost.startsWith('www.') ? canonicalHost : `www.${canonicalHost}`
@@ -39,6 +44,8 @@ const nextConfig: NextConfig = {
       { source: '/spiffe/:path*', destination: `${backendOrigin}/spiffe/:path*` },
       { source: '/scim/:path*', destination: `${backendOrigin}/scim/:path*` },
       { source: '/ssf/:path*', destination: `${backendOrigin}/ssf/:path*` },
+      // Same-origin Looking Glass / OID4VP → wallet harness (avoids cross-subdomain CORS loss on edge 502s).
+      { source: '/wallet-harness/:path*', destination: `${walletBackendOrigin}/:path*` },
     ]
   },
 }

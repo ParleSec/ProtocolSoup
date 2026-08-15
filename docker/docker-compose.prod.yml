@@ -69,12 +69,14 @@ services:
       dockerfile: docker/Dockerfile.frontend.prod
       args:
         BACKEND_ORIGIN: http://backend:8080
+        WALLET_BACKEND_ORIGIN: https://wallet.protocolsoup.com
         NEXT_PUBLIC_SITE_URL: https://protocolsoup.com
     container_name: protocolsoup-frontend
     expose:
       - "3000"
     environment:
       - BACKEND_ORIGIN=http://backend:8080
+      - WALLET_BACKEND_ORIGIN=https://wallet.protocolsoup.com
       - NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
     networks:
       - protocolsoup-network
