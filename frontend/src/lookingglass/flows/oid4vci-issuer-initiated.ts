@@ -6,16 +6,13 @@
  * an openid-credential-offer:// invocation URI or an HTTPS delivery URL for
  * an explicitly supplied external Credential Offer Endpoint.
  *
- * Unlike oid4vci-pre-authorized, this executor does not itself drive the
- * rest of the issuance flow: for an issuer-initiated authorization_code
- * offer, the wallet (a real wallet app, or an external test suite acting
- * as one) is the party that resolves the offer, pushes its own
- * client-attested PAR request carrying issuer_state, and completes the
- * token/nonce/credential exchange directly against this issuer. Looking
- * Glass does not impersonate the wallet; it observes that real conversation
- * by checking the issuer-created status_uri context on demand, the same
- * awaiting_user / "Check Result" chrome used by the OID4VP wallet-callback
- * flow, rather than polling on a timer.
+ * Looking Glass never impersonates the wallet for this flow. After creating
+ * (and optionally delivering) the offer, a real wallet — the hosted wallet
+ * harness or another OID4VCI wallet — must complete PAR, authorization_code
+ * redemption, token exchange, and credential issuance. Looking Glass only
+ * observes issuer-side status via status_uri using the same awaiting_user /
+ * "Check Result" chrome as OID4VP wallet-callback flows (no browser-side
+ * token/proof client).
  */
 
 import { FlowExecutorBase, type FlowExecutorConfig } from './base'
