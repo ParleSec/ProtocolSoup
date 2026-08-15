@@ -23,17 +23,17 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 
 | Flow ID | Name | Steps | Description |
 |---------|------|-------|-------------|
-| `oid4vci-pre-authorized` | Pre-Authorized Code | 6 | Resolve offer, discover metadata, exchange pre-authorized code, receive an access token, obtain `c_nonce` from the Nonce Endpoint, submit proof, receive issued credential |
-| `oid4vci-pre-authorized-tx-code` | Pre-Authorized + tx_code | 6 | Same flow with mandatory `tx_code` at token exchange |
-| `oid4vci-deferred-issuance` | Deferred Issuance | 8 | Full end-to-end flow: offer, metadata, token, credential request, deferred response with `transaction_id`, polling, credential ready |
-| `oid4vci-issuer-initiated` | Issuer-Initiated Offer | 4 | Create an `authorization_code` Credential Offer with a fresh `issuer_state`, deliver it to an external Credential Offer Endpoint via a real HTTPS GET (or expose an `openid-credential-offer://` invocation/QR when no endpoint is set), then click Check Result to observe real issuer-observed PAR, token, and credential issuance milestones |
+| `oid4vci-pre-authorized` | Pre-Authorized Code | 6 | Create Credential Offer, then observe wallet→issuer metadata, token, nonce, proof, and credential hops |
+| `oid4vci-pre-authorized-tx-code` | Pre-Authorized + tx_code | 6 | Same stages with mandatory `tx_code` on the token request |
+| `oid4vci-deferred-issuance` | Deferred Issuance | 8 | Same stages plus deferred_credential polling until credentials are ready |
+| `oid4vci-issuer-initiated` | Issuer-Initiated Offer | 4 | Create an `authorization_code` Credential Offer with a fresh `issuer_state`, deliver it to an external Credential Offer Endpoint via a real HTTPS GET (or expose an `openid-credential-offer://` invocation/QR when no endpoint is set), then click Check Result to observe real issuer-observed PAR, token, and credential issuance milestones. Looking Glass does not redeem the code in-browser. |
 
 ## Demo Scenarios
 
-- **Pre-Authorized Issuance** -- Resolve by-reference offer, exchange token, submit proof, receive issued credential. The default and lead credential configuration is the ISO/IEC 18013-5 mobile driving licence (`mso_mdoc`); an offer or credential request that does not name a configuration receives the mDL.
-- **Pre-Authorized + tx_code** -- Enforce out-of-band `tx_code` before token issuance
-- **Deferred Issuance Polling** -- Receive `transaction_id`, poll until credential is ready
-- **Issuer-Initiated Offer** -- Build an `authorization_code` offer with `issuer_state`. When a wallet Credential Offer Endpoint is supplied, the issuer delivers the offer with a real HTTPS GET (`credential_offer` query parameter; 2xx/3xx accepted without following redirects). Otherwise Looking Glass exposes an `openid-credential-offer://` invocation URI/QR. Looking Glass then reuses the OID4VP wallet-handoff chrome (`awaiting_user` + "Check Result"): each click checks a separate opaque `status_uri` once for whether the issuer has received the wallet's validated PAR, issued the access token, and issued the credential, or reports the offer context has expired. When the wallet PAR uses scope only (for example `vc:mdl`), the issuer binds authorization to the intersection with the offer's credential configurations.
+- **Pre-Authorized Issuance** -- Looking Glass creates a Credential Offer, then surfaces each real wallet→issuer hop (Credential Issuer Metadata, Token Request, Nonce Request, proof JWT, Credential Request/Response) from the wallet's protocol transcript. The default credential configuration is the ISO/IEC 18013-5 mobile driving licence (`mso_mdoc`).
+- **Pre-Authorized + tx_code** -- Same glass-box stages with mandatory `tx_code` on the token request
+- **Deferred Issuance Polling** -- Same stages plus Deferred Credential Poll until the credential is ready
+- **Issuer-Initiated Offer** -- Build an `authorization_code` offer with `issuer_state`. When a wallet Credential Offer Endpoint is supplied, the issuer delivers the offer with a real HTTPS GET (`credential_offer` query parameter; 2xx/3xx accepted without following redirects). Otherwise Looking Glass exposes an `openid-credential-offer://` invocation URI/QR. Looking Glass then reuses the OID4VP wallet-handoff chrome (`awaiting_user` + "Check Result"): each click checks a separate opaque `status_uri` once for whether the issuer has received the wallet's validated PAR, issued the access token, and issued the credential, or reports the offer context has expired. Looking Glass does not complete PAR/token/credential in-browser. When the wallet PAR uses scope only (for example `vc:mdl`), the issuer binds authorization to the intersection with the offer's credential configurations.
 
 :::note[Default credential format]
 The issuer's default and lead `credential_configurations_supported` entry is the mDL `mso_mdoc` (`MobileDrivingLicenceMsoMdoc`). A request that omits an explicit configuration now receives the mDL. Metadata advertises only `dc+sd-jwt` and `mso_mdoc` (HAIP-recognized formats); W3C formats (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`) remain issuable by naming their configuration id explicitly in Looking Glass. See the [behavioural change note](#default-credential-format-behavioural-change) below.
@@ -54,7 +54,7 @@ The issuer's default and lead `credential_configurations_supported` entry is the
 ## Pre-Authorized Code Issuance Flow (OID4VCI §4, §6.1, §7)
 
 1. **Resolve Credential Offer** — Wallet receives `credential_offer_uri` out-of-band and fetches the credential offer object from the Credential Issuer. Offer contains `credential_issuer`, `credential_configuration_ids`, and `grants.urn:ietf:params:oauth:grant-type:pre-authorized_code`.
-2. **Discover Issuer Metadata** — Wallet fetches `/.well-known/openid-credential-issuer` to discover `credential_configurations_supported`, `credential_endpoint`, `nonce_endpoint`, `deferred_credential_endpoint`, and token endpoint URL.
+2. **Discover Issuer Metadata** — Wallet fetches Credential Issuer Metadata via OID4VCI §12.2.2 well-known insertion (`https://host/.well-known/openid-credential-issuer{path}`), preserving a trailing slash on the issuer path when present.
 3. **Token Request** — Wallet calls token endpoint with `grant_type=urn:ietf:params:oauth:grant-type:pre-authorized_code`, `pre-authorized_code`, and `tx_code` when required by the offer grant.
 4. **Token Response and Nonce Request** — Authorization Server returns `access_token`, `token_type`, and `scope` (if applicable). The Wallet then obtains `c_nonce` from the advertised Nonce Endpoint.
 5. **Credential Request** — Wallet submits `credential_configuration_id` and `proofs: { "jwt": ["...", ...] }` with one or more proof JWTs (up to `batch_credential_issuance.batch_size`) bound to the active `c_nonce` and the credential issuer audience. Multiple proofs request multiple copies of the same Credential Dataset, each bound to a distinct proof key.
@@ -74,7 +74,9 @@ In addition to `pre-authorized_code`, the token endpoint accepts
 2. Wallet fetches `{authorization_server}/.well-known/oauth-authorization-server`
    (RFC 8414 Section 3.1 well-known URI insertion — for issuer
    `https://host/oid4vci` this resolves to
-   `https://host/.well-known/oauth-authorization-server/oid4vci`) to discover
+   `https://host/.well-known/oauth-authorization-server/oid4vci`; a trailing
+   slash on the issuer path is stripped). The wallet does not fall back to
+   `openid-configuration` for OID4VCI. Discovery yields
    `authorization_endpoint`, `token_endpoint`, `grant_types_supported`,
    `code_challenge_methods_supported` (`S256`),
    `authorization_response_iss_parameter_supported` (`true`, RFC 9207), and
@@ -94,17 +96,28 @@ In addition to `pre-authorized_code`, the token endpoint accepts
    HTTP 400 `invalid_grant` (OIDCC §3.1.3.4 / FAPI2 SP), including when that
    second client has not previously called PAR.
 4. Wallet drives the standard OAuth 2.0 authorization code flow against
-   `authorization_endpoint`, then exchanges the code at
-   `token_endpoint` exactly as it would for `pre-authorized_code`, receiving
+   `authorization_endpoint` with only `client_id` and `request_uri` after PAR
+   (FAPI2 SP Final §5.3.3.2), then exchanges the code at
+   `token_endpoint` with the same client attestation authentication used at
+   PAR, receiving
    `access_token` before requesting `c_nonce` from the Nonce Endpoint. PAR
    `request_uri` values stay usable across authorize page loads and are
    consumed only when authorization completes (FAPI 2.0 SP §5.3.2.2 Note 3);
    PAR-backed requests never silent-SSO via an existing session cookie and
    require an explicit Continue (or password login) after the preload visit.
 
-This path is implemented and covered at the HTTP/API layer. The current Looking
-Glass OID4VCI executors demonstrate only the pre-authorized-code variants; they
-do not yet drive this authorization-code flow.
+This path is implemented at the issuer HTTP/API layer and by the hosted wallet
+reference client (`protocolsoup-wallet`: `POST /api/import`,
+`GET /api/oid4vci/callback`). Looking Glass pre-authorized executors create the
+issuer offer, then delegate redemption to the wallet harness via
+`POST /api/import` (token, proof, credential, and deferred polling run in the
+wallet — not in the browser). The issuer-initiated Looking Glass flow
+(`oid4vci-issuer-initiated`) creates and optionally delivers an
+`authorization_code` offer, then observes issuer-side PAR/token/credential
+milestones via `status_uri`; it does not impersonate the wallet. Pointing that
+flow's `credential_offer_endpoint` at the wallet (with HAIP attestation env
+configured when the offer targets a HAIP configuration) is how a wallet-driven
+authorization-code path is exercised.
 
 Authorization requests can carry `openid_credential` `authorization_details`.
 The issuer validates each requested configuration, binds the approved details
@@ -122,11 +135,18 @@ from that code so credential (and related) resource endpoints reject it with
 
 The issuer implements the following HAIP-related issuance controls as opt-in,
 trust-anchor-gated (or otherwise explicitly enabled) API features. This is
-not a claim of complete HAIP issuer support: the Looking Glass and wallet
-harness do not yet drive the client-attestation, key-attestation, DPoP proof,
-and encrypted-credential-request material together in a single end-to-end
-HAIP issuance demo.
-The unattested Final flow remains unaffected by default.
+not a claim of complete HAIP issuer or wallet profile conformance.
+
+The hosted wallet reference client drives client attestation, key attestation,
+DPoP, and credential-response encryption together when HAIP attestation
+material is configured (`WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and
+`WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON`, plus related
+`WALLET_OID4VCI_ATTESTED_CLIENT_ID` / `WALLET_CLIENT_ATTESTATION_ISSUER` /
+`WALLET_KEY_ATTESTATION_*` settings). Looking Glass pre-authorized executors
+delegate redemption to that wallet path via `/api/import` rather than minting
+attestation and DPoP proofs in the browser. Issuer-initiated Looking Glass
+observes a real wallet conversation via `status_uri`. The unattested Final
+flow remains unaffected by default.
 
 - **Sender-constrained access tokens (RFC 9449 DPoP).** The token endpoint
   accepts an optional `DPoP` proof header; when present, the issued access
@@ -159,6 +179,12 @@ The unattested Final flow remains unaffected by default.
   Key that must sign the PoP JWT, and the PoP's `jti` is single-use. When both
   headers are present, they are the authentication verdict for the request —
   a failed attestation is never silently downgraded to a weaker method. The
+  hosted wallet treats each HTTP attempt as a new authenticated request: on a
+  DPoP `use_dpop_nonce` retry at PAR or token, it keeps the Client Attestation
+  JWT and mints a fresh PoP with a new `jti` (OAuth2-ATCA
+  single-use PoP `jti`). Credential and other resource
+  requests similarly retry when the RS returns HTTP 401 (or 400) with
+  `use_dpop_nonce` and a `DPoP-Nonce` header (RFC 9449). The
   attested `sub` becomes the authoritative `client_id`. Advertised in AS
   metadata's `token_endpoint_auth_methods_supported` as
   `attest_jwt_client_auth` only once a trust anchor is configured, alongside
@@ -195,7 +221,8 @@ The unattested Final flow remains unaffected by default.
   Type Metadata document, while disclosed claims and `_sd` commitments use the
   SD-JWT VC top-level claim model rather than the legacy `vc` container.
 
-These controls are exercised by backend regression tests.
+These controls are exercised by backend regression tests and by the wallet
+reference client when HAIP attestation env is configured.
 
 ## Contract Enforcement
 
