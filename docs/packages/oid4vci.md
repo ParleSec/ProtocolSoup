@@ -68,14 +68,20 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
 - Replay/freshness denial handling
 
 The attestation, encryption, and DPoP items are HAIP-related API building
-blocks, not a complete HAIP conformance claim: the current Looking
-Glass/wallet flows do not drive them together end to end. Only JWT access tokens can be
-DPoP-bound; opaque/reference token binding is out of scope. The
-`authorization_code` grant issues a refresh token (DPoP-bound when the
-access token is and Client Attestation was not used; Client Instance
-Key-bound under attestation per OAuth2-ATCA §10.3). Refresh tokens are not
-rotated on use (FAPI2 SP Final §5.3.2.1-9). Pre-authorized code grants do
-not issue refresh tokens.
+blocks, not a complete HAIP conformance claim. The hosted wallet reference
+client (`protocolsoup-wallet`) drives client attestation, key attestation,
+DPoP, and credential-response encryption together when its HAIP attestation
+env material is configured. Looking Glass pre-authorized executors create the
+issuer offer, then surface each real wallet→issuer hop (metadata, token, nonce,
+proof JWT, credential, deferred polling) from the wallet's `_protocol_exchanges`
+transcript. Issuer-initiated Looking
+Glass observes wallet-driven `authorization_code` milestones via `status_uri`
+and does not redeem codes in-browser. Only JWT access tokens can be DPoP-bound;
+opaque/reference token binding is out of scope. The `authorization_code`
+grant issues a refresh token (DPoP-bound when the access token is and Client
+Attestation was not used; Client Instance Key-bound under attestation per
+OAuth2-ATCA §10.3). Refresh tokens are not rotated on use (FAPI2 SP Final
+§5.3.2.1-9). Pre-authorized code grants do not issue refresh tokens.
 
 ## Default credential configuration
 
@@ -173,9 +179,13 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - Encrypted credential responses are real JWE (ECDH-ES + A128GCM/A256GCM) encryption via `go-jose`, not a stub — the response body is genuinely undecryptable without the wallet's ephemeral private key.
 - Looking Glass events are emitted from real request handling, including security rejections.
 - Authorization-code and HAIP-related issuance controls are covered by backend
-  HTTP tests. Looking Glass's own executable flows exercise the
-  pre-authorized issuance variants end to end plus the issuer-initiated
-  `authorization_code` offer (`oid4vci-issuer-initiated`). The issuer persists
+  HTTP tests and by the wallet reference client's unified OID4VCI import path
+  when HAIP attestation env is configured. Looking Glass pre-authorized flows
+  create the offer then surface the wallet's recorded OID4VCI hops
+  (`_protocol_exchanges`: metadata, token, nonce, proof, credential, deferred).
+  Issuer-initiated
+  Looking Glass (`oid4vci-issuer-initiated`) observes rather than impersonates
+  the wallet via `status_uri`. The issuer persists
   the offer context, rejects unknown or expired `issuer_state` values and
   Credential-Configuration-mismatched bindings at PAR (the same offer may be
   redeemed by consecutive clients until the offer TTL), and propagates the
@@ -211,4 +221,5 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
   `status_uri` once and shows `waiting_for_wallet`,
   `authorization_request_received`, `token_issued`, or `credential_issued`
   from the issuer's real request handling. The wallet remains responsible
-  for sending its own PAR, token, and credential requests.
+  for sending its own PAR, token, and credential requests (including HAIP
+  attestation and DPoP when that wallet is configured for them).
