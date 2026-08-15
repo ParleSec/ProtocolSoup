@@ -48,21 +48,17 @@ import {
 } from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
-const OID4VP_WALLET_SUBMIT_URL = 'https://wallet.protocolsoup.com/submit'
+import { describeWalletAPIError, walletAPIURL } from '../lookingglass/wallet-client'
+
+const OID4VP_WALLET_SUBMIT_URL = walletAPIURL('/submit')
 const SAFE_QR_DATA_URL_PREFIX = 'data:image/png;base64,'
-// The mDL mso_mdoc is the lead (default) credential profile; the
-// SD-JWT VC and W3C profiles remain selectable as non-default options.
+// Profiles advertised in Credential Issuer Metadata (HAIP-aligned: dc+sd-jwt + mso_mdoc).
 const OID4VCI_CREDENTIAL_PROFILES = [
   { id: 'MobileDrivingLicenceMsoMdoc', format: 'mso_mdoc', label: 'mso_mdoc (mDL)' },
   { id: 'UniversityDegreeCredential', format: 'dc+sd-jwt', label: 'dc+sd-jwt' },
-  { id: 'UniversityDegreeCredentialJWT', format: 'jwt_vc_json', label: 'jwt_vc_json' },
-  { id: 'UniversityDegreeCredentialJWTLD', format: 'jwt_vc_json-ld', label: 'jwt_vc_json-ld' },
-  { id: 'UniversityDegreeCredentialLDP', format: 'ldp_vc', label: 'ldp_vc' },
-  // HAIP key-attested configurations. Only relevant to flows that carry the
-  // request through client attestation + DPoP themselves (for example an
-  // external wallet driving the issuer-initiated offer flow); Looking Glass's
-  // own pre-authorized executor does not build the Appendix D key attestation
-  // these require.
+  // HAIP key-attested configurations. Looking Glass pre-authorized redemption
+  // goes through the wallet harness, which supplies client/key attestation when
+  // WALLET_* attestation material is configured.
   { id: 'MobileDrivingLicenceMsoMdocHAIP', format: 'mso_mdoc', label: 'mso_mdoc (mDL, HAIP key-attested)' },
   { id: 'UniversityDegreeCredentialSDJWTHAIP', format: 'dc+sd-jwt', label: 'dc+sd-jwt (HAIP key-attested)' },
 ] as const
@@ -93,11 +89,7 @@ function sanitizeQRCodeDataURL(raw: string): string {
 }
 
 function describeWalletSubmitError(responsePayload: Record<string, unknown> | null, fallback: string): string {
-  const baseMessage = String(
-    responsePayload?.error_description
-      || responsePayload?.error
-      || fallback,
-  ).trim()
+  const baseMessage = describeWalletAPIError(responsePayload, fallback)
   const credentialMatches = responsePayload?.credential_matches
   if (!credentialMatches || typeof credentialMatches !== 'object' || Array.isArray(credentialMatches)) {
     return baseMessage

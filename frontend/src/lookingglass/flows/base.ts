@@ -73,6 +73,10 @@ export interface FlowExecutorState {
     statusUri?: string
     /** Epoch milliseconds after which the status_uri context is considered expired, as a string. */
     statusDeadline?: string
+    /** Wallet-reported issuer authorization URL when authorization_required is returned. */
+    authorizationUrl?: string
+    /** Credential issuer identifier from wallet import / offer review. */
+    credentialIssuer?: string
   }
   /** Error details if any */
   error?: {

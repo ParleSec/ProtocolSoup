@@ -199,28 +199,28 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
   // OID4VCI flows
   'oid4vci-pre-authorized': {
     executorClass: OID4VCIPreAuthorizedExecutor,
-    description: 'Pre-authorized credential issuance with proof + c_nonce',
+    description: 'Create offer, then wallet harness redeems it (token, proof, credential)',
     rfcReference: 'OpenID4VCI 1.0',
     requiresUserInteraction: false,
     additionalConfig: { txCodeRequired: false, deferred: false },
   },
   'oid4vci-pre-authorized-tx-code': {
     executorClass: OID4VCIPreAuthorizedExecutor,
-    description: 'Pre-authorized issuance with tx_code enforcement',
+    description: 'Pre-authorized offer with tx_code; wallet harness performs token exchange',
     rfcReference: 'OpenID4VCI 1.0 Section 6.1',
     requiresUserInteraction: true,
     additionalConfig: { txCodeRequired: true, deferred: false },
   },
   'oid4vci-deferred-issuance': {
     executorClass: OID4VCIPreAuthorizedExecutor,
-    description: 'Deferred issuance polling flow',
+    description: 'Deferred offer; wallet harness polls deferred_credential until ready',
     rfcReference: 'OpenID4VCI 1.0 Deferred Credential Endpoint',
     requiresUserInteraction: false,
     additionalConfig: { txCodeRequired: false, deferred: true },
   },
   'oid4vci-issuer-initiated': {
     executorClass: OID4VCIIssuerInitiatedExecutor,
-    description: 'Issuer-initiated authorization_code offer, deliverable to an external wallet endpoint',
+    description: 'Issuer-initiated authorization_code offer for a real wallet (PAR/auth outside Looking Glass)',
     rfcReference: 'OpenID4VCI 1.0 Section 4.1',
     requiresUserInteraction: true,
     additionalConfig: {},
