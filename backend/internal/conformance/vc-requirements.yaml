@@ -457,17 +457,26 @@ requirements:
     section: "8.2"
     level: MUST
     statement: >-
-      The issuer rejects multiple JWT proofs because batch issuance is not
-      advertised, and rejects duplicate known request parameters while
-      ignoring unknown extensions.
+      When batch_credential_issuance is advertised, the Credential Issuer
+      accepts multiple JWT proofs up to batch_size, binds each issued
+      Credential to a distinct proof key, rejects duplicate proof keys, rejects
+      proofs exceeding batch_size, and rejects duplicate known request
+      parameters while ignoring unknown extensions.
     roles: [issuer]
     applicability: applicable
     implementation:
       - backend/internal/protocols/oid4vci/handlers.go
+      - backend/internal/protocols/oid4vci/plugin.go
     tests:
       - package: ./internal/protocols/oid4vci
         file: backend/internal/protocols/oid4vci/plugin_test.go
-        name: TestCredentialRejectsUnadvertisedMultipleProofs
+        name: TestCredentialIssuesBatchBoundToDistinctProofKeys
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialRejectsDuplicateProofKeysInBatch
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/plugin_test.go
+        name: TestCredentialRejectsProofsExceedingBatchSize
       - package: ./internal/protocols/oid4vci
         file: backend/internal/protocols/oid4vci/plugin_test.go
         name: TestDeferredRequestIgnoresUnknownParametersAndRejectsDuplicates
@@ -992,3 +1001,371 @@ requirements:
       - package: ./internal/vc
         file: backend/internal/vc/sdjwt_test.go
         name: TestProcessSDJWTDisclosuresRejectsPermanentClaimCollision
+
+  # --- OID4VCI / HAIP wallet-role matrix (CW-*) ---
+
+  - id: CW-001
+    specification: oid4vci
+    section: "4.1"
+    level: MUST NOT
+    statement: >-
+      credential_offer MUST NOT be present when credential_offer_uri is present
+      (and vice versa).
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_external.go
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestCredentialOfferEnvelopeRejectsBothTransports
+
+  - id: CW-006
+    specification: oid4vci
+    section: "4.1.1 and 6.1"
+    level: MUST
+    statement: >-
+      If the Wallet decides to use the Pre-Authorized Code Flow and a tx_code
+      object was present in the Credential Offer (including if empty), the
+      Transaction Code value MUST be sent in the Token Request tx_code
+      parameter as defined in Section 6.1.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_external.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_external_test.go
+        name: TestIssueFromExternalIssuerRequiresTxCode
+
+  - id: CW-010
+    specification: oid4vci
+    section: "13.5"
+    level: MUST
+    statement: >-
+      The Wallet MUST treat Credential Offer parameter values as not
+      trustworthy and MUST perform the same Issuer validation as for a
+      Wallet-initiated flow.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_external.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestMetadataCredentialIssuerMismatchRejection
+
+  - id: CW-020
+    specification: oid4vci
+    section: "12.2.2"
+    level: MUST
+    statement: >-
+      To retrieve Credential Issuer Metadata, the Wallet MUST send an HTTP GET
+      request to the Credential Issuer Identifier with path
+      /.well-known/openid-credential-issuer inserted between the host and any
+      path component.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_external.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_external_test.go
+        name: TestWellKnownMetadataURLCandidatesWithIssuerPath
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_external_test.go
+        name: TestWellKnownMetadataURLCandidatesPreserveCredentialIssuerTrailingSlash
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_external_test.go
+        name: TestWellKnownMetadataURLCandidatesStripOAuthASTrailingSlash
+
+  - id: CW-024
+    specification: oid4vci
+    section: "12.2.4"
+    level: MUST NOT
+    statement: >-
+      If the credential_issuer value in metadata does not match the Credential
+      Issuer Identifier used to retrieve it (simple string comparison, no
+      normalization), the metadata MUST NOT be used.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_external.go
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestMetadataCredentialIssuerMismatchRejection
+
+  - id: CW-044
+    specification: oid4vci
+    section: "6.2"
+    level: MUST
+    statement: >-
+      When the Token Response includes authorization_details with
+      credential_identifiers, the Wallet MUST use those identifiers with the
+      Access Token in subsequent Credential Requests.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestCredentialRequestBuilderIdentifierExclusivity
+
+  - id: CW-065
+    specification: oid4vci
+    section: "Appendix F.1"
+    level: MUST
+    statement: >-
+      A JWT proof has typ openid4vci-proof+jwt, alg that is neither none nor a
+      MAC algorithm, aud equal to the Credential Issuer Identifier, required
+      iat, nonce when the Issuer has a Nonce Endpoint, and exactly one of kid,
+      jwk, or x5c as the key reference.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/main.go
+      - backend/cmd/walletharness/haip_issuance.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestCreateCredentialProofJWTUsesFinalAnonymousProofShape
+
+  - id: CW-070
+    specification: oid4vci
+    section: "8.2"
+    level: MUST
+    statement: >-
+      credential_identifier is REQUIRED when the Token Response returned
+      openid_credential authorization_details with credential_identifiers and
+      MUST NOT be used otherwise; when used, credential_configuration_id MUST
+      NOT be present. credential_configuration_id is REQUIRED when
+      credential_identifiers were not returned and MUST NOT be used otherwise.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestCredentialRequestBuilderIdentifierExclusivity
+
+  - id: CW-072
+    specification: oid4vci
+    section: "8.2 and 10"
+    level: MUST
+    statement: >-
+      When credential_response_encryption.encryption_required is true, or when
+      the Wallet includes credential_response_encryption, the Wallet encrypts
+      and decrypts Credential Responses as JWTs using the negotiated algorithms.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestCredentialResponseEncryptionJWERoundTrip
+
+  - id: CW-081
+    specification: oid4vci
+    section: "8.3 and 9"
+    level: SHOULD
+    statement: >-
+      If a transaction_id is present, the Wallet SHOULD wait at least interval
+      seconds before sending a Deferred Credential Request and MUST present an
+      Access Token valid for the previously requested Credential(s).
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+      - backend/cmd/walletharness/main.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestCredentialResponseValueRequiresFinalCredentialsArray
+
+  - id: CW-100
+    specification: oid4vci
+    section: "15.3"
+    level: SHOULD
+    statement: >-
+      Wallets SHOULD store Credentials only in encrypted form, and, wherever
+      possible, use hardware-backed encryption. Wallets SHOULD not store
+      Credentials longer than needed.
+    roles: [wallet]
+    applicability: deviation
+    adr: docs/adr/001-wallet-credential-storage-deferred.md
+    implementation:
+      - backend/cmd/walletharness/main.go
+      - docs/adr/001-wallet-credential-storage-deferred.md
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestIso18045ModerateNotClaimedWhenEnvUnset
+    notes: >-
+      Session-scoped in-memory credential storage is retained until the
+      HashiCorp platform vault initiative. Cross-protocol security limitation
+      for OID4VP presentations of the same held credentials; not an OID4VP
+      normative storage deviation.
+
+  - id: CW-H003
+    specification: haip
+    section: "4"
+    level: MUST
+    statement: >-
+      When implementing OpenID for Verifiable Credential Issuance, both the
+      Wallet and the Credential Issuer MUST comply with the provisions of the
+      FAPI 2.0 Security Profile that are applicable, including PKCE with S256,
+      PAR where applicable, and the iss value in the Authorization Response.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+      - backend/cmd/walletharness/oid4vci_external.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestPKCES256ChallengeGeneration
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestPARFormIncludesCodeChallengeMethodS256
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestRFC9207IssMismatchRejection
+
+  - id: CW-H004
+    specification: haip
+    section: "4"
+    level: MUST
+    statement: >-
+      Wallets MUST support DPoP and MUST be prepared to handle DPoP-Nonce from
+      the Nonce Endpoint and other Credential Issuer and Authorization Server
+      endpoints.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+      - backend/cmd/walletharness/haip_issuance.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestNotifyCredentialAcceptedUsesNotificationBinding
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestDoDPoPJSONRequestRefreshesClientAttestationPoPOnNonceRetry
+
+  - id: CW-H010
+    specification: haip
+    section: "4.3"
+    level: MUST
+    statement: >-
+      Wallets MUST authenticate at the PAR endpoint using the same client
+      authentication rules as at the Token Endpoint.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestPARFormIncludesCodeChallengeMethodS256
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestBuildAuthorizationURLFromPAR
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestShouldUseHAIPIssuancePathForExternalAttestedAS
+
+  - id: CW-H013
+    specification: haip
+    section: "4.4.1"
+    level: MUST
+    statement: >-
+      When using OID4VCI Appendix E Wallet Attestations, the validating
+      certificate and chain excluding the trust anchor are included in the
+      Client Attestation JWT x5c, attestations MUST NOT be reused across
+      Issuers, the attestation sub MUST be shared across Wallet instances of
+      that type, and PAR client_id MUST equal the attestation sub.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/haip_issuance.go
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestClientAttestationIssuerEnvOverride
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestHAIPAttestationJWTBuildersUseExpectedHeaders
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestPushAuthorizationRequestFetchesChallengeEndpoint
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestBuildClientAttestationPoPJWTIncludesChallengeClaim
+
+  - id: CW-H014
+    specification: haip
+    section: "4.5.1"
+    level: MUST
+    statement: >-
+      Wallets MUST support key attestations. Software wallets MUST NOT claim
+      hardware or ISO 18045 assurance properties they cannot prove.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/haip_issuance.go
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestIso18045ModerateNotClaimedWhenEnvUnset
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestConfigurationRequiresKeyAttestationFromMetadata
+
+  - id: CW-H017
+    specification: haip
+    section: "7"
+    level: MUST
+    statement: >-
+      Wallets MUST, at minimum, support ECDSA with P-256 and SHA-256 (ES256 /
+      COSE -7) for validating Wallet Attestations including PoP, Key
+      Attestations, jwt proofs, and signed Issuer metadata as applicable.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/haip_issuance.go
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestGenerateEphemeralEncryptionKeyIsP256
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestHAIPAttestationJWTBuildersUseExpectedHeaders
+
+  - id: CW-089
+    specification: oid4vci
+    section: "14.5"
+    level: MUST
+    statement: >-
+      When a Refresh Token is issued, the Wallet obtains a fresh Access Token
+      per RFC 6749 Section 6 to refresh Credentials without End-User
+      interaction; otherwise the Wallet restarts issuance.
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestExchangeRefreshTokenRequiresInputs
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestExchangeRefreshTokenRedeemsGrant
