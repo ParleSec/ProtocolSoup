@@ -338,7 +338,7 @@ func (f *SDJWTFormat) ValidateIssuerSignature(input CredentialValidationInput) (
 	if err != nil {
 		return IssuerTrustNotEvaluated, err
 	}
-	return validateJWTSignature(parsed.IssuerSignedJWT, input.IssuerKeys)
+	return validateJWTSignature(parsed.IssuerSignedJWT, input.IssuerKeys, input.IssuerTrustAnchors)
 }
 
 // JWTVCFormat implements compact JWS-backed JWT VC formats.
@@ -382,7 +382,7 @@ func (f *JWTVCFormat) ValidateIssuerSignature(input CredentialValidationInput) (
 	if err != nil {
 		return IssuerTrustNotEvaluated, err
 	}
-	return validateJWTSignature(parsed.Original, input.IssuerKeys)
+	return validateJWTSignature(parsed.Original, input.IssuerKeys, input.IssuerTrustAnchors)
 }
 
 // LDPVCFormat implements the current ldp_vc profile and the future raw JSON-LD data model.
@@ -436,7 +436,7 @@ func (f *LDPVCFormat) ValidateIssuerSignature(input CredentialValidationInput) (
 		}
 		return IssuerTrustVerified, nil
 	}
-	return validateJWTSignature(parsed.Original, input.IssuerKeys)
+	return validateJWTSignature(parsed.Original, input.IssuerKeys, input.IssuerTrustAnchors)
 }
 
 // MSOMdocFormat implements the ISO/IEC 18013-5 mso_mdoc profile: base64url-encoded
@@ -865,13 +865,10 @@ func parseJSONLDCredential(raw string, formatID string) (*ParsedCredential, erro
 // negative outcome -- an unusable key, a signature that does not verify --
 // is IssuerTrustFailed, because a check was actually attempted against real
 // trust material and did not succeed.
-func validateJWTSignature(token string, issuerKeys []intcrypto.JWK) (IssuerTrustStatus, error) {
+func validateJWTSignature(token string, issuerKeys []intcrypto.JWK, trustAnchors *x509.CertPool) (IssuerTrustStatus, error) {
 	normalized := strings.TrimSpace(token)
 	if normalized == "" {
 		return IssuerTrustNotEvaluated, fmt.Errorf("credential jwt is required")
-	}
-	if len(issuerKeys) == 0 {
-		return IssuerTrustNotEvaluated, fmt.Errorf("issuer keys are required")
 	}
 
 	decoded, err := intcrypto.DecodeTokenWithoutValidation(normalized)
@@ -881,36 +878,71 @@ func validateJWTSignature(token string, issuerKeys []intcrypto.JWK) (IssuerTrust
 	kid := strings.TrimSpace(formatString(decoded.Header["kid"]))
 	alg := strings.TrimSpace(formatString(decoded.Header["alg"]))
 
-	candidates := make([]intcrypto.JWK, 0, len(issuerKeys))
-	for _, issuerKey := range issuerKeys {
-		if kid != "" && strings.TrimSpace(issuerKey.Kid) != "" && strings.TrimSpace(issuerKey.Kid) != kid {
-			continue
+	var lastErr error
+	if len(issuerKeys) > 0 {
+		candidates := make([]intcrypto.JWK, 0, len(issuerKeys))
+		for _, issuerKey := range issuerKeys {
+			if kid != "" && strings.TrimSpace(issuerKey.Kid) != "" && strings.TrimSpace(issuerKey.Kid) != kid {
+				continue
+			}
+			if alg != "" && strings.TrimSpace(issuerKey.Alg) != "" && strings.TrimSpace(issuerKey.Alg) != alg {
+				continue
+			}
+			candidates = append(candidates, issuerKey)
 		}
-		if alg != "" && strings.TrimSpace(issuerKey.Alg) != "" && strings.TrimSpace(issuerKey.Alg) != alg {
-			continue
+		if len(candidates) == 0 {
+			candidates = append(candidates, issuerKeys...)
 		}
-		candidates = append(candidates, issuerKey)
-	}
-	if len(candidates) == 0 {
-		candidates = append(candidates, issuerKeys...)
+
+		for _, issuerKey := range candidates {
+			publicKey, err := issuerKey.ToPublicKey()
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			valid, err := intcrypto.VerifySignatureWithKey(normalized, publicKey)
+			if err == nil && valid {
+				return IssuerTrustVerified, nil
+			}
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			lastErr = fmt.Errorf("credential signature verification failed")
+		}
 	}
 
-	var lastErr error
-	for _, issuerKey := range candidates {
-		publicKey, err := issuerKey.ToPublicKey()
+	// HAIP / certificate-backed credentials carry trust in x5c. When the
+	// caller supplies independently configured trust anchors (for ProtocolSoup
+	// this is the same IACA pool used for mso_mdoc), verify the chain and the
+	// leaf signature instead of requiring a JWKS hit.
+	if _, hasX5C := decoded.Header["x5c"]; hasX5C {
+		if trustAnchors == nil {
+			if lastErr == nil {
+				return IssuerTrustNotEvaluated, fmt.Errorf("x5c credential requires issuer trust anchors")
+			}
+			return IssuerTrustFailed, lastErr
+		}
+		certificates, err := intcrypto.ParseX5CCertificateChain(decoded.Header["x5c"])
 		if err != nil {
-			lastErr = err
-			continue
+			return IssuerTrustFailed, fmt.Errorf("parse credential x5c: %w", err)
 		}
-		valid, err := intcrypto.VerifySignatureWithKey(normalized, publicKey)
-		if err == nil && valid {
-			return IssuerTrustVerified, nil
-		}
+		leaf, err := intcrypto.ValidateCertificateChainAgainstRoots(certificates, trustAnchors, time.Now().UTC())
 		if err != nil {
-			lastErr = err
-			continue
+			return IssuerTrustFailed, fmt.Errorf("validate credential x5c chain: %w", err)
 		}
-		lastErr = fmt.Errorf("credential signature verification failed")
+		valid, err := intcrypto.VerifySignatureWithKey(normalized, leaf.PublicKey)
+		if err != nil {
+			return IssuerTrustFailed, fmt.Errorf("verify credential signature with x5c leaf: %w", err)
+		}
+		if !valid {
+			return IssuerTrustFailed, fmt.Errorf("credential signature verification failed against x5c leaf")
+		}
+		return IssuerTrustVerified, nil
+	}
+
+	if len(issuerKeys) == 0 {
+		return IssuerTrustNotEvaluated, fmt.Errorf("issuer keys are required")
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no usable issuer keys were provided")
