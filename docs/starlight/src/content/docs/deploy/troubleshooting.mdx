@@ -55,6 +55,17 @@ SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 
 If your frontend is at a custom domain, add that origin.
 
+## Looking Glass OID4VCI shows "Failed to fetch"
+
+**Symptom:** Pre-authorized OID4VCI flows fail immediately with `OID4VCI Execution Failed` / `Failed to fetch`.
+
+**Cause:** Looking Glass redeems offers through the wallet harness. A cross-origin call to `wallet.protocolsoup.com` that returns an application `502` can be rewritten by the edge without `Access-Control-Allow-Origin`, which the browser surfaces only as `Failed to fetch`.
+
+**Fix:**
+1. Confirm the frontend rewrite is present: browser Network tab should show `POST /wallet-harness/api/import` (same origin), not a direct call to `wallet.protocolsoup.com`.
+2. Confirm `WALLET_BACKEND_ORIGIN` points at the live wallet harness and that wallet `/health` is warm.
+3. Confirm the wallet has `WALLET_MDOC_IACA_ROOT_PEM` for `mso_mdoc` imports and can reach issuer JWKS at the advertised `jwks_uri` (Credential Issuer Metadata / RFC 8414) for JWT/SD-JWT imports. The wallet rejects mdoc storage when no IACA root is configured or when the document-signer chain does not chain to that root.
+
 ## SCIM requests return 401
 
 **Symptom:** All SCIM API calls return `401 Unauthorized`.

@@ -3,7 +3,7 @@
 ## Service Summary
 
 - **Image:** `ghcr.io/parlesec/protocolsoup-wallet`
-- **Purpose:** Act as an external wallet harness for OID4VP demos, including optional OID4VCI bootstrap and callback submission.
+- **Purpose:** OID4VP presentation harness and OID4VCI wallet reference client. Imports or bootstraps credentials from real issuers, then presents to verifiers (including Looking Glass demos and callback submission).
 - **Topology role:** Companion service for `protocolsoup-vc` or federation VC endpoints; called by UI/external tooling, then relays to verifier callbacks.
 
 ## Runtime Contract
@@ -30,17 +30,27 @@
 | `WALLET_HTTP_TIMEOUT` | No | `15s` | Upstream request timeout |
 | `WALLET_DEVICE_KEY_PATH` | No | `(empty)` | Persistent `mso_mdoc` holder device key (EC P-256) file path; empty uses an ephemeral key |
 | `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` | No | System roots only | Additional PEM CA roots trusted for `x509_san_dns` / `x509_hash` request objects; `x5c` certificates are never self-trusted |
-| `WALLET_MDOC_IACA_ROOT_PEM` | Required for mdoc storage | `(empty)` | PEM IACA roots trusted when verifying `IssuerAuth` before an issued `mso_mdoc` is stored |
+| `WALLET_MDOC_IACA_ROOT_PEM` | Required for mdoc storage | `(empty)` | PEM IACA root(s) trusted when verifying `IssuerAuth` before an issued `mso_mdoc` is stored. Multiple certificates are additive. Include ProtocolSoup's issuer IACA (and any other independently obtained IACA roots this wallet should accept). |
+| `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` | No | `(empty)` | Attester private JWK (+ `x5c`) used to mint `OAuth-Client-Attestation` JWTs. Together with the key-attestation attester JWK, enables the HAIP issuance path |
+| `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` | No | `(empty)` | Attester private JWK (+ `x5c`) used to mint Appendix D `key_attestation` JWTs for HAIP credential proofs |
+| `WALLET_OID4VCI_ATTESTED_CLIENT_ID` | No | `protocolsoup-wallet` | Attested `client_id` / client attestation JWT `sub` / client attestation PoP JWT `iss` when HAIP attestation material is configured |
+| `WALLET_CLIENT_ATTESTATION_ISSUER` | No | `https://wallet.protocolsoup.com/attester` | `iss` claim on client attestation JWTs |
+| `WALLET_KEY_ATTESTATION_KEY_STORAGE` | No | `(empty)` | Comma-separated `key_storage` attack-potential levels asserted in key attestation (for example `iso_18045_moderate`). Omitted unless set honestly for the deployment |
+| `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` | No | `(empty)` | Comma-separated `user_authentication` attack-potential levels asserted in key attestation. Omitted unless set honestly for the deployment |
 
 ### Storage And Volumes
 
 - Session wallet key material and credential cache are in-memory per scope key, expiring based on `WALLET_SESSION_TTL`.
+- Durable encrypted credential-at-rest storage (OID4VCI 1.0 §15.3 SHOULD) is deferred; see [ADR 001](../adr/001-wallet-credential-storage-deferred.md). Credentials, JWT holder keys, refresh tokens, and DPoP/client-instance state do not survive process restart.
 - Automatic OID4VCI bootstrap omits `wallet_user_id`, allowing the issuer to select its designated default identity record. It selects a wallet signing key from the configuration's advertised JWT proof algorithms; anonymous pre-authorized proof JWTs omit `iss`, carry that public key in the JOSE `jwk` header, and sign the proof with it.
 - `WALLET_MDOC_IACA_ROOT_PEM` must contain the public IACA root for the configured issuer. Hosts typically copy the issuer's persisted public `iaca_root.pem` into that wallet environment variable or secret before deploying the wallet.
 - When `WALLET_DEVICE_KEY_PATH` is set, the `mso_mdoc` (ISO/IEC 18013-5) holder device key is persisted to that file so the device binding of issued mdoc credentials survives restarts; mount a durable volume for it. `fly.wallet.toml` uses `/data/device-key.pem` on the `protocolsoup_wallet_data` volume. Otherwise the device key is ephemeral.
 - The wallet stores an issued `mso_mdoc` only after its document-signer chain,
   Annex B profile, signature, tagged MSO, digests, validity interval, document
-  type, namespaces, and device key verify against `WALLET_MDOC_IACA_ROOT_PEM`.
+  type, and namespaces verify against `WALLET_MDOC_IACA_ROOT_PEM`. Activating a
+  credential for DeviceResponse also requires `deviceKeyInfo.deviceKey` to match
+  the wallet device key (batch secondaries bound to ephemeral proof keys are
+  stored for protocol visibility but not activated).
   CRL/OCSP revocation remains an external trust-policy responsibility.
 - External issuer offer, metadata, token, nonce, credential, JWKS, and
   notification endpoints pass through the wallet URL policy. Userinfo,
@@ -53,6 +63,36 @@
 - `GET /health` returns service status and the deployed commit when
   `BUILD_COMMIT` is configured.
 - Readiness depends on VC target reachability when `/submit` is used.
+
+## OID4VCI Client (Reference Implementation)
+
+The wallet runs a unified, metadata-driven OID4VCI client shared by automatic bootstrap (`POST /api/issue`, `/submit` bootstrap) and external import (`POST /api/import`):
+
+- **Grants:** `pre-authorized_code` (with optional `tx_code`) and `authorization_code`.
+- **Authorization code:** discovers RFC 8414 AS metadata; uses PAR + PKCE S256 when the AS requires or advertises PAR (and HAIP attestation material is configured for the HAIP path); completes at `GET /api/oid4vci/callback`. After PAR, the browser authorization redirect carries only `client_id` and `request_uri` (FAPI2 SP Final §5.3.3.2). PAR and token use the same client attestation authentication. The wallet UI keeps the offer in the current tab and opens the AS authorize step in a popup (same-tab fallback if popups are blocked, with `sessionStorage` restoring offer context on return). Resource-endpoint DPoP nonce challenges are accepted as HTTP 401 or 400. The same HAIP client can authorize for a protected resource (paste discovery URL + resource URL + scope into Import → `POST /api/import` with `discovery_url`, `resource_endpoint`, `scope`): after token exchange the callback GETs the resource with DPoP and `x-fapi-interaction-id` instead of redeeming a credential — this is ordinary OAuth resource access. When a pasted discovery URL is `openid-configuration` or `oauth-authorization-server`, the wallet checks that metadata `issuer` matches the Issuer URL derived from that discovery URL (OIDC Discovery §4.3 / RFC 8414 §3.3) and **stops** on mismatch — it must not continue to PAR or try another well-known path. FAPI2 OIDC discovery uses `{issuer}/.well-known/openid-configuration`; `{issuer}/.well-known/oauth-authorization-server` (OIDC append placement) is rewritten to `openid-configuration`. RFC 8414 insertion (`/.well-known/oauth-authorization-server/{path}`) is unchanged for HAIP. When a paste contains both well-known URLs, `openid-configuration` wins.
+- **Wallet-initiated issuance:** paste a Credential Issuer identifier (or `/.well-known/openid-credential-issuer` metadata URL) into Import. `POST /api/import` with `credential_issuer` fetches Credential Issuer Metadata and returns `configuration_selection_required` plus `credential_configurations` from `credential_configurations_supported`. After the holder picks a configuration, a second import with `credential_configuration_id` starts `authorization_code` (empty grant — no issuer_state). Authorization Server discovery URLs are rejected as credential issuers.
+- **UI protocol mode:** the SPA classifies input and deep links as credential issuer, offer, issued credential, protected resource, presentation request, or AS discovery, then reshapes tabs and CTAs (`Issue` + Discover/Import vs `Request` + Resolve/Review/Present). Before PAR it shows issuer identifier, selected format/`vct`, and requirements taken from real metadata (PAR, DPoP, client attestation, encryption, holder binding). After Discover, the configuration picker stays on Issue so a later **Request again** can start a new PAR without rediscovering (`request_uri` is single-use). Used Issue steps collapse; **Request again** and **Continue to Issuer** remain on the collapsed headers. Reset mode returns to idle.
+- **HAIP path (env-gated):** when both attestation attester JWKs are configured, the client can present client attestation + PoP, DPoP-bound tokens, and Appendix D key attestation on proofs for HAIP configurations / AS metadata that require them. When AS metadata advertises `challenge_endpoint` (OAuth 2.0 Attestation-Based Client Authentication §6.1), the wallet POSTs for an `attestation_challenge` and includes it as the Client Attestation PoP JWT `challenge` claim. On a DPoP `use_dpop_nonce` challenge (PAR or token), the wallet retries with a fresh DPoP proof **and** a new client attestation PoP `jti` (Client Attestation JWT may be reused), refreshing the attestation challenge from `OAuth-Client-Attestation-Challenge` or the challenge endpoint when advertised.
+- **Credential request:** when Credential Issuer Metadata advertises `batch_credential_issuance`, the wallet sends multiple pairwise-distinct JWT proofs in `proofs.jwt` (capped by `batch_size`, currently 2). Distinct keys apply to SD-JWT/JWT and mdoc (first mdoc proof keeps the persistent device key; additional proofs use ephemeral keys). Returned `credentials` are matched by each credential's holder key (`cnf` / mdoc `deviceKeyInfo.deviceKey`) rather than response array order. Batch-secondary `mso_mdoc` credentials bound to ephemeral proof keys are stored after IACA verification but are not activated for DeviceResponse; the device-key-bound copy remains the active credential.
+- **Credential request/response encryption:** when metadata advertises `credential_request_encryption` JWKs, credential and deferred requests are encrypted as compact JWE (`application/jwt`, ECDH-ES + A128GCM/A256GCM) even if `encryption_required` is false. Including `credential_response_encryption` also forces request encryption (OID4VCI 1.0 §8.2).
+- **Deferred polling:** follows `transaction_id` via the advertised `deferred_credential_endpoint`. Credential and deferred endpoints may return HTTP 202 (with optional `interval`); both endpoints retry DPoP `use_dpop_nonce` challenges (HTTP 401/400) the same way as other HAIP resource calls.
+- **Notifications:** reports `credential_accepted` to the advertised `notification_endpoint` with the access-token-bound `notification_id`. Notification is a DPoP-bound resource call (RFC 9449): the wallet retries HTTP 401/400 `use_dpop_nonce` and sends `x-fapi-interaction-id`. Success is HTTP 204.
+- **`credential_identifiers`:** when the token response returns them, credential requests use `credential_identifier` and omit `credential_configuration_id`.
+- **Issuer metadata trust:** fail-closed — fetched Credential Issuer Metadata must present a `credential_issuer` that matches the offer's issuer identifier.
+- **Holder binding:** JWT `sub` is optional on SD-JWT VC. The wallet stores an issued JWT/SD-JWT when RFC 7800 `cnf` is present (HAIP requires `cnf.jwk` when cryptographic holder binding is used) or when `sub` / `credentialSubject.id` is present. It does not reject a HAIP `dc+sd-jwt` solely for a missing `sub`.
+- **Issuer key resolution:** JWT and SD-JWT issuer signatures are verified against `jwks_uri` advertised in Credential Issuer Metadata and RFC 8414 Authorization Server metadata. The wallet stops at the first non-empty JWK set and does not probe SD-JWT VC Issuer Metadata (`/.well-known/jwt-vc-issuer`) — that resource is not a JWK Set. Speculative ProtocolSoup JWKS paths (`/.well-known/jwks.json`, `/api/.well-known/jwks.json`, `/oidc/.well-known/jwks.json`) run only when no advertised `jwks_uri` yielded keys.
+- **Metadata discovery:** Credential Issuer Metadata uses OID4VCI §12.2.2 well-known insertion and preserves a trailing slash on the issuer path; OAuth Authorization Server metadata follows RFC 8414 §3.1 (`oauth-authorization-server` only — no `openid-configuration` fallback) and strips it. Concurrent GETs to the same discovery URL are single-flighted so overlapping imports cannot race issuer discovery.
+- **Key attestation honesty:** the software wallet does not assert `iso_18045_moderate` (or other attack-potential levels) unless `WALLET_KEY_ATTESTATION_KEY_STORAGE` / `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` are set to values the deployment can actually support.
+
+Looking Glass OID4VCI pre-authorized executors create the issuer offer, then
+delegate redemption to this wallet via `POST /api/import` (with
+`looking_glass_session_id`) so token, proof, credential, and deferred polling
+run in the harness — not in the browser. The issuer-initiated Looking Glass
+flow creates and optionally delivers an `authorization_code` offer, then
+observes issuer-side milestones via `status_uri`; it does not redeem codes
+in-browser. Pointing that flow's `credential_offer_endpoint` at this wallet
+(and configuring HAIP attestation env when required) is how an end-to-end
+wallet-driven authorization-code / HAIP issuance path is exercised.
 
 ## API Surface
 
@@ -69,7 +109,10 @@
 - `POST /submit`
   - Supports `mode=one_click` (default)
   - Supports `mode=stepwise` with steps: `bootstrap`, `issue_credential`, `build_presentation`, `submit_response`
-- `POST /api/resolve`, `POST /api/present`, `POST /api/preview`, `GET /api/session`, OID4VCI import/issue helpers
+- `POST /api/resolve`, `POST /api/present`, `POST /api/preview`, `GET /api/session`
+- `POST /api/issue` — OID4VCI bootstrap against the configured issuer
+- `POST /api/import` — import from an external credential offer (pre-authorized or authorization_code), start wallet-initiated issuance from `credential_issuer` (optional `credential_configuration_id`), or HAIP authorize + DPoP GET of a protected resource (`discovery_url`, `resource_endpoint`, `scope`, optional `wallet_base_url`)
+- `GET /api/oid4vci/callback` — authorization-code redirect callback
 
 ## Quick Start
 
@@ -101,6 +144,7 @@ services:
 - Set a narrow `WALLET_ALLOWED_CORS_ORIGINS` list.
 - Place wallet and VC services on private networks; expose only required ingress.
 - Rotate and monitor upstream credentials and trust boundaries at the VC target.
+- Do not set `WALLET_KEY_ATTESTATION_*` to hardware or ISO 18045 levels unless the deployment truly meets them.
 
 ## Troubleshooting
 
@@ -109,6 +153,7 @@ services:
 - **`response_uri ... does not match trusted verifier callback`:** request object callback does not match `WALLET_TARGET_BASE_URL`.
 - **`credential_jwt sub does not match wallet_subject`:** provided credential is bound to a different holder.
 - **`wallet does not have a credential that satisfies the presentation request`:** ensure the selected OID4VCI credential profile issues a format requested by the OID4VP DCQL preset, or provide a matching `credential_jwt`.
+- **`credential configuration ... requires haip attestation material`:** set both `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` (with `x5c`), or choose a non-HAIP configuration.
 - **Upstream timeout/failure:** check `WALLET_HTTP_TIMEOUT` and VC target health.
 
 ## Versioning And Tags
