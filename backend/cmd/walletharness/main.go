@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -23,12 +24,12 @@ import (
 	"os"
 	"path"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	intcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
 	"github.com/ParleSec/ProtocolSoup/internal/vc"
 	jose "github.com/go-jose/go-jose/v4"
@@ -77,6 +78,18 @@ type walletHarnessServer struct {
 	mu                sync.Mutex
 	wallets           map[string]*walletMaterial
 	oid4vciAuthStates map[string]*pendingOID4VCIAuthState
+
+	// jsonFetchFlights deduplicates concurrent GETs to the same URL so
+	// overlapping imports cannot race a single-flight issuer discovery
+	// endpoint.
+	jsonFetchMu      sync.Mutex
+	jsonFetchFlights map[string]*jsonFetchFlight
+}
+
+type jsonFetchFlight struct {
+	ready   chan struct{}
+	payload map[string]interface{}
+	err     error
 }
 
 type walletMaterial struct {
@@ -4183,6 +4196,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 			Form:                  tokenForm,
 			LookingGlassSessionID: options.LookingGlassSessionID,
 			Session:               haipSession,
+			PopAudience:           s.oid4vciIssuerAudience(),
 		})
 	} else {
 		tokenPayload, err = func() (map[string]interface{}, error) {
@@ -4231,6 +4245,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 
 	var proofJWT string
 	issuerAudience := s.oid4vciIssuerAudience()
+	proofJWTs := []string{}
 	if haipIssuance {
 		proofJWT, err = s.createHAIPCredentialProofJWT(
 			wallet,
@@ -4251,9 +4266,41 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	if err != nil {
 		return nil, err
 	}
+	proofJWTs = append(proofJWTs, proofJWT)
+	// Issuer advertises batch_credential_issuance; request a second
+	// distinct-key proof (OID4VCI 1.0 §11.2.3: batch_size MUST be >= 2).
+	if ephemeralKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader); keyErr == nil {
+		if haipIssuance {
+			holderJWK := intcrypto.JWKFromECPublicKey(&ephemeralKey.PublicKey, "wallet-batch-1")
+			if batchProof, batchErr := s.createSDJWTHAIPCredentialProofJWTFromKey(
+				ephemeralKey,
+				holderJWK,
+				offerWalletSubject,
+				cNonce,
+				issuerAudience,
+			); batchErr == nil {
+				proofJWTs = append(proofJWTs, batchProof)
+			}
+		} else if batchProof, _, batchErr := createCredentialProofJWTFromECKey(ephemeralKey, cNonce, issuerAudience); batchErr == nil {
+			proofJWTs = append(proofJWTs, batchProof)
+		}
+	}
 
 	credentialURL := s.issuerBaseURL + "/oid4vci/credential"
 	tokenType := firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer")
+	credentialIdentifiers := credentialIdentifiersFromTokenResponse(tokenPayload)
+	encryptionSupport := credentialResponseEncryptionSupport{
+		AlgValuesSupported: []string{"ECDH-ES"},
+		EncValuesSupported: []string{"A128GCM", "A256GCM"},
+	}
+	var requestEncryptionSupport *credentialRequestEncryptionSupport
+	if issuerMetadata, metaErr := s.resolveExternalIssuerMetadata(ctx, s.issuerBaseURL+"/oid4vci", options.LookingGlassSessionID); metaErr == nil && issuerMetadata != nil {
+		reqEnc := issuerMetadata.CredentialRequestEncryption
+		requestEncryptionSupport = &reqEnc
+		if len(issuerMetadata.CredentialResponseEncryption.AlgValuesSupported) > 0 {
+			encryptionSupport = issuerMetadata.CredentialResponseEncryption
+		}
+	}
 	var credentialPayload map[string]interface{}
 	if haipIssuance {
 		credentialPayload, err = s.requestHAIPCredential(
@@ -4262,49 +4309,31 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 			credentialConfigID,
 			accessToken,
 			tokenType,
-			proofJWT,
+			proofJWTs,
 			haipSession,
 			options.LookingGlassSessionID,
+			&encryptionSupport,
+			requestEncryptionSupport,
+			credentialIdentifiers,
 		)
 	} else {
-		credentialRequestBody := map[string]interface{}{
-			"credential_configuration_id": credentialConfigID,
-			"proofs": map[string]interface{}{
-				"jwt": []string{proofJWT},
-			},
-		}
-		rawCredentialBody, marshalErr := json.Marshal(credentialRequestBody)
-		if marshalErr != nil {
-			return nil, fmt.Errorf("marshal credential request: %w", marshalErr)
-		}
-		credentialReq, buildErr := http.NewRequestWithContext(ctx, http.MethodPost, credentialURL, strings.NewReader(string(rawCredentialBody)))
-		if buildErr != nil {
-			return nil, fmt.Errorf("build credential request: %w", buildErr)
-		}
-		credentialReq.Header.Set("Accept", "application/json")
-		credentialReq.Header.Set("Content-Type", "application/json")
-		credentialReq.Header.Set("Authorization", authorizationHeaderForAccessToken(tokenType, accessToken))
-		if strings.TrimSpace(options.LookingGlassSessionID) != "" {
-			credentialReq.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
-		}
-		credentialResp, doErr := s.httpClient.Do(credentialReq)
-		if doErr != nil {
-			return nil, fmt.Errorf("credential request failed: %w", doErr)
-		}
-		defer credentialResp.Body.Close()
-		credentialBody, _ := io.ReadAll(credentialResp.Body)
-		if credentialResp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("credential request returned %d: %s", credentialResp.StatusCode, oneLine(string(credentialBody)))
-		}
-		if decodeErr := json.Unmarshal(credentialBody, &credentialPayload); decodeErr != nil {
-			return nil, fmt.Errorf("decode credential response: %w", decodeErr)
-		}
+		credentialPayload, err = s.requestCredentialWithLifecycle(ctx, credentialURL, credentialRequestBuildInput{
+			CredentialConfigurationID: credentialConfigID,
+			CredentialIdentifiers:     credentialIdentifiers,
+			ProofJWTs:                 proofJWTs,
+			Encryption:                &encryptionSupport,
+			RequestEncryption:         requestEncryptionSupport,
+			RequireEncryption:         false,
+		}, accessToken, tokenType, nil, options.LookingGlassSessionID)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	if txID := strings.TrimSpace(asString(credentialPayload["transaction_id"])); txID != "" {
+		if waitErr := waitDeferredInterval(ctx, credentialPayload); waitErr != nil {
+			return nil, waitErr
+		}
 		deferredPayload, err := s.pollDeferredCredential(
 			ctx,
 			accessToken,
@@ -4312,6 +4341,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 			txID,
 			options.LookingGlassSessionID,
 			haipSession,
+			requestEncryptionSupport,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("deferred credential polling failed: %w", err)
@@ -4359,56 +4389,30 @@ func (s *walletHarnessServer) pollDeferredCredential(
 	transactionID string,
 	lookingGlassSessionID string,
 	haipSession *haipIssuanceSession,
+	requestEncryption *credentialRequestEncryptionSupport,
 ) (map[string]interface{}, error) {
 	deferredURL := s.issuerBaseURL + "/oid4vci/deferred_credential"
-
-	for attempt := 0; attempt < deferredMaxRetries; attempt++ {
-		backoff := deferredDefaultBackoff
-		reqBody, _ := json.Marshal(map[string]string{"transaction_id": transactionID})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, deferredURL, strings.NewReader(string(reqBody)))
-		if err != nil {
-			return nil, fmt.Errorf("build deferred request: %w", err)
+	var encryption *credentialResponseEncryptionSupport
+	requireEncryption := false
+	if haipSession != nil {
+		encryption = &credentialResponseEncryptionSupport{
+			AlgValuesSupported: []string{"ECDH-ES"},
+			EncValuesSupported: []string{"A128GCM", "A256GCM"},
 		}
-		req.Header.Set("Content-Type", "application/json")
-		if err := attachHAIPDPoPHeaders(req, tokenType, accessToken, haipSession, deferredURL); err != nil {
-			return nil, fmt.Errorf("attach deferred credential authorization: %w", err)
-		}
-		if strings.TrimSpace(lookingGlassSessionID) != "" {
-			req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
-		}
-
-		resp, err := s.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("deferred credential request failed: %w", err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if resp.StatusCode == http.StatusOK {
-			var payload map[string]interface{}
-			if err := json.Unmarshal(body, &payload); err != nil {
-				return nil, fmt.Errorf("decode deferred credential response: %w", err)
-			}
-			return payload, nil
-		}
-
-		if resp.StatusCode == http.StatusAccepted {
-			if ra := resp.Header.Get("Retry-After"); ra != "" {
-				if seconds, err := strconv.Atoi(ra); err == nil && seconds > 0 {
-					backoff = time.Duration(seconds) * time.Second
-				}
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(backoff):
-				continue
-			}
-		}
-
-		return nil, fmt.Errorf("deferred credential returned %d: %s", resp.StatusCode, oneLine(string(body)))
+		requireEncryption = true
 	}
-	return nil, fmt.Errorf("deferred credential not ready after %d retries", deferredMaxRetries)
+	return s.pollDeferredCredentialAt(
+		ctx,
+		deferredURL,
+		accessToken,
+		tokenType,
+		transactionID,
+		lookingGlassSessionID,
+		haipSession,
+		encryption,
+		requestEncryption,
+		requireEncryption,
+	)
 }
 
 func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
@@ -4534,26 +4538,6 @@ func credentialPayloadToString(raw interface{}) (string, error) {
 	}
 }
 
-func credentialResponseValue(payload map[string]interface{}) (interface{}, error) {
-	rawCredentials, ok := payload["credentials"]
-	if !ok {
-		return nil, fmt.Errorf("credential response missing credentials")
-	}
-	credentials, ok := rawCredentials.([]interface{})
-	if !ok || len(credentials) == 0 {
-		return nil, fmt.Errorf("credential response credentials must be a non-empty array")
-	}
-	entry, ok := credentials[0].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("credential response credentials[0] must be an object")
-	}
-	credential, ok := entry["credential"]
-	if !ok {
-		return nil, fmt.Errorf("credential response credentials[0] missing credential")
-	}
-	return credential, nil
-}
-
 func (s *walletHarnessServer) notifyCredentialAccepted(
 	ctx context.Context,
 	credential *issuedWalletCredential,
@@ -4575,43 +4559,45 @@ func (s *walletHarnessServer) notifyCredentialAccepted(
 	if err != nil {
 		return fmt.Errorf("marshal credential notification: %w", err)
 	}
-	req, err := http.NewRequestWithContext(
-		ctx,
-		http.MethodPost,
-		notificationURL,
-		strings.NewReader(string(body)),
-	)
-	if err != nil {
-		return fmt.Errorf("build credential notification: %w", err)
+	useDPoP := isDPoPBoundTokenType(credential.TokenType)
+	input := dpopAuthenticatedRequestInput{
+		Method:                http.MethodPost,
+		URL:                   notificationURL,
+		BodyBytes:             body,
+		ContentType:           "application/json",
+		Accept:                "application/json",
+		AccessToken:           credential.AccessToken,
+		TokenType:             credential.TokenType,
+		Session:               credential.HAIPDPoPSession,
+		LookingGlassSessionID: lookingGlassSessionID,
+		IncludeDPoP:           useDPoP,
+		Ath:                   useDPoP,
+		ExtraHeaders: map[string]string{
+			"x-fapi-interaction-id": randomFAPIInteractionID(),
+		},
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	if err := attachHAIPDPoPHeaders(
-		req,
-		credential.TokenType,
-		credential.AccessToken,
-		credential.HAIPDPoPSession,
-		notificationURL,
-	); err != nil {
-		return fmt.Errorf("attach credential notification authorization: %w", err)
+	payload, status, headers, responseBody, reqErr := s.doDPoPRequest(ctx, input, "")
+	if status == http.StatusNoContent {
+		return nil
 	}
-	if sessionID := strings.TrimSpace(lookingGlassSessionID); sessionID != "" {
-		req.Header.Set("X-Looking-Glass-Session", sessionID)
+	if isUseDPoPNonceChallenge(status, payload, headers, responseBody) {
+		nonce := strings.TrimSpace(headers.Get(dpop.NonceHeaderName))
+		if nonce == "" {
+			return fmt.Errorf("credential notification returned use_dpop_nonce without %s header", dpop.NonceHeaderName)
+		}
+		_, status, _, responseBody, retryErr := s.doDPoPRequest(ctx, input, nonce)
+		if status == http.StatusNoContent {
+			return nil
+		}
+		if retryErr != nil {
+			return fmt.Errorf("credential notification retry: %w", retryErr)
+		}
+		return fmt.Errorf("credential notification retry returned %d: %s", status, oneLine(string(responseBody)))
 	}
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("credential notification failed: %w", err)
+	if reqErr != nil {
+		return fmt.Errorf("credential notification failed: %w", reqErr)
 	}
-	defer resp.Body.Close()
-	responseBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf(
-			"credential notification returned %d: %s",
-			resp.StatusCode,
-			oneLine(string(responseBody)),
-		)
-	}
-	return nil
+	return fmt.Errorf("credential notification returned %d: %s", status, oneLine(string(responseBody)))
 }
 
 func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, _ string, cNonce string, audience string) (string, error) {
@@ -4636,6 +4622,115 @@ func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, _
 		"typ": "openid4vci-proof+jwt",
 		"jwk": pubJWK,
 	})
+}
+
+func createCredentialProofJWTFromECKey(privateKey *ecdsa.PrivateKey, cNonce string, audience string) (string, string, error) {
+	if privateKey == nil {
+		return "", "", fmt.Errorf("holder private key is required")
+	}
+	if strings.TrimSpace(cNonce) == "" {
+		return "", "", fmt.Errorf("c_nonce is required for proof")
+	}
+	pubJWK := intcrypto.JWKFromECPublicKey(&privateKey.PublicKey, "wallet-batch-proof")
+	thumbprint := strings.TrimSpace(pubJWK.Thumbprint())
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"aud":   strings.TrimSpace(audience),
+		"nonce": strings.TrimSpace(cNonce),
+		"iat":   now.Unix(),
+		"jti":   randomValue(20),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = "openid4vci-proof+jwt"
+	token.Header["jwk"] = pubJWK
+	signed, err := token.SignedString(privateKey)
+	if err != nil {
+		return "", "", err
+	}
+	return signed, thumbprint, nil
+}
+
+func confirmationClaimPresent(claims map[string]interface{}) bool {
+	cnf, _ := claims["cnf"].(map[string]interface{})
+	return len(cnf) > 0
+}
+
+func holderKeyThumbprintFromCredential(credential string) string {
+	normalized := strings.TrimSpace(credential)
+	if normalized == "" {
+		return ""
+	}
+	payload := map[string]interface{}(nil)
+	if envelope, err := vc.ParseSDJWTEnvelope(normalized); err == nil && envelope != nil {
+		decoded, err := intcrypto.DecodeTokenWithoutValidation(strings.TrimSpace(envelope.IssuerSignedJWT))
+		if err != nil || decoded == nil {
+			return ""
+		}
+		processed, _, procErr := vc.ProcessSDJWTDisclosures(map[string]interface{}(decoded.Payload), envelope.Disclosures)
+		if procErr == nil && processed != nil {
+			payload = processed
+		} else {
+			payload = decoded.Payload
+		}
+	} else {
+		decoded, err := intcrypto.DecodeTokenWithoutValidation(normalized)
+		if err != nil || decoded == nil {
+			return ""
+		}
+		payload = decoded.Payload
+	}
+	cnf, _ := payload["cnf"].(map[string]interface{})
+	if cnf == nil {
+		return ""
+	}
+	if jkt := strings.TrimSpace(asString(cnf["jkt"])); jkt != "" {
+		return jkt
+	}
+	rawJWK, _ := cnf["jwk"].(map[string]interface{})
+	if rawJWK == nil {
+		return ""
+	}
+	encoded, err := json.Marshal(rawJWK)
+	if err != nil {
+		return ""
+	}
+	var jwk intcrypto.JWK
+	if err := json.Unmarshal(encoded, &jwk); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(jwk.Thumbprint())
+}
+
+func credentialResponseValues(payload map[string]interface{}) ([]interface{}, error) {
+	rawCredentials, ok := payload["credentials"]
+	if !ok {
+		return nil, fmt.Errorf("credential response missing credentials")
+	}
+	credentials, ok := rawCredentials.([]interface{})
+	if !ok || len(credentials) == 0 {
+		return nil, fmt.Errorf("credential response credentials must be a non-empty array")
+	}
+	values := make([]interface{}, 0, len(credentials))
+	for index, rawEntry := range credentials {
+		entry, ok := rawEntry.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("credential response credentials[%d] must be an object", index)
+		}
+		credential, ok := entry["credential"]
+		if !ok {
+			return nil, fmt.Errorf("credential response credentials[%d] missing credential", index)
+		}
+		values = append(values, credential)
+	}
+	return values, nil
+}
+
+func credentialResponseValue(payload map[string]interface{}) (interface{}, error) {
+	values, err := credentialResponseValues(payload)
+	if err != nil {
+		return nil, err
+	}
+	return values[0], nil
 }
 
 func (s *walletHarnessServer) createDirectPostResponseJWT(wallet *walletMaterial, requestContext *resolvedRequestContext, vpToken string) (string, error) {
@@ -5052,12 +5147,14 @@ func (s *walletHarnessServer) bindCredential(wallet *walletMaterial, credentialJ
 		return fmt.Errorf("credential parse failed: %w", err)
 	}
 	subject := strings.TrimSpace(parsedCredential.Subject)
-	if subject == "" {
+	// SD-JWT VC: sub is OPTIONAL. Cryptographic holder binding is cnf
+	// (REQUIRED when Key Binding is supported; HAIP requires cnf.jwk).
+	if subject == "" && !confirmationClaimPresent(parsedCredential.Claims) {
 		return fmt.Errorf("credential is missing subject binding")
 	}
-	if strings.TrimSpace(subject) != wallet.Subject {
-		if !strings.HasPrefix(strings.TrimSpace(subject), "did:example:wallet:") && !strings.HasPrefix(wallet.Subject, "did:key:") {
-			return fmt.Errorf("credential subject %q does not match wallet_subject %q", strings.TrimSpace(subject), wallet.Subject)
+	if subject != "" && subject != strings.TrimSpace(wallet.Subject) {
+		if !strings.HasPrefix(subject, "did:example:wallet:") && !strings.HasPrefix(wallet.Subject, "did:key:") {
+			return fmt.Errorf("credential subject %q does not match wallet_subject %q", subject, wallet.Subject)
 		}
 	}
 	if wallet.Credentials == nil {

@@ -164,6 +164,61 @@ func TestNotifyCredentialAcceptedUsesDPoPWhenTokenBound(t *testing.T) {
 	}
 }
 
+func TestNotifyCredentialAcceptedRetriesDPoPNonce(t *testing.T) {
+	session, err := (&walletHarnessServer{}).newHAIPIssuanceSession()
+	if err != nil {
+		t.Fatalf("newHAIPIssuanceSession: %v", err)
+	}
+	var attempt int
+	var gotNonce string
+	var sawInteractionID bool
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		if strings.TrimSpace(r.Header.Get("x-fapi-interaction-id")) != "" {
+			sawInteractionID = true
+		}
+		if attempt == 1 {
+			w.Header().Set("DPoP-Nonce", "notification-nonce-1")
+			w.Header().Set("WWW-Authenticate", `DPoP error="use_dpop_nonce"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("DPoP") == "" {
+			http.Error(w, "missing dpop", http.StatusBadRequest)
+			return
+		}
+		gotNonce = r.Header.Get("DPoP")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer issuer.Close()
+	host, _ := url.Parse(issuer.URL)
+	server := &walletHarnessServer{
+		httpClient:    issuer.Client(),
+		targetHost:    host.Host,
+		allowExternal: true,
+		issuerBaseURL: issuer.URL,
+	}
+	err = server.notifyCredentialAccepted(context.Background(), &issuedWalletCredential{
+		NotificationID:  "notification-1",
+		NotificationURL: issuer.URL + "/notification",
+		AccessToken:     "dpop-access-token",
+		TokenType:       "DPoP",
+		HAIPDPoPSession: session,
+	}, "")
+	if err != nil {
+		t.Fatalf("notifyCredentialAccepted: %v", err)
+	}
+	if attempt != 2 {
+		t.Fatalf("attempt = %d, want 2", attempt)
+	}
+	if strings.TrimSpace(gotNonce) == "" {
+		t.Fatal("expected DPoP proof on retry")
+	}
+	if !sawInteractionID {
+		t.Fatal("expected x-fapi-interaction-id on notification")
+	}
+}
+
 func TestResolveWalletScopeKeyStrictIsolation(t *testing.T) {
 	strictServer := &walletHarnessServer{strictIsolation: true}
 	if _, err := strictServer.resolveWalletScopeKey(walletSubmitRequest{}); err == nil {
@@ -1795,7 +1850,7 @@ func TestHAIPAttestationJWTBuildersUseExpectedHeaders(t *testing.T) {
 		t.Fatalf("client attestation sub = %q", decodedAttestation.Payload["sub"])
 	}
 
-	popJWT, err := buildClientAttestationPoPJWT(instanceKey, "https://issuer.example/oid4vci", "pop-jti-1", time.Now().UTC())
+	popJWT, err := buildClientAttestationPoPJWT(instanceKey, clientID, "https://issuer.example/oid4vci", "pop-jti-1", time.Now().UTC(), "")
 	if err != nil {
 		t.Fatalf("buildClientAttestationPoPJWT: %v", err)
 	}
@@ -1805,6 +1860,9 @@ func TestHAIPAttestationJWTBuildersUseExpectedHeaders(t *testing.T) {
 	}
 	if got := strings.TrimSpace(asString(decodedPoP.Header["typ"])); got != typOAuthClientAttestationPoPJWT {
 		t.Fatalf("client attestation pop typ = %q", got)
+	}
+	if asString(decodedPoP.Payload["iss"]) != clientID {
+		t.Fatalf("client attestation pop iss = %q, want %q", decodedPoP.Payload["iss"], clientID)
 	}
 
 	keyAttestationJWT, err := buildKeyAttestationJWT(
