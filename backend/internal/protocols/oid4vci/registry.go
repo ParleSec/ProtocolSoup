@@ -299,8 +299,8 @@ func credentialConfigurationsSupportedFromRegistry(registry map[string]credentia
 	supported := make(map[string]map[string]interface{}, len(registry))
 	for id, configuration := range registry {
 		// HAIP 1.0 only recognizes dc+sd-jwt and mso_mdoc in issuer metadata.
-		// Keep W3C formats in the issuance registry for Looking Glass,
-		// but do not advertise them in Credential Issuer Metadata.
+		// W3C formats remain in the issuance registry for non-HAIP tests, but
+		// are not advertised in Credential Issuer Metadata or Looking Glass.
 		if !credentialFormatAdvertisedInIssuerMetadata(configuration.Format) {
 			continue
 		}
