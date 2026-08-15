@@ -148,10 +148,31 @@ func TestHarnessBindMdocCredentialStoresAndChecksBinding(t *testing.T) {
 
 	// A credential bound to a DIFFERENT device key must be rejected: regenerating
 	// or mismatching the device key breaks the binding.
+	primaryRoots := s.mdocIssuerRoots
 	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	foreign := issueMdocBoundTo(t, s, &otherKey.PublicKey)
 	if err := s.bindCredential(wallet, foreign, "MobileDrivingLicenceMsoMdoc", credentialFormatMsoMdoc); err == nil {
 		t.Fatal("expected rejection of an mso_mdoc credential bound to a foreign device key")
+	}
+
+	// Batch OID4VCI secondaries may be bound to ephemeral proof keys: store them
+	// without requiring the wallet device key, and do not activate them.
+	beforeActive := wallet.CredentialJWT
+	if err := s.bindMdocCredentialWithPolicy(wallet, foreign, "MobileDrivingLicenceMsoMdoc", false); err != nil {
+		t.Fatalf("relaxed batch bind of foreign-key mdoc: %v", err)
+	}
+	if len(wallet.Credentials) != 2 {
+		t.Fatalf("expected 2 stored credentials after relaxed bind, got %d", len(wallet.Credentials))
+	}
+	if wallet.CredentialJWT != beforeActive {
+		t.Fatalf("relaxed bind must not replace the active device-key credential")
+	}
+	if s.mdocCredentialMatchesWalletDeviceKey(foreign) {
+		t.Fatal("foreign-key mdoc must not match wallet device key")
+	}
+	s.mdocIssuerRoots = primaryRoots
+	if !s.mdocCredentialMatchesWalletDeviceKey(credential) {
+		t.Fatal("expected primary mdoc to match wallet device key")
 	}
 
 	// The issuer-provided x5chain cannot bootstrap wallet trust.
