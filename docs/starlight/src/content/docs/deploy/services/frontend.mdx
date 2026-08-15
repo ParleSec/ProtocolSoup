@@ -26,6 +26,8 @@ Frontend requires a backend/gateway service reachable at `BACKEND_ORIGIN` (for e
 
 Next.js rewrites HTTP traffic for these paths to backend: `/api`, `/oauth2`, `/oidc`, `/oid4vci`, `/oid4vp`, `/saml`, `/spiffe`, `/scim`, `/ssf`.
 
+Looking Glass also uses a same-origin `/wallet-harness/*` rewrite to the wallet harness (`WALLET_BACKEND_ORIGIN`).
+
 WebSocket paths are intentionally **not** rewritten by Next. Route `/ws/*` at your edge proxy directly to backend.
 
 ## Environment
@@ -33,6 +35,7 @@ WebSocket paths are intentionally **not** rewritten by Next. Route `/ws/*` at yo
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `BACKEND_ORIGIN` | Yes (outside local defaults) | `http://localhost:8080` | Backend origin for HTTP rewrites |
+| `WALLET_BACKEND_ORIGIN` | Yes (when Looking Glass uses a remote wallet) | `https://wallet.protocolsoup.com` | Wallet harness origin for `/wallet-harness/*` |
 | `NEXT_PUBLIC_SITE_URL` | Yes (production) | `https://protocolsoup.com` | Canonical public base URL for metadata/sitemaps |
 | `DOCS_SITE_URL` | No | `https://docs.protocolsoup.com` | Docs sitemap host for sitemap index |
 
