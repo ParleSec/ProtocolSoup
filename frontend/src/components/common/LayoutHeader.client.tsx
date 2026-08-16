@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Eye, Home, ExternalLink, BookOpen, Menu, X, Radio, FileText, Search } from 'lucide-react'
+import { Eye, Home, ExternalLink, BookOpen, Menu, X, FileText, Search } from 'lucide-react'
 
 import { usePlatformShortcutLabel } from '@/components/palette/usePaletteQuery'
 
@@ -18,7 +18,6 @@ function Github({ className }: { className?: string }) {
 const navItems = [
   { path: '/', icon: Home, label: 'Home' },
   { path: '/looking-glass', icon: Eye, label: 'Looking Glass' },
-  { path: '/ssf-sandbox', icon: Radio, label: 'SSF Sandbox' },
   { path: '/protocols', icon: BookOpen, label: 'Protocols' },
 ]
 

@@ -5,7 +5,7 @@ export const SSF_EXAMPLES: Record<string, CodeExample> = {
   'ssf-stream-configuration': {
     language: 'javascript',
     label: 'JavaScript (Stream Manager)',
-    code: `// SSF Stream Configuration (OpenID SSF §4)
+    code: `// SSF Stream Configuration (OpenID SSF 1.0 Final §7.2 / §8.1.1)
 // Configure a stream between a Transmitter (IdP) and Receiver (your app).
 
 // Step 1: Discover SSF capabilities via the well-known endpoint
@@ -14,6 +14,7 @@ const config = await fetch('/.well-known/ssf-configuration')
 
 // Discovery response:
 // {
+//   "spec_version": "1_0",
 //   "issuer": "https://idp.example.com",
 //   "jwks_uri": "/ssf/jwks",
 //   "configuration_endpoint": "/ssf/stream",
@@ -24,7 +25,7 @@ const config = await fetch('/.well-known/ssf-configuration')
 //   ]
 // }
 
-// Step 2: Create a stream (SSF §4.1)
+// Step 2: Create a stream (SSF §8.1.1)
 const stream = await fetch(config.configuration_endpoint, {
   method: 'POST',
   headers: {
@@ -32,8 +33,10 @@ const stream = await fetch(config.configuration_endpoint, {
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
-    delivery_method: 'push',             // or 'poll'
-    delivery_endpoint_url: PUSH_ENDPOINT, // Your receiver URL
+    delivery: {
+      method: 'urn:ietf:rfc:8935',
+      endpoint_url: PUSH_ENDPOINT,
+    },
     events_requested: [
       'https://schemas.openid.net/secevent/caep/event-type/session-revoked',
       'https://schemas.openid.net/secevent/caep/event-type/credential-change',

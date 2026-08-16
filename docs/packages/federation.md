@@ -68,6 +68,7 @@
 - `GET /oauth2/demo/users`
 - `GET /oauth2/demo/clients`
 - `POST /oauth2/demo/clients/machine-client-pkjwt/jwks`
+- `POST /oauth2/demo/caep/revoke-subject` (SSF receiver CAEP hook; bearer `SSF_TO_FEDERATION_TOKEN`)
 
 The OAuth token endpoint supports `private_key_jwt` for the
 `client_credentials` grant with RS256, ES256, and EdDSA assertions. The

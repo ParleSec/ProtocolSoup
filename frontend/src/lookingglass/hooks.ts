@@ -654,6 +654,11 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
     }
   }
 
+  // Shared Signals — every catalog preset uses the same durable lab executor
+  if (protocolId === 'ssf') {
+    return 'ssf-lab'
+  }
+
   // SCIM 2.0 mappings
   if (protocolId === 'scim') {
     switch (normalizedId) {

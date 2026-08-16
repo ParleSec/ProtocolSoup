@@ -122,7 +122,7 @@ export interface FlowEvent {
 }
 
 export interface DecodedToken {
-  type: 'access_token' | 'id_token' | 'refresh_token' | 'client_assertion' | 'dpop_proof'
+  type: 'access_token' | 'id_token' | 'refresh_token' | 'client_assertion' | 'dpop_proof' | 'set'
   raw: string
   header?: Record<string, unknown>
   payload?: Record<string, unknown>

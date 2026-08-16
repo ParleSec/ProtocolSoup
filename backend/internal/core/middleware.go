@@ -333,6 +333,10 @@ func CaptureMiddleware(lg *lookingglass.Engine) func(http.Handler) http.Handler 
 				next.ServeHTTP(w, r)
 				return
 			}
+			if r.Header.Get(lookingglass.SkipCaptureHeader) != "" {
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			start := time.Now()
 			requestCapture := newBodyCapture(captureBodyLimitBytes)

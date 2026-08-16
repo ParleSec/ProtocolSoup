@@ -89,6 +89,7 @@ services:
       - SHOWCASE_MOCK_IDP=true
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - OAUTH2_REPLAY_REDIS_URL=redis://redis:6379/0
+      - SSF_TO_FEDERATION_TOKEN=${SSF_TO_FEDERATION_TOKEN:-ssf-federation-caep-lab}
     depends_on:
       redis:
         condition: service_healthy
@@ -171,6 +172,11 @@ services:
       - SHOWCASE_BASE_URL=http://localhost:8080
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - SSF_DATA_DIR=/app/data
+      - FEDERATION_SERVICE_URL=http://federation-service:8080
+      - SSF_TO_FEDERATION_TOKEN=${SSF_TO_FEDERATION_TOKEN:-ssf-federation-caep-lab}
+    depends_on:
+      federation-service:
+        condition: service_healthy
     volumes:
       - ssf-data:/app/data
     networks:

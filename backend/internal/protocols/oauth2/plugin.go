@@ -168,6 +168,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/demo/users", p.handleListUsers)
 	router.Get("/demo/clients", p.handleListClients)
 	router.Post("/demo/clients/machine-client-pkjwt/jwks", p.handleRegisterPrivateKeyJWTClientJWKS)
+	router.Post("/demo/caep/revoke-subject", p.handleCAEPRevokeSubject)
 }
 
 // GetInspectors returns the protocol's inspectors

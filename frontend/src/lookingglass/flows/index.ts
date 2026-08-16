@@ -93,6 +93,8 @@ export {
   type SCIMPatchRequest,
 } from './scim-provisioning'
 
+export { SSFLabExecutor } from './ssf-lab'
+
 // Factory
 export {
   createFlowExecutor,

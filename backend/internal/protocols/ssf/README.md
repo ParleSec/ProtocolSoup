@@ -9,7 +9,7 @@ This implementation provides:
 - **Transmitter**: Generates and delivers Security Event Tokens (SETs) to receivers
 - **Receiver**: Validates, processes, and executes response actions based on received SETs
 - **Action Executor**: Performs real security state changes (session revocation, account disabling, etc.)
-- **Session Isolation**: Each user session gets an isolated sandbox for demonstration purposes
+- **Looking Glass session**: RP posture and event storage are scoped by `X-Looking-Glass-Session`, not by claims inside the SET
 
 ## Service Deployment
 
@@ -40,7 +40,7 @@ The service also starts a **standalone receiver** on `SSF_RECEIVER_PORT` (defaul
 │           V                                                 V               │
 │  ┌─────────────────┐                            ┌─────────────────────────┐ │
 │  │    STORAGE      │                            │   ACTION EXECUTOR       │ │
-│  │   (SQLite)      │                            │   (Mock IdP)            │ │
+│  │   (SQLite)      │                            │   (RP on this service)  │ │
 │  │                 │                            │                         │ │
 │  │ • Streams       │                            │ • Session Revocation    │ │
 │  │ • Subjects      │                            │ • Account Disable/Enable│ │
@@ -53,24 +53,24 @@ The service also starts a **standalone receiver** on `SSF_RECEIVER_PORT` (defaul
 
 ## Session-Based Isolation
 
-Each frontend user session gets an isolated sandbox:
+Looking Glass owns the session. SSF does not mint a parallel `ssf_session_id`.
 
-1. **Session ID Generation**: Frontend generates a unique session ID stored in `localStorage`
-2. **Header Propagation**: All requests include `X-SSF-Session` header, including push deliveries
-3. **Database Storage**: Session ID stored in the `events.session_id` column (not in the SET itself)
-4. **State Isolation**: Action executor uses `sessionID:email` composite keys for state
+1. **Session ID**: Looking Glass `POST /api/protocols/ssf/demo/{flow}` returns an owned session. Catalog flow IDs are presets into that same stream lab.
+2. **Header Propagation**: Client and server-to-server hops send `X-Looking-Glass-Session` (query `lg_session` when headers cannot be set). Push delivery copies the same header. The SET itself MUST NOT carry the session id (RFC 8417).
+3. **Database Storage**: Session ID is stored in `events.session_id`, not in SET claims.
+4. **RP state**: `ReceiverActionExecutor` keys posture as `sessionID:email` in SQLite on this service. Alice/Bob emails match MockIdP users for identifier continuity only.
 
 ```
-Frontend                    Backend                     Receiver
+Frontend                    SSF service                  Receiver (8081)
    │                           │                           │
-   │  X-SSF-Session: sess_abc  │                           │
+   │  X-Looking-Glass-Session  │                           │
    │ ─────────────────────────>│                           │
    │                           │                           │
-   │                           │  SET + X-SSF-Session hdr  │
+   │                           │  SET + same session hdr   │
    │                           │ ─────────────────────────>│
    │                           │                           │
    │                           │                           │ Extract sessionID
-   │                           │                           │ from X-SSF-Session header
+   │                           │                           │ from the header, not the SET
    │                           │                           │
    │                           │                           │ Update state for
    │                           │                           │ "sess_abc:alice@..."
@@ -93,12 +93,13 @@ Frontend                    Backend                     Receiver
 
 | Event | URI | Description |
 |-------|-----|-------------|
-| Sessions Revoked | `sessions-revoked` | All sessions terminated |
 | Account Disabled | `account-disabled` | Account suspended |
 | Account Enabled | `account-enabled` | Account reactivated |
 | Account Purged | `account-purged` | Account permanently deleted |
 | Identifier Changed | `identifier-changed` | Primary identifier modified |
 | Credential Compromise | `credential-compromise` | Credentials potentially exposed |
+
+Lab action `sessions-revoked` emits CAEP `session-revoked` for all sessions (RISC §2.11).
 
 ## API Endpoints
 
@@ -107,25 +108,27 @@ Frontend                    Backend                     Receiver
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/ssf/info` | GET | Plugin information |
-| `/ssf/.well-known/ssf-configuration` | GET | SSF transmitter metadata |
+| `/.well-known/ssf-configuration` | GET | SSF transmitter metadata (issuer insertion, SSF §7.2) |
 | `/ssf/jwks` | GET | Public keys for SET verification |
 
-### Stream Management (SSF sect 4)
+Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS story as other ProtocolSoup services.
+
+### Stream Management (SSF §8.1.1)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/stream` | POST | Create a new stream (SSF sect 4.1) |
-| `/ssf/stream` | GET | Get stream configuration |
-| `/ssf/stream` | PATCH | Update stream configuration |
-| `/ssf/stream` | DELETE | Delete a stream |
+| `/ssf/stream` | POST | Create a new stream (nested `delivery`) |
+| `/ssf/stream` | GET | List streams, or one stream with `?stream_id=` |
+| `/ssf/stream` | PATCH | Update a stream (`stream_id` required) |
+| `/ssf/stream` | DELETE | Delete a stream (`stream_id` required) |
 
-### Stream Status & Verification (SSF sect 6-7)
+### Stream Status & Verification (SSF §8.1.4)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/status` | GET | Get stream status (SSF sect 6) |
+| `/ssf/status` | GET | Get stream status |
 | `/ssf/status` | POST | Update stream status (enabled/paused/disabled) |
-| `/ssf/verify` | POST | Trigger verification event (SSF sect 7) |
+| `/ssf/verify` | POST | Trigger verification SET (`stream_id` required; **204**) |
 
 ### Subject Management
 
@@ -154,9 +157,9 @@ Frontend                    Backend                     Receiver
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/push` | POST | Push delivery endpoint (receiver) |
-| `/ssf/poll` | POST | Poll for pending events |
-| `/ssf/ack` | POST | Acknowledge received events |
+| `/ssf/receiver/push` | POST | Push delivery endpoint (RFC 8935; **202**) |
+| `/ssf/poll` | POST | Poll for pending events (RFC 8936) |
+| `/ssf/ack` | POST | Thin alias for poll `acks` |
 
 ### Event History & Logs
 
@@ -247,7 +250,7 @@ event, err := transmitter.TriggerSessionsRevokedWithSession(
 Validates and processes incoming SETs:
 
 ```go
-// Process push delivery (session ID passed via X-SSF-Session header)
+// Process push delivery (session ID passed via X-Looking-Glass-Session header)
 response, err := receiver.ProcessPushDelivery(ctx, setToken, sessionID)
 
 // JTI replay detection per RFC 8935 §2 / RFC 8417 §2.2
@@ -292,7 +295,7 @@ RFC 8417 compliant Security Event Token:
     "email": "alice@example.com"
   },
   "events": {
-    "https://schemas.openid.net/secevent/risc/event-type/sessions-revoked": {
+    "https://schemas.openid.net/secevent/caep/event-type/session-revoked": {
       "subject": { "format": "email", "email": "alice@example.com" },
       "event_timestamp": 1704825600,
       "reason": "Security incident detected",
@@ -307,24 +310,24 @@ RFC 8417 compliant Security Event Token:
 ### Manual API Test
 
 ```bash
-# Set session header
+# Set Looking Glass session header
 SESSION_ID="test-session-123"
 
 # 1. Initialize session (get subjects)
-curl -H "X-SSF-Session: $SESSION_ID" http://localhost:8080/ssf/subjects
+curl -H "X-Looking-Glass-Session: $SESSION_ID" http://localhost:8080/ssf/subjects
 
 # 2. Check initial state
-curl -H "X-SSF-Session: $SESSION_ID" \
+curl -H "X-Looking-Glass-Session: $SESSION_ID" \
   http://localhost:8080/ssf/security-state/alice%40example.com
 
 # 3. Trigger event
-curl -X POST -H "X-SSF-Session: $SESSION_ID" \
+curl -X POST -H "X-Looking-Glass-Session: $SESSION_ID" \
   -H "Content-Type: application/json" \
   -d '{"subject_identifier": "alice@example.com"}' \
   http://localhost:8080/ssf/actions/sessions-revoked
 
 # 4. Verify state changed
-curl -H "X-SSF-Session: $SESSION_ID" \
+curl -H "X-Looking-Glass-Session: $SESSION_ID" \
   http://localhost:8080/ssf/security-state/alice%40example.com
 ```
 
@@ -332,10 +335,10 @@ curl -H "X-SSF-Session: $SESSION_ID" \
 
 1. **Event Trigger** → Transmitter creates SecurityEvent with sessionID stored in DB
 2. **SET Generation** → Encoder creates a spec-compliant SET (no custom claims)
-3. **Push Delivery** → HTTP POST to `/ssf/push` with `X-SSF-Session` header
+3. **Push Delivery** → HTTP POST to `/ssf/receiver/push` with `X-Looking-Glass-Session` header
 4. **SET Verification** → Receiver validates signature via JWKS
 5. **Replay Detection** → Receiver checks JTI against seen-set to reject duplicates
-6. **Session Extraction** → Session ID extracted from `X-SSF-Session` delivery header
+6. **Session Extraction** → Session ID extracted from `X-Looking-Glass-Session` delivery header
 7. **Action Execution** → ActionExecutor updates session-scoped state
 8. **State Query** → Frontend fetches updated state with session header
 

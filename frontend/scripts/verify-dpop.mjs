@@ -205,11 +205,10 @@ function verifyFlowDeepLinks() {
     bareParams === '/looking-glass?protocol=oauth2&flow=authorization-code',
   )
 
-  // buildFlowExecutionPath special-cases SSF into its dedicated sandbox
-  // instead of Looking Glass.
+  // buildFlowExecutionPath sends every protocol, including SSF, to Looking Glass.
   check(
-    'buildFlowExecutionPath routes ssf to the SSF sandbox, not Looking Glass',
-    buildFlowExecutionPath({ protocolId: 'ssf', flowId: 'stream-management' }) === '/ssf-sandbox',
+    'buildFlowExecutionPath routes ssf to Looking Glass',
+    buildFlowExecutionPath({ protocolId: 'ssf', flowId: 'stream-management' }) === '/looking-glass?protocol=ssf&flow=stream-management',
   )
   check(
     'buildFlowExecutionPath routes every other protocol to Looking Glass',

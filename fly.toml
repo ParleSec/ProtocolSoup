@@ -52,6 +52,13 @@ primary_region = 'syd'
   # SCIM Configuration - uses subdirectory of shared volume
   SCIM_DATA_DIR = '/data/scim'
 
+  # SSF stream and RP posture persistence on the shared volume
+  SSF_DATA_DIR = '/data/ssf'
+
+  # Cross-service CAEP: SSF receiver POSTs to federation over loopback HTTP.
+  FEDERATION_SERVICE_URL = 'http://127.0.0.1:8080'
+  SSF_TO_FEDERATION_TOKEN = 'ssf-federation-caep-lab'
+
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
 # - SCIM_API_TOKEN: Bearer token for SCIM authentication

@@ -61,7 +61,7 @@ docker compose -f docker-compose.simple.yml up -d
 | backend | 8080 | Single Go process with all protocols registered |
 | frontend | 3000 | Browser UI with Looking Glass |
 
-**Includes:** OAuth 2.0, OIDC, SAML. No SCIM, SSF, SPIFFE, VC, or gateway.
+**Includes:** the `cmd/server` monolith registers OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP, SCIM, SSF, and SPIFFE in one process (no gateway split). SPIFFE still needs SPIRE for live SVID issuance. SSF in this model is in-process for deploy convenience; the split `protocolsoup-ssf` image remains the documented topology.
 
 **Note:** This compose file builds from source (`Dockerfile.backend` and `Dockerfile.frontend`) rather than pulling GHCR images. You need the full repository cloned locally.
 

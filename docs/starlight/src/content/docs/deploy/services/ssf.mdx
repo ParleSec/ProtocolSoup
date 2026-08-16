@@ -18,20 +18,20 @@ Use SSF service to test security event stream configuration, CAEP/RISC event del
 | Primary port | `8080` (SSF APIs) |
 | Receiver port | `8081` (push delivery listener) |
 | Health | `GET /health` |
-| SSF discovery | `GET /ssf/.well-known/ssf-configuration` |
+| SSF discovery | `GET /.well-known/ssf-configuration` |
 | Receiver status | `GET /ssf/receiver/status` |
 
 ## Key Endpoints
 
 ### Transmitter
 
-- `POST|GET|PATCH|DELETE /ssf/stream` -- stream management
+- `POST|GET|PATCH|DELETE /ssf/stream` -- stream management (nested `delivery`; GET without `stream_id` returns a list)
 - `GET|POST /ssf/status` -- stream status
+- `POST /ssf/verify` -- verification (`stream_id` required; **204**)
 - `GET|POST /ssf/subjects` -- subject management
 - `POST /ssf/actions/{action}` -- trigger event actions
-- `POST /ssf/push` -- push delivery
 - `GET|POST /ssf/poll` -- poll delivery
-- `POST /ssf/ack` -- acknowledge events
+- `POST /ssf/ack` -- thin alias for poll acks
 
 ### Receiver
 
@@ -42,16 +42,18 @@ Use SSF service to test security event stream configuration, CAEP/RISC event del
 
 ### Supporting
 
-- `GET /ssf/events/stream` -- SSE event stream
 - `GET /ssf/events` -- event history
 - `GET /ssf/security-state` -- all security states
 - `GET /ssf/security-state/{email}` -- security state by subject
+- `POST /ssf/security-state/{email}/reset` -- reset RP posture for a subject
 - `POST /ssf/decode` -- decode SET token
 - `GET /ssf/event-types` -- available event types
 
 ## Supported Event Actions
 
-`session-revoked`, `credential-change`, `device-compliance-change`, `credential-compromise`, `account-disabled`, `account-enabled`, `account-purged`, `identifier-changed`, `assurance-level-change`, `token-claims-change`, `identifier-recycled`, `account-credential-change-required`, `sessions-revoked`
+`session-revoked`, `credential-change`, `device-compliance-change`, `credential-compromise`, `account-disabled`, `account-enabled`, `account-purged`, `identifier-changed`, `assurance-level-change`, `token-claims-change`, `identifier-recycled`, `account-credential-change-required`
+
+Lab action `sessions-revoked` emits CAEP `session-revoked` (all sessions).
 
 ## Configuration
 
@@ -61,6 +63,8 @@ Use SSF service to test security event stream configuration, CAEP/RISC event del
 | `SSF_DATA_DIR` | No | `./data` | Stream and receiver state directory |
 | `SSF_RECEIVER_PORT` | No | `8081` | Standalone receiver listener port |
 | `SSF_RECEIVER_TOKEN` | No | auto-generated | Bearer token for push delivery authentication |
+| `FEDERATION_SERVICE_URL` | No | loopback | Federation base URL for CAEP `revoke-subject` |
+| `SSF_TO_FEDERATION_TOKEN` | No | empty | Shared bearer token with federation |
 
 ## Run
 
@@ -75,7 +79,10 @@ docker run -p 8080:8080 -p 8081:8081 \
 ## Operational Notes
 
 - Port `8081` runs the standalone receiver. Keep it private unless you intentionally test external push delivery.
-- Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver on port `8081`.
-- The receiver validates SETs and executes response actions (session revocation, credential compromise, etc.) via the built-in MockIdP action executor.
+- Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver on port `8081` and returns **202**.
+- Discovery is `GET /.well-known/ssf-configuration` on the issuer (`spec_version` `"1_0"`). Local/demo issuer may be `http://`.
+- After a verified CAEP `session-revoked` SET, the receiver POSTs to `FEDERATION_SERVICE_URL/oauth2/demo/caep/revoke-subject` so MockIdP sessions and tokens die. The hop is visible on Looking Glass. If federation is unreachable, the SET still succeeds and the glass box shows the failed outbound request.
+- The receiver validates SETs and executes response actions (session revocation, credential compromise, etc.) via `ReceiverActionExecutor` on this service. RP posture stays in SSF SQLite; OAuth death is the HTTP call above, not shared memory.
+- Looking Glass is the run surface: `/looking-glass?protocol=ssf`. The Flow tab is Looking Glass bus events only. Catalog flow IDs are presets into one durable stream lab session. Do not fold this image into federation.
 - Set `SSF_RECEIVER_TOKEN` explicitly in shared environments.
 - Persist `SSF_DATA_DIR` to keep stream and event state across restarts.

@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// MockIdPActionExecutor executes SSF response actions against persisted state
-type MockIdPActionExecutor struct {
+// ReceiverActionExecutor executes SSF response actions against persisted state
+type ReceiverActionExecutor struct {
 	baseURL          string
 	storage          *Storage
 	receiverEndpoint string
@@ -30,9 +30,9 @@ type UserSecurityState struct {
 	ModifiedBy            string    `json:"modified_by"`
 }
 
-// NewMockIdPActionExecutor creates a new action executor
-func NewMockIdPActionExecutor(storage *Storage, baseURL, receiverEndpoint, receiverToken string) *MockIdPActionExecutor {
-	return &MockIdPActionExecutor{
+// NewReceiverActionExecutor creates a new action executor
+func NewReceiverActionExecutor(storage *Storage, baseURL, receiverEndpoint, receiverToken string) *ReceiverActionExecutor {
+	return &ReceiverActionExecutor{
 		baseURL:          baseURL,
 		storage:          storage,
 		receiverEndpoint: receiverEndpoint,
@@ -40,14 +40,14 @@ func NewMockIdPActionExecutor(storage *Storage, baseURL, receiverEndpoint, recei
 	}
 }
 
-func (e *MockIdPActionExecutor) streamForSession(ctx context.Context, sessionID string) (*Stream, error) {
+func (e *ReceiverActionExecutor) streamForSession(ctx context.Context, sessionID string) (*Stream, error) {
 	if sessionID != "" {
 		return e.storage.GetSessionStream(ctx, sessionID, e.baseURL, e.receiverEndpoint, e.receiverToken)
 	}
 	return e.storage.GetDefaultStream(ctx, e.baseURL)
 }
 
-func (e *MockIdPActionExecutor) ensureUserState(ctx context.Context, sessionID, streamID, email string, sessions int) {
+func (e *ReceiverActionExecutor) ensureUserState(ctx context.Context, sessionID, streamID, email string, sessions int) {
 	if _, err := e.storage.GetSecurityState(ctx, streamID, email); err == nil {
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -71,7 +71,7 @@ func (e *MockIdPActionExecutor) ensureUserState(ctx context.Context, sessionID, 
 	}
 }
 
-func (e *MockIdPActionExecutor) getOrCreateState(ctx context.Context, sessionID, email string) (*UserSecurityState, string, error) {
+func (e *ReceiverActionExecutor) getOrCreateState(ctx context.Context, sessionID, email string) (*UserSecurityState, string, error) {
 	stream, err := e.streamForSession(ctx, sessionID)
 	if err != nil {
 		return nil, "", err
@@ -101,7 +101,7 @@ func (e *MockIdPActionExecutor) getOrCreateState(ctx context.Context, sessionID,
 	return state, stream.ID, nil
 }
 
-func (e *MockIdPActionExecutor) updateSubjectState(ctx context.Context, streamID, email string, sessionsActive int, accountEnabled bool) {
+func (e *ReceiverActionExecutor) updateSubjectState(ctx context.Context, streamID, email string, sessionsActive int, accountEnabled bool) {
 	subject, err := e.storage.GetSubjectByIdentifier(ctx, streamID, SubjectFormatEmail, email)
 	if err != nil {
 		return
@@ -119,7 +119,7 @@ func (e *MockIdPActionExecutor) updateSubjectState(ctx context.Context, streamID
 }
 
 // InitSessionUserStates initializes security states for demo users in a session
-func (e *MockIdPActionExecutor) InitSessionUserStates(sessionID string) {
+func (e *ReceiverActionExecutor) InitSessionUserStates(sessionID string) {
 	ctx := context.Background()
 	stream, err := e.streamForSession(ctx, sessionID)
 	if err != nil {
@@ -139,12 +139,12 @@ func (e *MockIdPActionExecutor) InitSessionUserStates(sessionID string) {
 }
 
 // RevokeUserSessions revokes all sessions for a user
-func (e *MockIdPActionExecutor) RevokeUserSessions(ctx context.Context, email string) error {
+func (e *ReceiverActionExecutor) RevokeUserSessions(ctx context.Context, email string) error {
 	return e.RevokeUserSessionsForSession(ctx, "", email)
 }
 
 // RevokeUserSessionsForSession revokes all sessions for a user in a specific session
-func (e *MockIdPActionExecutor) RevokeUserSessionsForSession(ctx context.Context, sessionID, email string) error {
+func (e *ReceiverActionExecutor) RevokeUserSessionsForSession(ctx context.Context, sessionID, email string) error {
 	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
 	if err != nil {
 		return err
@@ -165,12 +165,12 @@ func (e *MockIdPActionExecutor) RevokeUserSessionsForSession(ctx context.Context
 }
 
 // DisableUser disables a user account
-func (e *MockIdPActionExecutor) DisableUser(ctx context.Context, email string) error {
+func (e *ReceiverActionExecutor) DisableUser(ctx context.Context, email string) error {
 	return e.DisableUserForSession(ctx, "", email)
 }
 
 // DisableUserForSession disables a user account in a specific session
-func (e *MockIdPActionExecutor) DisableUserForSession(ctx context.Context, sessionID, email string) error {
+func (e *ReceiverActionExecutor) DisableUserForSession(ctx context.Context, sessionID, email string) error {
 	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
 	if err != nil {
 		return err
@@ -193,12 +193,12 @@ func (e *MockIdPActionExecutor) DisableUserForSession(ctx context.Context, sessi
 }
 
 // EnableUser enables a user account
-func (e *MockIdPActionExecutor) EnableUser(ctx context.Context, email string) error {
+func (e *ReceiverActionExecutor) EnableUser(ctx context.Context, email string) error {
 	return e.EnableUserForSession(ctx, "", email)
 }
 
 // EnableUserForSession enables a user account in a specific session
-func (e *MockIdPActionExecutor) EnableUserForSession(ctx context.Context, sessionID, email string) error {
+func (e *ReceiverActionExecutor) EnableUserForSession(ctx context.Context, sessionID, email string) error {
 	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
 	if err != nil {
 		return err
@@ -220,12 +220,12 @@ func (e *MockIdPActionExecutor) EnableUserForSession(ctx context.Context, sessio
 }
 
 // ForcePasswordReset forces a password reset for a user
-func (e *MockIdPActionExecutor) ForcePasswordReset(ctx context.Context, email string) error {
+func (e *ReceiverActionExecutor) ForcePasswordReset(ctx context.Context, email string) error {
 	return e.ForcePasswordResetForSession(ctx, "", email)
 }
 
 // ForcePasswordResetForSession forces a password reset for a user in a specific session
-func (e *MockIdPActionExecutor) ForcePasswordResetForSession(ctx context.Context, sessionID, email string) error {
+func (e *ReceiverActionExecutor) ForcePasswordResetForSession(ctx context.Context, sessionID, email string) error {
 	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
 	if err != nil {
 		return err
@@ -244,12 +244,12 @@ func (e *MockIdPActionExecutor) ForcePasswordResetForSession(ctx context.Context
 }
 
 // InvalidateTokens invalidates all tokens for a user
-func (e *MockIdPActionExecutor) InvalidateTokens(ctx context.Context, email string) error {
+func (e *ReceiverActionExecutor) InvalidateTokens(ctx context.Context, email string) error {
 	return e.InvalidateTokensForSession(ctx, "", email)
 }
 
 // InvalidateTokensForSession invalidates all tokens for a user in a specific session
-func (e *MockIdPActionExecutor) InvalidateTokensForSession(ctx context.Context, sessionID, email string) error {
+func (e *ReceiverActionExecutor) InvalidateTokensForSession(ctx context.Context, sessionID, email string) error {
 	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
 	if err != nil {
 		return err
@@ -269,7 +269,7 @@ func (e *MockIdPActionExecutor) InvalidateTokensForSession(ctx context.Context, 
 }
 
 // GetUserStateForSession returns the current security state for a user in a specific session
-func (e *MockIdPActionExecutor) GetUserStateForSession(sessionID, email string) (*UserSecurityState, error) {
+func (e *ReceiverActionExecutor) GetUserStateForSession(sessionID, email string) (*UserSecurityState, error) {
 	stream, err := e.streamForSession(context.Background(), sessionID)
 	if err != nil {
 		return nil, err
@@ -284,7 +284,7 @@ func (e *MockIdPActionExecutor) GetUserStateForSession(sessionID, email string) 
 }
 
 // GetAllUserStatesForSession returns security states for users in a specific session
-func (e *MockIdPActionExecutor) GetAllUserStatesForSession(sessionID string) map[string]*UserSecurityState {
+func (e *ReceiverActionExecutor) GetAllUserStatesForSession(sessionID string) map[string]*UserSecurityState {
 	stream, err := e.streamForSession(context.Background(), sessionID)
 	if err != nil {
 		return map[string]*UserSecurityState{}
@@ -302,7 +302,7 @@ func (e *MockIdPActionExecutor) GetAllUserStatesForSession(sessionID string) map
 }
 
 // ResetUserStateForSession resets a user's security state in a specific session
-func (e *MockIdPActionExecutor) ResetUserStateForSession(sessionID, email string, sessions int) {
+func (e *ReceiverActionExecutor) ResetUserStateForSession(sessionID, email string, sessions int) {
 	ctx := context.Background()
 	stream, err := e.streamForSession(ctx, sessionID)
 	if err != nil {
@@ -324,7 +324,7 @@ func (e *MockIdPActionExecutor) ResetUserStateForSession(sessionID, email string
 }
 
 // CleanupOldSessions removes states for sessions not accessed recently
-func (e *MockIdPActionExecutor) CleanupOldSessions(maxAge time.Duration) int {
+func (e *ReceiverActionExecutor) CleanupOldSessions(maxAge time.Duration) int {
 	count, err := e.storage.CleanupSecurityStates(context.Background(), maxAge)
 	if err != nil {
 		log.Printf("[ActionExecutor] Cleanup failed: %v", err)

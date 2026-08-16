@@ -33,8 +33,6 @@ export class ErrorBoundary extends Component<Props, State> {
         names.forEach((name) => caches.delete(name))
       })
     }
-    // Clear localStorage SSF session to prevent stale state issues
-    localStorage.removeItem('ssf_session_id')
     window.location.reload()
   }
 

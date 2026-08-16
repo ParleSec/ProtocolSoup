@@ -127,12 +127,12 @@ export function Dashboard() {
             cta="Open Looking Glass"
           />
           <NavCard
-            to="/ssf-sandbox"
+            to="/looking-glass?protocol=ssf"
             icon={Radio}
             color="amber"
-            title="SSF Sandbox"
-            description="Interactive playground for Shared Signals Framework - trigger events and watch real-time security signals."
-            cta="Open Sandbox"
+            title="SSF Stream Lab"
+            description="Fire CAEP and RISC events on a durable Looking Glass session and inspect Transmitter and Receiver traffic."
+            cta="Open Stream Lab"
           />
           <NavCard
             to="/protocols"

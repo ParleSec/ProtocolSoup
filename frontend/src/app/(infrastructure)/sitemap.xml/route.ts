@@ -51,7 +51,6 @@ export async function GET() {
     { path: '', changefreq: 'weekly', priority: 1.0, title: PAGE_SEO['/'].title },
     { path: '/protocols', changefreq: 'weekly', priority: 0.9, title: PAGE_SEO['/protocols'].title },
     { path: '/looking-glass', changefreq: 'weekly', priority: 0.9, title: PAGE_SEO['/looking-glass'].title },
-    { path: '/ssf-sandbox', changefreq: 'weekly', priority: 0.9, title: PAGE_SEO['/ssf-sandbox'].title },
   ]
 
   for (const route of staticRoutes) {

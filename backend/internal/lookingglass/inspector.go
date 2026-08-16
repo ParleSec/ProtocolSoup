@@ -48,6 +48,11 @@ type SessionState string
 
 const OwnerTokenHeader = "X-Looking-Glass-Session-Token"
 
+// SkipCaptureHeader tells CaptureMiddleware to skip recording an HTTP exchange.
+// Use it when the caller already emits the hop onto the Looking Glass bus
+// (for example SSF push delivery with the full SET body).
+const SkipCaptureHeader = "X-ProtocolSoup-Skip-Capture"
+
 const (
 	SessionStateActive   SessionState = "active"
 	SessionStatePaused   SessionState = "paused"

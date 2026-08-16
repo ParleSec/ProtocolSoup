@@ -233,7 +233,7 @@ export function FlowDetail({
               } border text-sm font-medium transition-all w-full`}
             >
               {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
+              Try in Looking Glass
             </Link>
           )}
         </div>
@@ -255,7 +255,7 @@ export function FlowDetail({
               } border text-sm font-medium transition-all flex-shrink-0`}
             >
               {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              {protocolId === 'ssf' ? 'Try in SSF Sandbox' : 'Try in Looking Glass'}
+              Try in Looking Glass
             </Link>
           )}
         </div>
@@ -406,8 +406,8 @@ export function FlowDetail({
             href={flowExecutionPath}
             className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-surface-400 hover:text-white transition-colors"
           >
-            <span className="hidden sm:inline">{protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}</span>
-            <span className="sm:hidden">{protocolId === 'ssf' ? 'SSF Sandbox' : 'Looking Glass'}</span>
+            <span className="hidden sm:inline">Open Looking Glass</span>
+            <span className="sm:hidden">Looking Glass</span>
             <ExternalLink className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </Link>
         )}

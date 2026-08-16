@@ -114,16 +114,19 @@ The built-in token decoder is available at `POST /api/lookingglass/decode`. It h
 - Security Event Tokens (SETs)
 - X.509 certificates
 
-## SSF Sandbox
+## SSF Stream Lab
 
-SSF flows use a dedicated sandbox experience instead of the standard Looking Glass timeline. The SSF sandbox provides:
+SSF uses Looking Glass as a durable **stream lab** (`/looking-glass?protocol=ssf`). Catalog flow IDs are presets into that session, not isolated grants.
 
-- Stream configuration and management
-- CAEP/RISC event transmission and delivery
-- Receiver status monitoring with real event processing
-- Response action execution and security state tracking
+The stream lab provides:
 
-Use Looking Glass for all other protocol families.
+- Subject, CAEP/RISC event, and push/poll delivery chrome on one owned Looking Glass session
+- Transmitter and Receiver timeline plus unstripped SET/JWKS wire capture (Flow tab is Looking Glass bus only)
+- RP posture (sessions, account, tokens) stored on the SSF service
+- After CAEP `session-revoked`, a real HTTP hop to federation `POST /oauth2/demo/caep/revoke-subject` so OAuth sessions die
+- SET metadata overlay on the Tokens tab (decoded from the signed compact JWT)
+
+`/ssf-sandbox` redirects to Looking Glass. SSF remains its own image (`protocolsoup-ssf`) behind the gateway, the same way SCIM does.
 
 ## Related
 

@@ -28,6 +28,12 @@ import {
   type LookingGlassProtocol,
   type LookingGlassFlow,
 } from '../lookingglass'
+import { getLookingGlassSurface } from '../lookingglass/surfaces'
+import { SecurityStatePanel } from '../lookingglass/components/ssf/SecurityStatePanel'
+import { SETOverlay } from '../lookingglass/components/ssf/SETOverlay'
+import { mapLookingGlassEventsToFlowEvents, setsFromLookingGlassEvents } from '../lookingglass/ssf/mapEvents'
+import { getSSFLab, subscribeSSFLab, updateSSFLab } from '../lookingglass/ssf/lab-store'
+import type { SecurityState } from '../lookingglass/ssf/types'
 
 import { TokenInspector } from '../lookingglass/components/inspectors/TokenInspector'
 import { StatusBadge as SharedStatusBadge, ProtocolNotice, SegmentedChoice, type StatusBadgeVariant } from '../lookingglass/components/shared'
@@ -192,10 +198,13 @@ export function LookingGlass() {
   const [oid4vpDisclosureClaims, setOID4VPDisclosureClaims] = useState<string[]>([])
   const [oid4vpContractExpanded, setOID4VPContractExpanded] = useState(false)
   const [showAllQuickFlows, setShowAllQuickFlows] = useState(false)
+  const [ssfReady, setSsfReady] = useState(false)
+  const [ssfSecurityState, setSsfSecurityState] = useState<SecurityState | null>(null)
 
   const { protocols, loading: protocolsLoading } = useProtocols()
   const {
     wireExchanges,
+    events: lookingGlassEvents,
     connected: wireConnected,
     clearEvents: clearWireEvents,
   } = useLookingGlassSession(wireSessionId, wireSessionToken)
@@ -285,7 +294,9 @@ export function LookingGlass() {
   const isOID4VCIIssuerInitiatedFlow = isOID4VCIFlow && flowId === 'oid4vci-issuer-initiated'
 
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
-  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow
+  const surface = useMemo(() => getLookingGlassSurface(selectedProtocol?.id), [selectedProtocol?.id])
+  const SurfaceChrome = surface?.chrome
+  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow || Boolean(SurfaceChrome)
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
   const wasOID4VCIIssuerInitiatedFlowRef = useRef(false)
 
@@ -438,7 +449,7 @@ export function LookingGlass() {
 
   const realExecutor = useRealFlowExecutor({
     protocolId: selectedProtocol?.id || null,
-    flowId: selectedFlow?.id || null,
+    flowId: selectedProtocol?.id === 'ssf' ? 'ssf-lab' : (selectedFlow?.id || null),
     clientId: clientConfig.clientId,
     clientSecret: clientConfig.clientSecret,
     clientCredentialsAuthMethod: isClientCredentialsFlow ? clientCredentialsAuthMethod : undefined,
@@ -461,7 +472,19 @@ export function LookingGlass() {
     lookingGlassSessionId: wireSessionId || undefined,
     lookingGlassSessionToken: wireSessionToken || undefined,
   })
-  const status = realExecutor.state?.status || 'idle'
+  const mergedExecutorState = useMemo(() => {
+    if (!realExecutor.state) return null
+    if (!surface) return realExecutor.state
+    // SSF Flow/Tokens are Looking Glass bus only — never executor-local makeRequest steps.
+    const sessionEvents = mapLookingGlassEventsToFlowEvents(lookingGlassEvents)
+    const sessionTokens = setsFromLookingGlassEvents(lookingGlassEvents)
+    return {
+      ...realExecutor.state,
+      events: sessionEvents,
+      decodedTokens: sessionTokens,
+    }
+  }, [lookingGlassEvents, realExecutor.state, surface])
+  const status = mergedExecutorState?.status || 'idle'
   const isOID4VPAwaitingResult =
     selectedProtocol?.id === 'oid4vp' &&
     status === 'awaiting_user'
@@ -1097,11 +1120,6 @@ export function LookingGlass() {
   }, [resetFlow, clearWireEvents, clearUrlState])
 
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
-    // SSF has its own dedicated sandbox - redirect there
-    if (protocol.id === 'ssf') {
-      router.push('/ssf-sandbox')
-      return
-    }
     setSelectedProtocol(protocol)
     setSelectedFlow(null)
     resetFlow()
@@ -1127,38 +1145,40 @@ export function LookingGlass() {
     )
     setOID4VPScopeAliasInput('')
     syncUrlToSelection(protocol.id, null)
-  }, [resetFlow, clearWireEvents, router, syncUrlToSelection])
+  }, [resetFlow, clearWireEvents, syncUrlToSelection])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
-    // SSF flows should redirect to the SSF Sandbox
-    if (selectedProtocol?.id === 'ssf') {
-      router.push('/ssf-sandbox')
-      return
-    }
+    const keepSession = getLookingGlassSurface(selectedProtocol?.id)?.session.resetOnFlowChange === false
     setSelectedFlow(flow)
-    resetFlow()
-    setWireSessionId(null)
-    setWireSessionToken(null)
-    clearWireEvents()
-    setWireSessionError(null)
-    setPendingExecute(false)
-    setInspectedToken('')
-    setOID4VPWalletModalOpen(false)
-    setOID4VPLastPromptedRequestID('')
-    setOID4VPWalletSubmitPending(false)
-    setOID4VPWalletSubmitError(null)
-    setOID4VPWalletSubmitMessage(null)
-    setOID4VPWalletMode('one_click')
-    setOID4VPStepwiseVPToken('')
-    setOID4VPStepwiseLastStep('')
-    setOID4VPDisclosureClaims([])
+    if (!keepSession) {
+      resetFlow()
+      setWireSessionId(null)
+      setWireSessionToken(null)
+      clearWireEvents()
+      setWireSessionError(null)
+      setPendingExecute(false)
+      setInspectedToken('')
+      setOID4VPWalletModalOpen(false)
+      setOID4VPLastPromptedRequestID('')
+      setOID4VPWalletSubmitPending(false)
+      setOID4VPWalletSubmitError(null)
+      setOID4VPWalletSubmitMessage(null)
+      setOID4VPWalletMode('one_click')
+      setOID4VPStepwiseVPToken('')
+      setOID4VPStepwiseLastStep('')
+      setOID4VPDisclosureClaims([])
+    }
     syncUrlToSelection(selectedProtocol?.id || null, flow.id)
-  }, [resetFlow, clearWireEvents, selectedProtocol, router, syncUrlToSelection])
+  }, [resetFlow, clearWireEvents, selectedProtocol, syncUrlToSelection])
 
   const handleReset = useCallback(() => {
+    const keepSession = surface?.session.accumulateWire
     resetFlow()
-    setWireSessionId(null)
-    setWireSessionToken(null)
+    if (!keepSession) {
+      setWireSessionId(null)
+      setWireSessionToken(null)
+      clearUrlState()
+    }
     clearWireEvents()
     setWireSessionError(null)
     setPendingExecute(false)
@@ -1172,8 +1192,7 @@ export function LookingGlass() {
     setOID4VPStepwiseVPToken('')
     setOID4VPStepwiseLastStep('')
     setOID4VPDisclosureClaims([])
-    clearUrlState()
-  }, [resetFlow, clearWireEvents, clearUrlState])
+  }, [resetFlow, clearWireEvents, clearUrlState, surface])
 
   const copyWalletHandoff = useCallback(async () => {
     if (!walletHandoffArtifact) return
@@ -1191,7 +1210,9 @@ export function LookingGlass() {
     }
     setWireSessionError(null)
     try {
-      clearWireEvents()
+      if (!surface?.session.accumulateWire) {
+        clearWireEvents()
+      }
       const response = await fetch(`/api/protocols/${selectedProtocol.id}/demo/${selectedFlow.id}`, {
         method: 'POST',
       })
@@ -1211,12 +1232,15 @@ export function LookingGlass() {
       setWireSessionError(message)
       return null
     }
-  }, [selectedProtocol, selectedFlow, clearWireEvents])
+  }, [selectedProtocol, selectedFlow, clearWireEvents, surface])
 
   const handleExecute = useCallback(async () => {
     if (isOID4VPFlow && !canExecuteOID4VPRequest) {
       const message = oid4vpDCQLValidationError || oid4vpScopeAliasValidationError || 'OID4VP request configuration is invalid.'
       setOID4VPWalletSubmitError(message)
+      return
+    }
+    if (surface && !ssfReady && selectedProtocol?.id === 'ssf') {
       return
     }
     // Client Credentials private-key registration is intentionally one-shot
@@ -1251,7 +1275,16 @@ export function LookingGlass() {
     resetClientCredentialsCapture,
     startWireSession,
     executeFlow,
+    surface,
+    ssfReady,
+    selectedProtocol?.id,
   ])
+
+  useEffect(() => {
+    if (!surface?.session.accumulateWire) return
+    if (!selectedProtocol || !selectedFlow || wireSessionId) return
+    void startWireSession()
+  }, [surface, selectedProtocol, selectedFlow, wireSessionId, startWireSession])
 
   useEffect(() => {
     if (pendingExecute && wireSessionId) {
@@ -1263,11 +1296,6 @@ export function LookingGlass() {
   const handleQuickSelect = useCallback((protocolId: string, flowId: string) => {
     const normalizeFlowId = (id: string) => id.toLowerCase().replace(/_/g, '-')
 
-    // SSF flows should redirect to the SSF Sandbox
-    if (protocolId === 'ssf') {
-      router.push('/ssf-sandbox')
-      return
-    }
     const protocol = protocols.find(p => p.id === protocolId)
     if (protocol) {
       setSelectedProtocol(protocol)
@@ -1293,7 +1321,7 @@ export function LookingGlass() {
         setOID4VPDisclosureClaims([])
       }
     }
-  }, [protocols, resetFlow, clearWireEvents, router])
+  }, [protocols, resetFlow, clearWireEvents])
 
   // Honour ?protocol=X&flow=Y from deep-links (palette run dispatch, shared
   // URLs, browser bookmarks). After consuming the deep-link, replace the
@@ -1409,6 +1437,29 @@ export function LookingGlass() {
     },
   ] as const
 
+  useEffect(() => {
+    return subscribeSSFLab(() => {
+      setSsfSecurityState(getSSFLab().securityState)
+      setSsfReady(getSSFLab().ready)
+    })
+  }, [])
+
+  const handleResetRpState = useCallback(async () => {
+    const lab = getSSFLab()
+    if (!lab.subjectIdentifier || !wireSessionId) return
+    await fetch(`/ssf/security-state/${encodeURIComponent(lab.subjectIdentifier)}/reset`, {
+      method: 'POST',
+      headers: { 'X-Looking-Glass-Session': wireSessionId },
+    })
+    const res = await fetch(`/ssf/security-state/${encodeURIComponent(lab.subjectIdentifier)}`, {
+      headers: { 'X-Looking-Glass-Session': wireSessionId },
+    })
+    if (!res.ok) return
+    const state = await res.json() as SecurityState
+    updateSSFLab({ securityState: state })
+    setSsfSecurityState(state)
+  }, [wireSessionId])
+
   return (
     <div className="max-w-5xl mx-auto space-y-4 sm:space-y-6">
       {/* Header */}
@@ -1426,7 +1477,7 @@ export function LookingGlass() {
             )}
           </div>
           <p className="text-surface-400 text-xs sm:text-base ml-10 sm:ml-[52px] leading-relaxed">
-            Execute protocol flows and inspect the traffic
+            {surface?.copy.subtitle || 'Execute protocol flows and inspect the traffic'}
           </p>
         </div>
       </header>
@@ -1490,6 +1541,7 @@ export function LookingGlass() {
           onProtocolSelect={handleProtocolSelect}
           onFlowSelect={handleFlowSelect}
           loading={protocolsLoading}
+          flowNoun={surface?.copy.flowNoun}
         />
         {selectedFlow && (
           <div className="flex items-center rounded bg-surface-900 border border-white/10 overflow-hidden">
@@ -2029,6 +2081,15 @@ export function LookingGlass() {
             )}
           </motion.div>
         )}
+        {SurfaceChrome && (
+          <SurfaceChrome
+            flowId={selectedFlow?.id || null}
+            sessionId={wireSessionId}
+            sessionToken={wireSessionToken}
+            onReadyChange={setSsfReady}
+            onSecurityStateChange={setSsfSecurityState}
+          />
+        )}
         </section>
       )}
 
@@ -2126,21 +2187,21 @@ export function LookingGlass() {
                 {status === 'idle' && (
                   <button
                     onClick={handleExecute}
-                    disabled={isOID4VPFlow && !canExecuteOID4VPRequest}
+                    disabled={(isOID4VPFlow && !canExecuteOID4VPRequest) || (Boolean(surface) && !ssfReady)}
                     title={
                       isOID4VPFlow && !canExecuteOID4VPRequest
                         ? (oid4vpDCQLValidationError || oid4vpScopeAliasValidationError || 'OID4VP request configuration is invalid.')
                         : undefined
                     }
                     className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
-                      isOID4VPFlow && !canExecuteOID4VPRequest
+                      (isOID4VPFlow && !canExecuteOID4VPRequest) || (Boolean(surface) && !ssfReady)
                         ? 'bg-surface-800/70 border-white/10 text-surface-500 cursor-not-allowed'
                         : 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-500/30 text-green-400 hover:from-green-500/30 hover:to-emerald-500/30'
                     }`}
                   >
                     <Play className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                    <span className="hidden sm:inline">Execute</span>
-                    <span className="sm:hidden">Run</span>
+                    <span className="hidden sm:inline">{surface?.copy.executeLabel || 'Execute'}</span>
+                    <span className="sm:hidden">{surface ? 'Fire' : 'Run'}</span>
                   </button>
                 )}
                 {isOID4VPAwaitingResult && (
@@ -2282,7 +2343,7 @@ export function LookingGlass() {
               </div>
             )}
             <RealFlowPanel
-              state={realExecutor.state}
+              state={mergedExecutorState}
               flowInfo={realExecutor.flowInfo}
               requirements={realExecutor.requirements}
               error={realExecutor.error}
@@ -2291,6 +2352,17 @@ export function LookingGlass() {
               wireSessionError={wireSessionError}
               showTLSContext={showTLSContext}
               showVCTab={showVCTab}
+              extraTabs={surface?.panel.extraTabs}
+              extraTabContent={surface ? {
+                state: (
+                  <SecurityStatePanel
+                    state={ssfSecurityState}
+                    onReset={handleResetRpState}
+                  />
+                ),
+                set: <SETOverlay tokens={mergedExecutorState?.decodedTokens || []} />,
+              } : undefined}
+              emptyCopy={surface ? { title: surface.copy.emptyTitle, subtitle: surface.copy.emptySubtitle } : undefined}
             />
           </div>
         </motion.section>

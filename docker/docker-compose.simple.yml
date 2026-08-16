@@ -1,8 +1,9 @@
 # Protocol Soup - Simple Stack (no SPIFFE/SPIRE)
 # Run with: docker compose -f docker-compose.simple.yml up -d
 #
-# Use this if you only want OAuth2, OIDC, and SAML demos
-# without the SPIFFE/SPIRE workload identity infrastructure.
+# Single-process backend (cmd/server) with frontend. Registers OAuth 2.0, OIDC,
+# SAML, OID4VCI, OID4VP, SCIM, SSF, and SPIFFE in one binary (no gateway split).
+# SPIFFE still needs SPIRE for live SVID issuance; this file does not start SPIRE.
 
 services:
   backend:

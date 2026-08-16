@@ -29,6 +29,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 - `POST /oauth2/introspect`, `POST /oauth2/revoke`
 - `GET /oauth2/demo/users`, `GET /oauth2/demo/clients`
 - `POST /oauth2/demo/clients/machine-client-pkjwt/jwks` (owned, active-session, one-shot public-key registration)
+- `POST /oauth2/demo/caep/revoke-subject` (SSF CAEP session-revoked hook; bearer `SSF_TO_FEDERATION_TOKEN`)
 - `/oauth2/token` optionally accepts a `DPoP` proof header (RFC 9449), binding the issued access token (and, for `authorization_code` public clients, the refresh token) to the proof's key
 
 ### OIDC

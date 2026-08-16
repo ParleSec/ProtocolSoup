@@ -55,12 +55,10 @@ export function ProtocolDemo({
 
   const catalogEntry = getCatalogProtocol(protocolId)
   const hasExecutableFlow = flows.some(f => f.executable !== false)
-  const showExecutionCta = protocolId === 'ssf' || hasExecutableFlow
-  const executionPath = protocolId === 'ssf'
-    ? '/ssf-sandbox'
-    : recommendedFlow && hasExecutableFlow
-      ? buildFlowExecutionPath({ protocolId, flowId: recommendedFlow.id })
-      : '/looking-glass'
+  const showExecutionCta = hasExecutableFlow
+  const executionPath = recommendedFlow && hasExecutableFlow
+    ? buildFlowExecutionPath({ protocolId, flowId: recommendedFlow.id })
+    : '/looking-glass'
 
   return (
     <div className="space-y-6 sm:space-y-8 px-1 sm:px-0">
@@ -99,7 +97,7 @@ export function ProtocolDemo({
             className="inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm sm:text-base font-medium hover:bg-white/10 transition-colors"
           >
             {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            {protocolId === 'ssf' ? 'Open SSF Sandbox' : 'Open Looking Glass'}
+            Open Looking Glass
           </Link>
         )}
       </div>
