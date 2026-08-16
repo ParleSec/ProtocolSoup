@@ -20,7 +20,7 @@ export async function GET() {
     `- [Homepage](${SITE_ORIGIN}/)`,
     `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
     `- [Looking Glass](${SITE_ORIGIN}/looking-glass)`,
-    `- [SSF Sandbox](${SITE_ORIGIN}/ssf-sandbox)`,
+    `- [SSF Stream Lab](${SITE_ORIGIN}/looking-glass?protocol=ssf)`,
     '',
     '## Protocol Guides',
     ...protocolLines,

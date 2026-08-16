@@ -13,7 +13,7 @@ import {
   ChevronRight, Fingerprint, Book, User, Server, FileText,
   Zap
 } from 'lucide-react'
-import { useEffect, useState, type ElementType } from 'react'
+import { useEffect, useState, type ElementType, type ReactNode } from 'react'
 import type { 
   FlowExecutorState, 
   CapturedExchange,
@@ -48,6 +48,9 @@ interface RealFlowPanelProps {
   wireSessionError?: string | null
   showTLSContext?: boolean
   showVCTab?: boolean
+  extraTabs?: Array<'state' | 'set'>
+  extraTabContent?: Partial<Record<'state' | 'set', ReactNode>>
+  emptyCopy?: { title: string; subtitle: string }
 }
 
 export function RealFlowPanel({
@@ -60,8 +63,11 @@ export function RealFlowPanel({
   wireSessionError = null,
   showTLSContext = false,
   showVCTab = false,
+  extraTabs = [],
+  extraTabContent,
+  emptyCopy,
 }: RealFlowPanelProps) {
-  const [activeTab, setActiveTab] = useState<'flow' | 'http' | 'wire' | 'tokens' | 'vc'>('flow')
+  const [activeTab, setActiveTab] = useState<'flow' | 'http' | 'wire' | 'tokens' | 'vc' | 'state'>('flow')
 
   const latestVerificationArtifact = state?.vcArtifacts
     ? [...state.vcArtifacts].reverse().find((artifact) => artifact.type === 'verification_result')
@@ -114,12 +120,18 @@ export function RealFlowPanel({
   if (showVCTab) {
     tabs.push({ id: 'vc', label: 'VC', count: state?.vcArtifacts.length || 0, icon: FileText })
   }
+  if (extraTabs.includes('state')) {
+    tabs.push({ id: 'state', label: 'State', count: extraTabContent?.state ? 1 : 0, icon: User })
+  }
 
   useEffect(() => {
     if (!showVCTab && activeTab === 'vc') {
       setActiveTab('flow')
     }
-  }, [activeTab, showVCTab])
+    if (!extraTabs.includes('state') && activeTab === 'state') {
+      setActiveTab('flow')
+    }
+  }, [activeTab, extraTabs, showVCTab])
 
   if (error) {
     return (
@@ -131,9 +143,9 @@ export function RealFlowPanel({
     return (
       <div className="flex flex-col items-center justify-center py-12 text-center">
         <Zap className="w-12 h-12 text-surface-600 mb-3" />
-        <p className="text-surface-400">Select a flow to execute</p>
+        <p className="text-surface-400">{emptyCopy?.title || 'Select a flow to execute'}</p>
         <p className="text-surface-400 text-sm mt-1">
-          Each flow runs the exact protocol per RFC specifications
+          {emptyCopy?.subtitle || 'Each flow runs the exact protocol per RFC specifications'}
         </p>
       </div>
     )
@@ -332,6 +344,17 @@ export function RealFlowPanel({
               exit={{ opacity: 0, y: -10 }}
             >
               <TokensList tokens={state?.decodedTokens || []} />
+              {extraTabs.includes('set') && extraTabContent?.set}
+            </motion.div>
+          )}
+          {extraTabs.includes('state') && activeTab === 'state' && (
+            <motion.div
+              key="state"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+            >
+              {extraTabContent?.state}
             </motion.div>
           )}
           {showVCTab && activeTab === 'vc' && (
@@ -713,12 +736,13 @@ function TokensList({ tokens }: { tokens: DecodedToken[] }) {
     refresh_token: { label: 'Refresh Token', shortLabel: 'Refresh', color: 'text-blue-400', icon: RotateCcw },
     client_assertion: { label: 'Client Assertion', shortLabel: 'Assertion', color: 'text-cyan-400', icon: FileText },
     dpop_proof: { label: 'DPoP Proof (RFC 9449)', shortLabel: 'DPoP Proof', color: 'text-amber-400', icon: Lock },
+    set: { label: 'Security Event Token (SET)', shortLabel: 'SET', color: 'text-amber-400', icon: Key },
   }
 
   return (
     <div className="space-y-3 sm:space-y-4">
       {tokens.map((token, idx) => {
-        const config = tokenConfig[token.type]
+        const config = tokenConfig[token.type] || tokenConfig.access_token
         const Icon = config.icon
 
         return (

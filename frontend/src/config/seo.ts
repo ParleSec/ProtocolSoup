@@ -90,10 +90,10 @@ export const PAGE_SEO: Record<string, PageSEO> = {
     ogType: 'website',
   },
 
-  // SSF Sandbox
+  // Legacy SSF sandbox URL (redirects to Looking Glass)
   '/ssf-sandbox': {
-    title: 'SSF Sandbox - Shared Signals Framework Interactive Playground',
-    description: 'Interactive playground for the Shared Signals Framework (SSF). Trigger CAEP and RISC security events, decode SET tokens, and understand real-time security signal sharing.',
+    title: 'SSF Stream Lab - Shared Signals in Looking Glass',
+    description: 'Fire CAEP and RISC security events in Looking Glass, decode SET tokens, and inspect Transmitter and Receiver traffic on a durable stream session.',
     keywords: [
       'shared signals framework',
       'ssf tutorial',

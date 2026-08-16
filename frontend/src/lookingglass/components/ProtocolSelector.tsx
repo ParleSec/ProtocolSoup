@@ -18,6 +18,7 @@ interface ProtocolSelectorProps {
   onProtocolSelect: (protocol: LookingGlassProtocol) => void
   onFlowSelect: (flow: LookingGlassFlow) => void
   loading?: boolean
+  flowNoun?: string
 }
 
 interface DropdownPosition {
@@ -36,6 +37,7 @@ export function ProtocolSelector({
   onProtocolSelect,
   onFlowSelect,
   loading = false,
+  flowNoun = 'flow',
 }: ProtocolSelectorProps) {
   const [isProtocolOpen, setIsProtocolOpen] = useState(false)
   const [isFlowOpen, setIsFlowOpen] = useState(false)
@@ -204,7 +206,7 @@ export function ProtocolSelector({
 
       {/* Flow Select */}
       <div className="min-w-0 sm:flex sm:items-center sm:gap-2">
-        <span className="hidden sm:inline text-surface-600 text-xs sm:text-sm font-mono flex-shrink-0">flow:</span>
+        <span className="hidden sm:inline text-surface-600 text-xs sm:text-sm font-mono flex-shrink-0">{flowNoun.toLowerCase()}:</span>
         <button
           ref={flowButtonRef}
           aria-label="Select flow"
@@ -221,7 +223,7 @@ export function ProtocolSelector({
           }`}
         >
           <span className={`${selectedFlow ? 'text-white' : 'text-surface-400'} truncate`}>
-            {selectedFlow?.id || 'flow'}
+            {selectedFlow?.id || flowNoun.toLowerCase()}
           </span>
           <ChevronDown className={`w-3.5 h-3.5 text-surface-400 ml-auto flex-shrink-0 transition-transform ${isFlowOpen ? 'rotate-180' : ''}`} />
         </button>

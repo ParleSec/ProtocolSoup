@@ -79,7 +79,9 @@
   - changed-files:
       - any-glob-to-any-file:
           - "backend/internal/protocols/ssf/**"
-          - "frontend/src/lookingglass/flows/ssf-sandbox.ts"
+          - "frontend/src/lookingglass/flows/ssf-lab.ts"
+          - "frontend/src/lookingglass/surfaces.ts"
+          - "frontend/src/lookingglass/components/ssf/**"
 
 "protocol: verifiable-credentials":
   - changed-files:

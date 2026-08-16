@@ -8,7 +8,7 @@ export function NotFound() {
   const quickLinks = [
     { path: '/', icon: Home, label: 'Home', description: 'Return to dashboard' },
     { path: '/looking-glass', icon: Eye, label: 'Looking Glass', description: 'Inspect protocol flows' },
-    { path: '/ssf-sandbox', icon: Radio, label: 'SSF Sandbox', description: 'Test SSF events' },
+    { path: '/looking-glass?protocol=ssf', icon: Radio, label: 'SSF Stream Lab', description: 'Fire CAEP and RISC events' },
     { path: '/protocols', icon: BookOpen, label: 'Protocols', description: 'Explore protocols' },
   ]
 

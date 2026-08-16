@@ -1,4 +1,4 @@
-import { SSFSandboxClient } from '@/views/client/SSFSandboxClient'
+import { redirect } from 'next/navigation'
 import { PAGE_SEO } from '@/config/seo'
 import { createPageMetadata } from '@/lib/seo'
 
@@ -12,7 +12,6 @@ export const metadata = createPageMetadata({
   type: 'website',
 })
 
-export default function SSFSandboxPage() {
-  return <SSFSandboxClient />
+export default function SSFLookingGlassRedirectPage() {
+  redirect('/looking-glass?protocol=ssf')
 }
-
