@@ -514,6 +514,44 @@ jobs:
             --stage \
             "WALLET_MDOC_IACA_ROOT_PEM=$(cat "${trust_anchor}")"
 
+      - name: Sync verifier x509 trust anchor to wallet
+        env:
+          MAIN_FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          WALLET_FLY_API_TOKEN: ${{ secrets.FLY_WALLET_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          chain="${RUNNER_TEMP}/oid4vp-request-signer-chain.pem"
+          ca="${RUNNER_TEMP}/oid4vp-request-ca.pem"
+          FLY_API_TOKEN="${MAIN_FLY_API_TOKEN}" flyctl ssh console \
+            --app protocolsoup \
+            --quiet \
+            --command "cat /data/oid4vp/x509_request_signer_chain.pem" > "${chain}"
+
+          python3 -c '
+          from pathlib import Path
+          import sys
+          text = Path(sys.argv[1]).read_text()
+          certs = []
+          buf = []
+          for line in text.splitlines():
+              buf.append(line)
+              if "END CERTIFICATE" in line:
+                  certs.append("\n".join(buf) + "\n")
+                  buf = []
+          if not certs:
+              raise SystemExit("no certificates in oid4vp request-signer chain")
+          Path(sys.argv[2]).write_text(certs[-1])
+          ' "${chain}" "${ca}"
+
+          openssl x509 -in "${ca}" -noout -subject -issuer
+          openssl verify -CAfile "${ca}" "${ca}"
+
+          FLY_API_TOKEN="${WALLET_FLY_API_TOKEN}" flyctl secrets set \
+            --app protocolsoup-wallet \
+            --stage \
+            "WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM=$(cat "${ca}")"
+
       - name: Stage wallet source revision
         run: >-
           flyctl secrets set
