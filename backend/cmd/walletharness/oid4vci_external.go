@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"path"
@@ -411,13 +412,7 @@ func (s *walletHarnessServer) handleAPIImport(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := s.notifyCredentialAccepted(ctx, importResult.IssuedCredential, req.LookingGlassSessionID); err != nil {
-		response := map[string]interface{}{
-			"error":             "wallet_import_failed",
-			"error_description": err.Error(),
-		}
-		attachTranscript(response)
-		writeJSON(w, http.StatusBadGateway, response)
-		return
+		log.Printf("wallet harness: credential notification failed after import: %v", err)
 	}
 
 	response := map[string]interface{}{
@@ -576,8 +571,7 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		return
 	}
 	if err := s.notifyCredentialAccepted(r.Context(), importResult.IssuedCredential, pending.LookingGlassSessionID); err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
-		return
+		log.Printf("wallet harness: credential notification failed after authorization-code import: %v", err)
 	}
 	s.redirectOID4VCICallbackResult(w, r, "success", "credential imported")
 }
@@ -832,10 +826,10 @@ func (s *walletHarnessServer) issueFromExternalIssuer(
 		return nil, err
 	}
 
-	// Match the issuer's advertised proof algorithms. Looking Glass often
-	// selects UniversityDegreeCredential (RS256-only) while the wallet
-	// defaults to ES256; without switching keys here, import fails before
-	// token exchange and Cloudflare surfaces the 502 as "Failed to fetch".
+	// Match the issuer's advertised proof algorithms. Prefer ES256 when the
+	// configuration advertises it (the hosted wallet holder key is P-256);
+	// otherwise switch to RS256/EdDSA so Looking Glass import does not send
+	// an unadvertised proof algorithm.
 	configurationFormat := normalizeCredentialFormat(asString(configurationMetadata["format"]))
 	if preferredAlg := preferredCredentialProofSigningAlgorithm(configurationMetadata); preferredAlg != "" &&
 		configurationFormat != credentialFormatMsoMdoc {
@@ -1250,12 +1244,8 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 					thumbprint = tp
 				}
 			default:
-				ephemeralKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				if keyErr != nil {
-					return nil, fmt.Errorf("generate batch proof key: %w", keyErr)
-				}
-				proofJWT, thumbprint, err = createCredentialProofJWTFromECKey(
-					ephemeralKey,
+				proofJWT, thumbprint, err = createDistinctBatchProofJWT(
+					wallet.SigningAlgorithm,
 					cNonce,
 					issuerMetadata.CredentialIssuer,
 				)

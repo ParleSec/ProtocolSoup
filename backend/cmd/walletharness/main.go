@@ -804,11 +804,7 @@ func (s *walletHarnessServer) handleAPIIssue(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		if notifyErr := s.notifyCredentialAccepted(r.Context(), issuedCredential, options.LookingGlassSessionID); notifyErr != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
-				"error":             "wallet_submission_failed",
-				"error_description": notifyErr.Error(),
-			})
-			return
+			log.Printf("wallet harness: credential notification failed after forced issuance: %v", notifyErr)
 		}
 		credentialSource = "forced_oid4vci"
 	} else {
@@ -3003,7 +2999,7 @@ func (s *walletHarnessServer) ensureWalletCredential(
 			return "", fmt.Errorf("bind auto-issued credential: %w", err)
 		}
 		if err := s.notifyCredentialAccepted(ctx, autoIssuedCredential, options.LookingGlassSessionID); err != nil {
-			return "", fmt.Errorf("notify auto-issued credential acceptance: %w", err)
+			log.Printf("wallet harness: credential notification failed after issuance for subject %q: %v", wallet.Subject, err)
 		}
 		if needsCredentialBootstrap {
 			credentialSource = "auto_issued_oid4vci"
@@ -4481,11 +4477,10 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 func preferredCredentialProofSigningAlgorithm(configuration map[string]interface{}) string {
 	proofTypes, _ := configuration["proof_types_supported"].(map[string]interface{})
 	jwtProof, _ := proofTypes["jwt"].(map[string]interface{})
-	rawAlgorithms, _ := jwtProof["proof_signing_alg_values_supported"].([]interface{})
-	for _, rawAlgorithm := range rawAlgorithms {
-		algorithm := strings.TrimSpace(asString(rawAlgorithm))
-		switch algorithm {
-		case "ES256", "RS256", "EdDSA":
+	rawAlgorithms := stringSliceFromValue(jwtProof["proof_signing_alg_values_supported"])
+	// Prefer ES256 when advertised: the hosted wallet's holder key is P-256.
+	for _, algorithm := range []string{"ES256", "RS256", "EdDSA"} {
+		if containsStringFold(rawAlgorithms, algorithm) {
 			return algorithm
 		}
 	}
@@ -4577,7 +4572,7 @@ func (s *walletHarnessServer) notifyCredentialAccepted(
 		},
 	}
 	payload, status, headers, responseBody, reqErr := s.doDPoPRequest(ctx, input, "")
-	if status == http.StatusNoContent {
+	if isSuccessfulNotificationStatus(status) {
 		return nil
 	}
 	if isUseDPoPNonceChallenge(status, payload, headers, responseBody) {
@@ -4586,7 +4581,7 @@ func (s *walletHarnessServer) notifyCredentialAccepted(
 			return fmt.Errorf("credential notification returned use_dpop_nonce without %s header", dpop.NonceHeaderName)
 		}
 		_, status, _, responseBody, retryErr := s.doDPoPRequest(ctx, input, nonce)
-		if status == http.StatusNoContent {
+		if isSuccessfulNotificationStatus(status) {
 			return nil
 		}
 		if retryErr != nil {
@@ -4598,6 +4593,10 @@ func (s *walletHarnessServer) notifyCredentialAccepted(
 		return fmt.Errorf("credential notification failed: %w", reqErr)
 	}
 	return fmt.Errorf("credential notification returned %d: %s", status, oneLine(string(responseBody)))
+}
+
+func isSuccessfulNotificationStatus(status int) bool {
+	return status == http.StatusNoContent || (status >= 200 && status < 300)
 }
 
 func (s *walletHarnessServer) createCredentialProofJWT(wallet *walletMaterial, _ string, cNonce string, audience string) (string, error) {
@@ -4641,6 +4640,51 @@ func createCredentialProofJWTFromECKey(privateKey *ecdsa.PrivateKey, cNonce stri
 		"jti":   randomValue(20),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = "openid4vci-proof+jwt"
+	token.Header["jwk"] = pubJWK
+	signed, err := token.SignedString(privateKey)
+	if err != nil {
+		return "", "", err
+	}
+	return signed, thumbprint, nil
+}
+
+func createDistinctBatchProofJWT(algorithm, cNonce, audience string) (string, string, error) {
+	switch strings.TrimSpace(algorithm) {
+	case "", "ES256":
+		ephemeralKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return "", "", fmt.Errorf("generate batch proof key: %w", err)
+		}
+		return createCredentialProofJWTFromECKey(ephemeralKey, cNonce, audience)
+	case "RS256":
+		ephemeralKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return "", "", fmt.Errorf("generate batch RSA proof key: %w", err)
+		}
+		return createCredentialProofJWTFromRSAKey(ephemeralKey, cNonce, audience)
+	default:
+		return "", "", fmt.Errorf("unsupported batch proof algorithm %q", algorithm)
+	}
+}
+
+func createCredentialProofJWTFromRSAKey(privateKey *rsa.PrivateKey, cNonce string, audience string) (string, string, error) {
+	if privateKey == nil {
+		return "", "", fmt.Errorf("holder private key is required")
+	}
+	if strings.TrimSpace(cNonce) == "" {
+		return "", "", fmt.Errorf("c_nonce is required for proof")
+	}
+	pubJWK := intcrypto.JWKFromRSAPublicKey(&privateKey.PublicKey, "wallet-batch-proof")
+	thumbprint := strings.TrimSpace(pubJWK.Thumbprint())
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"aud":   strings.TrimSpace(audience),
+		"nonce": strings.TrimSpace(cNonce),
+		"iat":   now.Unix(),
+		"jti":   randomValue(20),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
 	token.Header["jwk"] = pubJWK
 	signed, err := token.SignedString(privateKey)

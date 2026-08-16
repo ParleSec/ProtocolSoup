@@ -358,6 +358,43 @@ func TestSelectWalletSigningAlgorithmUsesCredentialMetadataAlgorithm(t *testing.
 	if wallet.SigningAlgorithm != "RS256" {
 		t.Fatalf("wallet SigningAlgorithm = %q, want RS256", wallet.SigningAlgorithm)
 	}
+
+	both := map[string]interface{}{
+		"proof_types_supported": map[string]interface{}{
+			"jwt": map[string]interface{}{
+				"proof_signing_alg_values_supported": []string{"RS256", "ES256"},
+			},
+		},
+	}
+	if got := preferredCredentialProofSigningAlgorithm(both); got != "ES256" {
+		t.Fatalf("preferredCredentialProofSigningAlgorithm(RS256+ES256) = %q, want ES256", got)
+	}
+}
+
+func TestCreateDistinctBatchProofJWTMatchesAlgorithm(t *testing.T) {
+	esJWT, _, err := createDistinctBatchProofJWT("ES256", "c-nonce", "https://issuer.example/oid4vci")
+	if err != nil {
+		t.Fatalf("ES256 batch proof: %v", err)
+	}
+	unverified, _, err := jwt.NewParser().ParseUnverified(esJWT, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse ES256 proof: %v", err)
+	}
+	if unverified.Method.Alg() != "ES256" {
+		t.Fatalf("ES256 batch proof alg = %q", unverified.Method.Alg())
+	}
+
+	rsJWT, _, err := createDistinctBatchProofJWT("RS256", "c-nonce", "https://issuer.example/oid4vci")
+	if err != nil {
+		t.Fatalf("RS256 batch proof: %v", err)
+	}
+	unverifiedRSA, _, err := jwt.NewParser().ParseUnverified(rsJWT, jwt.MapClaims{})
+	if err != nil {
+		t.Fatalf("parse RS256 proof: %v", err)
+	}
+	if unverifiedRSA.Method.Alg() != "RS256" {
+		t.Fatalf("RS256 batch proof alg = %q", unverifiedRSA.Method.Alg())
+	}
 }
 
 func TestGetOrCreateWalletIsolatesByScope(t *testing.T) {
