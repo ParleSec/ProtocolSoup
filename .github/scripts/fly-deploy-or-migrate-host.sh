@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Deploy a Fly Launch app. If Fly refuses to update a volume-pinned Machine
-# because the current physical host is out of CPUs, fork the volume onto a
-# different host, clone the Machine onto that copy, retire the packed-host
-# Machine, then retry the deploy.
+# Deploy a Fly Launch app. If Fly cannot place or update a volume-pinned
+# Machine because the current host is out of CPUs, converge the app to one
+# runnable Machine on a different host (preserving volume data), then retry.
+#
+# This is idempotent across runs. It handles a first packed-host failure, a
+# leftover clone from a partial recovery, orphan volumes, a packed Machine
+# that no longer exists, and a new host that is also packed.
 #
 # Reads use the Machines API (flyctl machine status has no --json). Mutations
 # still go through flyctl.
@@ -13,6 +16,7 @@ CONFIG=""
 MIGRATE_ONLY=0
 DEPLOY_ARGS=()
 FLY_API_HOSTNAME="${FLY_API_HOSTNAME:-https://api.machines.dev}"
+MAX_RECOVERIES=2
 
 usage() {
   cat <<'EOF'
@@ -107,8 +111,22 @@ list_volumes_json() {
   fly_api_get "/v1/apps/${APP}/volumes"
 }
 
+list_machines_json() {
+  fly_api_get "/v1/apps/${APP}/machines"
+}
+
 machine_json() {
   fly_api_get "/v1/apps/${APP}/machines/${1}"
+}
+
+machine_exists() {
+  local raw http_code
+  raw="$(curl -sS -w '\n%{http_code}' \
+    -H "Authorization: Bearer ${FLY_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "${FLY_API_HOSTNAME}/v1/apps/${APP}/machines/${1}")"
+  http_code="$(printf '%s\n' "$raw" | tail -n1)"
+  [[ "$http_code" =~ ^2 ]]
 }
 
 volume_attached_machine() {
@@ -161,6 +179,16 @@ machine_state() {
   machine_json "$machine_id" | jq -r '.state // empty'
 }
 
+live_machine_ids() {
+  list_machines_json | jq -r '.[].id'
+}
+
+volume_backed_machine_ids() {
+  list_machines_json | jq -r '
+    .[] | select((.config.mounts // []) | length > 0) | .id
+  '
+}
+
 wait_for_attach() {
   local vol_id="$1" timeout_s="$2"
   local start now attached
@@ -186,12 +214,36 @@ wait_for_started() {
   start="$(date +%s)"
   while true; do
     state="$(machine_state "$machine_id")"
-    if [[ "$state" == "started" ]]; then
+    case "$state" in
+      started)
+        return 0
+        ;;
+      stopped|suspended)
+        echo "Starting ${machine_id} (state=${state})..." >&2
+        fly machine start "$machine_id" || true
+        ;;
+    esac
+    now="$(date +%s)"
+    if (( now - start >= timeout_s )); then
+      echo "timed out waiting for machine ${machine_id} to start (last state: ${state:-unknown})" >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+wait_for_detach() {
+  local vol_id="$1" timeout_s="$2"
+  local start now attached
+  start="$(date +%s)"
+  while true; do
+    attached="$(volume_attached_machine "$vol_id")"
+    if [[ -z "$attached" ]]; then
       return 0
     fi
     now="$(date +%s)"
     if (( now - start >= timeout_s )); then
-      echo "timed out waiting for machine ${machine_id} to start (last state: ${state:-unknown})" >&2
+      echo "timed out waiting for volume ${vol_id} to detach (still on ${attached})" >&2
       return 1
     fi
     sleep 5
@@ -204,36 +256,22 @@ is_packed_host_error() {
     "$1"
 }
 
-machine_id_from_log() {
+packed_ids_from_log() {
   grep -Eo 'failed to update (VM|machine) [a-zA-Z0-9]+' "$1" \
     | awk '{ print $NF }' \
-    | tail -n1
+    | sort -u
 }
 
-only_volume_machine() {
-  list_volumes_json | jq -r '
-    [.[] | (.attached_machine_id // empty) | select(. != "" and . != "null")] | unique | .[]
-  '
-}
-
-resolve_machine_id() {
-  local from_log="${1:-}"
-  if [[ -n "$from_log" ]]; then
-    printf '%s\n' "$from_log"
-    return 0
-  fi
-  local ids
-  ids="$(only_volume_machine)"
-  if [[ -z "$ids" ]]; then
-    echo "no volume-attached machine found on ${APP}" >&2
-    return 1
-  fi
-  if [[ "$(printf '%s\n' "$ids" | awk 'NF' | wc -l | tr -d ' ')" != "1" ]]; then
-    echo "multiple volume-attached machines on ${APP}; pass a failed-update machine id" >&2
-    printf '%s\n' "$ids" >&2
-    return 1
-  fi
-  printf '%s\n' "$ids"
+in_list() {
+  local needle="$1"
+  local item
+  shift
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 fork_volume() {
@@ -254,56 +292,37 @@ fork_volume() {
   printf '%s\n' "$id"
 }
 
-destroy_unattached_extras() {
-  local keep_csv="$1"
-  local vol_id attached
-  while IFS= read -r vol_id; do
-    [[ -z "$vol_id" ]] && continue
-    case ",${keep_csv}," in
-      *",${vol_id},"*) continue ;;
-    esac
-    attached="$(volume_attached_machine "$vol_id")"
-    if [[ -z "$attached" ]]; then
-      echo "destroying extra unattached volume ${vol_id}"
-      fly volumes destroy "$vol_id" -y
-    fi
-  done < <(list_volumes_json | jq -r '.[].id')
+verify_mount() {
+  local machine_id="$1" mount_path="$2"
+  echo "Checking ${mount_path} on ${machine_id}..." >&2
+  fly ssh console --quiet --machine "$machine_id" --command "ls -la ${mount_path}" >&2
 }
 
-migrate_off_packed_host() {
-  local hint_machine="${1:-}"
-  local old_machine old_volume region mount_path cpu_kind cpus memory_mb
+clone_onto_fork() {
+  local source_machine="$1"
+  local source_volume region mount_path cpu_kind cpus memory_mb
   local new_volume new_machine
 
-  old_machine="$(resolve_machine_id "$hint_machine")"
-  old_volume="$(volume_id_for_machine "$old_machine")"
-  region="$(volume_region "$old_volume")"
-  mount_path="$(mount_path_for "$old_machine")"
-  cpu_kind="$(guest_field "$old_machine" "cpu_kind" "shared")"
-  cpus="$(guest_field "$old_machine" "cpus" "1")"
-  memory_mb="$(guest_field "$old_machine" "memory_mb" "256")"
+  source_volume="$(volume_id_for_machine "$source_machine")"
+  region="$(volume_region "$source_volume")"
+  mount_path="$(mount_path_for "$source_machine")"
+  cpu_kind="$(guest_field "$source_machine" "cpu_kind" "shared")"
+  cpus="$(guest_field "$source_machine" "cpus" "1")"
+  memory_mb="$(guest_field "$source_machine" "memory_mb" "256")"
   cpu_kind="${cpu_kind:-shared}"
   cpus="${cpus:-1}"
   memory_mb="${memory_mb:-256}"
-
   if [[ -z "$region" ]]; then
-    echo "could not determine region for volume ${old_volume}" >&2
+    echo "could not determine region for volume ${source_volume}" >&2
     return 1
   fi
 
-  echo "Packed-host recovery for ${APP}:"
-  echo "  machine=${old_machine}"
-  echo "  volume=${old_volume}"
-  echo "  region=${region}"
-  echo "  mount=${mount_path}"
-  echo "  guest=${cpu_kind} cpus=${cpus} memory_mb=${memory_mb}"
+  echo "Forking ${source_volume} from ${source_machine} (${cpu_kind} cpus=${cpus} memory_mb=${memory_mb} region=${region})..." >&2
+  new_volume="$(fork_volume "$source_volume" "$region" "$cpu_kind" "$cpus" "$memory_mb")"
+  echo "  forked volume=${new_volume}" >&2
 
-  echo "Forking ${old_volume} onto a different host..."
-  new_volume="$(fork_volume "$old_volume" "$region" "$cpu_kind" "$cpus" "$memory_mb")"
-  echo "  forked volume=${new_volume}"
-
-  echo "Cloning ${old_machine} onto ${new_volume}..."
-  if ! fly machine clone "$old_machine" \
+  echo "Cloning ${source_machine} onto ${new_volume}..." >&2
+  if ! fly machine clone "$source_machine" \
     --region "$region" \
     --attach-volume "${new_volume}:${mount_path}" \
     --vm-cpu-kind "$cpu_kind" \
@@ -315,21 +334,135 @@ migrate_off_packed_host() {
   fi
 
   new_machine="$(wait_for_attach "$new_volume" 180)"
-  echo "  new machine=${new_machine}"
+  echo "  new machine=${new_machine}" >&2
   wait_for_started "$new_machine" 180
+  verify_mount "$new_machine" "$mount_path"
+  printf '%s\n' "$new_machine"
+}
 
-  echo "Checking ${mount_path} on ${new_machine}..."
-  fly ssh console --quiet --machine "$new_machine" --command "ls -la ${mount_path}"
+pick_keeper() {
+  local id
+  local packed=("$@")
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    if ((${#packed[@]})) && in_list "$id" "${packed[@]}"; then
+      continue
+    fi
+    printf '%s\n' "$id"
+    return 0
+  done < <(volume_backed_machine_ids)
+  return 1
+}
 
-  destroy_unattached_extras "${old_volume},${new_volume}"
+pick_source() {
+  local id
+  local packed=("$@")
+  for id in "${packed[@]}"; do
+    if machine_exists "$id"; then
+      printf '%s\n' "$id"
+      return 0
+    fi
+  done
+  id="$(volume_backed_machine_ids | awk 'NF { print; exit }')"
+  if [[ -n "$id" ]]; then
+    printf '%s\n' "$id"
+    return 0
+  fi
+  return 1
+}
 
-  echo "Destroying packed-host machine ${old_machine}..."
-  fly machines destroy "$old_machine" --force -y
+destroy_machine() {
+  local machine_id="$1"
+  if ! machine_exists "$machine_id"; then
+    echo "Machine ${machine_id} already gone"
+    return 0
+  fi
+  echo "Destroying machine ${machine_id}..."
+  fly machine destroy "$machine_id" --force
+}
 
-  echo "Destroying packed-host volume ${old_volume}..."
-  fly volumes destroy "$old_volume" -y
+destroy_volume() {
+  local vol_id="$1"
+  if [[ -z "$vol_id" ]]; then
+    return 0
+  fi
+  if ! list_volumes_json | jq -e --arg id "$vol_id" '.[] | select(.id == $id)' >/dev/null; then
+    echo "Volume ${vol_id} already gone"
+    return 0
+  fi
+  wait_for_detach "$vol_id" 120 || true
+  echo "Destroying volume ${vol_id}..."
+  fly volumes destroy "$vol_id" -y
+}
 
-  echo "Host migration complete: machine ${new_machine} volume ${new_volume}"
+destroy_all_except_keeper() {
+  local keeper="$1"
+  local keeper_volume=""
+  local id vol_id
+
+  keeper_volume="$(volume_id_for_machine "$keeper")"
+  echo "Keeper ${keeper} volume ${keeper_volume}"
+
+  while IFS= read -r id; do
+    [[ -z "$id" || "$id" == "$keeper" ]] && continue
+    destroy_machine "$id"
+  done < <(live_machine_ids)
+
+  while IFS= read -r vol_id; do
+    [[ -z "$vol_id" || "$vol_id" == "$keeper_volume" ]] && continue
+    destroy_volume "$vol_id"
+  done < <(list_volumes_json | jq -r '.[].id')
+}
+
+place_volume_on_new_host() {
+  local source_vol newest region
+  source_vol="$(list_volumes_json | jq -r 'sort_by(.created_at) | first | .id // empty')"
+  if [[ -z "$source_vol" ]]; then
+    echo "no volumes on ${APP} to migrate" >&2
+    return 1
+  fi
+  region="$(volume_region "$source_vol")"
+  echo "No Machines left; forking oldest volume ${source_vol} onto a new host..."
+  newest="$(fork_volume "$source_vol" "$region" "shared" "1" "256")"
+  echo "  forked volume=${newest}"
+  while IFS= read -r vol_id; do
+    [[ -z "$vol_id" || "$vol_id" == "$newest" ]] && continue
+    destroy_volume "$vol_id"
+  done < <(list_volumes_json | jq -r '.[].id')
+}
+
+# Converge to one volume-backed Machine that Fly did not just refuse to place,
+# with /data verified, and no leftover Machines or volumes.
+converge_to_runnable_host() {
+  local keeper="" source="" mount_path="/data"
+  local packed=()
+  local id
+
+  if [[ $# -gt 0 ]]; then
+    packed=("$@")
+  fi
+
+  echo "Converging ${APP} off packed hosts (${#packed[@]} packed id(s): ${packed[*]:-none})"
+
+  if keeper="$(pick_keeper "${packed[@]+"${packed[@]}"}")"; then
+    echo "Reusing existing Machine ${keeper} that is not in the packed set"
+    wait_for_started "$keeper" 180
+    mount_path="$(mount_path_for "$keeper")"
+    verify_mount "$keeper" "$mount_path"
+    destroy_all_except_keeper "$keeper"
+    echo "Host migration complete: machine ${keeper}"
+    return 0
+  fi
+
+  if source="$(pick_source "${packed[@]+"${packed[@]}"}")"; then
+    keeper="$(clone_onto_fork "$source")"
+    destroy_all_except_keeper "$keeper"
+    echo "Host migration complete: machine ${keeper}"
+    return 0
+  fi
+
+  place_volume_on_new_host
+  echo "Host migration complete: volume moved; next deploy will create the Machine"
 }
 
 run_deploy() {
@@ -341,8 +474,26 @@ run_deploy() {
   flyctl "${args[@]}"
 }
 
+ids_from_log_or_live() {
+  local log_file="$1"
+  local ids
+  ids="$(packed_ids_from_log "$log_file" || true)"
+  if [[ -n "$ids" ]]; then
+    printf '%s\n' "$ids"
+    return 0
+  fi
+  volume_backed_machine_ids
+}
+
 if [[ "$MIGRATE_ONLY" -eq 1 ]]; then
-  migrate_off_packed_host ""
+  mapfile -t packed < <(volume_backed_machine_ids)
+  if ((${#packed[@]} == 1)); then
+    converge_to_runnable_host "${packed[0]}"
+  else
+    # Multiple Machines: converge to one. Without a deploy log, keep a
+    # volume-backed Machine and retire the rest (no extra fork).
+    converge_to_runnable_host
+  fi
   exit 0
 fi
 
@@ -350,20 +501,27 @@ log_file="$(mktemp)"
 cleanup() { rm -f "$log_file"; }
 trap cleanup EXIT
 
-set +e
-run_deploy 2>&1 | tee "$log_file"
-status="${PIPESTATUS[0]}"
-set -e
+recoveries=0
+while true; do
+  set +e
+  run_deploy 2>&1 | tee "$log_file"
+  status="${PIPESTATUS[0]}"
+  set -e
 
-if [[ "$status" -eq 0 ]]; then
-  exit 0
-fi
+  if [[ "$status" -eq 0 ]]; then
+    exit 0
+  fi
+  if ! is_packed_host_error "$log_file"; then
+    exit "$status"
+  fi
+  if (( recoveries >= MAX_RECOVERIES )); then
+    echo "Still cannot place the Machine after ${recoveries} host migrations" >&2
+    exit "$status"
+  fi
 
-if ! is_packed_host_error "$log_file"; then
-  exit "$status"
-fi
-
-echo "Fly refused the in-place update because the volume's current host is out of CPUs."
-migrate_off_packed_host "$(machine_id_from_log "$log_file")"
-echo "Retrying deploy on the new host..."
-run_deploy
+  recoveries=$((recoveries + 1))
+  echo "Fly refused an in-place update because a volume's current host is out of CPUs (recovery ${recoveries}/${MAX_RECOVERIES})."
+  mapfile -t packed < <(ids_from_log_or_live "$log_file")
+  converge_to_runnable_host "${packed[@]+"${packed[@]}"}"
+  echo "Retrying deploy..."
+done
