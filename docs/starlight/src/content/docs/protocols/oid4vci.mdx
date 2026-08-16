@@ -30,7 +30,7 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 
 ## Demo Scenarios
 
-- **Pre-Authorized Issuance** -- Looking Glass creates a Credential Offer, then surfaces each real wallet→issuer hop (Credential Issuer Metadata, Token Request, Nonce Request, proof JWT, Credential Request/Response) from the wallet's protocol transcript. The default credential configuration is the ISO/IEC 18013-5 mobile driving licence (`mso_mdoc`).
+- **Pre-Authorized Issuance** -- Looking Glass creates a Credential Offer, then surfaces each real wallet→issuer hop (Credential Issuer Metadata, Token Request, Nonce Request, proof JWT, Credential Request/Response) from the wallet's protocol transcript. The default credential configuration is the ISO/IEC 18013-5 mobile driving licence (`mso_mdoc`). HAIP key-attested profiles warn before Execute that the wallet needs attestation env material; a 400 without it is the real HAIP gate.
 - **Pre-Authorized + tx_code** -- Same glass-box stages with mandatory `tx_code` on the token request
 - **Deferred Issuance Polling** -- Same stages plus Deferred Credential Poll until the credential is ready
 - **Issuer-Initiated Offer** -- Build an `authorization_code` offer with `issuer_state`. When a wallet Credential Offer Endpoint is supplied, the issuer delivers the offer with a real HTTPS GET (`credential_offer` query parameter; 2xx/3xx accepted without following redirects). Otherwise Looking Glass exposes an `openid-credential-offer://` invocation URI/QR. Looking Glass then reuses the OID4VP wallet-handoff chrome (`awaiting_user` + "Check Result"): each click checks a separate opaque `status_uri` once for whether the issuer has received the wallet's validated PAR, issued the access token, and issued the credential, or reports the offer context has expired. Looking Glass does not complete PAR/token/credential in-browser. When the wallet PAR uses scope only (for example `vc:mdl`), the issuer binds authorization to the intersection with the offer's credential configurations.
@@ -208,9 +208,10 @@ flow remains unaffected by default.
   `encryption_required` stays `false`.
 - **Encrypted credential requests.** Credential Issuer Metadata advertises an
   ECDH-ES public key plus `A128GCM`/`A256GCM` in
-  `credential_request_encryption`. The Credential Endpoint accepts the compact
-  JWE as `application/jwt`, decrypts it with the persistent key, and applies
-  the same duplicate-member and proof validation as a JSON request.
+  `credential_request_encryption`. The Credential Endpoint and Deferred
+  Credential Endpoint accept the compact JWE as `application/jwt`, decrypt it
+  with the persistent key, and apply the same duplicate-member and proof
+  validation as a JSON request.
 - **Signed metadata and HAIP SD-JWT VC.** Requesting Credential Issuer
   Metadata with `Accept: application/jwt` returns an ES256 JWT with
   `typ: openidvci-issuer-metadata+jwt`, top-level metadata claims, and a

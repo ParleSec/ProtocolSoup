@@ -52,6 +52,16 @@ When a flow is selected, three icon buttons appear next to the protocol/flow dro
 
 The flow header also provides a low-emphasis reference breadcrumb: **Protocol Reference › protocol › flow**. Each reference opens in a new tab so the live execution remains intact. On narrow screens, the breadcrumb collapses to the matching flow guide.
 
+## Configuration Warnings
+
+Looking Glass blocks or warns before combinations that the live protocol will reject, and it explains failures without replacing the real `error` / `error_description` text.
+
+- **HAIP OID4VCI profiles** (`MobileDrivingLicenceMsoMdocHAIP`, `UniversityDegreeCredentialSDJWTHAIP`) show a warning before Execute. Pre-authorized redemption goes through the hosted wallet, which returns HTTP 400 unless `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` are configured. Choose a non-HAIP profile to run without attestation.
+- **Invalid DCQL or an empty scope alias** disables Execute until the request contract is valid.
+- **OID4VP credential-profile mismatch** blocks wallet submit when the selected issuance format is not in the DCQL query (paste a matching `credential_jwt` to override with a warning).
+- **`x509_hash`** is the HAIP signed-request prefix: Looking Glass forces DCQL and encrypted `direct_post.jwt` even on the unencrypted `direct_post` flow. The wallet must trust `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`; certificate roots in `x5c` are never self-trusted.
+- After a failure, the timeline and wallet modal keep the protocol error and add the matching next step (attestation env, verifier CA, `tx_code`, rate limit, or wallet proxy).
+
 ## Session Management
 
 Each flow execution creates a Looking Glass session. Sessions are linked to backend processing via:

@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion'
 import { Loader2, X } from 'lucide-react'
 import { humanizeOID4VPTrustMode } from '../../protocols/config/oid4vp'
+import { LOOKING_GLASS_X509_HASH_GUIDANCE } from '../wallet-client'
+import { ProtocolNotice } from './shared'
 
 export type OID4VPWalletMode = 'one_click' | 'stepwise'
 export type OID4VPWalletStep = 'bootstrap' | 'issue_credential' | 'build_presentation' | 'submit_response'
@@ -11,6 +13,7 @@ interface OID4VPWalletModalProps {
   requestID: string
   responseMode: string
   trustMode: string
+  clientIDScheme?: string
   requestURI: string
   didWebAllowedHosts: string[]
   walletHandoffPayload: string
@@ -43,6 +46,7 @@ export function OID4VPWalletModal({
   requestID,
   responseMode,
   trustMode,
+  clientIDScheme,
   requestURI,
   didWebAllowedHosts,
   walletHandoffPayload,
@@ -114,6 +118,11 @@ export function OID4VPWalletModal({
                   <span className="text-surface-400">trust_mode:</span> <code>{humanizeOID4VPTrustMode(trustMode)}</code>
                 </div>
               )}
+              {clientIDScheme && (
+                <div>
+                  <span className="text-surface-400">client_id_scheme:</span> <code>{clientIDScheme}</code>
+                </div>
+              )}
               {requestURI && (
                 <div className="break-all">
                   <span className="text-surface-400">request_uri:</span> <code>{requestURI}</code>
@@ -181,16 +190,21 @@ export function OID4VPWalletModal({
           </div>
 
           {(walletCompatibilityError || walletCompatibilityWarning) && (
-            <div className={`rounded-lg border p-3 text-[11px] sm:text-xs leading-relaxed ${
-              walletCompatibilityError
-                ? 'border-red-500/30 bg-red-500/5 text-red-300'
-                : 'border-amber-500/30 bg-amber-500/5 text-amber-300'
-            }`}>
-              <div className="font-medium mb-1">
-                {walletCompatibilityError ? 'Wallet credential gate failed' : 'Wallet credential gate warning'}
-              </div>
-              <div>{walletCompatibilityError || walletCompatibilityWarning}</div>
-            </div>
+            <ProtocolNotice
+              tone={walletCompatibilityError ? 'error' : 'warning'}
+              title={walletCompatibilityError ? 'Wallet credential gate failed' : 'Wallet credential gate warning'}
+            >
+              {walletCompatibilityError || walletCompatibilityWarning}
+            </ProtocolNotice>
+          )}
+          {clientIDScheme === 'x509_hash' && (
+            <ProtocolNotice
+              tone="warning"
+              title="HAIP x509_hash presentation"
+              specReference="HAIP 1.0; RFC 5280"
+            >
+              {LOOKING_GLASS_X509_HASH_GUIDANCE}
+            </ProtocolNotice>
           )}
 
           <div className="space-y-1.5">
@@ -282,7 +296,7 @@ export function OID4VPWalletModal({
             <p className="text-[11px] sm:text-xs text-cyan-200">{submitMessage}</p>
           )}
           {!!submitError && (
-            <p className="text-[11px] sm:text-xs text-red-300">{submitError}</p>
+            <ProtocolNotice tone="error" protocolError={submitError} />
           )}
         </div>
 

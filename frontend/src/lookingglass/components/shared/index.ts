@@ -1,4 +1,5 @@
 export { CopyButton } from './CopyButton'
 export { ExpandableSection } from './ExpandableSection'
 export { FieldRow } from './FieldRow'
+export { ProtocolNotice, type ProtocolNoticeTone } from './ProtocolNotice'
 export { StatusBadge, type StatusBadgeVariant } from './StatusBadge'

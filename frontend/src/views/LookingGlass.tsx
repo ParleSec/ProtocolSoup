@@ -30,7 +30,7 @@ import {
 } from '../lookingglass'
 
 import { TokenInspector } from '../lookingglass/components/inspectors/TokenInspector'
-import { StatusBadge as SharedStatusBadge, type StatusBadgeVariant } from '../lookingglass/components/shared'
+import { StatusBadge as SharedStatusBadge, ProtocolNotice, type StatusBadgeVariant } from '../lookingglass/components/shared'
 import { FlowButton, TokenButton } from '../lookingglass/components/ActionButtons'
 import { OID4VPWalletModal } from '../lookingglass/components/OID4VPWalletModal'
 import {
@@ -48,20 +48,31 @@ import {
 } from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
-import { describeWalletAPIError, walletAPIURL } from '../lookingglass/wallet-client'
+import { describeWalletAPIError, walletAPIURL, LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE, LOOKING_GLASS_X509_HASH_GUIDANCE } from '../lookingglass/wallet-client'
 
 const OID4VP_WALLET_SUBMIT_URL = walletAPIURL('/submit')
 const SAFE_QR_DATA_URL_PREFIX = 'data:image/png;base64,'
 // Profiles advertised in Credential Issuer Metadata (HAIP-aligned: dc+sd-jwt + mso_mdoc).
 const OID4VCI_CREDENTIAL_PROFILES = [
-  { id: 'MobileDrivingLicenceMsoMdoc', format: 'mso_mdoc', label: 'mso_mdoc (mDL)' },
-  { id: 'UniversityDegreeCredential', format: 'dc+sd-jwt', label: 'dc+sd-jwt' },
+  { id: 'MobileDrivingLicenceMsoMdoc', format: 'mso_mdoc', label: 'mso_mdoc (mDL)', haip: false },
+  { id: 'UniversityDegreeCredential', format: 'dc+sd-jwt', label: 'dc+sd-jwt', haip: false },
   // HAIP key-attested configurations. Looking Glass pre-authorized redemption
   // goes through the wallet harness, which supplies client/key attestation when
   // WALLET_* attestation material is configured.
-  { id: 'MobileDrivingLicenceMsoMdocHAIP', format: 'mso_mdoc', label: 'mso_mdoc (mDL, HAIP key-attested)' },
-  { id: 'UniversityDegreeCredentialSDJWTHAIP', format: 'dc+sd-jwt', label: 'dc+sd-jwt (HAIP key-attested)' },
+  { id: 'MobileDrivingLicenceMsoMdocHAIP', format: 'mso_mdoc', label: 'mso_mdoc (mDL, HAIP key-attested)', haip: true },
+  { id: 'UniversityDegreeCredentialSDJWTHAIP', format: 'dc+sd-jwt', label: 'dc+sd-jwt (HAIP key-attested)', haip: true },
 ] as const
+const LOOKING_GLASS_ISSUABLE_FORMATS = new Set<string>(
+  OID4VCI_CREDENTIAL_PROFILES.map((profile) => profile.format),
+)
+const LOOKING_GLASS_OID4VP_DCQL_PRESETS = OID4VP_DCQL_PRESETS.filter((preset) => {
+  try {
+    const formats = getOID4VPDCQLCredentialFormats(preset.query)
+    return formats.length > 0 && formats.every((format) => LOOKING_GLASS_ISSUABLE_FORMATS.has(format))
+  } catch {
+    return false
+  }
+})
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
   executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
@@ -524,6 +535,26 @@ export function LookingGlass() {
     selectedOID4VPCredentialProfileLabel,
     selectedOID4VPPreset?.label,
     normalizedOID4VPCredentialJWTInput,
+  ])
+
+  useEffect(() => {
+    if (!isOID4VPFlow || oid4vpQueryMode !== 'dcql' || oid4vpDCQLValidationError) {
+      return
+    }
+    const requestedFormats = getOID4VPDCQLCredentialFormats(oid4vpDCQLInput)
+    if (requestedFormats.length === 0 || requestedFormats.includes(selectedOID4VCICredentialProfile.format)) {
+      return
+    }
+    const matchingProfile = OID4VCI_CREDENTIAL_PROFILES.find((profile) => requestedFormats.includes(profile.format))
+    if (matchingProfile) {
+      setOID4VCICredentialConfigurationID(matchingProfile.id)
+    }
+  }, [
+    isOID4VPFlow,
+    oid4vpQueryMode,
+    oid4vpDCQLValidationError,
+    oid4vpDCQLInput,
+    selectedOID4VCICredentialProfile.format,
   ])
   const oid4vpTrustMode = useMemo(() => {
     const metadata = (oid4vpRequestObjectArtifact?.metadata || walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
@@ -1709,16 +1740,36 @@ export function LookingGlass() {
                 </option>
               ))}
             </select>
+            {selectedOID4VCICredentialProfile.haip && (
+              <div className="mt-2">
+                <ProtocolNotice
+                  tone="warning"
+                  title="HAIP profile will fail without wallet attestation"
+                  specReference="HAIP 1.0; OID4VCI 1.0 Appendix D"
+                >
+                  {LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE}
+                </ProtocolNotice>
+              </div>
+            )}
+            {isOID4VCIFlow && flowId === 'oid4vci-pre-authorized-tx-code' && (
+              <div className="mt-2">
+                <ProtocolNotice
+                  tone="info"
+                  title="tx_code is required on the token request"
+                  specReference="OpenID4VCI 1.0 Sections 4.1.1 and 6.1"
+                >
+                  Looking Glass reads the issuer-returned out-of-band tx_code from the Credential Offer and sends it with wallet import. If import fails with tx_code_required, the offer was created without that value — re-run this flow rather than a plain pre-authorized run.
+                </ProtocolNotice>
+              </div>
+            )}
             {isOID4VPFlow && (oid4vpWalletCredentialCompatibility.error || oid4vpWalletCredentialCompatibility.warning) && (
-              <div className={`mt-2 rounded-lg border p-2.5 text-[11px] sm:text-xs leading-relaxed ${
-                oid4vpWalletCredentialCompatibility.error
-                  ? 'border-red-500/30 bg-red-500/5 text-red-300'
-                  : 'border-amber-500/30 bg-amber-500/5 text-amber-300'
-              }`}>
-                <span className="font-medium">
-                  {oid4vpWalletCredentialCompatibility.error ? 'Credential profile mismatch: ' : 'Credential profile warning: '}
-                </span>
-                {oid4vpWalletCredentialCompatibility.error || oid4vpWalletCredentialCompatibility.warning}
+              <div className="mt-2">
+                <ProtocolNotice
+                  tone={oid4vpWalletCredentialCompatibility.error ? 'error' : 'warning'}
+                  title={oid4vpWalletCredentialCompatibility.error ? 'Credential profile mismatch' : 'Credential profile warning'}
+                >
+                  {oid4vpWalletCredentialCompatibility.error || oid4vpWalletCredentialCompatibility.warning}
+                </ProtocolNotice>
               </div>
             )}
           </motion.div>
@@ -1787,7 +1838,13 @@ export function LookingGlass() {
                     <label className="text-[11px] sm:text-xs text-surface-400">Verifier trust profile</label>
                     <select
                       value={oid4vpClientIDScheme}
-                      onChange={(event) => setOID4VPClientIDScheme(event.target.value as 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash')}
+                      onChange={(event) => {
+                        const scheme = event.target.value as 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash'
+                        setOID4VPClientIDScheme(scheme)
+                        if (scheme === 'x509_hash') {
+                          setOID4VPQueryMode('dcql')
+                        }
+                      }}
                       className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
                     >
                       <option value="redirect_uri">redirect_uri</option>
@@ -1815,8 +1872,17 @@ export function LookingGlass() {
                     className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                   />
                   <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
-                    <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS. <code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS name via X.509 certificate SAN. <code className="text-violet-300">x509_hash</code> selects the HAIP signed-request profile and binds the verifier to the request certificate hash. <code className="text-violet-300">POST</code> request_uri_method (OpenID4VP 1.0 Section 5.10) has the wallet fetch the request object with an HTTP POST carrying its own <code className="text-violet-300">wallet_nonce</code>, instead of a GET.
+                    <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS. <code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS name via X.509 certificate SAN. <code className="text-violet-300">POST</code> request_uri_method (OpenID4VP 1.0 Section 5.10) has the wallet fetch the request object with an HTTP POST carrying its own <code className="text-violet-300">wallet_nonce</code>, instead of a GET.
                   </p>
+                  {oid4vpClientIDScheme === 'x509_hash' && (
+                    <ProtocolNotice
+                      tone="warning"
+                      title={flowId === 'oid4vp-direct-post' ? 'HAIP will coerce this unencrypted flow to direct_post.jwt' : 'HAIP x509_hash signed request'}
+                      specReference="HAIP 1.0; OpenID4VP 1.0"
+                    >
+                      {LOOKING_GLASS_X509_HASH_GUIDANCE}
+                    </ProtocolNotice>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 mb-3">
@@ -1834,11 +1900,12 @@ export function LookingGlass() {
                   <button
                     type="button"
                     onClick={() => setOID4VPQueryMode('scope')}
+                    disabled={oid4vpClientIDScheme === 'x509_hash'}
                     className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
                       oid4vpQueryMode === 'scope'
                         ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
                         : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                    }`}
+                    } disabled:opacity-40 disabled:hover:text-surface-300`}
                   >
                     Use scope alias
                   </button>
@@ -1852,7 +1919,7 @@ export function LookingGlass() {
                         value={oid4vpDCQLPresetId}
                         onChange={(event) => {
                           const nextPresetId = event.target.value
-                          const preset = OID4VP_DCQL_PRESETS.find((item) => item.id === nextPresetId)
+                          const preset = LOOKING_GLASS_OID4VP_DCQL_PRESETS.find((item) => item.id === nextPresetId)
                           setOID4VPDCQLPresetID(nextPresetId)
                           if (preset) {
                             setOID4VPDCQLInput(preset.query)
@@ -1860,7 +1927,7 @@ export function LookingGlass() {
                         }}
                         className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
                       >
-                        {OID4VP_DCQL_PRESETS.map((preset) => (
+                        {LOOKING_GLASS_OID4VP_DCQL_PRESETS.map((preset) => (
                           <option key={preset.id} value={preset.id}>{preset.label}</option>
                         ))}
                       </select>
@@ -1874,7 +1941,9 @@ export function LookingGlass() {
                       placeholder="Paste dcql_query JSON"
                     />
                     {!!oid4vpDCQLValidationError && (
-                      <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpDCQLValidationError}</p>
+                      <ProtocolNotice tone="error" title="DCQL is invalid — Execute is disabled">
+                        {oid4vpDCQLValidationError}
+                      </ProtocolNotice>
                     )}
                   </div>
                 )}
@@ -1889,7 +1958,9 @@ export function LookingGlass() {
                       className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
                     />
                     {!!oid4vpScopeAliasValidationError && (
-                      <p className="text-[11px] sm:text-xs text-amber-400">{oid4vpScopeAliasValidationError}</p>
+                      <ProtocolNotice tone="error" title="Scope alias is invalid — Execute is disabled">
+                        {oid4vpScopeAliasValidationError}
+                      </ProtocolNotice>
                     )}
                   </div>
                 )}
@@ -1995,6 +2066,11 @@ export function LookingGlass() {
                   <button
                     onClick={handleExecute}
                     disabled={isOID4VPFlow && !canExecuteOID4VPRequest}
+                    title={
+                      isOID4VPFlow && !canExecuteOID4VPRequest
+                        ? (oid4vpDCQLValidationError || oid4vpScopeAliasValidationError || 'OID4VP request configuration is invalid.')
+                        : undefined
+                    }
                     className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
                       isOID4VPFlow && !canExecuteOID4VPRequest
                         ? 'bg-surface-800/70 border-white/10 text-surface-500 cursor-not-allowed'
@@ -2134,13 +2210,14 @@ export function LookingGlass() {
                 )}
               </details>
             )}
-            {selectedProtocol?.id === 'oid4vp' && (oid4vpWalletSubmitMessage || oid4vpWalletSubmitError) && (
-              <div className={`mb-3 p-3 rounded-lg border text-xs ${
-                oid4vpWalletSubmitError
-                  ? 'border-red-500/30 bg-red-500/5 text-red-300'
-                  : 'border-green-500/30 bg-green-500/5 text-green-300'
-              }`}>
-                {oid4vpWalletSubmitError || oid4vpWalletSubmitMessage}
+            {selectedProtocol?.id === 'oid4vp' && oid4vpWalletSubmitError && (
+              <div className="mb-3">
+                <ProtocolNotice tone="error" protocolError={oid4vpWalletSubmitError} />
+              </div>
+            )}
+            {selectedProtocol?.id === 'oid4vp' && oid4vpWalletSubmitMessage && !oid4vpWalletSubmitError && (
+              <div className="mb-3 p-3 rounded-lg border border-green-500/30 bg-green-500/5 text-xs text-green-300">
+                {oid4vpWalletSubmitMessage}
               </div>
             )}
             <RealFlowPanel
@@ -2166,6 +2243,7 @@ export function LookingGlass() {
             requestID={oid4vpRequestID}
             responseMode={oid4vpResponseMode}
             trustMode={oid4vpTrustMode}
+            clientIDScheme={oid4vpClientIDScheme}
             requestURI={oid4vpRequestURI}
             didWebAllowedHosts={oid4vpDidWebAllowedHosts}
             walletHandoffPayload={oid4vpWalletHandoffPayload}

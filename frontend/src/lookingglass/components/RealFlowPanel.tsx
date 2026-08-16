@@ -23,6 +23,7 @@ import type { WireCapturedExchange } from '../types'
 import { TLSInspector } from './inspectors/TLSInspector'
 import { VCInspector } from './inspectors/VCInspector'
 import { StepCards } from './StepCards'
+import { ProtocolNotice } from './shared'
 
 // ============================================================================
 // Main Panel Component
@@ -122,13 +123,7 @@ export function RealFlowPanel({
 
   if (error) {
     return (
-      <div className="p-4 sm:p-6 rounded-xl bg-red-500/5 border border-red-500/20">
-        <div className="flex items-center gap-3 mb-3">
-          <AlertTriangle className="w-5 h-5 sm:w-6 sm:h-6 text-red-400 flex-shrink-0" />
-          <h3 className="font-medium text-red-400">Flow Not Supported</h3>
-        </div>
-        <p className="text-red-300 text-sm">{error}</p>
-      </div>
+      <ProtocolNotice tone="error" title="Flow not supported" protocolError={error} />
     )
   }
 
@@ -177,6 +172,10 @@ export function RealFlowPanel({
           )}
         </div>
       </div>
+
+      {state?.status === 'error' && state.error?.description && (
+        <ProtocolNotice tone="error" protocolError={state.error.description} />
+      )}
 
       {/* Requirements Warning */}
       {requirements.requiresClientSecret && (

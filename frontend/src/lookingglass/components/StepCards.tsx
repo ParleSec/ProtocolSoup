@@ -2,13 +2,13 @@ import { motion } from 'framer-motion'
 import { useState, useMemo, type ElementType } from 'react'
 import {
   CheckCircle, XCircle, Clock, Send, ArrowDownLeft, Key, Shield,
-  AlertTriangle, Info, Lock, ChevronDown, ChevronRight, Book,
+  Info, Lock, ChevronDown, ChevronRight, Book,
   User, Fingerprint, Zap, Radio, Code
 } from 'lucide-react'
 import type { FlowEvent, CapturedExchange, DecodedToken, FlowExecutorState } from '../flows'
 import type { WireCapturedExchange } from '../types'
 import { TLSInspector } from './inspectors/TLSInspector'
-import { CopyButton } from './shared'
+import { CopyButton, ProtocolNotice } from './shared'
 
 // ============================================================================
 // Props & Types
@@ -864,23 +864,24 @@ function AnnotationRow({ event }: { event: FlowEvent }) {
 }
 
 function ErrorBlock({ event }: { event: FlowEvent }) {
-  const hasData = event.data && Object.keys(event.data).filter(k => k !== 'exchangeId').length > 0
+  const extraData = event.data
+    ? Object.fromEntries(
+        Object.entries(event.data).filter(([key]) => key !== 'exchangeId' && key !== 'guidance' && key !== 'protocolError'),
+      )
+    : {}
+  const hasData = Object.keys(extraData).length > 0
 
   return (
-    <div className="rounded-lg bg-red-500/5 border border-red-500/20 px-3 py-2 space-y-1">
-      <div className="flex items-center gap-2">
-        <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-        <span className="text-xs font-medium text-red-400">{event.title}</span>
-        {event.rfcReference && (
-          <span className="px-1 py-0.5 rounded text-[10px] bg-red-500/10 text-red-400 font-mono">{event.rfcReference}</span>
-        )}
-      </div>
-      {event.description && (
-        <p className="text-[11px] text-red-300">{event.description}</p>
-      )}
+    <div className="space-y-2">
+      <ProtocolNotice
+        tone="error"
+        title={event.title}
+        specReference={event.rfcReference}
+        protocolError={event.description}
+      />
       {hasData && (
         <pre className="p-1.5 rounded bg-red-950/30 text-[10px] font-mono text-red-300/80 overflow-x-auto max-h-24 overflow-y-auto">
-          {JSON.stringify(filterEventData(event.data!), null, 2)}
+          {JSON.stringify(extraData, null, 2)}
         </pre>
       )}
     </div>
