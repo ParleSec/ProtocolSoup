@@ -155,7 +155,7 @@ services:
 - **`response_uri ... does not match trusted verifier callback`:** request object callback does not match `WALLET_TARGET_BASE_URL`.
 - **`credential_jwt sub does not match wallet_subject`:** provided credential is bound to a different holder.
 - **`wallet does not have a credential that satisfies the presentation request`:** ensure the selected OID4VCI credential profile issues a format requested by the OID4VP DCQL preset, or provide a matching `credential_jwt`.
-- **`credential configuration ... requires haip attestation material`:** this is the HAIP *issuance* gate on `POST /api/import` (HTTP 400). Set both `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` (with `x5c`), or choose a non-HAIP configuration. OID4VP `/submit` does not require those issuance configurations: without attestation material it issues the educational equivalent of the same format (`MobileDrivingLicenceMsoMdocHAIP` → `MobileDrivingLicenceMsoMdoc`).
+- **`credential configuration ... requires haip attestation material`:** this is the HAIP *issuance* gate on `POST /api/import` (HTTP 400). The hosted wallet is configured with `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` (with `x5c`). A self-hosted wallet without those JWKs must set them or choose a non-HAIP configuration. OID4VP `/submit` can still present after issuing a HAIP credential when attestation is present; without attestation material it issues the educational equivalent of the same format (`MobileDrivingLicenceMsoMdocHAIP` → `MobileDrivingLicenceMsoMdoc`).
 - **Upstream timeout/failure:** check `WALLET_HTTP_TIMEOUT` and VC target health.
 
 ## Versioning And Tags

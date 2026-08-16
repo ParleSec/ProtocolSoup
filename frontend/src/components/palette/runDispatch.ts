@@ -7,7 +7,9 @@
  * The Looking Glass deep-link contract starts with `?protocol=X&flow=Y`.
  * Flow-specific selectors may add optional parameters; Client Credentials
  * uses `client_auth` and `token_mode` so shared demonstrations reproduce
- * both independent choices. The
+ * both independent choices. OID4VCI and OID4VP use `credential_format` and
+ * `haip` so shared demonstrations reproduce the credential and HAIP
+ * selectors. The
  * backend's runURLFor (backend/internal/palette/rank.go) emits exactly
  * this shape on PaletteResult.run_url. Both the palette handoff and the
  * `/looking-glass` page parse it through `parseFlowDeepLink` below so the
@@ -23,6 +25,10 @@ export interface FlowDeepLink {
   clientAuth?: 'client_secret_basic' | 'private_key_jwt'
   /** Optional Client Credentials access-token protection selection. */
   accessTokenMode?: 'bearer' | 'dpop'
+  /** Optional OID4VCI / OID4VP credential format selection. */
+  credentialFormat?: 'mso_mdoc' | 'dc+sd-jwt'
+  /** Optional HAIP selector: issuance on OID4VCI, issuance plus x509_hash presentation on OID4VP. */
+  haip?: boolean
 }
 
 export interface FlowRunHandoff extends FlowDeepLink {
@@ -53,13 +59,19 @@ export function parseFlowDeepLink(params: ReadableSearchParams): FlowDeepLink | 
   }
   const clientAuthValue = (params.get('client_auth') ?? '').trim()
   const tokenModeValue = (params.get('token_mode') ?? '').trim()
+  const credentialFormatValue = (params.get('credential_format') ?? '').trim()
+  const haipValue = (params.get('haip') ?? '').trim().toLowerCase()
   const clientAuth = clientAuthValue === 'client_secret_basic' || clientAuthValue === 'private_key_jwt'
     ? clientAuthValue
     : undefined
   const accessTokenMode = tokenModeValue === 'bearer' || tokenModeValue === 'dpop'
     ? tokenModeValue
     : undefined
-  return { protocolId, flowId, clientAuth, accessTokenMode }
+  const credentialFormat = credentialFormatValue === 'mso_mdoc' || credentialFormatValue === 'dc+sd-jwt'
+    ? credentialFormatValue
+    : undefined
+  const haip = haipValue === '1' || haipValue === 'true' ? true : undefined
+  return { protocolId, flowId, clientAuth, accessTokenMode, credentialFormat, haip }
 }
 
 /**
@@ -100,6 +112,8 @@ export function buildLookingGlassPath({
   flowId,
   clientAuth,
   accessTokenMode,
+  credentialFormat,
+  haip,
 }: FlowDeepLink): string {
   const params = new URLSearchParams({ protocol: protocolId, flow: flowId })
   if (clientAuth) {
@@ -107,6 +121,12 @@ export function buildLookingGlassPath({
   }
   if (accessTokenMode) {
     params.set('token_mode', accessTokenMode)
+  }
+  if (credentialFormat) {
+    params.set('credential_format', credentialFormat)
+  }
+  if (haip) {
+    params.set('haip', '1')
   }
   return `/looking-glass?${params.toString()}`
 }

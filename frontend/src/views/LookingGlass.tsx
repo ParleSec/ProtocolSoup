@@ -30,7 +30,7 @@ import {
 } from '../lookingglass'
 
 import { TokenInspector } from '../lookingglass/components/inspectors/TokenInspector'
-import { StatusBadge as SharedStatusBadge, ProtocolNotice, type StatusBadgeVariant } from '../lookingglass/components/shared'
+import { StatusBadge as SharedStatusBadge, ProtocolNotice, SegmentedChoice, type StatusBadgeVariant } from '../lookingglass/components/shared'
 import { FlowButton, TokenButton } from '../lookingglass/components/ActionButtons'
 import { OID4VPWalletModal } from '../lookingglass/components/OID4VPWalletModal'
 import {
@@ -48,7 +48,7 @@ import {
 } from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
-import { describeWalletAPIError, walletAPIURL, LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE, lookingGlassX509HashGuidance } from '../lookingglass/wallet-client'
+import { describeWalletAPIError, walletAPIURL, LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE, LOOKING_GLASS_X509_HASH_COERCION_GUIDANCE } from '../lookingglass/wallet-client'
 
 const OID4VP_WALLET_SUBMIT_URL = walletAPIURL('/submit')
 const SAFE_QR_DATA_URL_PREFIX = 'data:image/png;base64,'
@@ -62,15 +62,16 @@ const OID4VCI_CREDENTIAL_PROFILES = [
   { id: 'MobileDrivingLicenceMsoMdocHAIP', format: 'mso_mdoc', label: 'mso_mdoc (mDL, HAIP key-attested)', haip: true },
   { id: 'UniversityDegreeCredentialSDJWTHAIP', format: 'dc+sd-jwt', label: 'dc+sd-jwt (HAIP key-attested)', haip: true },
 ] as const
+type OID4VCICredentialFormat = (typeof OID4VCI_CREDENTIAL_PROFILES)[number]['format']
+type OID4VPClientIDScheme = 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash'
+
+function oid4vciProfileFor(format: OID4VCICredentialFormat, haip: boolean) {
+  return OID4VCI_CREDENTIAL_PROFILES.find((profile) => profile.format === format && profile.haip === haip)
+    || OID4VCI_CREDENTIAL_PROFILES[0]
+}
 const LOOKING_GLASS_ISSUABLE_FORMATS = new Set<string>(
   OID4VCI_CREDENTIAL_PROFILES.map((profile) => profile.format),
 )
-function oid4vpIssuanceProfiles() {
-  // HAIP 1.0 Section 5 presentation does not require HAIP 1.0 Sections 4.4.1 /
-  // 4.5.1 wallet or key attestation. Auto-issue the educational configuration
-  // of the matching format so OID4VP x509_hash runs without the issuance gate.
-  return OID4VCI_CREDENTIAL_PROFILES.filter((profile) => !profile.haip)
-}
 const LOOKING_GLASS_OID4VP_DCQL_PRESETS = OID4VP_DCQL_PRESETS.filter((preset) => {
   try {
     const formats = getOID4VPDCQLCredentialFormats(preset.query)
@@ -79,6 +80,16 @@ const LOOKING_GLASS_OID4VP_DCQL_PRESETS = OID4VP_DCQL_PRESETS.filter((preset) =>
     return false
   }
 })
+
+function oid4vpDCQLPresetForFormat(format: OID4VCICredentialFormat) {
+  return LOOKING_GLASS_OID4VP_DCQL_PRESETS.find((preset) => {
+    try {
+      return getOID4VPDCQLCredentialFormats(preset.query).includes(format)
+    } catch {
+      return false
+    }
+  })
+}
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
   executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
@@ -148,7 +159,8 @@ export function LookingGlass() {
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
-  const [oid4vciCredentialConfigurationID, setOID4VCICredentialConfigurationID] = useState('MobileDrivingLicenceMsoMdoc')
+  const [oid4vciCredentialFormat, setOID4VCICredentialFormat] = useState<OID4VCICredentialFormat>('mso_mdoc')
+  const [oid4vciHaip, setOID4VCIHaip] = useState(false)
   const [oid4vciWalletOfferEndpoint, setOID4VCIWalletOfferEndpoint] = useState('')
   const [wireSessionId, setWireSessionId] = useState<string | null>(null)
   const [wireSessionToken, setWireSessionToken] = useState<string | null>(null)
@@ -170,14 +182,14 @@ export function LookingGlass() {
     OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
   )
   const [oid4vpScopeAliasInput, setOID4VPScopeAliasInput] = useState('')
-  const [oid4vpClientIDScheme, setOID4VPClientIDScheme] = useState<'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash'>('redirect_uri')
+  const [oid4vpClientIDScheme, setOID4VPClientIDScheme] = useState<OID4VPClientIDScheme>('redirect_uri')
   const [oid4vpClientIDInput, setOID4VPClientIDInput] = useState('')
   const [oid4vpRequestURIMethod, setOID4VPRequestURIMethod] = useState<'get' | 'post'>('get')
   const [oid4vpWalletMode, setOID4VPWalletMode] = useState<'one_click' | 'stepwise'>('one_click')
   const [oid4vpStepwiseVPToken, setOID4VPStepwiseVPToken] = useState('')
   const [oid4vpStepwiseLastStep, setOID4VPStepwiseLastStep] = useState('')
   const [oid4vpDisclosureClaims, setOID4VPDisclosureClaims] = useState<string[]>([])
-  const [oid4vpContractExpanded, setOID4VPContractExpanded] = useState(true)
+  const [oid4vpContractExpanded, setOID4VPContractExpanded] = useState(false)
   const [showAllQuickFlows, setShowAllQuickFlows] = useState(false)
 
   const { protocols, loading: protocolsLoading } = useProtocols()
@@ -274,17 +286,16 @@ export function LookingGlass() {
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
   const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
+  const wasOID4VCIIssuerInitiatedFlowRef = useRef(false)
 
   useEffect(() => {
-    if (!isOID4VCIIssuerInitiatedFlow) {
+    const entering = isOID4VCIIssuerInitiatedFlow && !wasOID4VCIIssuerInitiatedFlowRef.current
+    wasOID4VCIIssuerInitiatedFlowRef.current = isOID4VCIIssuerInitiatedFlow
+    if (!entering || oid4vciCredentialFormat !== 'mso_mdoc') {
       return
     }
-    setOID4VCICredentialConfigurationID((current) => (
-      current === 'MobileDrivingLicenceMsoMdoc'
-        ? 'MobileDrivingLicenceMsoMdocHAIP'
-        : current
-    ))
-  }, [isOID4VCIIssuerInitiatedFlow])
+    setOID4VCIHaip(true)
+  }, [isOID4VCIIssuerInitiatedFlow, oid4vciCredentialFormat])
 
   // Use stored token or user input for flows that need a token
   const activeToken = tokenInput || storedAccessToken || ''
@@ -345,8 +356,8 @@ export function LookingGlass() {
   // Use stored token, input, or empty
   const activeRefreshToken = refreshTokenInput || storedRefreshToken || ''
   const selectedOID4VCICredentialProfile = useMemo(
-    () => OID4VCI_CREDENTIAL_PROFILES.find((profile) => profile.id === oid4vciCredentialConfigurationID) || OID4VCI_CREDENTIAL_PROFILES[0],
-    [oid4vciCredentialConfigurationID],
+    () => oid4vciProfileFor(oid4vciCredentialFormat, oid4vciHaip),
+    [oid4vciCredentialFormat, oid4vciHaip],
   )
   const selectedOID4VPPreset = useMemo(
     () => OID4VP_DCQL_PRESETS.find((preset) => preset.id === oid4vpDCQLPresetId) || OID4VP_DCQL_PRESETS[0],
@@ -513,10 +524,9 @@ export function LookingGlass() {
       return { requestedFormats, error: null as string | null, warning: null as string | null }
     }
 
-    const presetLabel = selectedOID4VPPreset?.label || 'custom DCQL'
     const mismatchMessage = [
-      `The selected VC credential profile ${selectedOID4VPCredentialProfileLabel} issues "${selectedFormat}",`,
-      `but the OID4VP preset "${presetLabel}" requests credential format ${formatOID4VPList(requestedFormats)}.`,
+      `The selected credential ${selectedOID4VPCredentialProfileLabel} issues "${selectedFormat}",`,
+      `but the presentation query requests format ${formatOID4VPList(requestedFormats)}.`,
     ].join(' ')
 
     if (normalizedOID4VPCredentialJWTInput) {
@@ -529,7 +539,7 @@ export function LookingGlass() {
 
     return {
       requestedFormats,
-      error: `${mismatchMessage} Select a matching VC credential profile or paste a matching credential_jwt before submitting the wallet response.`,
+      error: `${mismatchMessage} Select a matching format or paste a matching credential_jwt before submitting the wallet response.`,
       warning: null as string | null,
     }
   }, [
@@ -539,48 +549,32 @@ export function LookingGlass() {
     oid4vpDCQLInput,
     selectedOID4VCICredentialProfile.format,
     selectedOID4VPCredentialProfileLabel,
-    selectedOID4VPPreset?.label,
     normalizedOID4VPCredentialJWTInput,
   ])
 
   useEffect(() => {
-    if (!isOID4VPFlow || oid4vpQueryMode !== 'dcql' || oid4vpDCQLValidationError) {
+    if (!isOID4VPFlow) {
       return
     }
-    const requestedFormats = getOID4VPDCQLCredentialFormats(oid4vpDCQLInput)
-    if (requestedFormats.length === 0) {
-      if (!selectedOID4VCICredentialProfile.haip) {
-        return
-      }
-      const educational = oid4vpIssuanceProfiles().find(
-        (profile) => profile.format === selectedOID4VCICredentialProfile.format,
-      )
-      if (educational) {
-        setOID4VCICredentialConfigurationID(educational.id)
-      }
+    const preset = oid4vpDCQLPresetForFormat(oid4vciCredentialFormat)
+    if (!preset) {
       return
     }
-    if (
-      requestedFormats.includes(selectedOID4VCICredentialProfile.format) &&
-      !selectedOID4VCICredentialProfile.haip
-    ) {
+    setOID4VPDCQLPresetID(preset.id)
+    setOID4VPDCQLInput(preset.query)
+  }, [isOID4VPFlow, oid4vciCredentialFormat])
+
+  useEffect(() => {
+    if (!isOID4VPFlow) {
       return
     }
-    const matchingProfile = oid4vpIssuanceProfiles().find((profile) =>
-      requestedFormats.includes(profile.format),
-    )
-    if (matchingProfile && matchingProfile.id !== selectedOID4VCICredentialProfile.id) {
-      setOID4VCICredentialConfigurationID(matchingProfile.id)
+    if (oid4vciHaip) {
+      setOID4VPClientIDScheme('x509_hash')
+      setOID4VPQueryMode('dcql')
+      return
     }
-  }, [
-    isOID4VPFlow,
-    oid4vpQueryMode,
-    oid4vpDCQLValidationError,
-    oid4vpDCQLInput,
-    selectedOID4VCICredentialProfile.format,
-    selectedOID4VCICredentialProfile.haip,
-    selectedOID4VCICredentialProfile.id,
-  ])
+    setOID4VPClientIDScheme((current) => (current === 'x509_hash' ? 'redirect_uri' : current))
+  }, [isOID4VPFlow, oid4vciHaip])
   const oid4vpTrustMode = useMemo(() => {
     const metadata = (oid4vpRequestObjectArtifact?.metadata || walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
     return String(metadata.trustMode || '').trim()
@@ -1057,6 +1051,10 @@ export function LookingGlass() {
     setOID4VPScopeAliasInput('')
     setOID4VPClientIDInput('')
     setOID4VPClientIDScheme('redirect_uri')
+    setOID4VPRequestURIMethod('get')
+    setOID4VCICredentialFormat('mso_mdoc')
+    setOID4VCIHaip(false)
+    setOID4VPContractExpanded(false)
     lastHandledPairRef.current = null
     clearUrlState()
   }, [resetFlow, clearWireEvents, clearUrlState])
@@ -1273,6 +1271,8 @@ export function LookingGlass() {
       pair.flowId,
       pair.clientAuth || '',
       pair.accessTokenMode || '',
+      pair.credentialFormat || '',
+      pair.haip ? '1' : '',
     ].join('\u0000')
     if (lastHandledPairRef.current === key) return
     lastHandledPairRef.current = key
@@ -1282,6 +1282,10 @@ export function LookingGlass() {
     ) {
       setClientCredentialsAuthMethod(pair.clientAuth || 'client_secret_basic')
       setClientCredentialsAccessTokenMode(pair.accessTokenMode || 'bearer')
+    }
+    if (pair.protocolId === 'oid4vci' || pair.protocolId === 'oid4vp') {
+      setOID4VCICredentialFormat(pair.credentialFormat || 'mso_mdoc')
+      setOID4VCIHaip(Boolean(pair.haip))
     }
     handleQuickSelect(pair.protocolId, pair.flowId)
 
@@ -1297,6 +1301,8 @@ export function LookingGlass() {
       flowId: selectedFlow.id,
       clientAuth: isClientCredentialsFlow ? clientCredentialsAuthMethod : undefined,
       accessTokenMode: isClientCredentialsFlow ? clientCredentialsAccessTokenMode : undefined,
+      credentialFormat: showVCTab ? oid4vciCredentialFormat : undefined,
+      haip: showVCTab ? oid4vciHaip : undefined,
     })
     const url = `${window.location.origin}${deepLink}`
     navigator.clipboard.writeText(url).then(() => {
@@ -1309,6 +1315,9 @@ export function LookingGlass() {
     isClientCredentialsFlow,
     clientCredentialsAuthMethod,
     clientCredentialsAccessTokenMode,
+    showVCTab,
+    oid4vciCredentialFormat,
+    oid4vciHaip,
   ])
 
   const hasCapturedTokens = realExecutor.state?.decodedTokens && realExecutor.state.decodedTokens.length > 0
@@ -1502,32 +1511,15 @@ export function LookingGlass() {
             <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
               Choose how the confidential client authenticates to the token endpoint.
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleClientCredentialsAuthMethodChange('client_secret_basic')}
-                aria-pressed={clientCredentialsAuthMethod === 'client_secret_basic'}
-                className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
-                  clientCredentialsAuthMethod === 'client_secret_basic'
-                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
-                    : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
-                }`}
-              >
-                client_secret_basic
-              </button>
-              <button
-                type="button"
-                onClick={() => handleClientCredentialsAuthMethodChange('private_key_jwt')}
-                aria-pressed={clientCredentialsAuthMethod === 'private_key_jwt'}
-                className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
-                  clientCredentialsAuthMethod === 'private_key_jwt'
-                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
-                    : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
-                }`}
-              >
-                private_key_jwt
-              </button>
-            </div>
+            <SegmentedChoice
+              aria-label="Client authentication"
+              value={clientCredentialsAuthMethod}
+              onChange={handleClientCredentialsAuthMethodChange}
+              options={[
+                { id: 'client_secret_basic', label: 'client_secret_basic' },
+                { id: 'private_key_jwt', label: 'private_key_jwt' },
+              ]}
+            />
             <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
               {clientCredentialsAuthMethod === 'private_key_jwt'
                 ? 'A non-extractable WebCrypto private key signs the assertion in this browser. An owned session registration assigns the real client ID after its public JWK is accepted.'
@@ -1542,32 +1534,15 @@ export function LookingGlass() {
               <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
                 Choose whether the issued access token is a regular Bearer token or sender-constrained with DPoP.
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleClientCredentialsAccessTokenModeChange('bearer')}
-                  aria-pressed={clientCredentialsAccessTokenMode === 'bearer'}
-                  className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
-                    clientCredentialsAccessTokenMode === 'bearer'
-                      ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-300'
-                      : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
-                  }`}
-                >
-                  Bearer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleClientCredentialsAccessTokenModeChange('dpop')}
-                  aria-pressed={clientCredentialsAccessTokenMode === 'dpop'}
-                  className={`rounded-lg border px-3 py-2 text-xs font-mono transition-colors ${
-                    clientCredentialsAccessTokenMode === 'dpop'
-                      ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
-                      : 'border-white/10 bg-surface-900 text-surface-400 hover:text-white'
-                  }`}
-                >
-                  DPoP
-                </button>
-              </div>
+              <SegmentedChoice
+                aria-label="Access-token protection"
+                value={clientCredentialsAccessTokenMode}
+                onChange={handleClientCredentialsAccessTokenModeChange}
+                options={[
+                  { id: 'bearer', label: 'Bearer' },
+                  { id: 'dpop', label: 'DPoP', accent: 'amber' },
+                ]}
+              />
               <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
                 {clientCredentialsAccessTokenMode === 'dpop'
                   ? 'A separate non-extractable ES256 key signs a fresh RFC 9449 proof. The resulting token carries cnf.jkt and is returned with token_type=DPoP.'
@@ -1745,36 +1720,77 @@ export function LookingGlass() {
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
-            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
           >
             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
               <Fingerprint className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400" />
-              <span className="text-xs sm:text-sm font-medium text-surface-300">VC credential profile</span>
+              <span className="text-xs sm:text-sm font-medium text-surface-300">Credential</span>
             </div>
             <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
               {isOID4VPFlow
-                ? 'Select the credential format used to auto-issue before presentation. HAIP key-attested issuance profiles are not used here: HAIP presentation is x509_hash + encrypted direct_post.jwt, not wallet attestation.'
-                : 'Select the credential profile used for issuance and wallet presentation.'}
+                ? 'Choose the credential to auto-issue, then whether HAIP presentation is on.'
+                : 'Choose the credential format, then whether HAIP key-attested issuance is on.'}
             </p>
-            <select
-              value={selectedOID4VCICredentialProfile.id}
-              onChange={(event) => setOID4VCICredentialConfigurationID(event.target.value)}
-              className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
-            >
-              {(isOID4VPFlow ? oid4vpIssuanceProfiles() : OID4VCI_CREDENTIAL_PROFILES).map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.label} ({profile.id})
-                </option>
-              ))}
-            </select>
-            {isOID4VCIFlow && selectedOID4VCICredentialProfile.haip && (
+            <SegmentedChoice
+              aria-label="Credential format"
+              value={oid4vciCredentialFormat}
+              onChange={setOID4VCICredentialFormat}
+              options={[
+                { id: 'mso_mdoc', label: 'mso_mdoc' },
+                { id: 'dc+sd-jwt', label: 'dc+sd-jwt' },
+              ]}
+            />
+            <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+              {oid4vciCredentialFormat === 'mso_mdoc'
+                ? 'ISO/IEC 18013-5 mobile driving licence (mDL).'
+                : 'University Degree SD-JWT VC.'}
+            </p>
+
+            <div className="mt-4 pt-4 border-t border-white/10">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+                <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />
+                <span className="text-xs sm:text-sm font-medium text-surface-300">HAIP</span>
+              </div>
+              <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+                {isOID4VPFlow
+                  ? 'HAIP presentation uses x509_hash, DCQL, and encrypted direct_post.jwt, and issues the key-attested credential of the selected format.'
+                  : 'HAIP issuance uses wallet and key attestation on the selected format.'}
+              </p>
+              <SegmentedChoice
+                aria-label="HAIP"
+                value={oid4vciHaip ? 'on' : 'off'}
+                onChange={(value) => setOID4VCIHaip(value === 'on')}
+                options={[
+                  { id: 'off', label: 'educational' },
+                  { id: 'on', label: 'HAIP', accent: 'amber' },
+                ]}
+              />
+              <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+                {oid4vciHaip
+                  ? isOID4VPFlow
+                    ? `Issues ${selectedOID4VCICredentialProfile.id}, then presents with x509_hash (HAIP 1.0 Section 5).`
+                    : `Issues ${selectedOID4VCICredentialProfile.id} with client and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1).`
+                  : `Issues ${selectedOID4VCICredentialProfile.id} without HAIP attestation.`}
+              </p>
+            </div>
+            {isOID4VCIFlow && oid4vciHaip && (
               <div className="mt-2">
                 <ProtocolNotice
-                  tone="warning"
-                  title="HAIP issuance will fail without wallet attestation"
+                  tone="info"
+                  title="HAIP issuance uses wallet attestation"
                   specReference="HAIP 1.0; OID4VCI 1.0 Appendix D"
                 >
                   {LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE}
+                </ProtocolNotice>
+              </div>
+            )}
+            {isOID4VPFlow && oid4vciHaip && flowId === 'oid4vp-direct-post' && (
+              <div className="mt-2">
+                <ProtocolNotice
+                  tone="info"
+                  title="HAIP will coerce this unencrypted flow to direct_post.jwt"
+                  specReference="HAIP 1.0 Section 5.1"
+                >
+                  {LOOKING_GLASS_X509_HASH_COERCION_GUIDANCE}
                 </ProtocolNotice>
               </div>
             )}
@@ -1839,127 +1855,63 @@ export function LookingGlass() {
             className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
           >
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <Workflow className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-400" />
-                <span className="text-xs sm:text-sm font-medium text-surface-300">OID4VP request contract</span>
-                <span className="text-[10px] sm:text-xs text-surface-500">
-                  {oid4vpQueryMode === 'dcql' ? 'DCQL mode' : 'Scope alias mode'}
-                </span>
+              <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                <Workflow className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-violet-400 flex-shrink-0" />
+                <span className="text-xs sm:text-sm font-medium text-surface-300">Presentation request</span>
               </div>
               <button
                 type="button"
                 onClick={() => setOID4VPContractExpanded((previous) => !previous)}
-                className="px-2 py-1 rounded border border-white/10 bg-surface-900 text-[10px] sm:text-xs text-surface-300 hover:text-white transition-colors"
+                className="px-2 py-1 rounded border border-white/10 bg-surface-900 text-[10px] sm:text-xs text-surface-300 hover:text-white transition-colors flex-shrink-0"
               >
-                {oid4vpContractExpanded ? 'Collapse' : 'Expand'}
+                {oid4vpContractExpanded ? 'Hide advanced' : 'Advanced'}
               </button>
             </div>
+            <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed font-mono">
+              {[
+                oid4vciCredentialFormat,
+                oid4vciHaip ? 'HAIP' : 'educational',
+                oid4vpQueryMode === 'dcql' ? 'DCQL' : 'scope',
+                oid4vpClientIDScheme,
+                oid4vpRequestURIMethod === 'post' ? 'request_uri POST' : null,
+              ].filter(Boolean).join(' · ')}
+            </p>
+            {(!!oid4vpDCQLValidationError || !!oid4vpScopeAliasValidationError) && (
+              <div className="mt-2">
+                <ProtocolNotice
+                  tone="error"
+                  title={oid4vpDCQLValidationError ? 'DCQL is invalid — Execute is disabled' : 'Scope alias is invalid — Execute is disabled'}
+                >
+                  {oid4vpDCQLValidationError || oid4vpScopeAliasValidationError}
+                </ProtocolNotice>
+              </div>
+            )}
             {oid4vpContractExpanded && (
-              <>
-                <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-                  Configure either <code className="text-violet-300">dcql_query</code> or a scope alias (mutually exclusive per OpenID4VP).
+              <div className="mt-3 space-y-4">
+                <p className="text-[10px] sm:text-xs text-surface-400 leading-relaxed">
+                  DCQL and scope alias are mutually exclusive per OpenID4VP. Format already selects the matching DCQL preset; edit the JSON only to customize the query.
                 </p>
 
-                <div className="mb-3 space-y-2 rounded-lg border border-white/10 bg-surface-950/60 p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="text-[11px] sm:text-xs text-surface-400">Verifier trust profile</label>
-                    <select
-                      value={oid4vpClientIDScheme}
-                      onChange={(event) => {
-                        const scheme = event.target.value as 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash'
-                        setOID4VPClientIDScheme(scheme)
-                        if (scheme === 'x509_hash') {
-                          setOID4VPQueryMode('dcql')
-                        }
-                      }}
-                      className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
-                    >
-                      <option value="redirect_uri">redirect_uri</option>
-                      <option value="verifier_attestation">verifier_attestation</option>
-                      <option value="x509_san_dns">x509_san_dns</option>
-                      <option value="x509_hash">x509_hash (HAIP)</option>
-                    </select>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="text-[11px] sm:text-xs text-surface-400">Request URI method</label>
-                    <select
-                      value={oid4vpRequestURIMethod}
-                      onChange={(event) => setOID4VPRequestURIMethod(event.target.value as 'get' | 'post')}
-                      className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
-                    >
-                      <option value="get">GET (default)</option>
-                      <option value="post">POST</option>
-                    </select>
-                  </div>
-                  <input
-                    type="text"
-                    value={oid4vpClientIDInput}
-                    onChange={(event) => setOID4VPClientIDInput(event.target.value)}
-                    placeholder="Optional client_id override. Leave blank to use the verifier default for the selected scheme."
-                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                <div className="space-y-2">
+                  <span className="text-[11px] sm:text-xs text-surface-400">Query</span>
+                  <SegmentedChoice
+                    aria-label="Presentation query"
+                    value={oid4vpQueryMode}
+                    onChange={setOID4VPQueryMode}
+                    options={[
+                      { id: 'dcql', label: 'DCQL', accent: 'violet' },
+                      { id: 'scope', label: 'scope alias', accent: 'violet', disabled: oid4vciHaip },
+                    ]}
                   />
-                  <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
-                    <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS. <code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS name via X.509 certificate SAN. <code className="text-violet-300">POST</code> request_uri_method (OpenID4VP 1.0 Section 5.10) has the wallet fetch the request object with an HTTP POST carrying its own <code className="text-violet-300">wallet_nonce</code>, instead of a GET.
-                  </p>
-                  {oid4vpClientIDScheme === 'x509_hash' && (
-                    <ProtocolNotice
-                      tone="info"
-                      title={flowId === 'oid4vp-direct-post' ? 'HAIP will coerce this unencrypted flow to direct_post.jwt' : 'HAIP x509_hash signed request'}
-                      specReference="HAIP 1.0 Section 5; OpenID4VP 1.0 Section 5.9.3"
-                    >
-                      {lookingGlassX509HashGuidance(flowId === 'oid4vp-direct-post')}
-                    </ProtocolNotice>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setOID4VPQueryMode('dcql')}
-                    className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
-                      oid4vpQueryMode === 'dcql'
-                        ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
-                        : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                    }`}
-                  >
-                    Use DCQL
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOID4VPQueryMode('scope')}
-                    disabled={oid4vpClientIDScheme === 'x509_hash'}
-                    className={`px-2.5 py-2 rounded-lg border text-xs transition-colors ${
-                      oid4vpQueryMode === 'scope'
-                        ? 'border-violet-500/40 bg-violet-500/15 text-violet-200'
-                        : 'border-white/10 bg-surface-900 text-surface-300 hover:text-white'
-                    } disabled:opacity-40 disabled:hover:text-surface-300`}
-                  >
-                    Use scope alias
-                  </button>
                 </div>
 
                 {oid4vpQueryMode === 'dcql' && (
                   <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label className="text-[11px] sm:text-xs text-surface-400">Preset</label>
-                      <select
-                        value={oid4vpDCQLPresetId}
-                        onChange={(event) => {
-                          const nextPresetId = event.target.value
-                          const preset = LOOKING_GLASS_OID4VP_DCQL_PRESETS.find((item) => item.id === nextPresetId)
-                          setOID4VPDCQLPresetID(nextPresetId)
-                          if (preset) {
-                            setOID4VPDCQLInput(preset.query)
-                          }
-                        }}
-                        className="px-2 py-1.5 rounded bg-surface-900 border border-white/10 text-xs text-surface-200 focus:outline-none focus:border-violet-500/40"
-                      >
-                        {LOOKING_GLASS_OID4VP_DCQL_PRESETS.map((preset) => (
-                          <option key={preset.id} value={preset.id}>{preset.label}</option>
-                        ))}
-                      </select>
-                      <span className="text-[10px] sm:text-xs text-cyan-300">{selectedOID4VPPreset?.description}</span>
-                    </div>
+                    <p className="text-[10px] sm:text-xs text-cyan-300">
+                      {oid4vpDCQLInput === selectedOID4VPPreset?.query
+                        ? selectedOID4VPPreset?.description
+                        : 'Custom DCQL query. Changing format restores the matching preset.'}
+                    </p>
                     <textarea
                       value={oid4vpDCQLInput}
                       onChange={(event) => setOID4VPDCQLInput(event.target.value)}
@@ -1967,31 +1919,65 @@ export function LookingGlass() {
                       className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all resize-y"
                       placeholder="Paste dcql_query JSON"
                     />
-                    {!!oid4vpDCQLValidationError && (
-                      <ProtocolNotice tone="error" title="DCQL is invalid — Execute is disabled">
-                        {oid4vpDCQLValidationError}
-                      </ProtocolNotice>
-                    )}
                   </div>
                 )}
 
                 {oid4vpQueryMode === 'scope' && (
+                  <input
+                    type="text"
+                    value={oid4vpScopeAliasInput}
+                    onChange={(event) => setOID4VPScopeAliasInput(event.target.value)}
+                    placeholder="e.g. openid profile degree_verification"
+                    className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                  />
+                )}
+
+                {!oid4vciHaip && (
                   <div className="space-y-2">
-                    <input
-                      type="text"
-                      value={oid4vpScopeAliasInput}
-                      onChange={(event) => setOID4VPScopeAliasInput(event.target.value)}
-                      placeholder="e.g. openid profile degree_verification"
-                      className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                    <span className="text-[11px] sm:text-xs text-surface-400">Verifier trust</span>
+                    <SegmentedChoice
+                      aria-label="Verifier trust"
+                      columns={3}
+                      value={oid4vpClientIDScheme === 'x509_hash' ? 'redirect_uri' : oid4vpClientIDScheme}
+                      onChange={(scheme) => setOID4VPClientIDScheme(scheme)}
+                      options={[
+                        { id: 'redirect_uri', label: 'redirect_uri', accent: 'violet' },
+                        { id: 'verifier_attestation', label: 'verifier_attestation', accent: 'violet' },
+                        { id: 'x509_san_dns', label: 'x509_san_dns', accent: 'violet' },
+                      ]}
                     />
-                    {!!oid4vpScopeAliasValidationError && (
-                      <ProtocolNotice tone="error" title="Scope alias is invalid — Execute is disabled">
-                        {oid4vpScopeAliasValidationError}
-                      </ProtocolNotice>
-                    )}
+                    <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+                      <code className="text-violet-300">verifier_attestation</code> uses a live attestation issuer and JWKS.
+                      {' '}<code className="text-violet-300">x509_san_dns</code> binds verifier identity to a DNS SAN.
+                      HAIP presentation is the HAIP selector above, not a separate trust dropdown.
+                    </p>
                   </div>
                 )}
-              </>
+
+                <div className="space-y-2">
+                  <span className="text-[11px] sm:text-xs text-surface-400">Request URI method</span>
+                  <SegmentedChoice
+                    aria-label="Request URI method"
+                    value={oid4vpRequestURIMethod}
+                    onChange={setOID4VPRequestURIMethod}
+                    options={[
+                      { id: 'get', label: 'GET', accent: 'violet' },
+                      { id: 'post', label: 'POST', accent: 'violet' },
+                    ]}
+                  />
+                  <p className="text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+                    POST <code className="text-violet-300">request_uri_method</code> (OpenID4VP 1.0 Section 5.10) has the wallet fetch the request object with an HTTP POST carrying <code className="text-violet-300">wallet_nonce</code>.
+                  </p>
+                </div>
+
+                <input
+                  type="text"
+                  value={oid4vpClientIDInput}
+                  onChange={(event) => setOID4VPClientIDInput(event.target.value)}
+                  placeholder="Optional client_id override. Leave blank to use the verifier default."
+                  className="w-full px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-[11px] sm:text-xs font-mono text-white placeholder-surface-600 focus:outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 transition-all"
+                />
+              </div>
             )}
           </motion.div>
         )}
