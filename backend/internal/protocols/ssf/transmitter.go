@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +22,7 @@ type Transmitter struct {
 	encoder    *SETEncoder
 	baseURL    string
 	httpClient *http.Client
+	glass      *glassBox
 
 	// Event broadcast channels
 	eventListeners []chan<- TransmitterEvent
@@ -80,8 +82,14 @@ func (t *Transmitter) RemoveEventListener(ch chan<- TransmitterEvent) {
 	}
 }
 
-// broadcast sends an event to all listeners
+// SetGlass attaches the Looking Glass bus used for stream-lab visibility.
+func (t *Transmitter) SetGlass(g *glassBox) {
+	t.glass = g
+}
+
+// broadcast sends an event to Looking Glass and any remaining channel listeners.
 func (t *Transmitter) broadcast(event TransmitterEvent) {
+	t.glass.emitTransmitter(event)
 	t.listenerMu.RLock()
 	defer t.listenerMu.RUnlock()
 	for _, listener := range t.eventListeners {
@@ -163,6 +171,21 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		return nil, fmt.Errorf("failed to encode SET: %w", err)
 	}
 
+	signedClaims := claimsFromCompactSET(setToken)
+	glassData := map[string]interface{}{
+		"token":          setToken,
+		"claims":         signedClaims,
+		"iss":            signedClaims["iss"],
+		"iat":            signedClaims["iat"],
+		"jti":            signedClaims["jti"],
+		"aud":            signedClaims["aud"],
+		"sub_id":         signedClaims["sub_id"],
+		"events":         signedClaims["events"],
+		"event_uris":     []string{event.EventType},
+		"session_in_set": false,
+		"algorithm":      "RS256",
+	}
+
 	// Broadcast: SET Generated
 	t.broadcast(TransmitterEvent{
 		Type:      TransmitterEventSETGenerated,
@@ -171,9 +194,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
 		SessionID: event.SessionID,
-		Data: map[string]interface{}{
-			"claims": event,
-		},
+		Data: glassData,
 	})
 
 	// Broadcast: SET Signed
@@ -184,10 +205,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
 		SessionID: event.SessionID,
-		Data: map[string]interface{}{
-			"token":     setToken,
-			"algorithm": "RS256",
-		},
+		Data:      glassData,
 	})
 
 	// Find subject ID if exists
@@ -364,15 +382,18 @@ func (t *Transmitter) attemptDelivery(ctx context.Context, stream *Stream, event
 
 	req.Header.Set("Content-Type", "application/secevent+jwt")
 	req.Header.Set("Accept", "application/json")
+	// Looking Glass already records this hop via TransmitterEventHTTPExchange
+	// (full SET body, RFC 8935). Skip CaptureMiddleware so Wire is not duplicated.
+	req.Header.Set(lookingglass.SkipCaptureHeader, "1")
 
 	// Add bearer token if configured for authenticated push delivery
 	if stream.BearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+stream.BearerToken)
 	}
 
-	// Pass session ID as a delivery header (not in the SET itself) for sandbox isolation
+	// Session id travels on the delivery header, not inside the SET (RFC 8417).
 	if event.SessionID != "" {
-		req.Header.Set("X-SSF-Session", event.SessionID)
+		req.Header.Set(lookingGlassSessionHeader, event.SessionID)
 	}
 
 	// Capture request details
@@ -445,22 +466,35 @@ func (t *Transmitter) handleDeliveryFailure(ctx context.Context, event *StoredEv
 }
 
 // GetPendingEventsForPoll returns events pending for poll delivery.
+// RFC 8936: unacknowledged SETs MUST be retransmitted — do not mark delivered
+// on first poll. maxEvents 0 is acknowledge-only (no SETs in the response).
 // Returns: sets (JTI -> SET token), sessionIDs (JTI -> session ID), moreAvailable, error.
-func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID string, maxEvents int, ack []string) (map[string]string, map[string]string, bool, error) {
-	// Acknowledge any events if provided
+func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID string, maxEvents int, ack []string, setErrs map[string]SETError) (map[string]string, map[string]string, bool, error) {
+	if len(setErrs) > 0 {
+		if err := t.storage.RecordSETErrors(ctx, setErrs); err != nil {
+			return nil, nil, false, fmt.Errorf("failed to record setErrs: %w", err)
+		}
+	}
 	if len(ack) > 0 {
 		if err := t.storage.AcknowledgeEvents(ctx, ack); err != nil {
 			return nil, nil, false, fmt.Errorf("failed to acknowledge events: %w", err)
 		}
 	}
 
-	// Get pending events
-	events, err := t.storage.GetPendingEvents(ctx, streamID, maxEvents)
+	if maxEvents == 0 {
+		return map[string]string{}, map[string]string{}, false, nil
+	}
+
+	events, err := t.storage.GetPendingEvents(ctx, streamID, maxEvents+1)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("failed to get pending events: %w", err)
 	}
 
-	// Build response
+	moreAvailable := len(events) > maxEvents
+	if moreAvailable {
+		events = events[:maxEvents]
+	}
+
 	sets := make(map[string]string)
 	sessionIDs := make(map[string]string)
 	for _, event := range events {
@@ -468,12 +502,7 @@ func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID stri
 		if event.SessionID != "" {
 			sessionIDs[event.ID] = event.SessionID
 		}
-		// Mark as delivered since receiver is polling
-		_ = t.storage.UpdateEventStatus(ctx, event.ID, EventStatusDelivered)
 	}
-
-	// Check if there are more events
-	moreAvailable := len(events) == maxEvents
 
 	return sets, sessionIDs, moreAvailable, nil
 }
@@ -481,11 +510,12 @@ func (t *Transmitter) GetPendingEventsForPoll(ctx context.Context, streamID stri
 // TriggerVerification sends a verification SET per SSF §7.
 // The state parameter is an opaque string echoed in the verification event payload,
 // allowing the caller to correlate the response.
-func (t *Transmitter) TriggerVerification(ctx context.Context, streamID, state string) (*StoredEvent, error) {
+func (t *Transmitter) TriggerVerification(ctx context.Context, streamID, state, sessionID string) (*StoredEvent, error) {
 	event := SecurityEvent{
 		EventType:      EventTypeVerification,
 		EventTimestamp: time.Now(),
 		State:          state,
+		SessionID:      sessionID, // Looking Glass routing only; never a SET claim
 		// Verification events use a minimal subject (the stream itself)
 		Subject: SubjectIdentifier{
 			Format: SubjectFormatOpaque,
@@ -507,9 +537,10 @@ func (t *Transmitter) TriggerSessionRevokedWithSession(ctx context.Context, stre
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
-		Reason:           reason,
 		InitiatingEntity: initiator,
-		ReasonAdmin:      &ReasonInfo{EN: reason},
+	}
+	if reason != "" {
+		event.ReasonAdmin = &ReasonInfo{EN: reason}
 	}
 
 	// Update subject's active sessions
@@ -537,7 +568,7 @@ func (t *Transmitter) TriggerCredentialChangeWithSession(ctx context.Context, st
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
 		CredentialType:   credentialType,
-		ChangeType:       changeType, // CAEP §3.2: REQUIRED (create | revoke | update)
+		ChangeType:       changeType, // CAEP §3.3: REQUIRED (create | revoke | update | delete)
 		InitiatingEntity: initiator,
 	}
 	return t.GenerateEvent(ctx, streamID, event)
@@ -563,20 +594,26 @@ func (t *Transmitter) TriggerDeviceComplianceChangeWithSession(ctx context.Conte
 }
 
 // TriggerCredentialCompromise triggers a credential compromise event
-func (t *Transmitter) TriggerCredentialCompromise(ctx context.Context, streamID string, subject SubjectIdentifier, reason string) (*StoredEvent, error) {
-	return t.TriggerCredentialCompromiseWithSession(ctx, streamID, "", subject, reason)
+func (t *Transmitter) TriggerCredentialCompromise(ctx context.Context, streamID string, subject SubjectIdentifier, reason, credentialType string) (*StoredEvent, error) {
+	return t.TriggerCredentialCompromiseWithSession(ctx, streamID, "", subject, reason, credentialType)
 }
 
-// TriggerCredentialCompromiseWithSession triggers a credential compromise event with session context
-func (t *Transmitter) TriggerCredentialCompromiseWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason string) (*StoredEvent, error) {
+// TriggerCredentialCompromiseWithSession triggers a credential compromise event with session context.
+// RISC §2.7: credential_type is REQUIRED and is written into the SET.
+func (t *Transmitter) TriggerCredentialCompromiseWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason, credentialType string) (*StoredEvent, error) {
+	if credentialType == "" {
+		credentialType = CredentialTypePassword
+	}
 	event := SecurityEvent{
 		EventType:        EventTypeCredentialCompromise,
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
-		Reason:           reason,
+		CredentialType:   credentialType,
 		InitiatingEntity: InitiatingEntitySystem,
-		ReasonAdmin:      &ReasonInfo{EN: reason},
+	}
+	if reason != "" {
+		event.ReasonAdmin = &ReasonInfo{EN: reason}
 	}
 	return t.GenerateEvent(ctx, streamID, event)
 }
@@ -593,9 +630,11 @@ func (t *Transmitter) TriggerAccountDisabledWithSession(ctx context.Context, str
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
-		Reason:           reason,
+		Reason:           riscAccountDisabledReason(reason),
 		InitiatingEntity: initiator,
-		ReasonAdmin:      &ReasonInfo{EN: reason},
+	}
+	if reason != "" {
+		event.ReasonAdmin = &ReasonInfo{EN: reason}
 	}
 
 	// Update subject status
@@ -718,7 +757,7 @@ func (t *Transmitter) TriggerIdentifierRecycledWithSession(ctx context.Context, 
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
-// TriggerAccountCredentialChangeRequired triggers a credential change required event (RISC §2.7)
+// TriggerAccountCredentialChangeRequired triggers a credential change required event (RISC §2.1)
 func (t *Transmitter) TriggerAccountCredentialChangeRequired(ctx context.Context, streamID string, subject SubjectIdentifier, reason, initiator string) (*StoredEvent, error) {
 	return t.TriggerAccountCredentialChangeRequiredWithSession(ctx, streamID, "", subject, reason, initiator)
 }
@@ -748,41 +787,45 @@ func (t *Transmitter) TriggerAccountCredentialChangeRequiredWithSession(ctx cont
 
 // TriggerAssuranceLevelChange triggers an assurance level change event
 func (t *Transmitter) TriggerAssuranceLevelChange(ctx context.Context, streamID string, subject SubjectIdentifier, currentLevel, previousLevel string) (*StoredEvent, error) {
-	return t.TriggerAssuranceLevelChangeWithSession(ctx, streamID, "", subject, currentLevel, previousLevel)
+	return t.TriggerAssuranceLevelChangeWithSession(ctx, streamID, "", subject, currentLevel, previousLevel, AssuranceNamespaceNIST)
 }
 
 // TriggerAssuranceLevelChangeWithSession triggers an assurance level change event with session context
-func (t *Transmitter) TriggerAssuranceLevelChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, currentLevel, previousLevel string) (*StoredEvent, error) {
+func (t *Transmitter) TriggerAssuranceLevelChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, currentLevel, previousLevel, namespace string) (*StoredEvent, error) {
+	if namespace == "" {
+		namespace = AssuranceNamespaceNIST
+	}
 	event := SecurityEvent{
 		EventType:        EventTypeAssuranceLevelChange,
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
-		CurrentLevel:     currentLevel,  // CAEP §3.3: use current_level, not current_status
-		PreviousLevel:    previousLevel, // CAEP §3.3: use previous_level, not previous_status
+		CurrentLevel:     currentLevel,  // CAEP §3.4: use current_level, not current_status
+		PreviousLevel:    previousLevel, // CAEP §3.4: use previous_level, not previous_status
+		Namespace:        namespace,     // CAEP §3.4 REQUIRED
 		InitiatingEntity: InitiatingEntitySystem,
 	}
 	return t.GenerateEvent(ctx, streamID, event)
 }
 
-// TriggerSessionsRevoked triggers a sessions revoked event (all sessions)
+// TriggerSessionsRevoked maps the lab action to CAEP session-revoked for all
+// sessions. RISC §2.11: new implementations MUST use the CAEP event.
 func (t *Transmitter) TriggerSessionsRevoked(ctx context.Context, streamID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
 	return t.TriggerSessionsRevokedWithSession(ctx, streamID, "", subject, reason, initiator)
 }
 
-// TriggerSessionsRevokedWithSession triggers a sessions revoked event with session context
 func (t *Transmitter) TriggerSessionsRevokedWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, reason string, initiator string) (*StoredEvent, error) {
 	event := SecurityEvent{
-		EventType:        EventTypeSessionsRevoked,
+		EventType:        EventTypeSessionRevoked,
 		Subject:          subject,
 		SessionID:        sessionID,
 		EventTimestamp:   time.Now(),
-		Reason:           reason,
 		InitiatingEntity: initiator,
-		ReasonAdmin:      &ReasonInfo{EN: reason},
+	}
+	if reason != "" {
+		event.ReasonAdmin = &ReasonInfo{EN: reason}
 	}
 
-	// Update subject's active sessions to 0
 	subj, err := t.storage.GetSubjectByIdentifier(ctx, streamID, subject.Format, subject.Email)
 	if err == nil && subj != nil {
 		subj.ActiveSessions = 0

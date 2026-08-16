@@ -37,11 +37,12 @@ type EventPayload struct {
 	ReasonAdmin      *ReasonInfo            `json:"reason_admin,omitempty"`
 	ReasonUser       *ReasonInfo            `json:"reason_user,omitempty"`
 	CredentialType   string                 `json:"credential_type,omitempty"`
-	ChangeType       string                 `json:"change_type,omitempty"`    // CAEP §3.2: create | revoke | update
-	CurrentStatus    string                 `json:"current_status,omitempty"` // For device compliance change (CAEP §3.4)
+	ChangeType       string                 `json:"change_type,omitempty"`    // CAEP §3.3: create | revoke | update | delete
+	CurrentStatus    string                 `json:"current_status,omitempty"` // For device compliance change (CAEP §3.5)
 	PreviousStatus   string                 `json:"previous_status,omitempty"`
-	CurrentLevel     string                 `json:"current_level,omitempty"` // For assurance level change (CAEP §3.3)
+	CurrentLevel     string                 `json:"current_level,omitempty"` // For assurance level change (CAEP §3.4)
 	PreviousLevel    string                 `json:"previous_level,omitempty"`
+	Namespace        string                 `json:"namespace,omitempty"`     // CAEP §3.4 REQUIRED
 	NewValue         string                 `json:"new-value,omitempty"`
 	OldValue         string                 `json:"old-value,omitempty"`
 	Claims           map[string]interface{} `json:"claims,omitempty"` // CAEP §3.2: changed claims
@@ -88,51 +89,56 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) 
 		subject.URI = event.Subject.URI
 	}
 
-	// Build event payload
-	eventPayload := EventPayload{
-		Subject:          subject,
-		EventTimestamp:   event.EventTimestamp.Unix(),
-		InitiatingEntity: event.InitiatingEntity,
-	}
-
-	if event.Reason != "" {
-		eventPayload.Reason = event.Reason
-	}
-	if event.ReasonAdmin != nil {
-		eventPayload.ReasonAdmin = event.ReasonAdmin
-	}
-	if event.ReasonUser != nil {
-		eventPayload.ReasonUser = event.ReasonUser
-	}
-	if event.CredentialType != "" {
-		eventPayload.CredentialType = event.CredentialType
-	}
-	if event.ChangeType != "" {
-		eventPayload.ChangeType = event.ChangeType
-	}
-	if event.CurrentStatus != "" {
-		eventPayload.CurrentStatus = event.CurrentStatus
-	}
-	if event.PreviousStatus != "" {
-		eventPayload.PreviousStatus = event.PreviousStatus
-	}
-	if event.CurrentLevel != "" {
-		eventPayload.CurrentLevel = event.CurrentLevel
-	}
-	if event.PreviousLevel != "" {
-		eventPayload.PreviousLevel = event.PreviousLevel
-	}
-	if event.NewValue != "" {
-		eventPayload.NewValue = event.NewValue
-	}
-	if event.OldValue != "" {
-		eventPayload.OldValue = event.OldValue
-	}
-	if len(event.Claims) > 0 {
-		eventPayload.Claims = event.Claims
-	}
-	if event.State != "" {
+	// SSF §3.1: subject lives in top-level sub_id. SSF §3.1.2: event objects
+	// MUST NOT include a nested subject claim. Verification (SSF §8.1.4.1)
+	// is only {state} inside the event object plus opaque sub_id = stream_id.
+	eventPayload := EventPayload{}
+	if event.EventType == EventTypeVerification {
 		eventPayload.State = event.State
+	} else {
+		if !event.EventTimestamp.IsZero() {
+			eventPayload.EventTimestamp = event.EventTimestamp.Unix()
+		}
+		eventPayload.InitiatingEntity = event.InitiatingEntity
+		if event.EventType == EventTypeAccountDisabled {
+			eventPayload.Reason = riscAccountDisabledReason(event.Reason)
+		}
+		if event.ReasonAdmin != nil {
+			eventPayload.ReasonAdmin = event.ReasonAdmin
+		}
+		if event.ReasonUser != nil {
+			eventPayload.ReasonUser = event.ReasonUser
+		}
+		if event.CredentialType != "" {
+			eventPayload.CredentialType = event.CredentialType
+		}
+		if event.ChangeType != "" {
+			eventPayload.ChangeType = event.ChangeType
+		}
+		if event.CurrentStatus != "" {
+			eventPayload.CurrentStatus = event.CurrentStatus
+		}
+		if event.PreviousStatus != "" {
+			eventPayload.PreviousStatus = event.PreviousStatus
+		}
+		if event.CurrentLevel != "" {
+			eventPayload.CurrentLevel = event.CurrentLevel
+		}
+		if event.PreviousLevel != "" {
+			eventPayload.PreviousLevel = event.PreviousLevel
+		}
+		if event.Namespace != "" {
+			eventPayload.Namespace = event.Namespace
+		}
+		if event.NewValue != "" {
+			eventPayload.NewValue = event.NewValue
+		}
+		if event.OldValue != "" {
+			eventPayload.OldValue = event.OldValue
+		}
+		if len(event.Claims) > 0 {
+			eventPayload.Claims = event.Claims
+		}
 	}
 
 	// Create claims
@@ -161,6 +167,14 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) 
 	}
 
 	return signedToken, nil
+}
+
+// claimsFromCompactSET returns the decoded JWT payload of a compact SET.
+// Looking Glass glass-box Data MUST come from these signed claims, not from
+// the in-memory SecurityEvent (which can leak session_id and disagree with iss).
+func claimsFromCompactSET(tokenString string) map[string]interface{} {
+	_, _, claims := peekSET(tokenString)
+	return claims
 }
 
 // SETDecoder handles decoding and validating SET tokens

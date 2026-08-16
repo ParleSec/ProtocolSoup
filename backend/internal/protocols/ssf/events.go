@@ -28,7 +28,6 @@ const (
 	EventTypeIdentifierChanged               = "https://schemas.openid.net/secevent/risc/event-type/identifier-changed"
 	EventTypeIdentifierRecycled              = "https://schemas.openid.net/secevent/risc/event-type/identifier-recycled"
 	EventTypeAccountCredentialChangeRequired = "https://schemas.openid.net/secevent/risc/event-type/account-credential-change-required"
-	EventTypeSessionsRevoked                 = "https://schemas.openid.net/secevent/risc/event-type/sessions-revoked"
 )
 
 // Subject identifier formats per SSF spec
@@ -247,18 +246,6 @@ var eventMetadataRegistry = map[string]EventMetadata{
 		},
 		ZeroTrustImpact: "Proactive credential hygiene enforcement",
 	},
-	EventTypeSessionsRevoked: {
-		URI:         EventTypeSessionsRevoked,
-		Name:        "All Sessions Revoked",
-		Description: "All sessions for the subject have been revoked",
-		Category:    CategoryRISC,
-		ResponseActions: []string{
-			"Terminate all active sessions globally",
-			"Clear session caches",
-			"Force re-authentication everywhere",
-		},
-		ZeroTrustImpact: "Global session termination for incident response",
-	},
 }
 
 // GetAllEventTypes returns all supported event types grouped by category
@@ -302,17 +289,18 @@ type SecurityEvent struct {
 	ReasonAdmin      *ReasonInfo `json:"reason_admin,omitempty"`
 	ReasonUser       *ReasonInfo `json:"reason_user,omitempty"`
 
-	// For credential events (CAEP §3.2)
+	// For credential events (CAEP §3.3)
 	CredentialType string `json:"credential_type,omitempty"`
-	ChangeType     string `json:"change_type,omitempty"` // create | revoke | update (REQUIRED by CAEP §3.2)
+	ChangeType     string `json:"change_type,omitempty"` // create | revoke | update | delete (REQUIRED by CAEP §3.3)
 
 	// For compliance/status events
 	CurrentStatus  string `json:"current_status,omitempty"`
 	PreviousStatus string `json:"previous_status,omitempty"`
 
-	// For assurance level change events (CAEP §3.3 -- distinct field names from status)
+	// For assurance level change events (CAEP §3.4 -- distinct field names from status)
 	CurrentLevel  string `json:"current_level,omitempty"`
 	PreviousLevel string `json:"previous_level,omitempty"`
+	Namespace     string `json:"namespace,omitempty"` // CAEP §3.4 REQUIRED on assurance-level-change
 
 	// For identifier events
 	NewValue string `json:"new_value,omitempty"`
@@ -338,7 +326,7 @@ const (
 	InitiatingEntitySystem = "system"
 )
 
-// CredentialType constants per CAEP §3.2
+// CredentialType constants per CAEP §3.3
 const (
 	CredentialTypePassword             = "password"
 	CredentialTypePIN                  = "pin"
@@ -352,8 +340,27 @@ const (
 	CredentialTypeApp                  = "app"
 )
 
-// ComplianceStatus constants
+// ComplianceStatus constants (CAEP §3.5: compliant | not-compliant)
 const (
 	ComplianceStatusCompliant    = "compliant"
-	ComplianceStatusNonCompliant = "non-compliant"
+	ComplianceStatusNonCompliant = "not-compliant"
 )
+
+// CAEP §3.4 assurance-level-change namespace.
+const AssuranceNamespaceNIST = "NIST-AAL"
+
+// RISC §2.3 account-disabled reason values. If reason is present it MUST be
+// one of these; administrative prose belongs in reason_admin.
+const (
+	AccountDisabledReasonHijacking   = "hijacking"
+	AccountDisabledReasonBulkAccount = "bulk-account"
+)
+
+func riscAccountDisabledReason(reason string) string {
+	switch reason {
+	case AccountDisabledReasonHijacking, AccountDisabledReasonBulkAccount:
+		return reason
+	default:
+		return ""
+	}
+}
