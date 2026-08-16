@@ -3,12 +3,16 @@
 # because the current physical host is out of CPUs, fork the volume onto a
 # different host, clone the Machine onto that copy, retire the packed-host
 # Machine, then retry the deploy.
+#
+# Reads use the Machines API (flyctl machine status has no --json). Mutations
+# still go through flyctl.
 set -euo pipefail
 
 APP=""
 CONFIG=""
 MIGRATE_ONLY=0
 DEPLOY_ARGS=()
+FLY_API_HOSTNAME="${FLY_API_HOSTNAME:-https://api.machines.dev}"
 
 usage() {
   cat <<'EOF'
@@ -64,53 +68,79 @@ if ! command -v jq >/dev/null 2>&1; then
   echo "jq is not on PATH" >&2
   exit 1
 fi
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is not on PATH" >&2
+  exit 1
+fi
+if [[ -z "${FLY_API_TOKEN:-}" ]]; then
+  echo "FLY_API_TOKEN is not set" >&2
+  exit 1
+fi
 
 fly() {
   flyctl "$@" --app "$APP"
 }
 
+fly_api_get() {
+  local path="$1"
+  local raw http_code body
+  raw="$(curl -sS -w '\n%{http_code}' \
+    -H "Authorization: Bearer ${FLY_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "${FLY_API_HOSTNAME}${path}")"
+  http_code="$(printf '%s\n' "$raw" | tail -n1)"
+  body="$(printf '%s\n' "$raw" | sed '$d')"
+  if [[ ! "$http_code" =~ ^2 ]]; then
+    echo "Machines API GET ${path} failed (HTTP ${http_code})" >&2
+    printf '%s\n' "$body" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$body" | jq -e . >/dev/null; then
+    echo "Machines API GET ${path} returned non-JSON" >&2
+    printf '%s\n' "$body" >&2
+    return 1
+  fi
+  printf '%s\n' "$body"
+}
+
 list_volumes_json() {
-  fly volumes list --json
+  fly_api_get "/v1/apps/${APP}/volumes"
+}
+
+machine_json() {
+  fly_api_get "/v1/apps/${APP}/machines/${1}"
 }
 
 volume_attached_machine() {
   local vol_id="$1"
   list_volumes_json | jq -r --arg id "$vol_id" '
     .[] | select(.id == $id) |
-    (.attached_machine_id // .attachedMachineId // empty)
+    (.attached_machine_id // empty)
   ' | awk 'NF && $0 != "null" { print; exit }'
-}
-
-machine_status_json() {
-  fly machine status "$1" --json
 }
 
 guest_field() {
   local machine_id="$1" field="$2" default="$3"
-  machine_status_json "$machine_id" | jq -r --arg f "$field" --arg d "$default" '
-    (.config.guest[$f] // .Machine.config.guest[$f] // $d)
+  machine_json "$machine_id" | jq -r --arg f "$field" --arg d "$default" '
+    .config.guest[$f] // $d
   '
 }
 
 mount_path_for() {
   local machine_id="$1"
-  machine_status_json "$machine_id" | jq -r '
-    (.config.mounts[0].path // .Machine.config.mounts[0].path // "/data")
-  '
+  machine_json "$machine_id" | jq -r '.config.mounts[0].path // "/data"'
 }
 
 volume_id_for_machine() {
   local machine_id="$1"
-  local from_status from_list
-  from_status="$(machine_status_json "$machine_id" | jq -r '
-    .config.mounts[0].volume // .Machine.config.mounts[0].volume // empty
-  ')"
-  if [[ -n "$from_status" && "$from_status" != "null" ]]; then
-    printf '%s\n' "$from_status"
+  local from_machine from_list
+  from_machine="$(machine_json "$machine_id" | jq -r '.config.mounts[0].volume // empty')"
+  if [[ -n "$from_machine" && "$from_machine" != "null" ]]; then
+    printf '%s\n' "$from_machine"
     return 0
   fi
   from_list="$(list_volumes_json | jq -r --arg mid "$machine_id" '
-    .[] | select((.attached_machine_id // .attachedMachineId // "") == $mid) | .id
+    .[] | select((.attached_machine_id // "") == $mid) | .id
   ' | awk 'NF { print; exit }')"
   if [[ -z "$from_list" ]]; then
     echo "no volume attached to machine ${machine_id}" >&2
@@ -128,9 +158,7 @@ volume_region() {
 
 machine_state() {
   local machine_id="$1"
-  machine_status_json "$machine_id" | jq -r '
-    .state // .State // .Machine.state // empty
-  '
+  machine_json "$machine_id" | jq -r '.state // empty'
 }
 
 wait_for_attach() {
@@ -184,7 +212,7 @@ machine_id_from_log() {
 
 only_volume_machine() {
   list_volumes_json | jq -r '
-    [.[] | (.attached_machine_id // .attachedMachineId // empty) | select(. != "" and . != "null")] | unique | .[]
+    [.[] | (.attached_machine_id // empty) | select(. != "" and . != "null")] | unique | .[]
   '
 }
 
@@ -216,13 +244,9 @@ fork_volume() {
     --require-unique-zone \
     --vm-cpu-kind "$cpu_kind" \
     --vm-cpus "$cpus" \
-    --vm-memory "$memory_mb" \
-    --json)"
-  id="$(printf '%s\n' "$out" | jq -r '.id // .ID // empty' 2>/dev/null || true)"
-  if [[ -z "$id" || "$id" == "null" ]]; then
-    id="$(printf '%s\n' "$out" | awk '/^[[:space:]]*ID:/ { print $2; exit }')"
-  fi
-  if [[ -z "$id" || "$id" == "null" ]]; then
+    --vm-memory "$memory_mb")"
+  id="$(printf '%s\n' "$out" | awk '/^[[:space:]]*ID:/ { print $2; exit }')"
+  if [[ -z "$id" ]]; then
     echo "could not parse forked volume id from fly volumes fork output:" >&2
     printf '%s\n' "$out" >&2
     return 1
