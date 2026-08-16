@@ -135,7 +135,7 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
   private async createAuthorizationRequest(): Promise<Record<string, unknown>> {
     this.updateState({ currentStep: 'Creating verifier authorization request' })
 
-    const responseMode = this.flowConfig.responseMode || 'direct_post'
+    let responseMode: 'direct_post' | 'direct_post.jwt' = this.flowConfig.responseMode || 'direct_post'
     const extraParams = this.flowConfig.extraParams || {}
     const configuredClientID = String(
       this.flowConfig.clientID || extraParams.oid4vp_client_id || '',
@@ -163,7 +163,7 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         },
       ],
     }
-    const configuredScopeAlias = String(
+    let configuredScopeAlias = String(
       this.flowConfig.scopeAlias || extraParams.oid4vp_scope_alias || '',
     ).trim()
     const configuredRequestURIMethod = String(
@@ -180,7 +180,15 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
         throw new Error('Configured dcql_query is not valid JSON')
       }
     }
-    if (!dcqlQuery && !configuredScopeAlias) {
+    if (configuredClientIDScheme === 'x509_hash') {
+      // HAIP 1.0 Section 5: signed requests use x509_hash, an encrypted
+      // response, and DCQL. Coerce even if the operator started the
+      // unencrypted oid4vp-direct-post flow or selected a scope alias.
+      configuredScopeAlias = ''
+      if (!dcqlQuery) {
+        dcqlQuery = defaultDCQLQuery
+      }
+    } else if (!dcqlQuery && !configuredScopeAlias) {
       dcqlQuery = defaultDCQLQuery
     }
 
@@ -195,10 +203,9 @@ export class OID4VPDirectPostExecutor extends FlowExecutorBase {
       requestPayload.client_id_scheme = configuredClientIDScheme
     }
     if (configuredClientIDScheme === 'x509_hash') {
-      // HAIP 1.0 Section 5 requires the x509_hash Client Identifier Prefix for
-      // signed presentation requests. The backend then enforces the profile's
-      // signed-request and encrypted-response requirements.
       requestPayload.profile = 'haip'
+      requestPayload.response_mode = 'direct_post.jwt'
+      responseMode = 'direct_post.jwt'
     }
     if (configuredScopeAlias) {
       requestPayload.scope = configuredScopeAlias
