@@ -121,6 +121,42 @@ with `server_error`, rather than silently accepting an unverified proof.
 - Increase the container memory limit.
 - Run fewer services (use single-service mode instead of full stack).
 
+## Fly deploy fails: insufficient CPUs on the current host
+
+**Symptom:** `flyctl deploy` builds the image, then fails while updating an existing Machine:
+
+```text
+aborted: could not reserve resource for machine: insufficient CPUs available to fulfill request on the current host
+```
+
+**Cause:** The app has a Fly Volume. Volumes live on one physical host, so Fly must update that Machine in place. If that host is out of spare CPUs, the update cannot start. Retrying the same deploy keeps targeting the same packed host. ProtocolSoup hits this on `protocolsoup-wallet` (`protocolsoup_wallet_data`, holding `/data/device-key.pem`) and on `protocolsoup` (`protocolsoup_data`).
+
+**Fix:** Copy the volume onto a different host, move the Machine, then deploy again. Production CI does this automatically via `.github/scripts/fly-deploy-or-migrate-host.sh`. To do it by hand:
+
+```bash
+fly volumes list -a protocolsoup-wallet
+fly machines list -a protocolsoup-wallet
+
+# Fork onto a host that can run this VM size (unique zone is the default).
+fly volumes fork <volume-id> -a protocolsoup-wallet \
+  --vm-cpu-kind shared --vm-cpus 1 --vm-memory 256
+
+fly machine clone <machine-id> -a protocolsoup-wallet \
+  --attach-volume <new-volume-id>:/data \
+  --vm-cpu-kind shared --vm-cpus 1 --vm-memory 256
+
+# Confirm /data (and the wallet device key, if present) on the new Machine,
+# then retire the packed-host Machine and volume so deploy cannot reattach them.
+fly ssh console -a protocolsoup-wallet --machine <new-machine-id> \
+  --command "ls -la /data"
+fly machines destroy <old-machine-id> -a protocolsoup-wallet --force
+fly volumes destroy <old-volume-id> -a protocolsoup-wallet -y
+
+flyctl deploy --config fly.wallet.toml --app protocolsoup-wallet --remote-only
+```
+
+Do not destroy the source volume until the new Machine is serving from the fork. The fork is a point-in-time copy; later writes on the old volume are not replicated.
+
 ## Port conflicts
 
 **Symptom:** `bind: address already in use` when starting a service.
