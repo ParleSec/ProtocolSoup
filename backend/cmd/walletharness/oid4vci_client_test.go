@@ -179,8 +179,11 @@ func TestCredentialRequestEncryptionJWERoundTrip(t *testing.T) {
 		EncryptionRequired: false,
 		Keys:               []intcrypto.JWK{jwk},
 	}
-	if !shouldEncryptCredentialRequest(support, false) {
-		t.Fatal("expected request encryption when issuer advertises jwks")
+	if shouldEncryptCredentialRequest(support, false) {
+		t.Fatal("advertised request-encryption jwks with encryption_required=false must not force encryption")
+	}
+	if !shouldEncryptCredentialRequest(support, true) {
+		t.Fatal("expected request encryption when the wallet also requests an encrypted credential response")
 	}
 	plaintext, _ := json.Marshal(map[string]interface{}{
 		"credential_configuration_id": "org.iso.18013.5.1.mDL",

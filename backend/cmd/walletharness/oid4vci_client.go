@@ -450,16 +450,17 @@ func decryptCredentialResponseJWT(compact string, privateKey *ecdsa.PrivateKey) 
 }
 
 // shouldEncryptCredentialRequest reports whether the Credential / Deferred
-// Credential Request body must be sent as an application/jwt JWE. OID4VCI 1.0
-// §8.2: encrypt when encryption_required, and MUST encrypt when the request
-// includes credential_response_encryption. When the issuer advertises request
-// encryption keys, the wallet also encrypts even if encryption_required is
-// false (OID4VCI 1.0 §8.2).
+// Credential Request body must be sent as an application/jwt JWE.
+// OID4VCI 1.0 §8.2: the Wallet MUST encrypt when encryption_required is true,
+// and MUST encrypt when the request includes credential_response_encryption.
+// Advertising request-encryption JWKs with encryption_required false is a MAY;
+// this wallet leaves those bodies as JSON so deferred polling stays
+// application/json unless encryption is actually required.
 func shouldEncryptCredentialRequest(requestEnc *credentialRequestEncryptionSupport, responseEncryptionRequested bool) bool {
 	if requestEnc == nil || !requestEnc.advertised() {
 		return false
 	}
-	return requestEnc.EncryptionRequired || responseEncryptionRequested || requestEnc.advertised()
+	return requestEnc.EncryptionRequired || responseEncryptionRequested
 }
 
 func encryptCredentialRequestBody(plaintext []byte, support *credentialRequestEncryptionSupport) (string, error) {
