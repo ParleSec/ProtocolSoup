@@ -257,21 +257,14 @@ is_packed_host_error() {
 }
 
 packed_ids_from_log() {
-  grep -Eo 'failed to update (VM|machine) [a-zA-Z0-9]+' "$1" \
+  # Only IDs on lines that report a host-capacity failure. A sibling update
+  # can log "failed to update VM <id>: context canceled" when the packed
+  # Machine fails; that ID is still a valid keeper.
+  grep -Ei 'insufficient CPUs available to fulfill request on the current host|insufficient resources to create new machine with existing volume|could not reserve resource for machine: insufficient CPUs' "$1" \
+    | grep -Eo '(VM|machine) [a-zA-Z0-9]+' \
     | awk '{ print $NF }' \
+    | grep -E '^[0-9a-f]+$' \
     | sort -u
-}
-
-in_list() {
-  local needle="$1"
-  local item
-  shift
-  for item in "$@"; do
-    if [[ "$item" == "$needle" ]]; then
-      return 0
-    fi
-  done
-  return 1
 }
 
 fork_volume() {
@@ -327,7 +320,7 @@ clone_onto_fork() {
     --attach-volume "${new_volume}:${mount_path}" \
     --vm-cpu-kind "$cpu_kind" \
     --vm-cpus "$cpus" \
-    --vm-memory "$memory_mb"; then
+    --vm-memory "$memory_mb" >&2; then
     echo "clone failed; destroying unused fork ${new_volume}" >&2
     fly volumes destroy "$new_volume" -y || true
     return 1
@@ -337,27 +330,38 @@ clone_onto_fork() {
   echo "  new machine=${new_machine}" >&2
   wait_for_started "$new_machine" 180
   verify_mount "$new_machine" "$mount_path"
+  if [[ ! "$new_machine" =~ ^[0-9a-f]+$ ]]; then
+    echo "clone did not yield a machine id: ${new_machine}" >&2
+    return 1
+  fi
   printf '%s\n' "$new_machine"
 }
 
 pick_keeper() {
+  local packed_json="[]"
   local id
-  local packed=("$@")
-  while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
-    if ((${#packed[@]})) && in_list "$id" "${packed[@]}"; then
-      continue
-    fi
-    printf '%s\n' "$id"
-    return 0
-  done < <(volume_backed_machine_ids)
-  return 1
+  if [[ $# -gt 0 ]]; then
+    packed_json="$(printf '%s\n' "$@" | jq -R . | jq -s .)"
+  fi
+  id="$(list_machines_json | jq -r --argjson packed "$packed_json" '
+    def ok:
+      ((.config.mounts // []) | length > 0)
+      and (.id as $mid | ($packed | index($mid)) | not);
+    (map(select(ok and .state == "started"))
+     + map(select(ok and .state != "started")))
+    | .[0].id // empty
+  ')"
+  if [[ -z "$id" ]]; then
+    return 1
+  fi
+  printf '%s\n' "$id"
 }
 
 pick_source() {
   local id
   local packed=("$@")
-  for id in "${packed[@]}"; do
+  for id in "${packed[@]+"${packed[@]}"}"; do
+    [[ -z "$id" ]] && continue
     if machine_exists "$id"; then
       printf '%s\n' "$id"
       return 0
@@ -399,6 +403,11 @@ destroy_all_except_keeper() {
   local keeper="$1"
   local keeper_volume=""
   local id vol_id
+
+  if [[ ! "$keeper" =~ ^[0-9a-f]+$ ]]; then
+    echo "refusing to converge with invalid keeper id: ${keeper}" >&2
+    return 1
+  fi
 
   keeper_volume="$(volume_id_for_machine "$keeper")"
   echo "Keeper ${keeper} volume ${keeper_volume}"
