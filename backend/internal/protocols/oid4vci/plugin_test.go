@@ -729,6 +729,46 @@ func TestCredentialIssuanceSupportsMultipleFormats(t *testing.T) {
 	}
 }
 
+func TestUniversityDegreeCredentialAcceptsES256Proof(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	walletSubject := asString(t, offerPayload["wallet_subject"])
+
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	tokenPayload := decodeJSONMap(t, tokenResp)
+	accessToken := asString(t, tokenPayload["access_token"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
+	proofJWT := createWalletProofJWTWithAlgorithm(t, cNonce, walletSubject, testIssuerAudience, "ES256")
+
+	credentialResp := postJSONWithHeaders(
+		t,
+		server.URL+"/oid4vci/credential",
+		map[string]interface{}{
+			"credential_configuration_id": "UniversityDegreeCredential",
+			"proofs": map[string]interface{}{
+				"jwt": []string{proofJWT},
+			},
+		},
+		map[string]string{
+			"Authorization": "Bearer " + accessToken,
+		},
+	)
+	assertStatus(t, credentialResp, http.StatusOK)
+}
+
 func TestCredentialIssuanceIgnoresRemovedFormatParameter(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
@@ -896,6 +936,47 @@ func TestDeferredIssuanceFlow(t *testing.T) {
 	}
 	if successes != 1 || rejections != 1 {
 		t.Fatalf("concurrent deferred results: successes=%d rejections=%d, want 1 each", successes, rejections)
+	}
+}
+
+func TestDeferredCredentialAcceptsEncryptedRequestMediaType(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	accessToken := asString(t, decodeJSONMap(t, tokenResp)["access_token"])
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/oid4vci/deferred_credential", strings.NewReader("not-a-jwe"))
+	if err != nil {
+		t.Fatalf("build deferred request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/jwt")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("deferred request failed: %v", err)
+	}
+	assertStatus(t, resp, http.StatusBadRequest)
+	payload := decodeJSONMap(t, resp)
+	description := asString(t, payload["error_description"])
+	if strings.Contains(description, "Content-Type must be application/json") {
+		t.Fatalf("deferred endpoint still rejects application/jwt: %q", description)
+	}
+	if !strings.Contains(description, "encrypted deferred credential request is invalid") {
+		t.Fatalf("error_description = %q, want encrypted deferred credential request is invalid", description)
 	}
 }
 

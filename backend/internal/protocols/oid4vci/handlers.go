@@ -1900,13 +1900,8 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		authErr.respond(w)
 		return
 	}
-	if !requestHasMediaType(r, "application/json") {
-		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", "Content-Type must be application/json")
-		return
-	}
-
 	var req deferredCredentialRequest
-	if err := decodeRequestObject(r.Body, &req, "deferred credential request"); err != nil {
+	if err := p.decodeJSONOrEncryptedJWTRequest(r, &req, "deferred credential request"); err != nil {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", err.Error())
 		return
 	}

@@ -151,7 +151,8 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
   up to that many JWT proofs in one Credential Request, issuing one credential
   copy per proof bound to that proof's key (same Credential Dataset). Non-JWT
   proof types are not advertised. Credential Requests may be a compact ECDH-ES
-  JWE using the key advertised in `credential_request_encryption`.
+  JWE using the key advertised in `credential_request_encryption`. The deferred
+  credential endpoint accepts the same JSON or encrypted JWT media types.
 - Authorization codes, credential nonces, and deferred transaction identifiers
   are consumed atomically; conflicting notification lifecycle events are
   rejected without mutating accepted history.
