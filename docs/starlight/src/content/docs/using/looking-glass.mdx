@@ -8,7 +8,7 @@ Looking Glass is the primary interface for executing protocol flows. It shows ev
 ## How It Works
 
 1. Select a protocol and flow from the sidebar.
-2. Enter required inputs (varies by flow -- could be a client ID, subject, callback URL, or tx_code).
+2. Configure the flow (varies by protocol -- client ID, subject, callback URL, credential format, or HAIP).
 3. Execute the flow.
 4. Watch each step render in real time as the backend emits events.
 5. Click any step to inspect full request/response payloads, tokens, and validation results.
@@ -40,7 +40,7 @@ Looking Glass supports shareable deep-links in the format `/looking-glass?protoc
 | `client_auth` | Client Credentials | `client_secret_basic`, `private_key_jwt` |
 | `token_mode` | Client Credentials | `bearer`, `dpop` |
 | `credential_format` | OID4VCI, OID4VP | `mso_mdoc`, `dc+sd-jwt` |
-| `haip` | OID4VCI, OID4VP | `1` (omit for educational) |
+| `haip` | OID4VCI, OID4VP | `1` (omit for the general profile) |
 
 On OID4VCI, `haip=1` selects key-attested issuance. On OID4VP, `haip=1` selects that issuance configuration plus HAIP presentation (`x509_hash`, DCQL, encrypted `direct_post.jwt`).
 
@@ -65,7 +65,8 @@ The flow header also provides a low-emphasis reference breadcrumb: **Protocol Re
 
 Looking Glass blocks or warns before combinations that the live protocol will reject, and it explains failures without replacing the real `error` / `error_description` text.
 
-- **HAIP selector** (`educational` / `HAIP`) is independent of credential format (`mso_mdoc` / `dc+sd-jwt`), matching the Client Credentials `private_key_jwt` / DPoP selectors. On OID4VCI, HAIP issues `MobileDrivingLicenceMsoMdocHAIP` or `UniversityDegreeCredentialSDJWTHAIP` with client and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1). The hosted wallet is configured for that path, so Execute is expected to succeed. A self-hosted wallet without `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` returns HTTP 400 on import. On OID4VP, HAIP also applies presentation: `x509_hash`, DCQL, and encrypted `direct_post.jwt` (HAIP 1.0 Section 5). If attestation material is missing, `/submit` falls back to the educational configuration of the same format. Verifier trust profiles other than `x509_hash`, custom DCQL, scope alias, and `request_uri` POST live under **Advanced**.
+- **HAIP selector** (`general` / `HAIP`) is independent of credential format (`mso_mdoc` / `dc+sd-jwt`), matching the Client Credentials `private_key_jwt` / DPoP selectors. On OID4VCI, HAIP issues `MobileDrivingLicenceMsoMdocHAIP` or `UniversityDegreeCredentialSDJWTHAIP` with client and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1). The hosted wallet is configured for that path, so Execute is expected to succeed. A self-hosted wallet without `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` returns HTTP 400 on import. On OID4VP, HAIP also applies presentation: `x509_hash`, DCQL, and encrypted `direct_post.jwt` (HAIP 1.0 Section 5). If attestation material is missing, `/submit` falls back to the general configuration of the same format. Verifier trust profiles other than `x509_hash`, custom DCQL, scope alias, `request_uri` POST, and the `redirect_uri` / `client_id` override live under **Advanced**. When verifier trust is `redirect_uri`, that field is the redirect URI: `client_id` MUST equal `response_uri` (OpenID4VP 1.0 Section 5.9.3).
+- **Issuer-initiated offer delivery** is optional and lives under **Advanced**. When blank, Execute produces an `openid-credential-offer://` QR. Paste an HTTPS `credential_offer_endpoint` only to have the issuer deliver the live offer (OID4VCI 1.0 §4.1.2).
 - **Invalid DCQL or an empty scope alias** disables Execute until the request contract is valid.
 - **OID4VP format mismatch** blocks wallet submit when the selected credential format is not in the DCQL query (paste a matching `credential_jwt` to override with a warning). Changing format restores the matching DCQL preset.
 - **`x509_hash`** is the HAIP signed-request prefix: DCQL and encrypted `direct_post.jwt` are required. On the unencrypted `direct_post` flow, Looking Glass coerces the request to `direct_post.jwt`. The hosted wallet already trusts the showcase verifier CA; self-hosted wallets validate `x5c` against `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM`. Certificate roots in `x5c` are never self-trusted. Client and key attestation are not part of this presentation profile.

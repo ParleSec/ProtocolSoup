@@ -80,7 +80,7 @@ The wallet runs a unified, metadata-driven OID4VCI client shared by automatic bo
 - **`credential_identifiers`:** when the token response returns them, credential requests use `credential_identifier` and omit `credential_configuration_id`.
 - **Issuer metadata trust:** fail-closed — fetched Credential Issuer Metadata must present a `credential_issuer` that matches the offer's issuer identifier.
 - **Holder binding:** JWT `sub` is optional on SD-JWT VC. The wallet stores an issued JWT/SD-JWT when RFC 7800 `cnf` is present (HAIP requires `cnf.jwk` when cryptographic holder binding is used) or when `sub` / `credentialSubject.id` is present. It does not reject a HAIP `dc+sd-jwt` solely for a missing `sub`.
-- **Issuer key resolution:** JWT and SD-JWT issuer signatures are verified against `jwks_uri` advertised in Credential Issuer Metadata and RFC 8414 Authorization Server metadata. The wallet stops at the first non-empty JWK set and does not probe SD-JWT VC Issuer Metadata (`/.well-known/jwt-vc-issuer`) — that resource is not a JWK Set. Speculative ProtocolSoup JWKS paths (`/.well-known/jwks.json`, `/api/.well-known/jwks.json`, `/oidc/.well-known/jwks.json`) run only when no advertised `jwks_uri` yielded keys.
+- **Issuer key resolution:** JWT and SD-JWT issuer signatures are verified against `jwks_uri` advertised in Credential Issuer Metadata and RFC 8414 Authorization Server metadata. The ProtocolSoup OID4VCI Authorization Server advertises `jwks_uri` as `{issuer}/.well-known/jwks.json`. The wallet stops at the first non-empty JWK set and does not probe SD-JWT VC Issuer Metadata (`/.well-known/jwt-vc-issuer`) — that resource is not a JWK Set. Speculative ProtocolSoup JWKS paths (`/.well-known/jwks.json`, `/api/.well-known/jwks.json`, `/oidc/.well-known/jwks.json`) run only when no advertised `jwks_uri` yielded keys.
 - **Metadata discovery:** Credential Issuer Metadata uses OID4VCI §12.2.2 well-known insertion and preserves a trailing slash on the issuer path; OAuth Authorization Server metadata follows RFC 8414 §3.1 (`oauth-authorization-server` only — no `openid-configuration` fallback) and strips it. Concurrent GETs to the same discovery URL are single-flighted so overlapping imports cannot race issuer discovery.
 - **Key attestation honesty:** the software wallet does not assert `iso_18045_moderate` (or other attack-potential levels) unless `WALLET_KEY_ATTESTATION_KEY_STORAGE` / `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` are set to values the deployment can actually support.
 
@@ -90,7 +90,7 @@ delegate redemption to this wallet via `POST /api/import` (with
 run in the harness — not in the browser. The issuer-initiated Looking Glass
 flow creates and optionally delivers an `authorization_code` offer, then
 observes issuer-side milestones via `status_uri`; it does not redeem codes
-in-browser. Pointing that flow's `credential_offer_endpoint` at this wallet
+in-browser. Pointing Looking Glass **Advanced** `credential_offer_endpoint` at this wallet
 (and configuring HAIP attestation env when required) is how an end-to-end
 wallet-driven authorization-code / HAIP issuance path is exercised.
 
@@ -151,11 +151,11 @@ services:
 ## Troubleshooting
 
 - **`session isolation key is required`:** supply `looking_glass_session_id` or `request_id` in `/submit`.
-- **`wallet_submission_failed`:** `/submit` returns `422 Unprocessable Content` with the issuer or credential-selection error; select a credential profile compatible with the request, or provide a matching `credential_jwt`.
+- **`wallet_submission_failed`:** `/submit` returns `422 Unprocessable Content` with the issuer or credential-selection error; choose a credential format compatible with the request, or provide a matching `credential_jwt`.
 - **`response_uri ... does not match trusted verifier callback`:** request object callback does not match `WALLET_TARGET_BASE_URL`.
 - **`credential_jwt sub does not match wallet_subject`:** provided credential is bound to a different holder.
-- **`wallet does not have a credential that satisfies the presentation request`:** ensure the selected OID4VCI credential profile issues a format requested by the OID4VP DCQL preset, or provide a matching `credential_jwt`.
-- **`credential configuration ... requires haip attestation material`:** this is the HAIP *issuance* gate on `POST /api/import` (HTTP 400). The hosted wallet is configured with `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` (with `x5c`). A self-hosted wallet without those JWKs must set them or choose a non-HAIP configuration. OID4VP `/submit` can still present after issuing a HAIP credential when attestation is present; without attestation material it issues the educational equivalent of the same format (`MobileDrivingLicenceMsoMdocHAIP` → `MobileDrivingLicenceMsoMdoc`).
+- **`wallet does not have a credential that satisfies the presentation request`:** ensure the selected OID4VCI credential format issues a credential requested by the OID4VP DCQL query, or provide a matching `credential_jwt`.
+- **`credential configuration ... requires haip attestation material`:** this is the HAIP *issuance* gate on `POST /api/import` (HTTP 400). The hosted wallet is configured with `WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` (with `x5c`). A self-hosted wallet without those JWKs must set them or choose a non-HAIP configuration. OID4VP `/submit` can still present after issuing a HAIP credential when attestation is present; without attestation material it issues the general equivalent of the same format (`MobileDrivingLicenceMsoMdocHAIP` → `MobileDrivingLicenceMsoMdoc`).
 - **Upstream timeout/failure:** check `WALLET_HTTP_TIMEOUT` and VC target health.
 
 ## Versioning And Tags

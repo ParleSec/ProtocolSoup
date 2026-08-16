@@ -103,6 +103,8 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 |----------|--------|---------|
 | `/.well-known/openid-credential-issuer/oid4vci` | `GET` | Canonical credential issuer metadata (issuer-derived path) |
 | `/.well-known/oauth-authorization-server/oid4vci` | `GET` | Canonical Authorization Server metadata (RFC 8414, issuer-derived path) |
+| `/oid4vci/.well-known/jwks.json` | `GET` | Authorization Server JWK Set advertised as RFC 8414 `jwks_uri` |
+| `/oid4vci/jwks` | `GET` | Alternate JWKS path for the same KeySet |
 | `/credential-offer/{offerID}` | `GET` | Resolve by-reference credential offer |
 | `/par` | `POST` | Push a client-attested HAIP authorization request, optionally pre-bound to DPoP |
 | `/token` | `POST` | Exchange grant (`pre-authorized_code` or `authorization_code`) for an access token; accepts `OAuth-Client-Attestation`/`-PoP` headers |
@@ -132,7 +134,7 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - When the Wallet uses `scope` for authorization (OID4VCI §5.1.2), the token
   response omits `authorization_details` unless the Wallet also used RFC 9396
   `authorization_details`. Returning invented configuration IDs for a shared
-  scope (for example both educational and HAIP mDL under `vc:mdl`) would invent
+  scope (for example both general and HAIP mDL under `vc:mdl`) would invent
   configuration IDs the wallet did not request.
 - Authorization Server Metadata advertises
   `authorization_response_iss_parameter_supported: true` (RFC 9207); the shared
@@ -213,8 +215,8 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - `oid4vci-deferred-issuance`
 - `oid4vci-issuer-initiated` — creates an `authorization_code` Credential
   Offer with a fresh `issuer_state` via `POST /offers/authorization-code`
-  and, when an external `credential_offer_endpoint` is supplied, has the
-  issuer deliver the offer with a real
+  and, when an external `credential_offer_endpoint` is supplied under Looking
+  Glass **Advanced**, has the issuer deliver the offer with a real
   HTTPS GET (`credential_offer` query parameter). With no external endpoint
   it produces an `openid-credential-offer://` invocation URI and QR code.
   Looking Glass then reuses the OID4VP wallet-handoff chrome
