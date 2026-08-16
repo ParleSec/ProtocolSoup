@@ -1959,6 +1959,30 @@ func TestPreferHAIPBootstrapConfigurationID(t *testing.T) {
 	}
 }
 
+func TestEducationalCredentialConfigurationID(t *testing.T) {
+	if got := educationalCredentialConfigurationID("MobileDrivingLicenceMsoMdocHAIP"); got != "MobileDrivingLicenceMsoMdoc" {
+		t.Fatalf("mdoc HAIP educational id = %q", got)
+	}
+	if got := educationalCredentialConfigurationID("UniversityDegreeCredentialSDJWTHAIP"); got != "UniversityDegreeCredential" {
+		t.Fatalf("sd-jwt HAIP educational id = %q", got)
+	}
+	if got := educationalCredentialConfigurationID("MobileDrivingLicenceMsoMdoc"); got != "MobileDrivingLicenceMsoMdoc" {
+		t.Fatalf("educational mdoc must stay %q, got %q", "MobileDrivingLicenceMsoMdoc", got)
+	}
+}
+
+func TestPresentationIssuanceConfigurationIDFallsBackWithoutAttestation(t *testing.T) {
+	s := &walletHarnessServer{}
+	if got := s.presentationIssuanceConfigurationID("MobileDrivingLicenceMsoMdocHAIP"); got != "MobileDrivingLicenceMsoMdoc" {
+		t.Fatalf("without attestation, mdoc HAIP must fall back, got %q", got)
+	}
+	s.haipClientAttestation = &attestationJWKMaterial{}
+	s.haipKeyAttestation = &attestationJWKMaterial{}
+	if got := s.presentationIssuanceConfigurationID("MobileDrivingLicenceMsoMdocHAIP"); got != "MobileDrivingLicenceMsoMdocHAIP" {
+		t.Fatalf("with attestation, mdoc HAIP must be kept, got %q", got)
+	}
+}
+
 func TestIsHAIPCredentialConfigurationID(t *testing.T) {
 	if !isHAIPCredentialConfigurationID("UniversityDegreeCredentialSDJWTHAIP") {
 		t.Fatal("expected SD-JWT HAIP configuration to be detected")
@@ -2021,4 +2045,3 @@ func TestParseAttestationJWKInputPreservesX5C(t *testing.T) {
 		t.Fatalf("x5c = %#v", x5c)
 	}
 }
-

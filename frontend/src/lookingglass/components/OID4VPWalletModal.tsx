@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Loader2, X } from 'lucide-react'
 import { humanizeOID4VPTrustMode } from '../../protocols/config/oid4vp'
-import { LOOKING_GLASS_X509_HASH_GUIDANCE } from '../wallet-client'
+import { lookingGlassX509HashGuidance } from '../wallet-client'
 import { ProtocolNotice } from './shared'
 
 export type OID4VPWalletMode = 'one_click' | 'stepwise'
@@ -199,11 +199,11 @@ export function OID4VPWalletModal({
           )}
           {clientIDScheme === 'x509_hash' && (
             <ProtocolNotice
-              tone="warning"
+              tone="info"
               title="HAIP x509_hash presentation"
-              specReference="HAIP 1.0; RFC 5280"
+              specReference="HAIP 1.0 Section 5; RFC 5280"
             >
-              {LOOKING_GLASS_X509_HASH_GUIDANCE}
+              {lookingGlassX509HashGuidance()}
             </ProtocolNotice>
           )}
 

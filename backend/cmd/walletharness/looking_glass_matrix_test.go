@@ -176,6 +176,39 @@ func TestLookingGlassOID4VCIAndOID4VPPermutations(t *testing.T) {
 	}
 }
 
+func TestLookingGlassOID4VPHAIPConfigWithoutAttestationPresentsEducationalMdoc(t *testing.T) {
+	env := startLookingGlassMatrixEnv(t)
+	credentialJWT := env.importLookingGlassOffer(t, lookingGlassVCIProfile{
+		ID:     "MobileDrivingLicenceMsoMdoc",
+		Format: "mso_mdoc",
+	}, "pre-authorized")
+	if credentialJWT == "" {
+		t.Fatal("expected issued educational mDL")
+	}
+	env.submitLookingGlassVP(t, lookingGlassVPSubmit{
+		scheme: "x509_hash",
+		mode:   "direct_post.jwt",
+		method: "get",
+		dcql: map[string]interface{}{
+			"credentials": []map[string]interface{}{
+				{
+					"id":     "mdl",
+					"format": "mso_mdoc",
+					"meta":   map[string]interface{}{"doctype_value": "org.iso.18013.5.1.mDL"},
+					"claims": []map[string]interface{}{
+						{"path": []string{"org.iso.18013.5.1", "family_name"}},
+						{"path": []string{"org.iso.18013.5.1", "document_number"}},
+					},
+				},
+			},
+		},
+		subject:       "did:example:lg:MobileDrivingLicenceMsoMdoc",
+		format:        "mso_mdoc",
+		configID:      "MobileDrivingLicenceMsoMdocHAIP",
+		credentialJWT: credentialJWT,
+	})
+}
+
 func (env *lookingGlassMatrixEnv) importLookingGlassOffer(t *testing.T, profile lookingGlassVCIProfile, flow string) string {
 	t.Helper()
 	endpoint := env.baseURL + "/oid4vci/offers/pre-authorized"

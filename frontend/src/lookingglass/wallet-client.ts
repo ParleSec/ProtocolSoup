@@ -61,10 +61,20 @@ export type LookingGlassFailureExplanation = {
 }
 
 export const LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE =
-  'HAIP key-attested configurations require client attestation and key attestation from the wallet. Looking Glass still executes the real protocol: without WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON and WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON (each with an x5c chain), the wallet returns HTTP 400. That rejection is the HAIP gate, not a demo failure. Choose a non-HAIP profile (mso_mdoc mDL or dc+sd-jwt) to redeem without attestation.'
+  'HAIP key-attested issuance configurations require client attestation and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1; OID4VCI 1.0 Appendix D/E). Looking Glass still executes the real protocol: without WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON and WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON (each with an x5c chain), wallet import returns HTTP 400. That rejection is the HAIP issuance gate, not a demo failure. Choose a non-HAIP profile to issue without attestation. OID4VP HAIP presentation (x509_hash) does not use these issuance configurations.'
 
 export const LOOKING_GLASS_X509_HASH_GUIDANCE =
-  'x509_hash is the HAIP signed-request Client Identifier Prefix. Looking Glass forces DCQL and encrypted direct_post.jwt even if this flow started as unencrypted direct_post. The wallet must validate the request-object x5c chain against WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM; roots carried in x5c are never self-trusted.'
+  'x509_hash is HAIP\'s signed-request Client Identifier Prefix (OpenID4VP 1.0 Section 5.9.3; HAIP 1.0 Section 5). The request object is a signed JWT; the wallet validates the x5c chain against its verifier trust store. Roots carried in x5c are never self-trusted. HAIP presentation also requires DCQL and an encrypted response (direct_post.jwt). Client and key attestation are OID4VCI issuance requirements and are not part of this presentation profile. The hosted Looking Glass wallet already trusts the showcase verifier CA via WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM.'
+
+export const LOOKING_GLASS_X509_HASH_COERCION_GUIDANCE =
+  'This unencrypted direct_post flow is coerced to encrypted direct_post.jwt when x509_hash is selected, because HAIP 1.0 Section 5.1 requires response encryption.'
+
+export function lookingGlassX509HashGuidance(coerceUnencryptedDirectPost = false): string {
+  if (!coerceUnencryptedDirectPost) {
+    return LOOKING_GLASS_X509_HASH_GUIDANCE
+  }
+  return `${LOOKING_GLASS_X509_HASH_GUIDANCE} ${LOOKING_GLASS_X509_HASH_COERCION_GUIDANCE}`
+}
 
 type LookingGlassFailureMatcher = {
   test: (normalized: string) => boolean
@@ -81,7 +91,7 @@ const LOOKING_GLASS_FAILURE_MATCHERS: LookingGlassFailureMatcher[] = [
       (normalized.includes('key_attestation') && normalized.includes('required')),
     title: 'HAIP issuance needs wallet attestation',
     guidance: LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE,
-    specReference: 'HAIP 1.0; OID4VCI 1.0 Appendix D',
+    specReference: 'HAIP 1.0 Sections 4.4.1 and 4.5.1; OID4VCI 1.0 Appendix D',
   },
   {
     test: (normalized) =>
@@ -92,7 +102,7 @@ const LOOKING_GLASS_FAILURE_MATCHERS: LookingGlassFailureMatcher[] = [
       normalized.includes('x5c chain'),
     title: 'Wallet does not trust this verifier certificate',
     guidance: LOOKING_GLASS_X509_HASH_GUIDANCE,
-    specReference: 'HAIP 1.0; RFC 5280',
+    specReference: 'HAIP 1.0 Section 5; RFC 5280',
   },
   {
     test: (normalized) =>
@@ -111,7 +121,7 @@ const LOOKING_GLASS_FAILURE_MATCHERS: LookingGlassFailureMatcher[] = [
         normalized.includes('profile')),
     title: 'HAIP rejects this request shape',
     guidance: LOOKING_GLASS_X509_HASH_GUIDANCE,
-    specReference: 'HAIP 1.0; OpenID4VP 1.0',
+    specReference: 'HAIP 1.0 Section 5; OpenID4VP 1.0',
   },
   {
     test: (normalized) =>

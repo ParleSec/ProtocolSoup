@@ -48,7 +48,7 @@ import {
 } from '../protocols/presentation/protocol-catalog-data'
 import { toDataURL as toQRCodeDataURL } from 'qrcode'
 
-import { describeWalletAPIError, walletAPIURL, LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE, LOOKING_GLASS_X509_HASH_GUIDANCE } from '../lookingglass/wallet-client'
+import { describeWalletAPIError, walletAPIURL, LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE, lookingGlassX509HashGuidance } from '../lookingglass/wallet-client'
 
 const OID4VP_WALLET_SUBMIT_URL = walletAPIURL('/submit')
 const SAFE_QR_DATA_URL_PREFIX = 'data:image/png;base64,'
@@ -65,6 +65,12 @@ const OID4VCI_CREDENTIAL_PROFILES = [
 const LOOKING_GLASS_ISSUABLE_FORMATS = new Set<string>(
   OID4VCI_CREDENTIAL_PROFILES.map((profile) => profile.format),
 )
+function oid4vpIssuanceProfiles() {
+  // HAIP 1.0 Section 5 presentation does not require HAIP 1.0 Sections 4.4.1 /
+  // 4.5.1 wallet or key attestation. Auto-issue the educational configuration
+  // of the matching format so OID4VP x509_hash runs without the issuance gate.
+  return OID4VCI_CREDENTIAL_PROFILES.filter((profile) => !profile.haip)
+}
 const LOOKING_GLASS_OID4VP_DCQL_PRESETS = OID4VP_DCQL_PRESETS.filter((preset) => {
   try {
     const formats = getOID4VPDCQLCredentialFormats(preset.query)
@@ -542,11 +548,28 @@ export function LookingGlass() {
       return
     }
     const requestedFormats = getOID4VPDCQLCredentialFormats(oid4vpDCQLInput)
-    if (requestedFormats.length === 0 || requestedFormats.includes(selectedOID4VCICredentialProfile.format)) {
+    if (requestedFormats.length === 0) {
+      if (!selectedOID4VCICredentialProfile.haip) {
+        return
+      }
+      const educational = oid4vpIssuanceProfiles().find(
+        (profile) => profile.format === selectedOID4VCICredentialProfile.format,
+      )
+      if (educational) {
+        setOID4VCICredentialConfigurationID(educational.id)
+      }
       return
     }
-    const matchingProfile = OID4VCI_CREDENTIAL_PROFILES.find((profile) => requestedFormats.includes(profile.format))
-    if (matchingProfile) {
+    if (
+      requestedFormats.includes(selectedOID4VCICredentialProfile.format) &&
+      !selectedOID4VCICredentialProfile.haip
+    ) {
+      return
+    }
+    const matchingProfile = oid4vpIssuanceProfiles().find((profile) =>
+      requestedFormats.includes(profile.format),
+    )
+    if (matchingProfile && matchingProfile.id !== selectedOID4VCICredentialProfile.id) {
       setOID4VCICredentialConfigurationID(matchingProfile.id)
     }
   }, [
@@ -555,6 +578,8 @@ export function LookingGlass() {
     oid4vpDCQLValidationError,
     oid4vpDCQLInput,
     selectedOID4VCICredentialProfile.format,
+    selectedOID4VCICredentialProfile.haip,
+    selectedOID4VCICredentialProfile.id,
   ])
   const oid4vpTrustMode = useMemo(() => {
     const metadata = (oid4vpRequestObjectArtifact?.metadata || walletHandoffArtifact?.metadata || {}) as Record<string, unknown>
@@ -1727,24 +1752,26 @@ export function LookingGlass() {
               <span className="text-xs sm:text-sm font-medium text-surface-300">VC credential profile</span>
             </div>
             <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-              Select the credential profile used for issuance and wallet presentation.
+              {isOID4VPFlow
+                ? 'Select the credential format used to auto-issue before presentation. HAIP key-attested issuance profiles are not used here: HAIP presentation is x509_hash + encrypted direct_post.jwt, not wallet attestation.'
+                : 'Select the credential profile used for issuance and wallet presentation.'}
             </p>
             <select
               value={selectedOID4VCICredentialProfile.id}
               onChange={(event) => setOID4VCICredentialConfigurationID(event.target.value)}
               className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all"
             >
-              {OID4VCI_CREDENTIAL_PROFILES.map((profile) => (
+              {(isOID4VPFlow ? oid4vpIssuanceProfiles() : OID4VCI_CREDENTIAL_PROFILES).map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.label} ({profile.id})
                 </option>
               ))}
             </select>
-            {selectedOID4VCICredentialProfile.haip && (
+            {isOID4VCIFlow && selectedOID4VCICredentialProfile.haip && (
               <div className="mt-2">
                 <ProtocolNotice
                   tone="warning"
-                  title="HAIP profile will fail without wallet attestation"
+                  title="HAIP issuance will fail without wallet attestation"
                   specReference="HAIP 1.0; OID4VCI 1.0 Appendix D"
                 >
                   {LOOKING_GLASS_HAIP_ATTESTATION_GUIDANCE}
@@ -1876,11 +1903,11 @@ export function LookingGlass() {
                   </p>
                   {oid4vpClientIDScheme === 'x509_hash' && (
                     <ProtocolNotice
-                      tone="warning"
+                      tone="info"
                       title={flowId === 'oid4vp-direct-post' ? 'HAIP will coerce this unencrypted flow to direct_post.jwt' : 'HAIP x509_hash signed request'}
-                      specReference="HAIP 1.0; OpenID4VP 1.0"
+                      specReference="HAIP 1.0 Section 5; OpenID4VP 1.0 Section 5.9.3"
                     >
-                      {LOOKING_GLASS_X509_HASH_GUIDANCE}
+                      {lookingGlassX509HashGuidance(flowId === 'oid4vp-direct-post')}
                     </ProtocolNotice>
                   )}
                 </div>

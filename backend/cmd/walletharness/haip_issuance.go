@@ -185,6 +185,34 @@ func preferHAIPBootstrapConfigurationID(configurationID string, haipEnabled bool
 	}
 }
 
+// educationalCredentialConfigurationID maps a HAIP key-attested issuance
+// configuration to the same-format educational configuration. HAIP 1.0
+// Sections 4.4.1 / 4.5.1 require wallet and key attestation for issuance;
+// HAIP 1.0 Section 5 presentation (x509_hash, DCQL, encrypted response) does
+// not. Presentation bootstrap therefore issues the educational credential of
+// the matching format when attestation material is not configured.
+func educationalCredentialConfigurationID(configurationID string) string {
+	switch strings.TrimSpace(configurationID) {
+	case "MobileDrivingLicenceMsoMdocHAIP":
+		return "MobileDrivingLicenceMsoMdoc"
+	case "UniversityDegreeCredentialSDJWTHAIP":
+		return "UniversityDegreeCredential"
+	default:
+		return strings.TrimSpace(configurationID)
+	}
+}
+
+// presentationIssuanceConfigurationID is the credential configuration used to
+// auto-issue during OID4VP /submit. HAIP issuance IDs are rewritten to the
+// educational equivalent unless this wallet actually has attestation material.
+func (s *walletHarnessServer) presentationIssuanceConfigurationID(configurationID string) string {
+	normalized := strings.TrimSpace(configurationID)
+	if !isHAIPCredentialConfigurationID(normalized) || s.haipIssuanceEnabled() {
+		return normalized
+	}
+	return educationalCredentialConfigurationID(normalized)
+}
+
 func (s *walletHarnessServer) newHAIPIssuanceSession() (*haipIssuanceSession, error) {
 	dpopPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

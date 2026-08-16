@@ -683,7 +683,7 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 	}
 	if inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled()); inferredFormat != "" {
 		resolveResponse["inferred_credential_format"] = inferredFormat
-		resolveResponse["inferred_credential_configuration_id"] = inferredConfigID
+		resolveResponse["inferred_credential_configuration_id"] = s.presentationIssuanceConfigurationID(inferredConfigID)
 	}
 	writeJSON(w, http.StatusOK, resolveResponse)
 }
@@ -880,20 +880,13 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	credOpts := credentialSelectionOptions{
-		ProvidedCredentialJWT: strings.TrimSpace(req.CredentialJWT),
-		CredentialID:          strings.TrimSpace(req.CredentialID),
-		CredentialFormat:      strings.TrimSpace(req.CredentialFormat),
-		CredentialConfigID:    strings.TrimSpace(req.CredentialConfigID),
-		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
-	}
-	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
-		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
-		if inferredFormat != "" {
-			credOpts.CredentialFormat = inferredFormat
-			credOpts.CredentialConfigID = inferredConfigID
-		}
-	}
+	credOpts := s.preparePresentationCredentialOptions(credentialSelectionOptions{
+		ProvidedCredentialJWT: req.CredentialJWT,
+		CredentialID:          req.CredentialID,
+		CredentialFormat:      req.CredentialFormat,
+		CredentialConfigID:    req.CredentialConfigID,
+		LookingGlassSessionID: req.LookingGlassSessionID,
+	}, envelope)
 	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
 	if err != nil {
 		// This is a request/credential-selection failure, not a gateway failure.
@@ -1064,20 +1057,13 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	credOpts := credentialSelectionOptions{
-		ProvidedCredentialJWT: strings.TrimSpace(req.CredentialJWT),
-		CredentialID:          strings.TrimSpace(req.CredentialID),
-		CredentialFormat:      strings.TrimSpace(req.CredentialFormat),
-		CredentialConfigID:    strings.TrimSpace(req.CredentialConfigID),
-		LookingGlassSessionID: strings.TrimSpace(req.LookingGlassSessionID),
-	}
-	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
-		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
-		if inferredFormat != "" {
-			credOpts.CredentialFormat = inferredFormat
-			credOpts.CredentialConfigID = inferredConfigID
-		}
-	}
+	credOpts := s.preparePresentationCredentialOptions(credentialSelectionOptions{
+		ProvidedCredentialJWT: req.CredentialJWT,
+		CredentialID:          req.CredentialID,
+		CredentialFormat:      req.CredentialFormat,
+		CredentialConfigID:    req.CredentialConfigID,
+		LookingGlassSessionID: req.LookingGlassSessionID,
+	}, envelope)
 	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
 	if err != nil {
 		// Credential-selection failures are client-actionable. Do not return a
@@ -1287,20 +1273,13 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	credOpts := credentialSelectionOptions{
+	credOpts := s.preparePresentationCredentialOptions(credentialSelectionOptions{
 		ProvidedCredentialJWT: req.CredentialJWT,
 		CredentialID:          req.CredentialID,
 		CredentialFormat:      req.CredentialFormat,
 		CredentialConfigID:    req.CredentialConfigID,
 		LookingGlassSessionID: req.LookingGlassSessionID,
-	}
-	if credOpts.CredentialFormat == "" && credOpts.CredentialConfigID == "" {
-		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
-		if inferredFormat != "" {
-			credOpts.CredentialFormat = inferredFormat
-			credOpts.CredentialConfigID = inferredConfigID
-		}
-	}
+	}, envelope)
 	credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credOpts)
 	if err != nil {
 		// Credential-selection failures are client-actionable. Do not return a
@@ -2669,13 +2648,13 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		return
 
 	case "issue_credential":
-		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, credentialSelectionOptions{
+		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, s.preparePresentationCredentialOptions(credentialSelectionOptions{
 			ProvidedCredentialJWT: req.CredentialJWT,
 			CredentialID:          req.CredentialID,
 			CredentialFormat:      req.CredentialFormat,
 			CredentialConfigID:    req.CredentialConfigID,
 			LookingGlassSessionID: req.LookingGlassSessionID,
-		})
+		}, nil))
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
@@ -2719,20 +2698,13 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			})
 			return
 		}
-		buildCredOpts := credentialSelectionOptions{
+		buildCredOpts := s.preparePresentationCredentialOptions(credentialSelectionOptions{
 			ProvidedCredentialJWT: req.CredentialJWT,
 			CredentialID:          req.CredentialID,
 			CredentialFormat:      req.CredentialFormat,
 			CredentialConfigID:    req.CredentialConfigID,
 			LookingGlassSessionID: req.LookingGlassSessionID,
-		}
-		if buildCredOpts.CredentialFormat == "" && buildCredOpts.CredentialConfigID == "" {
-			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
-			if inferredFormat != "" {
-				buildCredOpts.CredentialFormat = inferredFormat
-				buildCredOpts.CredentialConfigID = inferredConfigID
-			}
-		}
+		}, envelope)
 		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, buildCredOpts)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{
@@ -2830,20 +2802,13 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			})
 			return
 		}
-		submitCredOpts := credentialSelectionOptions{
+		submitCredOpts := s.preparePresentationCredentialOptions(credentialSelectionOptions{
 			ProvidedCredentialJWT: req.CredentialJWT,
 			CredentialID:          req.CredentialID,
 			CredentialFormat:      req.CredentialFormat,
 			CredentialConfigID:    req.CredentialConfigID,
 			LookingGlassSessionID: req.LookingGlassSessionID,
-		}
-		if submitCredOpts.CredentialFormat == "" && submitCredOpts.CredentialConfigID == "" {
-			inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
-			if inferredFormat != "" {
-				submitCredOpts.CredentialFormat = inferredFormat
-				submitCredOpts.CredentialConfigID = inferredConfigID
-			}
-		}
+		}, envelope)
 		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, submitCredOpts)
 		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{
@@ -3261,8 +3226,35 @@ func validateBrowserRedirectURI(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-// inferCredentialFormatFromVPRequest extracts the expected credential format and configuration ID from a resolved VP request envelope.
-// It examines the DCQL query for an explicit format constraint, and falls back to vp_formats_supported in client_metadata to pick the most specific match.
+// preparePresentationCredentialOptions infers a credential format/config from
+// the VP request when the caller omitted both, then rewrites HAIP issuance
+// configuration IDs to the educational equivalent when this wallet cannot mint
+// HAIP attestations. OID4VCI /api/import is unchanged and still returns HTTP
+// 400 for HAIP configurations without attestation material.
+func (s *walletHarnessServer) preparePresentationCredentialOptions(
+	options credentialSelectionOptions,
+	envelope *resolvedRequestEnvelope,
+) credentialSelectionOptions {
+	options.CredentialConfigID = strings.TrimSpace(options.CredentialConfigID)
+	options.CredentialFormat = strings.TrimSpace(options.CredentialFormat)
+	options.CredentialID = strings.TrimSpace(options.CredentialID)
+	options.ProvidedCredentialJWT = strings.TrimSpace(options.ProvidedCredentialJWT)
+	options.LookingGlassSessionID = strings.TrimSpace(options.LookingGlassSessionID)
+	if options.CredentialFormat == "" && options.CredentialConfigID == "" {
+		inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled())
+		if inferredFormat != "" {
+			options.CredentialFormat = inferredFormat
+			options.CredentialConfigID = inferredConfigID
+		}
+	}
+	options.CredentialConfigID = s.presentationIssuanceConfigurationID(options.CredentialConfigID)
+	return options
+}
+
+// inferCredentialFormatFromVPRequest extracts the expected credential format
+// and configuration ID from a resolved VP request envelope. It examines the
+// DCQL query for an explicit format constraint, and falls back to
+// vp_formats_supported in client_metadata to pick the most specific match.
 func inferCredentialFormatFromVPRequest(envelope *resolvedRequestEnvelope, haipEnabled bool) (format string, configID string) {
 	if envelope == nil || envelope.DecodedPayload == nil {
 		return "", ""
