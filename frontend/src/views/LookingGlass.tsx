@@ -145,6 +145,11 @@ function describeWalletSubmitError(responsePayload: Record<string, unknown> | nu
   return `${baseMessage}. Match details: ${details.join('; ')}.`
 }
 
+function pickSSFLabFlow(protocol: LookingGlassProtocol): LookingGlassFlow | undefined {
+  const flows = protocol.flows || []
+  return flows.find((flow) => flow.id === 'ssf-stream-lab') || flows[0]
+}
+
 export function LookingGlass() {
   const router = useRouter()
   const pathname = usePathname()
@@ -200,6 +205,7 @@ export function LookingGlass() {
   const [showAllQuickFlows, setShowAllQuickFlows] = useState(false)
   const [ssfReady, setSsfReady] = useState(false)
   const [ssfSecurityState, setSsfSecurityState] = useState<SecurityState | null>(null)
+  const [ssfEventId, setSsfEventId] = useState('')
 
   const { protocols, loading: protocolsLoading } = useProtocols()
   const {
@@ -1121,7 +1127,8 @@ export function LookingGlass() {
 
   const handleProtocolSelect = useCallback((protocol: LookingGlassProtocol) => {
     setSelectedProtocol(protocol)
-    setSelectedFlow(null)
+    const labFlow = protocol.id === 'ssf' ? pickSSFLabFlow(protocol) : undefined
+    setSelectedFlow(labFlow || null)
     resetFlow()
     setWireSessionId(null)
     setWireSessionToken(null)
@@ -1144,7 +1151,7 @@ export function LookingGlass() {
       OID4VP_DCQL_PRESETS.find((preset) => preset.id === DEFAULT_OID4VP_DCQL_PRESET_ID)?.query || '{}',
     )
     setOID4VPScopeAliasInput('')
-    syncUrlToSelection(protocol.id, null)
+    syncUrlToSelection(protocol.id, labFlow?.id || null)
   }, [resetFlow, clearWireEvents, syncUrlToSelection])
 
   const handleFlowSelect = useCallback((flow: LookingGlassFlow) => {
@@ -1243,6 +1250,9 @@ export function LookingGlass() {
     if (surface && !ssfReady && selectedProtocol?.id === 'ssf') {
       return
     }
+    if (selectedProtocol?.id === 'ssf') {
+      updateSSFLab({ intent: 'fire' })
+    }
     // Client Credentials private-key registration is intentionally one-shot
     // per owned Looking Glass session. Start every execution in a fresh
     // session so reruns and all four auth/token-mode combinations remain
@@ -1279,6 +1289,23 @@ export function LookingGlass() {
     ssfReady,
     selectedProtocol?.id,
   ])
+
+  const handleVerifyStream = useCallback(async () => {
+    if (status !== 'idle') {
+      return
+    }
+    updateSSFLab({ intent: 'verify' })
+    if (!wireSessionId) {
+      setPendingExecute(true)
+      const created = await startWireSession()
+      if (!created) {
+        setPendingExecute(false)
+        updateSSFLab({ intent: 'fire' })
+      }
+      return
+    }
+    executeFlow()
+  }, [status, wireSessionId, startWireSession, executeFlow])
 
   useEffect(() => {
     if (!surface?.session.accumulateWire) return
@@ -1441,6 +1468,7 @@ export function LookingGlass() {
     return subscribeSSFLab(() => {
       setSsfSecurityState(getSSFLab().securityState)
       setSsfReady(getSSFLab().ready)
+      setSsfEventId(getSSFLab().eventId)
     })
   }, [])
 
@@ -1542,6 +1570,7 @@ export function LookingGlass() {
           onFlowSelect={handleFlowSelect}
           loading={protocolsLoading}
           flowNoun={surface?.copy.flowNoun}
+          hideFlowSelector={surface?.hideFlowSelector}
         />
         {selectedFlow && (
           <div className="flex items-center rounded bg-surface-900 border border-white/10 overflow-hidden">
@@ -2088,6 +2117,7 @@ export function LookingGlass() {
             sessionToken={wireSessionToken}
             onReadyChange={setSsfReady}
             onSecurityStateChange={setSsfSecurityState}
+            onVerifyStream={status === 'idle' ? handleVerifyStream : undefined}
           />
         )}
         </section>
@@ -2109,7 +2139,7 @@ export function LookingGlass() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <code className="text-white font-medium text-xs sm:text-base truncate max-w-[160px] sm:max-w-none">{selectedFlow.id}</code>
+                    <code className="text-white font-medium text-xs sm:text-base truncate max-w-[160px] sm:max-w-none">{surface ? (ssfEventId || 'ssf-stream-lab') : selectedFlow.id}</code>
                     {realExecutor.flowInfo && (
                       <span className="text-[10px] sm:text-xs text-surface-400 font-mono flex-shrink-0">
                         {realExecutor.flowInfo.rfcReference}
@@ -2191,7 +2221,9 @@ export function LookingGlass() {
                     title={
                       isOID4VPFlow && !canExecuteOID4VPRequest
                         ? (oid4vpDCQLValidationError || oid4vpScopeAliasValidationError || 'OID4VP request configuration is invalid.')
-                        : undefined
+                        : (Boolean(surface) && !ssfReady)
+                          ? 'Select a subject and event before firing'
+                          : undefined
                     }
                     className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg border text-xs sm:text-sm font-medium transition-all ${
                       (isOID4VPFlow && !canExecuteOID4VPRequest) || (Boolean(surface) && !ssfReady)

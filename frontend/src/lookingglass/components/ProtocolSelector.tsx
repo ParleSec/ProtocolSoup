@@ -19,6 +19,7 @@ interface ProtocolSelectorProps {
   onFlowSelect: (flow: LookingGlassFlow) => void
   loading?: boolean
   flowNoun?: string
+  hideFlowSelector?: boolean
 }
 
 interface DropdownPosition {
@@ -38,6 +39,7 @@ export function ProtocolSelector({
   onFlowSelect,
   loading = false,
   flowNoun = 'flow',
+  hideFlowSelector = false,
 }: ProtocolSelectorProps) {
   const [isProtocolOpen, setIsProtocolOpen] = useState(false)
   const [isFlowOpen, setIsFlowOpen] = useState(false)
@@ -177,7 +179,7 @@ export function ProtocolSelector({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+    <div className={`${hideFlowSelector ? 'grid grid-cols-1' : 'grid grid-cols-2'} gap-2 w-full sm:flex sm:flex-wrap sm:items-center sm:gap-3`}>
       {/* Protocol Select */}
       <div className="min-w-0 sm:flex sm:items-center sm:gap-2">
         <span className="hidden sm:inline text-surface-600 text-xs sm:text-sm font-mono flex-shrink-0">protocol:</span>
@@ -205,6 +207,7 @@ export function ProtocolSelector({
       </div>
 
       {/* Flow Select */}
+      {!hideFlowSelector && (
       <div className="min-w-0 sm:flex sm:items-center sm:gap-2">
         <span className="hidden sm:inline text-surface-600 text-xs sm:text-sm font-mono flex-shrink-0">{flowNoun.toLowerCase()}:</span>
         <button
@@ -228,6 +231,7 @@ export function ProtocolSelector({
           <ChevronDown className={`w-3.5 h-3.5 text-surface-400 ml-auto flex-shrink-0 transition-transform ${isFlowOpen ? 'rotate-180' : ''}`} />
         </button>
       </div>
+      )}
 
       {/* Protocol Dropdown Portal */}
       {createPortal(
@@ -278,7 +282,7 @@ export function ProtocolSelector({
       )}
 
       {/* Flow Dropdown Portal */}
-      {createPortal(
+      {!hideFlowSelector && createPortal(
         <AnimatePresence>
           {isFlowOpen && flowDropdownPos && selectedProtocol && (
             <motion.div

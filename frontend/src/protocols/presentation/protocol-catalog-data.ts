@@ -494,7 +494,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
       {
         id: 'ssf-stream-configuration',
         name: 'Stream Configuration',
-        rfc: 'SSF §4',
+        rfc: 'SSF §8.1.1',
         references: [
           { category: 'core', label: 'OpenID SSF §8 — Management API for SET Event Streams', href: 'https://openid.net/specs/openid-sharedsignals-framework-1_0.html' },
         ],

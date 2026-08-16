@@ -248,6 +248,18 @@ func (p *Plugin) GetInspectors() []plugin.Inspector {
 func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 	return []plugin.FlowDefinition{
 		{
+			ID:          "ssf-stream-lab",
+			Name:        "SSF Stream Lab",
+			Description: "Pick a subject and CAEP/RISC event, fire a SET, and inspect Transmitter and Receiver hops. Stream discovery is a separate Verify stream action and does not change RP account state.",
+			Executable:  true,
+			Category:    "stream-lab",
+			Steps: []plugin.FlowStep{
+				{Order: 1, Name: "Select subject and event", Description: "Looking Glass chrome is the control surface for subject, event type, and push vs poll delivery", From: "Receiver", To: "Transmitter", Type: "internal"},
+				{Order: 2, Name: "Fire SET", Description: "Transmitter encodes a RFC 8417 SET and delivers it over RFC 8935 or RFC 8936", From: "Transmitter", To: "Receiver", Type: "request"},
+				{Order: 3, Name: "RP posture", Description: "Verified CAEP/RISC events mutate RP security state; stream verify does not", From: "Receiver", To: "Receiver", Type: "internal"},
+			},
+		},
+		{
 			ID:          "ssf-stream-configuration",
 			Name:        "Stream Configuration",
 			Description: "Configure an SSF stream between a Transmitter (IdP) and Receiver (RP). Defines event types, delivery methods, and subject formats.",
