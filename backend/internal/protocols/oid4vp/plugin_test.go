@@ -279,8 +279,7 @@ func TestDirectPostJWTFlowAcceptsRawJSONLDPresentation(t *testing.T) {
 	})
 	vpToken := createRawLDPPresentationToken(t, createPayload, holderKeySet, holderDID, rawCredential)
 	form := url.Values{}
-	form.Set("state", asVPString(createPayload["state"]))
-	form.Set("response", createEncryptedResponseJWTWithEC(t, env.KeySet, createPayload, holderKeySet, holderDID, vpToken))
+	form.Set("response", encryptDirectPostJWTResponse(t, createPayload, vpToken))
 
 	formResp, err := http.PostForm(env.Server.URL+"/oid4vp/response", form)
 	if err != nil {
@@ -1482,13 +1481,14 @@ func postWalletResponse(
 	vpToken := createVPToken(t, createPayload, wallet, nonceOverride)
 	state := asVPString(createPayload["state"])
 	responseMode := asVPString(createPayload["response_mode"])
+	_ = verifierKeySet
 
 	form := url.Values{}
-	form.Set("state", state)
 	if responseMode == "direct_post.jwt" {
-		encryptedResponse := createEncryptedResponseJWT(t, verifierKeySet, createPayload, wallet, vpToken)
-		form.Set("response", encryptedResponse)
+		// OID4VP 1.0 Section 8.3.1: the HTTP form contains only `response`.
+		form.Set("response", encryptDirectPostJWTResponse(t, createPayload, vpToken))
 	} else {
+		form.Set("state", state)
 		form.Set("vp_token", vpToken)
 	}
 	formResp, err := http.PostForm(serverURL+"/oid4vp/response", form)
@@ -1771,119 +1771,55 @@ func TestKBJWTIatWithinFreshnessWindowBoundary(t *testing.T) {
 	}
 }
 
-func createEncryptedResponseJWT(
-	t *testing.T,
-	verifierKeySet *crypto.KeySet,
-	createPayload map[string]interface{},
-	wallet *walletFixture,
-	vpToken string,
-) string {
-	t.Helper()
-	pubJWK, found := wallet.KeySet.GetJWKByID(wallet.KeySet.RSAKeyID())
-	if !found {
-		t.Fatalf("wallet public jwk is unavailable")
-	}
-	now := time.Now().UTC()
-	innerClaims := jwt.MapClaims{
-		"iss":      wallet.Subject,
-		"sub":      wallet.Subject,
-		"aud":      asVPString(createPayload["response_uri"]),
-		"state":    asVPString(createPayload["state"]),
-		"vp_token": vpToken,
-		"iat":      now.Unix(),
-		"exp":      now.Add(3 * time.Minute).Unix(),
-		"jti":      "resp-" + wallet.Subject,
-		"cnf": map[string]interface{}{
-			"jwk": pubJWK,
-			"jkt": pubJWK.Thumbprint(),
-		},
-	}
-	innerToken := jwt.NewWithClaims(jwt.SigningMethodRS256, innerClaims)
-	innerToken.Header["typ"] = "oauth-authz-resp+jwt"
-	innerToken.Header["kid"] = wallet.KeySet.RSAKeyID()
-	signedInner, err := innerToken.SignedString(wallet.KeySet.RSAPrivateKey())
-	if err != nil {
-		t.Fatalf("sign response jwt: %v", err)
-	}
+func TestDirectPostJWTProvisionsECDHESForSDJWT(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
 
-	encrypter, err := jose.NewEncrypter(
-		jose.A256GCM,
-		jose.Recipient{
-			Algorithm: jose.RSA_OAEP,
-			Key:       verifierKeySet.RSAPublicKey(),
-		},
-		(&jose.EncrypterOptions{}).WithContentType("JWT"),
-	)
-	if err != nil {
-		t.Fatalf("create encrypter: %v", err)
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post.jwt")
+	requestID := asVPString(createPayload["request_id"])
+	env.vpPlugin.mu.RLock()
+	session := env.vpPlugin.requests[requestID]
+	env.vpPlugin.mu.RUnlock()
+	if session == nil || session.ResponseEncryptionJWK == nil {
+		t.Fatal("non-HAIP direct_post.jwt must provision an ECDH-ES response-encryption key")
 	}
-	object, err := encrypter.Encrypt([]byte(signedInner))
-	if err != nil {
-		t.Fatalf("encrypt response jwt: %v", err)
+	encValues, _ := createPayload["encrypted_response_enc_values_supported"].([]interface{})
+	if len(encValues) == 0 {
+		t.Fatal("expected encrypted_response_enc_values_supported on create response")
 	}
-	serialized, err := object.CompactSerialize()
-	if err != nil {
-		t.Fatalf("serialize jwe: %v", err)
-	}
-	return serialized
 }
 
-func createEncryptedResponseJWTWithEC(
-	t *testing.T,
-	verifierKeySet *crypto.KeySet,
-	createPayload map[string]interface{},
-	walletKeySet *crypto.KeySet,
-	walletSubject string,
-	vpToken string,
-) string {
+func encryptDirectPostJWTResponse(t *testing.T, createPayload map[string]interface{}, vpToken string) string {
 	t.Helper()
-	pubJWK, found := walletKeySet.GetJWKByID(walletKeySet.ECKeyID())
-	if !found {
-		t.Fatalf("wallet ec jwk is unavailable")
-	}
-	now := time.Now().UTC()
-	innerClaims := jwt.MapClaims{
-		"iss":      walletSubject,
-		"sub":      walletSubject,
-		"aud":      asVPString(createPayload["response_uri"]),
-		"state":    asVPString(createPayload["state"]),
-		"vp_token": vpToken,
-		"iat":      now.Unix(),
-		"exp":      now.Add(3 * time.Minute).Unix(),
-		"jti":      "resp-ec-" + walletSubject,
-		"cnf": map[string]interface{}{
-			"jwk": pubJWK,
-			"jkt": pubJWK.Thumbprint(),
-		},
-	}
-	innerToken := jwt.NewWithClaims(jwt.SigningMethodES256, innerClaims)
-	innerToken.Header["typ"] = "oauth-authz-resp+jwt"
-	innerToken.Header["kid"] = walletKeySet.ECKeyID()
-	signedInner, err := innerToken.SignedString(walletKeySet.ECPrivateKey())
+	decoded, err := crypto.DecodeTokenWithoutValidation(asVPString(createPayload["request"]))
 	if err != nil {
-		t.Fatalf("sign ec response jwt: %v", err)
+		t.Fatalf("decode request object: %v", err)
 	}
-
-	encrypter, err := jose.NewEncrypter(
-		jose.A256GCM,
-		jose.Recipient{
-			Algorithm: jose.RSA_OAEP,
-			Key:       verifierKeySet.RSAPublicKey(),
-		},
-		(&jose.EncrypterOptions{}).WithContentType("JWT"),
-	)
+	clientMetadata, ok := decoded.Payload["client_metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("request object missing client_metadata")
+	}
+	jwks, ok := clientMetadata["jwks"].(map[string]interface{})
+	if !ok {
+		t.Fatal("client_metadata missing jwks")
+	}
+	keys, ok := jwks["keys"].([]interface{})
+	if !ok || len(keys) == 0 {
+		t.Fatal("client_metadata.jwks missing response-encryption key")
+	}
+	encoded, err := json.Marshal(keys[0])
 	if err != nil {
-		t.Fatalf("create encrypter: %v", err)
+		t.Fatalf("marshal response-encryption jwk: %v", err)
 	}
-	object, err := encrypter.Encrypt([]byte(signedInner))
+	var jwk crypto.JWK
+	if err := json.Unmarshal(encoded, &jwk); err != nil {
+		t.Fatalf("parse response-encryption jwk: %v", err)
+	}
+	encrypted, err := encryptECDHESResponse(jwk, vpToken, asVPString(createPayload["state"]), jose.A128GCM)
 	if err != nil {
-		t.Fatalf("encrypt ec response jwt: %v", err)
+		t.Fatalf("encrypt direct_post.jwt response: %v", err)
 	}
-	serialized, err := object.CompactSerialize()
-	if err != nil {
-		t.Fatalf("serialize jwe: %v", err)
-	}
-	return serialized
+	return encrypted
 }
 
 func createRawLDPCredential(

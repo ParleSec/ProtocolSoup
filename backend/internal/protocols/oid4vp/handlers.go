@@ -300,16 +300,15 @@ func (p *Plugin) handleCreateAuthorizationRequest(w http.ResponseWriter, r *http
 	// and retain the private half on the session. The key's RFC 7638 thumbprint
 	// binds the SessionTranscript handover to the encryption (anti-substitution).
 	//
-	// HAIP 1.0 Section 5 requires ECDH-ES response encryption for every supported
-	// credential format. Non-HAIP direct_post.jwt retains the legacy RSA path
-	// except for mso_mdoc, whose online profile also uses ECDH-ES.
+	// Encrypted response modes (direct_post.jwt / dc_api.jwt) always advertise
+	// this key so the wallet can post only `response` (OID4VP §8.3.1) and the
+	// verifier can correlate the JWE via kid / authenticated decryption.
+	// HAIP 1.0 Section 5 additionally requires both A128GCM and A256GCM.
 	encValues := []string{mdocResponseEncEnc}
 	if req.Profile == profileHAIP || isDCAPI {
 		encValues = []string{encA128GCM, encA256GCM}
 	}
-	needsECDHES := req.Profile == profileHAIP ||
-		req.ResponseMode == responseModeDCAPIJWT ||
-		(req.ResponseMode == responseModeDirectPostJWT && dcqlRequestsMdoc(dcqlQuery))
+	needsECDHES := isEncryptedResponseMode(req.ResponseMode)
 	var responseEncKey *crypto.JWK
 	if needsECDHES {
 		privateEncJWK, err := injectResponseEncryption(clientMetadata, p.randomValue(8), encValues)

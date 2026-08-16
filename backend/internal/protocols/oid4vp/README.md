@@ -11,7 +11,7 @@ This implementation provides:
 - **Default Presentation Request**: the canonical request targets the mDL (`mso_mdoc`, doctype `org.iso.18013.5.1.mDL`) when no explicit `dcql_query`/`scope` is supplied; SD-JWT VC and the W3C formats remain selectable via an explicit query
 - **Response Modes**: Supports `direct_post` and `direct_post.jwt`; DC API building blocks are not an end-to-end browser implementation
 - **HAIP Mode**: Opt-in `profile: "haip"` enforcing HAIP 1.0 (DCQL, encrypted response, `x509_hash`, both `A128GCM`+`A256GCM`); out-of-profile choices are rejected
-- **Response JWT Validation**: Validates `typ=oauth-authz-resp+jwt` for the legacy JOSE `direct_post.jwt` path; ECDH-ES mdoc/HAIP responses carry the Authorization Response directly in the JWE payload
+- **Response JWT Validation**: Encrypted `direct_post.jwt` / `dc_api.jwt` responses are ECDH-ES JWEs whose JSON payload is the Authorization Response (`vp_token` + `state`)
 - **VP Token Validation**: Signature, `typ=vp+jwt`, nonce, audience, expiry, and holder-binding checks
 - **ISO mdoc Online Profile**: `mso_mdoc` presentations with DCQL-keyed base64url CBOR `DeviceResponse`, verifier-reconstructed `OpenID4VPHandover` (redirect, Appendix B.2.6.1) or `OpenID4VPDCAPIHandover` (DC API, Appendix B.2.6.2), and ECDH-ES + A128GCM/A256GCM encrypted responses
 - **W3C Digital Credentials API**: Handover/response-processing building blocks exist, but browser invocation is absent and the wallet harness rejects these modes
@@ -59,7 +59,7 @@ The OID4VP implementation is mounted as plugin ID `oid4vp` in the backend protoc
 | Flow ID | Name | Description |
 |---------|------|-------------|
 | `oid4vp-direct-post` | DCQL + `direct_post` | Wallet posts `vp_token` and `state` directly to verifier response endpoint |
-| `oid4vp-direct-post-jwt` | DCQL + `direct_post.jwt` | Wallet submits encrypted/signed response JWT containing `vp_token` and `state` |
+| `oid4vp-direct-post-jwt` | DCQL + `direct_post.jwt` | Wallet submits ECDH-ES `response` JWE containing JSON `vp_token` and `state` |
 
 ## Request and Response Contracts
 

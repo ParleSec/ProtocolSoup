@@ -961,9 +961,10 @@ paths:
       operationId: vcHandleWalletResponse
       description: |
         Accepts wallet VP submissions. For `direct_post`, the wallet sends `vp_token` and `state`.
-        For legacy `direct_post.jwt`, the wallet sends an encrypted `response` JWE containing a signed inner JWT.
-        ECDH-ES mso_mdoc and HAIP responses carry the Authorization Response directly in the JWE payload.
-        Both variants require exact correlation by `state`. DC API-shaped
+        For `direct_post.jwt`, the wallet sends an encrypted `response` JWE (ECDH-ES)
+        whose JSON payload carries `vp_token` and `state`. The HTTP form contains only
+        `response` (OID4VP 1.0 Section 8.3.1); when outer `state` is omitted the JWE
+        `kid` selects the request's ephemeral decryption key. DC API-shaped
         backend scaffolding is not a browser-mediated conformance surface.
         Accepts both `application/json` and `application/x-www-form-urlencoded`.
       requestBody:

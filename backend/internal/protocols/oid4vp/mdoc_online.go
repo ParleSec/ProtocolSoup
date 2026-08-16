@@ -15,11 +15,9 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 )
 
-// The mso_mdoc OID4VP online profile (OID4VP 1.0 Appendix B.2, Section 8.3.1)
-// uses ECDH-ES key agreement with A128GCM content encryption by default. These
-// are deliberately kept separate from the SD-JWT direct_post.jwt path (which
-// uses RSA-OAEP + a signed inner JWT), so the existing path is untouched. HAIP
-// 1.0 Section 5 additionally requires A256GCM; the verifier accepts both content
+// Encrypted OID4VP responses (OID4VP 1.0 Section 8.3 / Appendix B.2) use
+// ECDH-ES key agreement with A128GCM content encryption by default. HAIP 1.0
+// Section 5 additionally requires A256GCM; the verifier accepts both content
 // encryption algorithms on decrypt and (in HAIP / DC API mode) advertises both.
 const (
 	mdocResponseEncAlg = "ECDH-ES"

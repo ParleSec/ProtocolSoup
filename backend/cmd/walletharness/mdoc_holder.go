@@ -470,8 +470,8 @@ func (s *walletHarnessServer) reconstructMdocHandover(requestContext *resolvedRe
 // public key from a resolved request object's client_metadata.jwks (OID4VP 1.0
 // Section 8.3). It selects the first EC key marked for encryption (use=enc or
 // alg=ECDH-ES). Returns nil when the request advertises no such key: an
-// unencrypted direct_post request carries none, and the SD-JWT direct_post.jwt
-// path uses the verifier's RSA well-known key rather than a client_metadata key.
+// unencrypted direct_post request carries none. Encrypted direct_post.jwt
+// requests advertise an ECDH-ES key here (OID4VP 1.0 Section 8.3).
 func extractResponseEncryptionJWK(clientMetadata map[string]interface{}) *intcrypto.JWK {
 	if clientMetadata == nil {
 		return nil

@@ -1222,7 +1222,9 @@ paths:
       operationId: oid4vpWalletResponse
       description: |
         Accepts wallet VP submissions. For `direct_post`, the wallet sends `vp_token` and `state`.
-        For `direct_post.jwt`, the wallet sends an encrypted `response` JWE containing a signed inner JWT.
+        For `direct_post.jwt`, the wallet sends an encrypted `response` JWE (ECDH-ES)
+        whose JSON payload carries `vp_token` and `state`. The HTTP form contains only
+        `response` (OID4VP 1.0 Section 8.3.1).
         Accepts both `application/json` and `application/x-www-form-urlencoded`.
       requestBody:
         required: true
