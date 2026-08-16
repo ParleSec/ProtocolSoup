@@ -61,6 +61,8 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SSF_RECEIVER_TOKEN` | - | Bearer token the receiver accepts for event delivery. |
+| `FEDERATION_SERVICE_URL` | loopback from listen addr | On the SSF service, federation base URL for CAEP `revoke-subject`. Compose: `http://federation-service:8080`. Fly/monolith: `http://127.0.0.1:8080`. |
+| `SSF_TO_FEDERATION_TOKEN` | - | Shared bearer token; set on both SSF and federation. |
 
 ## SPIFFE Service
 

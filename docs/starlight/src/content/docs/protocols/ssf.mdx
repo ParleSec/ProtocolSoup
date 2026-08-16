@@ -8,8 +8,17 @@ description: "Real-time security event sharing with CAEP and RISC events."
 ## Standards
 
 - OpenID Shared Signals Framework 1.0
-- CAEP (Continuous Access Evaluation Protocol) 1.0
-- RISC (Risk Incident Sharing and Coordination) 1.0
+- OpenID Continuous Access Evaluation Profile (CAEP) 1.0
+- OpenID RISC Profile Specification 1.0
+- RFC 8417 (SET), RFC 8935 (push), RFC 8936 (poll)
+
+## Run Surface
+
+SSF is a **stream lab** in [Looking Glass](/using/looking-glass/): `/looking-glass?protocol=ssf`. Catalog flow IDs are presets into one durable Looking Glass session, not isolated grants. Fire CAEP/RISC events, inspect Transmitter and Receiver hops (full SET bodies), and read RP posture on the State tab.
+
+SSF remains its own image (`protocolsoup-ssf`) behind the gateway, the same way SCIM does. RP security state is stored on the SSF service. After a verified CAEP `session-revoked` SET, the receiver also POSTs to federation over HTTP so Alice/Bob OAuth sessions actually die.
+
+`/ssf-sandbox` redirects to Looking Glass.
 
 ## Available Flows
 
@@ -18,21 +27,23 @@ description: "Real-time security event sharing with CAEP and RISC events."
 | `ssf-stream-configuration` | Stream Configuration | Create and configure event streams |
 | `ssf-push-delivery` | Push Delivery | Transmitter pushes SETs to receiver |
 | `ssf-poll-delivery` | Poll Delivery | Receiver polls transmitter for SETs |
-| `caep-session-revoked` | Session Revoked (CAEP) | Session revocation event and response |
-| `caep-credential-change` | Credential Change (CAEP) | Credential change event and response |
-| `risc-account-disabled` | Account Disabled (RISC) | Account disabled event and response |
-| `risc-credential-compromise` | Credential Compromise (RISC) | Credential compromise event and response |
+| `caep-session-revoked` | Session Revoked (CAEP §3.1) | Session revocation event and response |
+| `caep-credential-change` | Credential Change (CAEP §3.3) | Credential change event and response |
+| `risc-account-disabled` | Account Disabled (RISC §2.3) | Account disabled event and response |
+| `risc-credential-compromise` | Credential Compromise (RISC §2.7) | Credential compromise event and response |
 
 ## Demo Scenarios
 
-- **SSF Interactive Sandbox** -- Full transmitter/receiver sandbox
+- **SSF Stream Lab** -- Durable Looking Glass session for CAEP/RISC events
 - **Session Revocation Demo** -- CAEP session revoked event lifecycle
 - **Credential Compromise Response** -- RISC response action execution
 - **Push vs Poll Comparison** -- Delivery mode behavior comparison
 
 ## Supported Event Actions
 
-`session-revoked`, `credential-change`, `device-compliance-change`, `credential-compromise`, `account-disabled`, `account-enabled`, `account-purged`, `identifier-changed`, `assurance-level-change`, `token-claims-change`, `identifier-recycled`, `account-credential-change-required`, `sessions-revoked`
+`session-revoked`, `credential-change`, `device-compliance-change`, `credential-compromise`, `account-disabled`, `account-enabled`, `account-purged`, `identifier-changed`, `assurance-level-change`, `token-claims-change`, `identifier-recycled`, `account-credential-change-required`
+
+The lab action `sessions-revoked` maps to CAEP `session-revoked` (all sessions). RISC `sessions-revoked` is not emitted (RISC §2.11).
 
 ## Endpoints
 
@@ -40,15 +51,15 @@ description: "Real-time security event sharing with CAEP and RISC events."
 
 | Path | Methods | Purpose |
 |------|---------|---------|
-| `/ssf/.well-known/ssf-configuration` | GET | SSF discovery |
+| `/.well-known/ssf-configuration` | GET | SSF discovery (issuer insertion, SSF §7.2) |
 | `/ssf/jwks` | GET | Transmitter JWKS |
-| `/ssf/stream` | POST, GET, PATCH, DELETE | Stream CRUD |
+| `/ssf/stream` | POST, GET, PATCH, DELETE | Stream CRUD (`GET` without `stream_id` returns a list; nested `delivery`) |
 | `/ssf/status` | GET, POST | Stream status |
+| `/ssf/verify` | POST | Stream verification (`stream_id` required; **204** empty) |
 | `/ssf/subjects` | GET, POST | Subject management |
 | `/ssf/actions/{action}` | POST | Trigger event action |
-| `/ssf/push` | POST | Push delivery |
-| `/ssf/poll` | GET, POST | Poll delivery |
-| `/ssf/ack` | POST | Acknowledge events |
+| `/ssf/poll` | GET, POST | Poll delivery (RFC 8936 `sets` / `acks` / `setErrs`) |
+| `/ssf/ack` | POST | Thin alias for poll `acks` |
 
 ### Receiver
 
@@ -63,21 +74,27 @@ description: "Real-time security event sharing with CAEP and RISC events."
 
 | Path | Methods | Purpose |
 |------|---------|---------|
-| `/ssf/events/stream` | GET | SSE event stream |
 | `/ssf/events` | GET | Event history |
 | `/ssf/security-state` | GET | All security states |
 | `/ssf/security-state/{email}` | GET | State by subject |
+| `/ssf/security-state/{email}/reset` | POST | Reset RP posture |
 | `/ssf/decode` | POST | Decode SET |
 
 ## Architecture
 
-SSF runs a standalone receiver on port `8081` alongside the main API on port `8080`. Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver. The receiver validates SETs and executes response actions via the MockIdP action executor.
+SSF runs as `protocolsoup-ssf` (`cmd/server-ssf`) with a standalone receiver on port `8081` alongside the main API on port `8080`. Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver and returns **202**. The receiver validates SETs and executes response actions via `ReceiverActionExecutor` on this service. After a verified CAEP `session-revoked` SET it POSTs `{ "email": "alice@example.com" }` to `FEDERATION_SERVICE_URL/oauth2/demo/caep/revoke-subject` (bearer `SSF_TO_FEDERATION_TOKEN`) so MockIdP sessions and tokens die. That hop is RP policy, not an SSF SET field, and is shown on the Looking Glass bus.
+
+Do not register SSF in the federation binary. Cross-service CAEP is HTTP only (loopback on the Fly/`cmd/server` monolith).
+
+Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS story as other ProtocolSoup services.
 
 ## What To Validate
 
-- Stream configuration: delivery method, event types, subject format
-- SET structure: `iss`, `iat`, `jti`, `events` claim with event URI keys
-- Push delivery: SET JWT signature, receiver bearer token authentication
-- Poll delivery: `sets` response, `more_available` flag, acknowledgment
-- Response actions: receiver processes event and updates security state
-- Security state: subject state changes after event processing
+- Stream configuration: nested `delivery: { method, endpoint_url }`, `events_supported` vs `events_delivered`
+- Discovery: `GET /.well-known/ssf-configuration`, `spec_version` `"1_0"`, `issuer` identical to SET `iss`
+- SET structure: `iss`, `iat`, `jti`, `aud`, `events`, top-level `sub_id`, no JWT `sub`, `typ=secevent+jwt`
+- Push delivery: `Content-Type: application/secevent+jwt`, signature, **202** (not 200)
+- Poll delivery: `sets` map keyed by `jti`; unacknowledged SETs retransmit; `maxEvents: 0` is ack-only; `acks` / `setErrs` on the next poll
+- Verification: `stream_id` required, **204** empty, verification SET `sub_id` opaque stream id
+- CAEP/RISC members: `namespace` + `current_level`; `credential_type`; `not-compliant`; RISC `reason` only `hijacking` | `bulk-account`
+- Looking Glass Flow tab is the Looking Glass bus only (no executor-local spoof timeline)

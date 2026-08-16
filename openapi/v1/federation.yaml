@@ -421,6 +421,52 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
+  /oauth2/demo/caep/revoke-subject:
+    post:
+      tags: [OAuth2]
+      summary: Demo CAEP subject revocation
+      description: >-
+        Demo-only RP/OP hook used after a verified CAEP session-revoked SET.
+        This is not RFC 7009 (that endpoint consumes a token, not an email).
+        The SSF receiver POSTs `{ "email": "alice@example.com" }` with bearer
+        `SSF_TO_FEDERATION_TOKEN`. MockIdP deletes OP sessions for that user
+        and revokes their refresh tokens and access JTIs so subsequent
+        introspection and resource use fail.
+      operationId: oauth2DemoCAEPRevokeSubject
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: alice@example.com
+      responses:
+        "200":
+          description: Sessions deleted and tokens revoked for the subject.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email:
+                    type: string
+                  sessions_deleted:
+                    type: integer
+                  refresh_tokens_revoked:
+                    type: integer
+                  access_tokens_revoked:
+                    type: integer
+        "401":
+          description: Missing or invalid SSF_TO_FEDERATION_TOKEN.
+        "404":
+          description: No MockIdP user with that email.
   /oauth2/demo/users:
     get:
       tags: [OAuth2]
