@@ -125,7 +125,7 @@ services:
 ## Troubleshooting
 
 - **No push events are processed:** verify receiver token alignment and `SSF_RECEIVER_PORT`.
-- **Looking Glass appears empty:** mint a session with `POST /api/protocols/ssf/demo/{flow}` and send `X-Looking-Glass-Session` on `/ssf/*` requests. The engine drops events for unknown sessions.
+- **Looking Glass appears empty:** mint a session with `POST /api/protocols/ssf/demo/ssf-stream-lab` and send `X-Looking-Glass-Session` on `/ssf/*` requests. The engine drops events for unknown sessions. Fire event mutates RP state; Verify stream does not.
 - **State resets after restart:** mount persistent storage and set `SSF_DATA_DIR`.
 - **Gateway path issues:** confirm `SSF_SERVICE_URL` points to this service in gateway config.
 

@@ -5,11 +5,15 @@ export const SSF_DELIVERY_POLL = 'urn:ietf:rfc:8936'
 
 export type SSFDeliveryMethod = typeof SSF_DELIVERY_PUSH | typeof SSF_DELIVERY_POLL
 
+/** Fire sends a CAEP/RISC SET. Verify only inspects the stream (no RP account mutation). */
+export type SSFLabIntent = 'fire' | 'verify'
+
 export interface SSFLabSnapshot {
   subjectIdentifier: string
   eventId: string
   deliveryMethod: SSFDeliveryMethod
   preset: string | null
+  intent: SSFLabIntent
   securityState: SecurityState | null
   ready: boolean
 }
@@ -19,6 +23,7 @@ const DEFAULT_LAB: SSFLabSnapshot = {
   eventId: '',
   deliveryMethod: SSF_DELIVERY_PUSH,
   preset: null,
+  intent: 'fire',
   securityState: null,
   ready: false,
 }

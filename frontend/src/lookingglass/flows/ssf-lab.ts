@@ -17,24 +17,30 @@ export class SSFLabExecutor extends FlowExecutorBase {
 
     try {
       const lab = getSSFLab()
-      const preset = lab.preset || ''
+      const intent = lab.intent
+      updateSSFLab({ intent: 'fire' })
+
+      if (intent === 'verify') {
+        await this.runStreamConfiguration()
+        this.updateState({
+          status: 'idle',
+          currentStep: 'Stream inspected — RP account state is unchanged',
+        })
+        return
+      }
 
       if (lab.deliveryMethod) {
         await this.patchDelivery(lab.deliveryMethod)
       }
 
-      if (preset === 'ssf-stream-configuration') {
-        await this.runStreamConfiguration()
-      } else {
-        if (!lab.subjectIdentifier || !lab.eventId) {
-          throw new Error('Select a subject and event before firing')
-        }
-        await this.fireEvent(lab.eventId, lab.subjectIdentifier)
-        if (lab.deliveryMethod === SSF_DELIVERY_POLL || preset === 'ssf-poll-delivery') {
-          await this.pollAndAck()
-        }
-        await this.refreshSecurityState(lab.subjectIdentifier)
+      if (!lab.subjectIdentifier || !lab.eventId) {
+        throw new Error('Select a subject and event before firing')
       }
+      await this.fireEvent(lab.eventId, lab.subjectIdentifier)
+      if (lab.deliveryMethod === SSF_DELIVERY_POLL) {
+        await this.pollAndAck()
+      }
+      await this.refreshSecurityState(lab.subjectIdentifier)
 
       this.updateState({
         status: 'idle',
@@ -43,7 +49,8 @@ export class SSFLabExecutor extends FlowExecutorBase {
     } catch (error) {
       const description = error instanceof Error ? error.message : 'SSF lab execution failed'
       this.updateState({
-        status: 'error',
+        status: 'idle',
+        currentStep: description,
         error: { code: 'ssf_lab_error', description },
       })
     }

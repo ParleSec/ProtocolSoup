@@ -19,6 +19,7 @@ export interface LookingGlassSurface {
     emptyTitle: string
     emptySubtitle: string
   }
+  hideFlowSelector?: boolean
   chrome: ComponentType<LookingGlassChromeProps> | null
   panel: {
     extraTabs: LookingGlassExtraTab[]
@@ -33,13 +34,14 @@ const SSF_SURFACE: LookingGlassSurface = {
     accumulateWire: true,
   },
   copy: {
-    flowNoun: 'Action',
+    flowNoun: 'Lab',
     executeLabel: 'Fire event',
     executeAgainLabel: 'Fire event',
-    subtitle: 'Configure the stream, fire CAEP and RISC events, and inspect Transmitter and Receiver traffic',
-    emptyTitle: 'Select an action preset to begin',
-    emptySubtitle: 'Subject, event type, and delivery stay on one Looking Glass session until you reset',
+    subtitle: 'Pick a subject and CAEP/RISC event, then fire a SET. RP account state changes only after that SET is verified — not after stream discovery.',
+    emptyTitle: 'Select Shared Signals to open the stream lab',
+    emptySubtitle: 'Fire event sends a SET. Verify stream only reads transmitter metadata and does not change RP posture.',
   },
+  hideFlowSelector: true,
   chrome: SSFLabChrome,
   panel: {
     extraTabs: ['state', 'set'],

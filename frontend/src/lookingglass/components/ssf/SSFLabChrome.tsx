@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, Radio, Sparkles } from 'lucide-react'
+import { ChevronDown, Radio } from 'lucide-react'
 import type { EventDef, SecurityState, Subject } from '../../ssf/types'
 import {
   SSF_DELIVERY_POLL,
@@ -16,6 +16,7 @@ export interface LookingGlassChromeProps {
   sessionToken: string | null
   onReadyChange?: (ready: boolean) => void
   onSecurityStateChange?: (state: SecurityState | null) => void
+  onVerifyStream?: () => void
 }
 
 const PRESET_EVENT: Record<string, string> = {
@@ -47,6 +48,7 @@ export function SSFLabChrome({
   sessionId,
   onReadyChange,
   onSecurityStateChange,
+  onVerifyStream,
 }: LookingGlassChromeProps) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [eventDefs, setEventDefs] = useState<EventDef[]>([])
@@ -56,7 +58,8 @@ export function SSFLabChrome({
 
   const selectedSubject = subjects.find((subject) => subject.id === subjectId) || subjects[0] || null
   const selectedEvent = eventDefs.find((event) => event.id === eventId) || null
-  const ready = flowId === 'ssf-stream-configuration' || Boolean(selectedSubject && selectedEvent)
+  const ready = Boolean(selectedSubject && selectedEvent)
+  const catalogIsStreamInspect = flowId === 'ssf-stream-configuration'
 
   const publish = useCallback((next: {
     subject?: Subject | null
@@ -67,7 +70,7 @@ export function SSFLabChrome({
     const subject = next.subject === undefined ? selectedSubject : next.subject
     const event = next.event === undefined ? selectedEvent : next.event
     const deliveryMethod = next.deliveryMethod ?? delivery
-    const isReady = flowId === 'ssf-stream-configuration' || Boolean(subject && event)
+    const isReady = Boolean(subject && event)
     updateSSFLab({
       subjectIdentifier: subject?.identifier || '',
       eventId: event?.id || '',
@@ -133,10 +136,16 @@ export function SSFLabChrome({
   }, [flowId])
 
   useEffect(() => {
-    if (!eventId && eventDefs.length > 0) {
-      const presetEvent = flowId ? PRESET_EVENT[flowId] : ''
-      setEventId(presetEvent && eventDefs.some((event) => event.id === presetEvent) ? presetEvent : eventDefs[0].id)
+    if (eventId || eventDefs.length === 0) return
+    const presetEvent = flowId ? PRESET_EVENT[flowId] : ''
+    if (presetEvent && eventDefs.some((event) => event.id === presetEvent)) {
+      setEventId(presetEvent)
+      return
     }
+    if (flowId === 'ssf-stream-configuration') {
+      return
+    }
+    setEventId(eventDefs[0].id)
   }, [eventDefs, eventId, flowId])
 
   useEffect(() => {
@@ -166,21 +175,35 @@ export function SSFLabChrome({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-surface-400 text-sm">
-        <Radio className="w-4 h-4 text-amber-400" />
-        <span>Stream lab — subject, event, and delivery stay on this session</span>
-      </div>
+      <p className="text-sm text-surface-400 leading-relaxed">
+        <span className="text-surface-300 font-medium">Fire event</span> sends a signed SET for the subject and event below. That is what changes RP account state (State tab).
+        {' '}
+        <span className="text-surface-300 font-medium">Verify stream</span> only does SSF discovery, <code className="text-xs">GET /stream</code>, JWKS, and <code className="text-xs">POST /verify</code>. It does not revoke sessions or disable accounts.
+      </p>
 
-      <div className="flex flex-wrap items-center gap-2 text-[11px] text-surface-500">
-        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-        <span>Quick start:</span>
-        <button type="button" className="px-2 py-1 rounded bg-surface-800 text-surface-300 hover:text-white" onClick={() => applyQuickEvent('session-revoked')}>
+      {catalogIsStreamInspect && (
+        <p className="text-xs text-amber-200/90 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          Catalog preset “Stream Configuration” inspects the transmitter. Use Verify stream for that. Fire event still uses the event picker and is the only control that mutates RP posture.
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onVerifyStream?.()}
+          disabled={!onVerifyStream}
+          className="px-3 py-1.5 rounded-lg border border-white/15 bg-surface-800 text-xs font-medium text-surface-200 hover:text-white hover:border-white/30 disabled:opacity-40 disabled:pointer-events-none"
+        >
+          Verify stream
+        </button>
+        <span className="text-[11px] text-surface-500">Shortcuts:</span>
+        <button type="button" className="px-2 py-1 rounded bg-surface-800 text-surface-300 hover:text-white text-[11px]" onClick={() => applyQuickEvent('session-revoked')}>
           session-revoked
         </button>
-        <button type="button" className="px-2 py-1 rounded bg-surface-800 text-surface-300 hover:text-white" onClick={() => applyQuickEvent('credential-compromise')}>
+        <button type="button" className="px-2 py-1 rounded bg-surface-800 text-surface-300 hover:text-white text-[11px]" onClick={() => applyQuickEvent('credential-compromise')}>
           credential-compromise
         </button>
-        <button type="button" className="px-2 py-1 rounded bg-surface-800 text-surface-300 hover:text-white" onClick={() => applyQuickEvent('account-disabled')}>
+        <button type="button" className="px-2 py-1 rounded bg-surface-800 text-surface-300 hover:text-white text-[11px]" onClick={() => applyQuickEvent('account-disabled')}>
           account-disabled
         </button>
       </div>
