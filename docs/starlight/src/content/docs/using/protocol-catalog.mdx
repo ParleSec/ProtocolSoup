@@ -79,15 +79,16 @@ description: All protocol families, flows, and demo scenarios available in Proto
 
 **Standards:** OpenID SSF 1.0, CAEP 1.0, RISC 1.0
 
-| Flow | Description |
-|------|-------------|
-| Stream Configuration | Create and configure event streams |
-| Push Delivery | Transmitter pushes SETs to receiver |
-| Poll Delivery | Receiver polls transmitter for SETs |
-| CAEP Session Revoked | Session revocation event and response |
-| CAEP Credential Change | Credential change event and response |
-| RISC Account Disabled | Account disabled event and response |
-| RISC Credential Compromise | Credential compromise event and response |
+| Catalog row | Looking Glass role |
+|-------------|--------------------|
+| Stream Lab | Default durable session (`/looking-glass?protocol=ssf`) |
+| Stream Configuration | Preset: **Verify stream** (discovery, `GET /stream`, JWKS, `POST /verify`). Does not change RP account state |
+| Push Delivery | Preset: delivery = RFC 8935, then **Fire event** |
+| Poll Delivery | Preset: delivery = RFC 8936, then **Fire event** |
+| CAEP Session Revoked | Preset: event = `session-revoked`, then **Fire event** |
+| CAEP Credential Change | Preset: event = `credential-change`, then **Fire event** |
+| RISC Account Disabled | Preset: event = `account-disabled`, then **Fire event** |
+| RISC Credential Compromise | Preset: event = `credential-compromise`, then **Fire event** |
 
 **Demo scenarios:** SSF Stream Lab (Looking Glass), Push vs Poll Comparison
 

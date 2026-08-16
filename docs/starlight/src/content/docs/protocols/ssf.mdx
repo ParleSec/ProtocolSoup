@@ -14,7 +14,9 @@ description: "Real-time security event sharing with CAEP and RISC events."
 
 ## Run Surface
 
-SSF is a **stream lab** in [Looking Glass](/using/looking-glass/): `/looking-glass?protocol=ssf`. Catalog flow IDs are presets into one durable Looking Glass session, not isolated grants. Fire CAEP/RISC events, inspect Transmitter and Receiver hops (full SET bodies), and read RP posture on the State tab.
+SSF is a **stream lab** in [Looking Glass](/using/looking-glass/): `/looking-glass?protocol=ssf`. Catalog flow IDs are presets into one durable Looking Glass session (they fill the event/delivery chrome). They do not replace the chrome.
+
+**Fire event** encodes and delivers a CAEP/RISC SET for the selected subject. That is the only Looking Glass control that mutates RP account state. **Verify stream** reads transmitter metadata and POSTs `/verify`; it does not revoke sessions or disable accounts.
 
 SSF remains its own image (`protocolsoup-ssf`) behind the gateway, the same way SCIM does. RP security state is stored on the SSF service. After a verified CAEP `session-revoked` SET, the receiver also POSTs to federation over HTTP so Alice/Bob OAuth sessions actually die.
 
@@ -22,15 +24,18 @@ SSF remains its own image (`protocolsoup-ssf`) behind the gateway, the same way 
 
 ## Available Flows
 
-| Flow ID | Name | Description |
-|---------|------|-------------|
-| `ssf-stream-configuration` | Stream Configuration | Create and configure event streams |
-| `ssf-push-delivery` | Push Delivery | Transmitter pushes SETs to receiver |
-| `ssf-poll-delivery` | Poll Delivery | Receiver polls transmitter for SETs |
-| `caep-session-revoked` | Session Revoked (CAEP §3.1) | Session revocation event and response |
-| `caep-credential-change` | Credential Change (CAEP §3.3) | Credential change event and response |
-| `risc-account-disabled` | Account Disabled (RISC §2.3) | Account disabled event and response |
-| `risc-credential-compromise` | Credential Compromise (RISC §2.7) | Credential compromise event and response |
+Looking Glass hides the per-event action dropdown. The chrome (subject, event, push/poll) is the control surface. Catalog IDs below still work as deep-link presets (`/looking-glass?protocol=ssf&flow=caep-session-revoked`).
+
+| Flow ID | Name | Looking Glass role |
+|---------|------|--------------------|
+| `ssf-stream-lab` | Stream Lab | Default lab session |
+| `ssf-stream-configuration` | Stream Configuration | Preset: use **Verify stream** (does not change RP state) |
+| `ssf-push-delivery` | Push Delivery | Preset: delivery = RFC 8935, then **Fire event** |
+| `ssf-poll-delivery` | Poll Delivery | Preset: delivery = RFC 8936, then **Fire event** |
+| `caep-session-revoked` | Session Revoked (CAEP §3.1) | Preset: event = `session-revoked`, then **Fire event** |
+| `caep-credential-change` | Credential Change (CAEP §3.3) | Preset: event = `credential-change`, then **Fire event** |
+| `risc-account-disabled` | Account Disabled (RISC §2.3) | Preset: event = `account-disabled`, then **Fire event** |
+| `risc-credential-compromise` | Credential Compromise (RISC §2.7) | Preset: event = `credential-compromise`, then **Fire event** |
 
 ## Demo Scenarios
 
