@@ -90,8 +90,9 @@ paths:
       summary: Canonical Authorization Server metadata path
       description: >
         RFC 8414 Authorization Server Metadata for the OID4VCI issuer,
-        advertising authorization_endpoint and token_endpoint so a wallet can
-        discover and drive the authorization_code grant.
+        advertising authorization_endpoint, token_endpoint, and jwks_uri so a
+        wallet can discover the authorization_code grant and verify issued
+        JWT/SD-JWT credentials against the Authorization Server JWK Set.
         token_endpoint_auth_methods_supported includes attest_jwt_client_auth
         only when a client attestation trust anchor is configured on the
         deployment.
@@ -110,6 +111,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+  /oid4vci/.well-known/jwks.json:
+    get:
+      tags: [OID4VCI]
+      summary: OID4VCI Authorization Server JWKS
+      description: >
+        JWK Set advertised as RFC 8414 jwks_uri. Contains the RSA and EC
+        public keys used to verify OID4VCI JWT and SD-JWT credentials.
+      operationId: getVcAuthorizationServerJwks
+      responses:
+        "200":
+          description: Public signing keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /oid4vci/jwks:
+    get:
+      tags: [OID4VCI]
+      summary: OID4VCI JWKS alternate endpoint
+      operationId: getVcAuthorizationServerJwksAlternate
+      responses:
+        "200":
+          description: Public signing keys.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /oid4vci/.well-known/oauth-authorization-server:
     get:
       tags: [OID4VCI]

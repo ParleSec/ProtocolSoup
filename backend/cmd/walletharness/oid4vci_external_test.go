@@ -334,6 +334,54 @@ func TestResolveExternalIssuerKeysDoesNotProbeJwtVCIssuer(t *testing.T) {
 	}
 }
 
+func TestResolveExternalIssuerKeysDoesNotProbeSpeculativeJWKSWhenAdvertised(t *testing.T) {
+	t.Parallel()
+
+	issuerKeySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("NewKeySet: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+
+	var speculativeHits atomic.Int32
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		speculativeHits.Add(1)
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/api/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		speculativeHits.Add(1)
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/oid4vci/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(issuerKeySet.PublicJWKS())
+	})
+
+	credentialIssuer := testServer.URL + "/oid4vci"
+	server := &walletHarnessServer{httpClient: testServer.Client()}
+	keys, err := server.resolveExternalIssuerKeys(
+		context.Background(),
+		&vc.ParsedCredential{Issuer: credentialIssuer, Format: "dc+sd-jwt"},
+		&resolvedExternalIssuerMetadata{CredentialIssuer: credentialIssuer},
+		&resolvedAuthorizationServerMetadata{
+			AuthorizationServer: credentialIssuer,
+			JWKSURI:             credentialIssuer + "/.well-known/jwks.json",
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("resolveExternalIssuerKeys: %v", err)
+	}
+	if len(keys) == 0 {
+		t.Fatal("expected advertised RFC 8414 jwks_uri keys")
+	}
+	if hits := speculativeHits.Load(); hits != 0 {
+		t.Fatalf("probed speculative JWKS paths %d times", hits)
+	}
+}
+
 func TestIssueFromExternalIssuerImportsCredential(t *testing.T) {
 	const (
 		preAuthorizedCode = "pre-auth-code"

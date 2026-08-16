@@ -217,6 +217,9 @@ func TestAuthorizationServerMetadataDiscoverable(t *testing.T) {
 	if asString(t, payload["token_endpoint"]) != testPlugin.issuerID()+"/token" {
 		t.Fatalf("expected token_endpoint to match issuer /token, got %v", payload["token_endpoint"])
 	}
+	if asString(t, payload["jwks_uri"]) != testPlugin.jwksURI() {
+		t.Fatalf("expected jwks_uri %q, got %v", testPlugin.jwksURI(), payload["jwks_uri"])
+	}
 	authMethods, ok := payload["token_endpoint_auth_methods_supported"].([]interface{})
 	if !ok {
 		t.Fatalf("expected token_endpoint_auth_methods_supported array")

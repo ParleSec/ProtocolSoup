@@ -53,6 +53,8 @@ The OID4VCI implementation is mounted as plugin ID `oid4vci` in the backend prot
 | GET | `/oid4vci/.well-known/openid-credential-issuer/*` | Issuer-derived metadata path support |
 | GET | `/oid4vci/.well-known/oauth-authorization-server` | RFC 8414 Authorization Server metadata (plugin-local alias) |
 | GET | `/oid4vci/.well-known/oauth-authorization-server/*` | Issuer-derived AS metadata path support |
+| GET | `/oid4vci/.well-known/jwks.json` | RFC 8414 `jwks_uri` JWK Set (RSA/EC signing keys) |
+| GET | `/oid4vci/jwks` | Alternate JWKS path |
 | GET | `/oid4vci/credential-offer/{offerID}` | Resolve by-reference credential offer |
 | POST | `/oid4vci/offers/pre-authorized` | Create pre-authorized offer (by reference) |
 | POST | `/oid4vci/offers/pre-authorized/by-value` | Create offer with inline `credential_offer` |

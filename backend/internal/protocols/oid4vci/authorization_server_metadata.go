@@ -1,9 +1,11 @@
 package oid4vci
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
@@ -63,6 +65,13 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		// accepted algorithms.
 		"dpop_signing_alg_values_supported": dpop.AllowedAlgorithmsList,
 	}
+	if p.keySet != nil {
+		// RFC 8414 Section 2: jwks_uri is the Authorization Server's JWK Set.
+		// The same KeySet signs OID4VCI JWT/SD-JWT credentials, so wallets
+		// verify issued credentials against this advertised URL instead of
+		// probing invented well-known paths.
+		metadata["jwks_uri"] = p.jwksURI()
+	}
 	if p.clientAttestationTrustAnchors != nil {
 		metadata["client_attestation_signing_alg_values_supported"] = []string{"ES256"}
 		metadata["client_attestation_pop_signing_alg_values_supported"] = []string{"ES256"}
@@ -94,6 +103,32 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 	)
 
 	writeJSON(w, http.StatusOK, metadata)
+}
+
+func (p *Plugin) jwksURI() string {
+	return p.issuerID() + "/.well-known/jwks.json"
+}
+
+// handleJWKS publishes the JWK Set advertised as RFC 8414 jwks_uri.
+// Only RSA and EC keys are included: JWT/SD-JWT issuance uses those
+// algorithms, and many JWKS validators reject OKP/Ed25519 (unknown kty).
+func (p *Plugin) handleJWKS(w http.ResponseWriter, r *http.Request) {
+	if p.keySet == nil {
+		http.Error(w, "jwks unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	jwks := p.keySet.PublicJWKS()
+	filtered := make([]crypto.JWK, 0, len(jwks.Keys))
+	for _, key := range jwks.Keys {
+		if key.Kty == "OKP" {
+			continue
+		}
+		filtered = append(filtered, key)
+	}
+	jwks.Keys = filtered
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_ = json.NewEncoder(w).Encode(jwks)
 }
 
 func (p *Plugin) isAllowedASMetadataRequestPath(requestPath string) bool {

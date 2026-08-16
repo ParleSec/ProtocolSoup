@@ -537,6 +537,42 @@ func TestCredentialIssuerMetadataWellKnown(t *testing.T) {
 	if asString(t, asMetadata["issuer"]) != asString(t, authorizationServers[0]) {
 		t.Fatalf("authorization server issuer %q does not match advertised identity %q", asString(t, asMetadata["issuer"]), asString(t, authorizationServers[0]))
 	}
+	if asString(t, asMetadata["jwks_uri"]) == "" {
+		t.Fatal("RFC 8414 Authorization Server metadata must advertise jwks_uri")
+	}
+}
+
+func TestOID4VCIJWKSMatchesAdvertisedURI(t *testing.T) {
+	server := newTestServer(t)
+	defer server.Close()
+
+	metadataResp, err := http.Get(server.URL + "/oid4vci/.well-known/oauth-authorization-server")
+	if err != nil {
+		t.Fatalf("authorization server metadata request failed: %v", err)
+	}
+	assertStatus(t, metadataResp, http.StatusOK)
+	metadata := decodeJSONMap(t, metadataResp)
+	jwksURI := asString(t, metadata["jwks_uri"])
+	if !strings.HasSuffix(jwksURI, "/oid4vci/.well-known/jwks.json") {
+		t.Fatalf("jwks_uri = %q, want suffix /oid4vci/.well-known/jwks.json", jwksURI)
+	}
+
+	jwksResp, err := http.Get(server.URL + "/oid4vci/.well-known/jwks.json")
+	if err != nil {
+		t.Fatalf("jwks request failed: %v", err)
+	}
+	assertStatus(t, jwksResp, http.StatusOK)
+	jwks := decodeJSONMap(t, jwksResp)
+	keys, ok := jwks["keys"].([]interface{})
+	if !ok || len(keys) == 0 {
+		t.Fatalf("jwks returned no keys: %#v", jwks)
+	}
+
+	aliasResp, err := http.Get(server.URL + "/oid4vci/jwks")
+	if err != nil {
+		t.Fatalf("plugin-local jwks alias request failed: %v", err)
+	}
+	assertStatus(t, aliasResp, http.StatusOK)
 }
 
 func TestCredentialIssuerMetadataIncludesMultiFormatConfigurations(t *testing.T) {

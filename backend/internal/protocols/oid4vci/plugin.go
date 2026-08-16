@@ -404,6 +404,8 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// entry (issuerID()) points to actually discoverable.
 	router.Get("/.well-known/oauth-authorization-server", p.handleAuthorizationServerMetadata)
 	router.Get("/.well-known/oauth-authorization-server/*", p.handleAuthorizationServerMetadata)
+	router.Get("/.well-known/jwks.json", p.handleJWKS)
+	router.Get("/jwks", p.handleJWKS)
 	router.Get("/credential-offer/{offerID}", p.handleCredentialOfferByReference)
 	router.Post("/offers/pre-authorized", p.handleCreatePreAuthorizedOffer)
 	router.Post("/offers/pre-authorized/by-value", p.handleCreatePreAuthorizedOfferByValue)
