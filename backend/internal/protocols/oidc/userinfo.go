@@ -721,6 +721,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 				"server_error", "Failed to create access token", responseIss)
 			return
 		}
+		p.mockIdP.TrackAccessToken(subject, accessToken)
 	}
 
 	var idToken string
@@ -1109,6 +1110,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		writeOIDCTokenError(w, http.StatusInternalServerError, "server_error", "Failed to create access token", "")
 		return
 	}
+	p.mockIdP.TrackAccessToken(subject, accessToken)
 
 	// Create new refresh token (rotation)
 	newRefreshToken, err := jwtService.CreateRefreshToken(
@@ -1243,6 +1245,7 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	if err != nil {
 		return nil, err
 	}
+	p.mockIdP.TrackAccessToken(subject, accessToken)
 
 	// Create refresh token
 	refreshToken, err := jwtService.CreateRefreshToken(

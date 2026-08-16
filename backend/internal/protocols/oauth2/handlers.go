@@ -2,12 +2,14 @@ package oauth2
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"html"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -1325,6 +1327,43 @@ func (p *Plugin) handleListClients(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleCAEPRevokeSubject is a demo RP/OP hook used after a verified CAEP
+// session-revoked SET. It is not RFC 7009 (that endpoint consumes a token, not
+// an email). Auth is a shared service token, not a Looking Glass session.
+func (p *Plugin) handleCAEPRevokeSubject(w http.ResponseWriter, r *http.Request) {
+	expected := strings.TrimSpace(os.Getenv("SSF_TO_FEDERATION_TOKEN"))
+	got := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(got)) != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
+		return
+	}
+	if p.mockIdP == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "idp_unavailable"})
+		return
+	}
+
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Email) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "email is required"})
+		return
+	}
+
+	sessions, refresh, access, err := p.mockIdP.RevokeSubjectByEmail(strings.TrimSpace(body.Email))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"email":                   strings.TrimSpace(body.Email),
+		"sessions_deleted":        sessions,
+		"refresh_tokens_revoked":  refresh,
+		"access_tokens_revoked":   access,
+	})
+}
+
 // issueTokens creates access token and refresh token. dpopJKT, when
 // non-empty, binds the access token to that DPoP key (RFC 9449 Sections 4.1
 // and 5): it carries a cnf.jkt claim and the response's token_type is DPoP.
@@ -1359,6 +1398,7 @@ func (p *Plugin) issueTokens(userID, clientID, scope, dpopJKT string, bindRefres
 	if err != nil {
 		return nil, err
 	}
+	p.mockIdP.TrackAccessToken(userID, accessToken)
 
 	// Create refresh token
 	refreshToken, err := jwtService.CreateRefreshToken(

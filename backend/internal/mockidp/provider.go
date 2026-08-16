@@ -31,6 +31,7 @@ type MockIdP struct {
 	revokedTokens  map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
 	usedCodes      map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
 	pushedRequests map[string]*PushedAuthorizationRequest
+	accessJTIsByUser map[string][]string
 	keySet         *crypto.KeySet
 	jwtService     *crypto.JWTService
 	issuer         string
@@ -91,9 +92,10 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		authCodes:      make(map[string]*models.AuthorizationCode),
 		sessions:       make(map[string]*models.Session),
 		refreshTokens:  make(map[string]*models.RefreshToken),
-		revokedTokens:  make(map[string]time.Time),              // RFC 7009: Revoked token tracking
-		usedCodes:      make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
-		pushedRequests: make(map[string]*PushedAuthorizationRequest),
+		revokedTokens:    make(map[string]time.Time),              // RFC 7009: Revoked token tracking
+		usedCodes:        make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
+		pushedRequests:   make(map[string]*PushedAuthorizationRequest),
+		accessJTIsByUser: make(map[string][]string),
 		keySet:         keySet,
 		issuer:         "http://localhost:8080",
 		pairwiseSalt:   pairwiseSalt,
@@ -872,6 +874,55 @@ func (idp *MockIdP) GetSession(id string) (*models.Session, bool) {
 		return nil, false
 	}
 	return session, exists
+}
+
+// TrackAccessToken records an issued access-token JTI so CAEP subject
+// revocation can kill later introspection and resource use.
+func (idp *MockIdP) TrackAccessToken(userID, token string) {
+	if userID == "" || token == "" {
+		return
+	}
+	jti := token
+	claims, err := idp.jwtService.ValidateToken(token)
+	if err == nil {
+		if v, ok := claims["jti"].(string); ok && v != "" {
+			jti = v
+		}
+	}
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	idp.accessJTIsByUser[userID] = append(idp.accessJTIsByUser[userID], jti)
+}
+
+// RevokeSubjectByEmail deletes OP sessions and revokes refresh tokens and
+// access JTIs for the user identified by email. Demo CAEP path used by SSF.
+func (idp *MockIdP) RevokeSubjectByEmail(email string) (sessionsDeleted, refreshRevoked, accessRevoked int, err error) {
+	user, ok := idp.GetUserByEmail(email)
+	if !ok || user == nil {
+		return 0, 0, 0, errors.New("user not found")
+	}
+
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+
+	now := time.Now()
+	for id, session := range idp.sessions {
+		if session != nil && session.UserID == user.ID {
+			delete(idp.sessions, id)
+			sessionsDeleted++
+		}
+	}
+	for token, rt := range idp.refreshTokens {
+		if rt != nil && rt.UserID == user.ID {
+			delete(idp.refreshTokens, token)
+			refreshRevoked++
+		}
+	}
+	for _, jti := range idp.accessJTIsByUser[user.ID] {
+		idp.revokedTokens[jti] = now
+		accessRevoked++
+	}
+	return sessionsDeleted, refreshRevoked, accessRevoked, nil
 }
 
 // StoreRefreshToken stores a refresh token. authTime is the original End-User

@@ -1,6 +1,7 @@
 package ssf
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +41,11 @@ type ReceiverService struct {
 
 	// Callback to execute real actions
 	actionExecutor ActionExecutor
+	glass          *glassBox
+
+	federationURL   string
+	federationToken string
+	federationHTTP  *http.Client
 
 	// Event broadcast channels
 	eventListeners []chan<- ReceiverEvent
@@ -62,6 +69,7 @@ type ActionExecutor interface {
 	ForcePasswordResetForSession(ctx context.Context, sessionID, email string) error
 	InvalidateTokensForSession(ctx context.Context, sessionID, email string) error
 	InitSessionUserStates(sessionID string)
+	GetUserStateForSession(sessionID, email string) (*UserSecurityState, error)
 }
 
 // JWKSCache caches public keys fetched from the transmitter
@@ -112,7 +120,7 @@ func (c *JWKSCache) GetKey(keyID string) (*rsa.PublicKey, *CapturedHTTPExchange,
 }
 
 // refresh fetches the JWKS from the transmitter and returns a CapturedHTTPExchange
-// with the full request/response details for visibility in the sandbox.
+// with the full request/response details for Looking Glass wire capture.
 func (c *JWKSCache) refresh() (*CapturedHTTPExchange, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -246,7 +254,21 @@ func NewReceiverService(port int, transmitterURL, bearerToken string, executor A
 		receivedEvents:  make([]ReceivedEvent, 0),
 		responseActions: make([]ResponseAction, 0),
 		actionExecutor:  executor,
+		federationHTTP:  &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// SetGlass attaches the Looking Glass bus used for stream-lab visibility.
+func (rs *ReceiverService) SetGlass(g *glassBox) {
+	rs.glass = g
+}
+
+// SetFederationCAEP configures the cross-service HTTP call made after a
+// verified CAEP session-revoked SET. The hop is always attempted so Looking
+// Glass can show success or a real transport/HTTP failure.
+func (rs *ReceiverService) SetFederationCAEP(baseURL, token string) {
+	rs.federationURL = strings.TrimRight(baseURL, "/")
+	rs.federationToken = token
 }
 
 // AddEventListener adds a listener for receiver pipeline events
@@ -270,6 +292,7 @@ func (rs *ReceiverService) RemoveEventListener(ch chan<- ReceiverEvent) {
 
 // broadcast sends an event to all listeners
 func (rs *ReceiverService) broadcast(event ReceiverEvent) {
+	rs.glass.emitReceiver(event)
 	rs.listenerMu.RLock()
 	defer rs.listenerMu.RUnlock()
 	for _, listener := range rs.eventListeners {
@@ -332,7 +355,7 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct != "application/secevent+jwt" {
 		log.Printf("[SSF Receiver] Invalid Content-Type: %q (expected application/secevent+jwt)", ct)
-		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_content_type",
+		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request",
 			"Content-Type must be application/secevent+jwt")
 		return
 	}
@@ -352,14 +375,18 @@ func (rs *ReceiverService) handlePush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract session ID from delivery header (not from the SET itself)
-	sessionID := r.Header.Get("X-SSF-Session")
+	sessionID := r.Header.Get(lookingGlassSessionHeader)
 
 	log.Printf("[SSF Receiver] Received push delivery: %d bytes (session: %s)", len(body), sessionID)
 
 	status := rs.processSET(r.Context(), setToken, sessionID)
 
 	if status.Status == "failed" {
-		writeReceiverSSFError(w, http.StatusBadRequest, "invalid_request", status.Description)
+		errCode := status.Err
+		if errCode == "" {
+			errCode = "invalid_request"
+		}
+		writeReceiverSSFError(w, http.StatusBadRequest, errCode, status.Description)
 		return
 	}
 
@@ -389,18 +416,26 @@ func (rs *ReceiverService) ProcessPollResponse(ctx context.Context, sets map[str
 
 // processSET processes a single raw SET token.
 // The JTI is extracted from the decoded token per RFC 8935 (push delivers a single raw SET).
-// sessionID is passed via the X-SSF-Session delivery header, not from the SET itself.
+// sessionID is passed via the X-Looking-Glass-Session delivery header, not from the SET itself.
 func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID string) SetStatus {
 	receivedAt := time.Now()
+	jtiPeek, eventURIs, claimsPeek := peekSET(setToken)
 
-	// Broadcast: Event Received
+	// Broadcast: Event Received — carry the SET, not only token_length
 	rs.broadcast(ReceiverEvent{
 		Type:      ReceiverEventReceived,
 		Timestamp: receivedAt,
+		EventID:   jtiPeek,
 		SessionID: sessionID,
 		Data: map[string]interface{}{
 			"delivery_method": "push",
 			"token_length":    len(setToken),
+			"set_token":       setToken,
+			"jti":             jtiPeek,
+			"event_uris":      eventURIs,
+			"claims":          claimsPeek,
+			"session_in_set":  false,
+			"session_header":  lookingGlassSessionHeader,
 		},
 	})
 
@@ -408,20 +443,20 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	token, _, err := new(jwt.Parser).ParseUnverified(setToken, jwt.MapClaims{})
 	if err != nil {
 		log.Printf("[SSF Receiver] Failed to parse SET header: %v", err)
-		return SetStatus{Status: "failed", Description: "Invalid SET format"}
+		return failedSET("invalid_request", "Invalid SET format")
 	}
 
 	keyID, ok := token.Header["kid"].(string)
 	if !ok {
 		log.Printf("[SSF Receiver] SET missing kid header")
-		return SetStatus{Status: "failed", Description: "Missing key ID"}
+		return failedSET("invalid_key", "Missing key ID")
 	}
 
 	// Fetch the public key from JWKS (may trigger a real HTTP fetch to the transmitter)
 	publicKey, jwksExchange, err := rs.jwksCache.GetKey(keyID)
 	if err != nil {
 		log.Printf("[SSF Receiver] Failed to get public key: %v", err)
-		return SetStatus{Status: "failed", Description: fmt.Sprintf("Key fetch failed: %v", err)}
+		return failedSET("invalid_key", fmt.Sprintf("Key fetch failed: %v", err))
 	}
 
 	// Broadcast JWKS fetch as an HTTP exchange if a real fetch occurred
@@ -463,7 +498,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 			},
 		})
 
-		return SetStatus{Status: "failed", Description: fmt.Sprintf("Signature verification failed: %v", err)}
+		return failedSET("invalid_key", fmt.Sprintf("Signature verification failed: %v", err))
 	}
 
 	log.Printf("[SSF Receiver] SET signature verified successfully")
@@ -472,17 +507,17 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	// instead of re-parsing via DecodeWithoutValidation (which would be a redundant third parse).
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	if !ok {
-		return SetStatus{Status: "failed", Description: "Invalid claims format"}
+		return failedSET("invalid_request", "Invalid claims format")
 	}
 
 	// ── RFC 7519 §4.1.1: Validate issuer ──────────────────────────────
 	if iss, ok := claims["iss"].(string); ok {
 		if iss != rs.transmitterURL {
 			log.Printf("[SSF Receiver] Issuer mismatch: got %q, expected %q", iss, rs.transmitterURL)
-			return SetStatus{Status: "failed", Description: fmt.Sprintf("Issuer mismatch: got %q", iss)}
+			return failedSET("invalid_issuer", fmt.Sprintf("Issuer mismatch: got %q", iss))
 		}
 	} else {
-		return SetStatus{Status: "failed", Description: "Missing required 'iss' claim"}
+		return failedSET("invalid_issuer", "Missing required 'iss' claim")
 	}
 
 	// ── RFC 7519 §4.1.3: Validate audience ─────────────────────────────
@@ -498,7 +533,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		audValid = true
 	}
 	if !audValid {
-		return SetStatus{Status: "failed", Description: "Missing or empty 'aud' claim"}
+		return failedSET("invalid_audience", "Missing or empty 'aud' claim")
 	}
 
 	// ── RFC 7519 §4.1.6: Validate issued-at (reject tokens > 5 min old) ──
@@ -507,10 +542,10 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		maxAge := 5 * time.Minute
 		if time.Since(iat) > maxAge {
 			log.Printf("[SSF Receiver] SET too old: issued at %v (%.0fs ago)", iat, time.Since(iat).Seconds())
-			return SetStatus{Status: "failed", Description: "SET expired: issued-at too old"}
+			return failedSET("invalid_request", "SET expired: issued-at too old")
 		}
 	} else {
-		return SetStatus{Status: "failed", Description: "Missing required 'iat' claim"}
+		return failedSET("invalid_request", "Missing required 'iat' claim")
 	}
 
 	decoded := buildDecodedSETFromClaims(claims, parsedToken.Header, setToken)
@@ -541,7 +576,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		rs.seenJTIsMu.RUnlock()
 		if seen {
 			log.Printf("[SSF Receiver] Duplicate SET rejected (jti %s already processed)", jti)
-			return SetStatus{Status: "failed", Description: fmt.Sprintf("duplicate SET rejected (jti %s already processed)", jti)}
+			return failedSET("invalid_request", fmt.Sprintf("duplicate SET rejected (jti %s already processed)", jti))
 		}
 	}
 
@@ -574,7 +609,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 		subjectEmail = decoded.Subject.Email
 	}
 
-	// Session ID comes from X-SSF-Session delivery header (not the SET)
+	// Session ID comes from X-Looking-Glass-Session delivery header (not the SET)
 	if sessionID != "" {
 		log.Printf("[SSF Receiver] Session ID from delivery header: %s", sessionID)
 	}
@@ -588,6 +623,9 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	for _, event := range decoded.Events {
 		log.Printf("[SSF Receiver] Processing event: %s for subject: %s (session: %s)", event.Type, subjectEmail, sessionID)
 		rs.executeResponseActions(ctx, jti, event, subjectEmail, sessionID)
+		if event.Type == EventTypeSessionRevoked && subjectEmail != "" {
+			rs.revokeFederationSubject(ctx, sessionID, subjectEmail)
+		}
 	}
 
 	// Record JTI as seen for replay detection
@@ -615,25 +653,111 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 
 // executeResponseActions delegates to the shared EventProcessor
 func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string) {
+	var before *UserSecurityState
+	if rs.actionExecutor != nil && subjectEmail != "" {
+		before, _ = rs.actionExecutor.GetUserStateForSession(sessionID, subjectEmail)
+	}
+
 	actions := ExecuteResponseActions(rs.actionExecutor, eventID, event, subjectEmail, sessionID)
 	for _, action := range actions {
 		rs.addResponseAction(action)
 		log.Printf("[SSF Receiver] Action recorded: %s - %s (session: %s)", action.Action, action.Status, sessionID)
 
-		// Broadcast: Response Action
+		var after *UserSecurityState
+		if rs.actionExecutor != nil && subjectEmail != "" {
+			after, _ = rs.actionExecutor.GetUserStateForSession(sessionID, subjectEmail)
+		}
+
 		rs.broadcast(ReceiverEvent{
 			Type:      ReceiverEventResponseAction,
 			Timestamp: action.ExecutedAt,
 			EventID:   eventID,
 			SessionID: sessionID,
 			Data: map[string]interface{}{
-				"action":     action.Action,
-				"event_type": event.Metadata.Name,
-				"category":   event.Metadata.Category,
-				"zero_trust": event.Metadata.ZeroTrustImpact,
+				"action":      action.Action,
+				"description": action.Description,
+				"status":      action.Status,
+				"event_type":  event.Metadata.Name,
+				"event_uri":   event.Type,
+				"category":    event.Metadata.Category,
+				"zero_trust":  event.Metadata.ZeroTrustImpact,
+				"subject":     subjectEmail,
+				"before":      before,
+				"after":       after,
 			},
 		})
+		before = after
 	}
+}
+
+func (rs *ReceiverService) revokeFederationSubject(ctx context.Context, sessionID, email string) {
+	target := rs.federationURL + "/oauth2/demo/caep/revoke-subject"
+	payload, _ := json.Marshal(map[string]string{"email": email})
+
+	reqHeaders := map[string]string{
+		"Content-Type": "application/json",
+		"Accept":       "application/json",
+	}
+	if rs.federationToken != "" {
+		reqHeaders["Authorization"] = "Bearer " + rs.federationToken
+	}
+
+	exchange := &CapturedHTTPExchange{
+		Label:     "CAEP RP revoke-subject (federation)",
+		Timestamp: time.Now(),
+		SessionID: sessionID,
+		Request: HTTPCapture{
+			Method:  "POST",
+			URL:     target,
+			Headers: reqHeaders,
+			Body:    string(payload),
+		},
+		Response: HTTPCapture{
+			Headers: make(map[string]string),
+		},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
+	if err != nil {
+		exchange.Response.Body = fmt.Sprintf("error: %v", err)
+		rs.broadcastFederationHop(sessionID, exchange)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if rs.federationToken != "" {
+		req.Header.Set("Authorization", "Bearer "+rs.federationToken)
+	}
+
+	client := rs.federationHTTP
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	start := time.Now()
+	resp, err := client.Do(req)
+	exchange.DurationMs = time.Since(start).Milliseconds()
+	if err != nil {
+		exchange.Response.Body = fmt.Sprintf("error: %v", err)
+		rs.broadcastFederationHop(sessionID, exchange)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	exchange.Response.StatusCode = resp.StatusCode
+	for k := range resp.Header {
+		exchange.Response.Headers[k] = resp.Header.Get(k)
+	}
+	exchange.Response.Body = string(body)
+	rs.broadcastFederationHop(sessionID, exchange)
+}
+
+func (rs *ReceiverService) broadcastFederationHop(sessionID string, exchange *CapturedHTTPExchange) {
+	rs.broadcast(ReceiverEvent{
+		Type:      ReceiverEventHTTPExchange,
+		Timestamp: exchange.Timestamp,
+		SessionID: sessionID,
+		Data:      exchange,
+	})
 }
 
 // addReceivedEvent adds an event to the received log
