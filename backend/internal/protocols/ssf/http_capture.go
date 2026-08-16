@@ -2,9 +2,9 @@ package ssf
 
 import "time"
 
-// CapturedHTTPExchange records the full request/response details of an HTTP
-// exchange between SSF components (e.g., push delivery, JWKS fetch).
-// Defined locally to avoid importing from Looking Glass (SSF has its own sandbox).
+// CapturedHTTPExchange records a transmitter/receiver HTTP hop before it is
+// mapped onto lookingglass.CapturedExchange. This is an internal DTO, not a
+// second event bus.
 type CapturedHTTPExchange struct {
 	Label      string      `json:"label"`
 	Request    HTTPCapture `json:"request"`

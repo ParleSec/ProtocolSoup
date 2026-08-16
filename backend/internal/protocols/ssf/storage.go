@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
 
 // Storage handles persistence for SSF streams, subjects, and events
@@ -25,15 +25,14 @@ func NewStorage(dataDir string) (*Storage, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "ssf.db")
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
-	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
 
 	storage := &Storage{db: db}
 	if err := storage.initSchema(); err != nil {
@@ -145,19 +144,90 @@ func (s *Storage) initSchema() error {
 	return nil
 }
 
-// Stream represents an SSF event stream configuration
+// Stream represents an SSF event stream configuration.
+// Wire JSON follows OpenID SSF 1.0 Final §8.1.1 (nested delivery, distinct
+// events_supported / events_delivered). Internal fields stay unexported-on-wire.
 type Stream struct {
 	ID               string    `json:"stream_id"`
 	Issuer           string    `json:"iss"`
 	Audience         []string  `json:"aud"`
-	EventsSupported  []string  `json:"events_delivered"`
+	EventsSupported  []string  `json:"-"`
 	EventsRequested  []string  `json:"events_requested"`
-	DeliveryMethod   string    `json:"delivery_method"`
-	DeliveryEndpoint string    `json:"delivery_endpoint_url,omitempty"`
-	BearerToken      string    `json:"bearer_token,omitempty"` // For authenticated push delivery
+	DeliveryMethod   string    `json:"-"`
+	DeliveryEndpoint string    `json:"-"`
+	BearerToken      string    `json:"-"`
 	Status           string    `json:"status"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// StreamDelivery is the SSF §8.1.1 nested delivery object.
+type StreamDelivery struct {
+	Method      string `json:"method"`
+	EndpointURL string `json:"endpoint_url,omitempty"`
+}
+
+type streamWire struct {
+	StreamID         string         `json:"stream_id"`
+	Iss              string         `json:"iss"`
+	Aud              []string       `json:"aud"`
+	EventsSupported  []string       `json:"events_supported"`
+	EventsRequested  []string       `json:"events_requested"`
+	EventsDelivered  []string       `json:"events_delivered"`
+	Delivery         StreamDelivery `json:"delivery"`
+	Status           string         `json:"status"`
+	CreatedAt        time.Time      `json:"created_at,omitempty"`
+	UpdatedAt        time.Time      `json:"updated_at,omitempty"`
+}
+
+func eventsDelivered(supported, requested []string) []string {
+	allowed := make(map[string]struct{}, len(supported))
+	for _, uri := range supported {
+		allowed[uri] = struct{}{}
+	}
+	out := make([]string, 0, len(requested))
+	for _, uri := range requested {
+		if _, ok := allowed[uri]; ok {
+			out = append(out, uri)
+		}
+	}
+	return out
+}
+
+func (s Stream) MarshalJSON() ([]byte, error) {
+	return json.Marshal(streamWire{
+		StreamID:        s.ID,
+		Iss:             s.Issuer,
+		Aud:             s.Audience,
+		EventsSupported: s.EventsSupported,
+		EventsRequested: s.EventsRequested,
+		EventsDelivered: eventsDelivered(s.EventsSupported, s.EventsRequested),
+		Delivery: StreamDelivery{
+			Method:      s.DeliveryMethod,
+			EndpointURL: s.DeliveryEndpoint,
+		},
+		Status:    s.Status,
+		CreatedAt: s.CreatedAt,
+		UpdatedAt: s.UpdatedAt,
+	})
+}
+
+func (s *Stream) UnmarshalJSON(data []byte) error {
+	var wire streamWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	s.ID = wire.StreamID
+	s.Issuer = wire.Iss
+	s.Audience = wire.Aud
+	s.EventsSupported = wire.EventsSupported
+	s.EventsRequested = wire.EventsRequested
+	s.DeliveryMethod = wire.Delivery.Method
+	s.DeliveryEndpoint = wire.Delivery.EndpointURL
+	s.Status = wire.Status
+	s.CreatedAt = wire.CreatedAt
+	s.UpdatedAt = wire.UpdatedAt
+	return nil
 }
 
 // Delivery method constants per RFC 8935/8936
@@ -209,6 +279,37 @@ func (s *Storage) GetStream(ctx context.Context, streamID string) (*Stream, erro
 	_ = json.Unmarshal([]byte(requested), &stream.EventsRequested)
 
 	return &stream, nil
+}
+
+// ListStreams returns every stored stream (SSF §8.1.1.2 GET without stream_id).
+func (s *Storage) ListStreams(ctx context.Context) ([]Stream, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, issuer, audience, events_supported, events_requested,
+			delivery_method, delivery_endpoint, COALESCE(bearer_token, ''), status, created_at, updated_at
+		FROM streams ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var streams []Stream
+	for rows.Next() {
+		var stream Stream
+		var audience, supported, requested string
+		if err := rows.Scan(&stream.ID, &stream.Issuer, &audience, &supported, &requested,
+			&stream.DeliveryMethod, &stream.DeliveryEndpoint, &stream.BearerToken, &stream.Status,
+			&stream.CreatedAt, &stream.UpdatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(audience), &stream.Audience)
+		_ = json.Unmarshal([]byte(supported), &stream.EventsSupported)
+		_ = json.Unmarshal([]byte(requested), &stream.EventsRequested)
+		streams = append(streams, stream)
+	}
+	if streams == nil {
+		streams = []Stream{}
+	}
+	return streams, rows.Err()
 }
 
 // GetDefaultStream gets or creates a default stream for the sandbox
@@ -614,6 +715,18 @@ func (s *Storage) UpdateEventStatus(ctx context.Context, eventID, status string)
 func (s *Storage) AcknowledgeEvents(ctx context.Context, eventIDs []string) error {
 	for _, id := range eventIDs {
 		if err := s.UpdateEventStatus(ctx, id, EventStatusAcknowledged); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RecordSETErrors records RFC 8936 setErrs from the Receiver. Unacknowledged
+// SETs that the Recipient could not process are marked failed rather than
+// retransmitted forever.
+func (s *Storage) RecordSETErrors(ctx context.Context, setErrs map[string]SETError) error {
+	for jti := range setErrs {
+		if err := s.UpdateEventStatus(ctx, jti, EventStatusFailed); err != nil {
 			return err
 		}
 	}

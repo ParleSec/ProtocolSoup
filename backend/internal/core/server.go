@@ -168,6 +168,12 @@ func (s *Server) setupRouter() {
 			r.Method(http.MethodGet, "/.well-known/ai-catalog.json", protocolRouter)
 		}
 
+		if info.ID == "ssf" {
+			// OpenID SSF 1.0 Final §7.2: insert /.well-known/ssf-configuration
+			// into the issuer (RFC 8615). Issuer is SHOWCASE_BASE_URL.
+			r.Method(http.MethodGet, "/.well-known/ssf-configuration", protocolRouter)
+		}
+
 		if info.ID == "oauth2" {
 			// RFC 8414 Section 3.1 inserts the well-known suffix before the
 			// path component of the OAuth issuer identifier.

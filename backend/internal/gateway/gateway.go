@@ -181,6 +181,10 @@ func (g *Gateway) Router() http.Handler {
 
 	r.Get("/ws/lookingglass/{session}", g.handleLookingGlassWS)
 
+	// OpenID SSF 1.0 Final §7.2: issuer well-known is inserted at the origin,
+	// not under /ssf. Proxy to the SSF upstream with the same path.
+	r.Get("/.well-known/ssf-configuration", g.handleSSFConfiguration)
+
 	r.Route("/{protocolID}", func(r chi.Router) {
 		r.Handle("/*", http.HandlerFunc(g.handleProtocolRoute))
 		r.Handle("/", http.HandlerFunc(g.handleProtocolRoute))

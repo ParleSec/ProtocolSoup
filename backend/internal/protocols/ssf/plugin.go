@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -24,25 +23,13 @@ type Plugin struct {
 	storage          *Storage
 	transmitter      *Transmitter
 	receiverService  *ReceiverService
-	actionExecutor   *MockIdPActionExecutor
+	actionExecutor   *ReceiverActionExecutor
 	lookingGlass     *lookingglass.Engine
 	keySet           *crypto.KeySet
 	baseURL          string
 	receiverPort     int
 	receiverToken    string // Bearer token for authenticated push delivery
 	receiverEndpoint string // Public-facing receiver push URL (baseURL/ssf/receiver/push)
-
-	// SSE connection tracking: one active goroutine per session.
-	// When a new SSE connection arrives for a session, the old one is cancelled
-	// to prevent phantom goroutines from consuming broadcast events.
-	sseSessionsMu sync.Mutex
-	sseSessions   map[string]sseConn
-	sseConnIDSeq  uint64
-}
-
-type sseConn struct {
-	id     uint64
-	cancel context.CancelFunc
 }
 
 // NewPlugin creates a new SSF plugin
@@ -56,7 +43,6 @@ func NewPlugin() *Plugin {
 			Tags:        []string{"security", "signals", "events", "caep", "risc", "zero-trust", "set"},
 			RFCs:        []string{"RFC 8417", "OpenID SSF 1.0", "CAEP", "RISC"},
 		}),
-		sseSessions: make(map[string]sseConn),
 	}
 }
 
@@ -110,12 +96,16 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		keyID = p.keySet.RSAKeyID()
 	}
 	p.transmitter = NewTransmitter(storage, privateKey, keyID, p.baseURL)
+	glass := newGlassBox(p.lookingGlass)
+	p.transmitter.SetGlass(glass)
 
-	// Initialize action executor for real state changes
-	p.actionExecutor = NewMockIdPActionExecutor(storage, p.baseURL, p.receiverEndpoint, p.receiverToken)
+	// Initialize action executor for real RP posture changes on the SSF service
+	p.actionExecutor = NewReceiverActionExecutor(storage, p.baseURL, p.receiverEndpoint, p.receiverToken)
 
 	// Initialize standalone receiver service on separate port
 	p.receiverService = NewReceiverService(p.receiverPort, p.baseURL, p.receiverToken, p.actionExecutor)
+	p.receiverService.SetGlass(glass)
+	p.receiverService.SetFederationCAEP(federationServiceURL(), os.Getenv("SSF_TO_FEDERATION_TOKEN"))
 
 	// Start the standalone receiver in a goroutine
 	go func() {
@@ -185,17 +175,17 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/.well-known/ssf-configuration", p.handleSSFConfiguration)
 	router.Get("/jwks", p.handleJWKS)
 
-	// Stream management (SSF §4)
+	// Stream management (SSF §8.1.1)
 	router.Post("/stream", p.handleCreateStream)
 	router.Get("/stream", p.handleGetStream)
 	router.Patch("/stream", p.handleUpdateStream)
 	router.Delete("/stream", p.handleDeleteStream)
 
-	// Stream status (SSF §6)
+	// Stream status
 	router.Get("/status", p.handleGetStatus)
 	router.Post("/status", p.handleUpdateStatus)
 
-	// Stream verification (SSF §7)
+	// Stream verification (SSF §8.1.4)
 	router.Post("/verify", p.handleVerification)
 
 	// Subject management
@@ -206,14 +196,11 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// Action triggers (interactive sandbox)
 	router.Post("/actions/{action}", p.handleTriggerAction)
 
-	// Event delivery (RFC 8935 push / RFC 8936 poll)
-	router.Post("/push", p.handlePush)
+	// Event delivery (RFC 8936 poll). Push delivery is HTTP POST to the
+	// Receiver at /ssf/receiver/push (RFC 8935), not an in-process /ssf/push.
 	router.Get("/poll", p.handlePoll)
 	router.Post("/poll", p.handlePoll)
 	router.Post("/ack", p.handleAcknowledge)
-
-	// SSE event stream (real-time pipeline events for frontend)
-	router.Get("/events/stream", p.handleEventStream)
 
 	// Event history and logs
 	router.Get("/events", p.handleGetEvents)
@@ -264,10 +251,10 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "ssf-stream-configuration",
 			Name:        "Stream Configuration",
 			Description: "Configure an SSF stream between a Transmitter (IdP) and Receiver (RP). Defines event types, delivery methods, and subject formats.",
-			Executable:  false,
+			Executable:  true,
 			Category:    "stream-management",
 			Steps: []plugin.FlowStep{
-				{Order: 1, Name: "Fetch Transmitter Configuration", Description: "Receiver discovers the Transmitter's SSF capabilities via the well-known configuration endpoint (SSF §3.1)", From: "Receiver", To: "Transmitter", Type: "request", Parameters: map[string]string{"method": "GET", "endpoint": "/.well-known/ssf-configuration"}},
+				{Order: 1, Name: "Fetch Transmitter Configuration", Description: "Receiver discovers the Transmitter's SSF capabilities via the well-known configuration endpoint (SSF §7.2)", From: "Receiver", To: "Transmitter", Type: "request", Parameters: map[string]string{"method": "GET", "endpoint": "/.well-known/ssf-configuration"}},
 				{Order: 2, Name: "SSF Configuration Response", Description: "Transmitter returns SSF metadata: supported event types, delivery methods, and management endpoints", From: "Transmitter", To: "Receiver", Type: "response", Parameters: map[string]string{"issuer": "Transmitter identifier URL (REQUIRED)", "jwks_uri": "URL for SET signature verification keys", "configuration_endpoint": "URL to create/manage streams", "status_endpoint": "URL to query stream status", "add_subject_endpoint": "URL to add subjects to stream", "delivery_methods_supported": "['urn:ietf:rfc:8935', 'urn:ietf:rfc:8936']"}},
 				{Order: 3, Name: "Create Stream Request", Description: "Receiver creates a new event stream by POSTing to the configuration_endpoint", From: "Receiver", To: "Transmitter", Type: "request", Parameters: map[string]string{"method": "POST to configuration_endpoint", "Authorization": "Bearer {management_token}", "delivery": "{ method: 'urn:ietf:rfc:8935', endpoint_url: '...' }"}},
 				{Order: 4, Name: "Stream Created Response", Description: "Transmitter creates the stream and returns its configuration including stream_id", From: "Transmitter", To: "Receiver", Type: "response", Parameters: map[string]string{"stream_id": "Unique stream identifier", "iss": "Transmitter issuer URL", "aud": "Receiver identifier", "events_delivered": "Event types that will be delivered"}},
@@ -279,7 +266,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "ssf-push-delivery",
 			Name:        "Push Delivery",
 			Description: "Real-time event delivery where the Transmitter POSTs Security Event Tokens (SETs) directly to the Receiver's endpoint (RFC 8935)",
-			Executable:  false,
+			Executable:  true,
 			Category:    "delivery",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Security Event Occurs", Description: "A security-relevant event occurs at the Transmitter (IdP)", From: "Transmitter", To: "Transmitter", Type: "internal", Parameters: map[string]string{"event_source": "User action, admin action, policy, or system"}},
@@ -294,7 +281,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "ssf-poll-delivery",
 			Name:        "Poll Delivery",
 			Description: "Receiver-initiated event retrieval where the Receiver periodically polls the Transmitter for pending events (RFC 8936)",
-			Executable:  false,
+			Executable:  true,
 			Category:    "delivery",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Poll Request", Description: "Receiver sends a poll request to retrieve pending SETs (RFC 8936 §2)", From: "Receiver", To: "Transmitter", Type: "request", Parameters: map[string]string{"method": "POST", "Content-Type": "application/json", "Authorization": "Bearer {access_token}", "maxEvents": "Maximum number of SETs to return (optional)", "returnImmediately": "If false, long-poll until events available"}},
@@ -308,7 +295,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			ID:          "caep-session-revoked",
 			Name:        "Session Revoked (CAEP)",
 			Description: "Continuous Access Evaluation Profile event indicating a user session has been terminated (CAEP §3.1). Receiving systems must immediately invalidate the affected session.",
-			Executable:  false,
+			Executable:  true,
 			Category:    "caep-events",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Session Revocation Trigger", Description: "An event triggers session revocation at the IdP: user logout, admin action, or security policy", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"triggers": "Logout, admin revoke, policy violation, security incident"}},
@@ -322,12 +309,12 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "caep-credential-change",
 			Name:        "Credential Change (CAEP)",
-			Description: "Event indicating a user's credentials have changed (CAEP §3.2). Receiving systems should force re-authentication.",
-			Executable:  false,
+			Description: "Event indicating a user's credentials have changed (CAEP §3.3). Receiving systems should force re-authentication.",
+			Executable:  true,
 			Category:    "caep-events",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Credential Change Occurs", Description: "User or admin changes credentials at the Identity Provider", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"credential_type": "password | pin | x509 | fido2-platform | fido2-roaming | fido-u2f | verifiable-credential | phone-voice | phone-sms | app", "change_type": "create | revoke | update"}},
-				{Order: 2, Name: "Create Credential Change SET", Description: "IdP creates a Security Event Token for the credential-change event type (CAEP §3.2)", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"event_type": "https://schemas.openid.net/secevent/caep/event-type/credential-change", "credential_type": "Type of credential that changed (REQUIRED)", "change_type": "create | revoke | update (REQUIRED)", "initiating_entity": "admin | user | policy | system (optional)", "reason_admin": "Administrative log message (optional)"}},
+				{Order: 2, Name: "Create Credential Change SET", Description: "IdP creates a Security Event Token for the credential-change event type (CAEP §3.3)", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"event_type": "https://schemas.openid.net/secevent/caep/event-type/credential-change", "credential_type": "Type of credential that changed (REQUIRED)", "change_type": "create | revoke | update | delete (REQUIRED)", "initiating_entity": "admin | user | policy | system (optional)", "reason_admin": "Administrative log message (optional)"}},
 				{Order: 3, Name: "Deliver SET to Receivers", Description: "Transmitter sends the credential change event to all subscribed Receivers", From: "Transmitter", To: "All Subscribed Receivers", Type: "request", Parameters: map[string]string{"delivery": "Push (RFC 8935) or Poll (RFC 8936)"}},
 				{Order: 4, Name: "Receiver Validates SET", Description: "Receiver validates the SET before processing", From: "Receiver (RP)", To: "Receiver (RP)", Type: "internal", Parameters: map[string]string{"signature": "Verify against Transmitter's JWKS", "credential_type": "Check if relevant to this RP"}},
 				{Order: 5, Name: "Invalidate Cached Credentials", Description: "Receiver invalidates any cached credential data and tokens issued with old credentials", From: "Receiver (RP)", To: "Credential Cache", Type: "internal", Parameters: map[string]string{"cached_tokens": "Invalidate tokens from old credentials", "cached_sessions": "May require re-authentication"}},
@@ -337,12 +324,12 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "risc-account-disabled",
 			Name:        "Account Disabled (RISC)",
-			Description: "Risk Incident Sharing event indicating a user account has been disabled (RISC §2.2). Receiving systems must immediately block access.",
-			Executable:  false,
+			Description: "Risk Incident Sharing event indicating a user account has been disabled (RISC §2.3). Receiving systems must immediately block access.",
+			Executable:  true,
 			Category:    "risc-events",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Account Disabled", Description: "Administrator or automated system disables a user account due to security concerns", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"reason": "hijacking | bulk-account (per RISC spec)", "note": "hijacking = account takeover detected, bulk-account = mass compromise"}},
-				{Order: 2, Name: "Create Account Disabled SET", Description: "IdP creates a Security Event Token for the account-disabled event type (RISC §2.2)", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"event_type": "https://schemas.openid.net/secevent/risc/event-type/account-disabled", "reason": "hijacking | bulk-account (optional)", "reason_admin": "Detailed reason for logging (optional)"}},
+				{Order: 2, Name: "Create Account Disabled SET", Description: "IdP creates a Security Event Token for the account-disabled event type (RISC §2.3)", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"event_type": "https://schemas.openid.net/secevent/risc/event-type/account-disabled", "reason": "hijacking | bulk-account (optional)", "reason_admin": "Detailed reason for logging (optional)"}},
 				{Order: 3, Name: "Deliver SET to Receivers", Description: "Transmitter sends the account-disabled event to all subscribed Receivers", From: "Transmitter", To: "All Subscribed Receivers", Type: "request", Parameters: map[string]string{"delivery": "Push (RFC 8935) or Poll (RFC 8936)", "note": "RISC events are security-critical - process immediately"}},
 				{Order: 4, Name: "Receiver Validates SET", Description: "Receiver validates the SET - RISC events require immediate attention", From: "Receiver (RP)", To: "Receiver (RP)", Type: "internal", Parameters: map[string]string{"signature": "Verify against Transmitter's JWKS", "event_type": "Must be account-disabled"}},
 				{Order: 5, Name: "Block All Access", Description: "Receiver immediately blocks all access for the disabled account", From: "Receiver (RP)", To: "Access Control", Type: "internal", Parameters: map[string]string{"sessions": "Terminate all active sessions", "tokens": "Revoke all access and refresh tokens", "new_auth": "Block new authentication attempts"}},
@@ -352,12 +339,12 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 		{
 			ID:          "risc-credential-compromise",
 			Name:        "Credential Compromise (RISC)",
-			Description: "Security event indicating a user's credentials may have been compromised (RISC §2.1). Requires immediate protective action by all Receivers.",
-			Executable:  false,
+			Description: "Security event indicating a user's credentials may have been compromised (RISC §2.7). Requires immediate protective action by all Receivers.",
+			Executable:  true,
 			Category:    "risc-events",
 			Steps: []plugin.FlowStep{
 				{Order: 1, Name: "Compromise Detection", Description: "Identity Provider detects potential credential compromise via breach database, anomaly detection, or external report", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"detection_source": "Breach database, anomaly detection, user report, external notification"}},
-				{Order: 2, Name: "Create Credential Compromise SET", Description: "IdP creates a Security Event Token for the credential-compromise event type (RISC §2.1)", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"event_type": "https://schemas.openid.net/secevent/risc/event-type/credential-compromise", "reason_admin": "Detailed compromise information for logging (optional)", "note": "Do NOT include actual compromised credential values in the SET"}},
+				{Order: 2, Name: "Create Credential Compromise SET", Description: "IdP creates a Security Event Token for the credential-compromise event type (RISC §2.7)", From: "Identity Provider", To: "Identity Provider", Type: "internal", Parameters: map[string]string{"event_type": "https://schemas.openid.net/secevent/risc/event-type/credential-compromise", "reason_admin": "Detailed compromise information for logging (optional)", "note": "Do NOT include actual compromised credential values in the SET"}},
 				{Order: 3, Name: "Deliver SET to Receivers", Description: "Transmitter sends the credential-compromise event to all subscribed Receivers", From: "Transmitter", To: "All Subscribed Receivers", Type: "request", Parameters: map[string]string{"delivery": "Push (RFC 8935) or Poll (RFC 8936)", "note": "Receivers should prioritize processing RISC events"}},
 				{Order: 4, Name: "Receiver Validates SET", Description: "Receiver validates the SET before taking protective action", From: "Receiver (RP)", To: "Receiver (RP)", Type: "internal", Parameters: map[string]string{"signature": "Verify against Transmitter's JWKS", "event_type": "Must be credential-compromise"}},
 				{Order: 5, Name: "Terminate All Sessions", Description: "Receiver immediately terminates ALL sessions for the affected user across all devices", From: "Receiver (RP)", To: "Session Store", Type: "internal", Parameters: map[string]string{"scope": "All sessions across all devices", "action": "Immediate termination"}},
@@ -373,9 +360,9 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 	return []plugin.DemoScenario{
 		{
-			ID:          "ssf-sandbox",
-			Name:        "SSF Interactive Sandbox",
-			Description: "Explore SSF by triggering real security events and watching them flow through the system",
+			ID:          "ssf-stream-lab",
+			Name:        "SSF Stream Lab",
+			Description: "Fire CAEP and RISC events on a durable Looking Glass session and inspect Transmitter and Receiver traffic",
 			Steps: []plugin.DemoStep{
 				{Order: 1, Name: "View Subjects", Description: "See the test subjects available in the stream", Endpoint: "/ssf/subjects", Method: "GET", Auto: true},
 				{Order: 2, Name: "Trigger Event", Description: "Click an action button to trigger a security event", Endpoint: "/ssf/actions/{action}", Method: "POST", Auto: false},
@@ -428,4 +415,18 @@ func getDataDir() string {
 		return "./data"
 	}
 	return filepath.Join(cwd, "data")
+}
+
+func federationServiceURL() string {
+	if v := strings.TrimSpace(os.Getenv("FEDERATION_SERVICE_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	addr := strings.TrimSpace(os.Getenv("SHOWCASE_LISTEN_ADDR"))
+	if addr == "" {
+		addr = ":8080"
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "http://127.0.0.1" + addr
+	}
+	return "http://" + addr
 }
