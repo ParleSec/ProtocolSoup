@@ -51,7 +51,9 @@ export function ProtocolDemo({
   const ProtocolIcon = getProtocolIcon(protocolId)
 
   // Get first recommended flow for quick action
-  const recommendedFlow = flows.find(f => FLOW_PRESENTATION_META[f.id]?.recommended) || flows[0]
+  const recommendedFlow =
+    flows.find((f) => f.executable !== false && FLOW_PRESENTATION_META[f.id]?.recommended) ||
+    flows.find((f) => f.executable !== false)
 
   const catalogEntry = getCatalogProtocol(protocolId)
   const hasExecutableFlow = flows.some(f => f.executable !== false)

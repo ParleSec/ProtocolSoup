@@ -12,6 +12,8 @@ export interface ProtocolFlowCatalogData {
   name: string
   rfc: string
   backendId?: string
+  /** When false, the flow is documented but Looking Glass does not execute it. */
+  lookingGlass?: boolean
   references?: ProtocolReference[]
 }
 
@@ -470,6 +472,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         id: 'bulk-operations',
         name: 'Bulk Operations',
         rfc: 'RFC 7644 §3.7',
+        lookingGlass: false,
         references: [
           { category: 'core', label: 'RFC 7644 §3.7 — Bulk Operations', href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-3.7' },
           { category: 'security', label: 'RFC 7644 §7 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc7644#section-7' },
@@ -638,6 +641,38 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
 ]
 
 export const PROTOCOL_IDS = PROTOCOL_CATALOG_DATA.map((protocol) => protocol.id)
+
+export const AGENT_SURFACE_PROTOCOL_IDS = ['agentauth', 'mcp'] as const
+
+export function isAgentSurfaceProtocol(id: string): boolean {
+  return (AGENT_SURFACE_PROTOCOL_IDS as readonly string[]).includes(id)
+}
+
+export const PROTOCOL_DISPLAY_ORDER = [
+  'oauth2',
+  'oidc',
+  'saml',
+  'scim',
+  'spiffe',
+  'ssf',
+  'oid4vci',
+  'oid4vp',
+  'agentauth',
+  'mcp',
+] as const
+
+function displayIndex(id: string): number {
+  const index = PROTOCOL_DISPLAY_ORDER.indexOf(id as (typeof PROTOCOL_DISPLAY_ORDER)[number])
+  return index === -1 ? PROTOCOL_DISPLAY_ORDER.length : index
+}
+
+export function sortedProtocolCatalogData(): ProtocolCatalogDataItem[] {
+  return PROTOCOL_CATALOG_DATA.slice().sort((a, b) => displayIndex(a.id) - displayIndex(b.id))
+}
+
+export function advertisedProtocolCatalogData(): ProtocolCatalogDataItem[] {
+  return sortedProtocolCatalogData().filter((protocol) => !isAgentSurfaceProtocol(protocol.id))
+}
 
 const PROTOCOL_CATALOG_BY_ID = new Map(
   PROTOCOL_CATALOG_DATA.map((protocol) => [protocol.id, protocol]),

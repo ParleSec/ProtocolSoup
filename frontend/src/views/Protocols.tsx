@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import {
   COMING_SOON_PROTOCOLS,
+  PROTOCOL_ACCENT_CLASSES,
   PROTOCOL_CATALOG,
   type ProtocolCatalogItem,
 } from '../protocols/presentation/protocol-catalog'
@@ -36,14 +37,13 @@ export function Protocols() {
         ))}
       </section>
 
-      {/* Coming Soon */}
       <section>
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-3">
           Coming Soon
         </h2>
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
           {COMING_SOON_PROTOCOLS.map((item) => (
-            <div 
+            <div
               key={item.name}
               className="p-3 sm:p-4 rounded-xl border border-dashed border-white/10 text-center"
             >
@@ -60,57 +60,7 @@ export function Protocols() {
 export default Protocols
 
 function ProtocolCard({ protocol }: { protocol: ProtocolCatalogItem }) {
-  const colors = {
-    blue: {
-      border: 'border-blue-500/20',
-      bg: 'bg-blue-500/10',
-      text: 'text-blue-400',
-      tag: 'bg-blue-500/10 text-blue-300 border-blue-500/20',
-    },
-    orange: {
-      border: 'border-orange-500/20',
-      bg: 'bg-orange-500/10',
-      text: 'text-orange-400',
-      tag: 'bg-orange-500/10 text-orange-300 border-orange-500/20',
-    },
-    cyan: {
-      border: 'border-cyan-500/20',
-      bg: 'bg-cyan-500/10',
-      text: 'text-cyan-400',
-      tag: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
-    },
-    green: {
-      border: 'border-green-500/20',
-      bg: 'bg-green-500/10',
-      text: 'text-green-400',
-      tag: 'bg-green-500/10 text-green-300 border-green-500/20',
-    },
-    purple: {
-      border: 'border-purple-500/20',
-      bg: 'bg-purple-500/10',
-      text: 'text-purple-400',
-      tag: 'bg-purple-500/10 text-purple-300 border-purple-500/20',
-    },
-    amber: {
-      border: 'border-amber-500/20',
-      bg: 'bg-amber-500/10',
-      text: 'text-amber-400',
-      tag: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
-    },
-    teal: {
-      border: 'border-teal-500/20',
-      bg: 'bg-teal-500/10',
-      text: 'text-teal-400',
-      tag: 'bg-teal-500/10 text-teal-300 border-teal-500/20',
-    },
-    sky: {
-      border: 'border-sky-500/20',
-      bg: 'bg-sky-500/10',
-      text: 'text-sky-400',
-      tag: 'bg-sky-500/10 text-sky-300 border-sky-500/20',
-    },
-  }
-  const c = colors[protocol.color as keyof typeof colors]
+  const c = PROTOCOL_ACCENT_CLASSES[protocol.color]
 
   return (
     <div className={`rounded-xl border ${c.border} bg-surface-900/30 overflow-hidden`}>
