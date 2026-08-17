@@ -117,22 +117,14 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">
           Get Started
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <NavCard
             to="/looking-glass"
             icon={Eye}
             color="cyan"
             title="Looking Glass"
-            description="Execute protocol flows and inspect every step of the exchange in real-time."
+            description="Execute OAuth, OIDC, SAML, SSF, and other protocol flows and inspect every step of the exchange in real-time."
             cta="Open Looking Glass"
-          />
-          <NavCard
-            to="/looking-glass?protocol=ssf"
-            icon={Radio}
-            color="amber"
-            title="SSF Stream Lab"
-            description="Fire CAEP and RISC events on a durable Looking Glass session and inspect Transmitter and Receiver traffic."
-            cta="Open Stream Lab"
           />
           <NavCard
             to="/protocols"
@@ -257,7 +249,7 @@ function NavCard({
 }: {
   to: string
   icon: React.ElementType
-  color: 'cyan' | 'purple' | 'amber'
+  color: 'cyan' | 'purple'
   title: string
   description: string
   cta: string
@@ -276,13 +268,6 @@ function NavCard({
       icon: 'bg-purple-500/20',
       iconText: 'text-purple-400',
       cta: 'text-purple-400',
-    },
-    amber: {
-      border: 'border-amber-500/20 hover:border-amber-500/40',
-      bg: 'from-amber-500/10',
-      icon: 'bg-amber-500/20',
-      iconText: 'text-amber-400',
-      cta: 'text-amber-400',
     },
   }
   const c = colors[color]

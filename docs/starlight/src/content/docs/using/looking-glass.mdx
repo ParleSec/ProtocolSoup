@@ -114,9 +114,9 @@ The built-in token decoder is available at `POST /api/lookingglass/decode`. It h
 - Security Event Tokens (SETs)
 - X.509 certificates
 
-## SSF Stream Lab
+## Shared Signals (SSF)
 
-SSF uses Looking Glass as a durable **stream lab** (`/looking-glass?protocol=ssf`). Catalog flow IDs (`caep-session-revoked`, `ssf-push-delivery`, …) are presets into that session: they fill the subject/event/delivery chrome. They are not a second execute path.
+SSF is a protocol in Looking Glass (`/looking-glass?protocol=ssf`), not a separate sandbox. Catalog flow IDs (`caep-session-revoked`, `ssf-push-delivery`, …) are presets into one durable session: they fill the subject/event/delivery chrome. They are not a second execute path.
 
 - **Fire event** sends a CAEP/RISC SET for the chrome subject and event. That is what changes RP posture on the State tab (and, for `session-revoked`, the federation revoke-subject hop).
 - **Verify stream** only does `GET /.well-known/ssf-configuration`, `GET /stream`, JWKS, and `POST /verify`. It does not revoke sessions or disable accounts.
