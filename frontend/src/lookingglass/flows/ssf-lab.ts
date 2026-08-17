@@ -4,7 +4,7 @@ import type { SecurityState } from '../ssf/types'
 
 export class SSFLabExecutor extends FlowExecutorBase {
   readonly flowType = 'ssf-lab'
-  readonly flowName = 'SSF Stream Lab'
+  readonly flowName = 'SSF in Looking Glass'
   readonly rfcReference = 'RFC 8417, RFC 8935, RFC 8936, OpenID SSF 1.0'
 
   constructor(config: FlowExecutorConfig) {

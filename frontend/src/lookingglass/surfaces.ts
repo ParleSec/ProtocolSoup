@@ -34,11 +34,11 @@ const SSF_SURFACE: LookingGlassSurface = {
     accumulateWire: true,
   },
   copy: {
-    flowNoun: 'Lab',
+    flowNoun: 'session',
     executeLabel: 'Fire event',
     executeAgainLabel: 'Fire event',
     subtitle: 'Pick a subject and CAEP/RISC event, then fire a SET. RP account state changes only after that SET is verified — not after stream discovery.',
-    emptyTitle: 'Select Shared Signals to open the stream lab',
+    emptyTitle: 'Select Shared Signals to open Looking Glass',
     emptySubtitle: 'Fire event sends a SET. Verify stream only reads transmitter metadata and does not change RP posture.',
   },
   hideFlowSelector: true,

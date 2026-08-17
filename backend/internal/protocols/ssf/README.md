@@ -55,7 +55,7 @@ The service also starts a **standalone receiver** on `SSF_RECEIVER_PORT` (defaul
 
 Looking Glass owns the session. SSF does not mint a parallel `ssf_session_id`.
 
-1. **Session ID**: Looking Glass `POST /api/protocols/ssf/demo/{flow}` returns an owned session. Catalog flow IDs are presets into that same stream lab.
+1. **Session ID**: Looking Glass `POST /api/protocols/ssf/demo/{flow}` returns an owned session. Catalog flow IDs are presets into that same Looking Glass session.
 2. **Header Propagation**: Client and server-to-server hops send `X-Looking-Glass-Session` (query `lg_session` when headers cannot be set). Push delivery copies the same header. The SET itself MUST NOT carry the session id (RFC 8417).
 3. **Database Storage**: Session ID is stored in `events.session_id`, not in SET claims.
 4. **RP state**: `ReceiverActionExecutor` keys posture as `sessionID:email` in SQLite on this service. Alice/Bob emails match MockIdP users for identifier continuity only.

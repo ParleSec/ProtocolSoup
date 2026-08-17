@@ -249,7 +249,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 	return []plugin.FlowDefinition{
 		{
 			ID:          "ssf-stream-lab",
-			Name:        "SSF Stream Lab",
+			Name:        "SSF in Looking Glass",
 			Description: "Pick a subject and CAEP/RISC event, fire a SET, and inspect Transmitter and Receiver hops. Stream discovery is a separate Verify stream action and does not change RP account state.",
 			Executable:  true,
 			Category:    "stream-lab",
@@ -373,7 +373,7 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 	return []plugin.DemoScenario{
 		{
 			ID:          "ssf-stream-lab",
-			Name:        "SSF Stream Lab",
+			Name:        "SSF in Looking Glass",
 			Description: "Fire CAEP and RISC events on a durable Looking Glass session and inspect Transmitter and Receiver traffic",
 			Steps: []plugin.DemoStep{
 				{Order: 1, Name: "View Subjects", Description: "See the test subjects available in the stream", Endpoint: "/ssf/subjects", Method: "GET", Auto: true},

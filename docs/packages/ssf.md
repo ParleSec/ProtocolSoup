@@ -3,7 +3,7 @@
 ## Service Summary
 
 - **Image:** `ghcr.io/parlesec/protocolsoup-ssf`
-- **Purpose:** Provide SSF transmitter and receiver behavior for CAEP/RISC event workflows with real SET generation and processing. Looking Glass is the run surface (stream lab); this image stays independent of federation.
+- **Purpose:** Provide SSF transmitter and receiver behavior for CAEP/RISC event workflows with real SET generation and processing. Looking Glass is the run surface; this image stays independent of federation.
 - **Topology role:** Can run standalone or behind `protocolsoup-gateway` as `/ssf`; includes a secondary receiver listener for push-delivery demos.
 - **Discovery:** `GET /.well-known/ssf-configuration` on the issuer (`spec_version` `"1_0"`). Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`).
 

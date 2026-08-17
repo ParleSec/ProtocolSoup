@@ -14,7 +14,7 @@ description: "Real-time security event sharing with CAEP and RISC events."
 
 ## Run Surface
 
-SSF is a **stream lab** in [Looking Glass](/using/looking-glass/): `/looking-glass?protocol=ssf`. Catalog flow IDs are presets into one durable Looking Glass session (they fill the event/delivery chrome). They do not replace the chrome.
+SSF is a durable session in [Looking Glass](/using/looking-glass/): `/looking-glass?protocol=ssf`. Catalog flow IDs are presets into one Looking Glass session (they fill the event/delivery chrome). They do not replace the chrome.
 
 **Fire event** encodes and delivers a CAEP/RISC SET for the selected subject. That is the only Looking Glass control that mutates RP account state. **Verify stream** reads transmitter metadata and POSTs `/verify`; it does not revoke sessions or disable accounts.
 
@@ -28,7 +28,7 @@ Looking Glass hides the per-event action dropdown. The chrome (subject, event, p
 
 | Flow ID | Name | Looking Glass role |
 |---------|------|--------------------|
-| `ssf-stream-lab` | Stream Lab | Default lab session |
+| `ssf-stream-lab` | Looking Glass session | Default durable session |
 | `ssf-stream-configuration` | Stream Configuration | Preset: use **Verify stream** (does not change RP state) |
 | `ssf-push-delivery` | Push Delivery | Preset: delivery = RFC 8935, then **Fire event** |
 | `ssf-poll-delivery` | Poll Delivery | Preset: delivery = RFC 8936, then **Fire event** |
@@ -39,7 +39,7 @@ Looking Glass hides the per-event action dropdown. The chrome (subject, event, p
 
 ## Demo Scenarios
 
-- **SSF Stream Lab** -- Durable Looking Glass session for CAEP/RISC events
+- **SSF in Looking Glass** -- Durable Looking Glass session for CAEP/RISC events
 - **Session Revocation Demo** -- CAEP session revoked event lifecycle
 - **Credential Compromise Response** -- RISC response action execution
 - **Push vs Poll Comparison** -- Delivery mode behavior comparison

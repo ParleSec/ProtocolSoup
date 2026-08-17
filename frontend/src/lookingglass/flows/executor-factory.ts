@@ -367,7 +367,7 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
 
   'ssf-lab': {
     executorClass: SSFLabExecutor,
-    description: 'Durable SSF stream lab: fire CAEP/RISC events and inspect Transmitter/Receiver SET delivery',
+    description: 'Durable SSF Looking Glass session: fire CAEP/RISC events and inspect Transmitter/Receiver SET delivery',
     rfcReference: 'RFC 8417, RFC 8935, RFC 8936, OpenID SSF 1.0',
     requiresUserInteraction: false,
   },
