@@ -115,6 +115,7 @@ wallet-driven authorization-code / HAIP issuance path is exercised.
 - `POST /api/issue` — OID4VCI bootstrap against the configured issuer
 - `POST /api/import` — import from an external credential offer (pre-authorized or authorization_code), start wallet-initiated issuance from `credential_issuer` (optional `credential_configuration_id`), or HAIP authorize + DPoP GET of a protected resource (`discovery_url`, `resource_endpoint`, `scope`, optional `wallet_base_url`)
 - `GET /api/oid4vci/callback` — authorization-code redirect callback
+- `GET /llms.txt`, `GET /llms-full.txt`, `GET /.well-known/api-catalog`, `GET /.well-known/agent-skills/use-wallet-harness/SKILL.md` — agent discovery (not protocol endpoints)
 
 ## Quick Start
 

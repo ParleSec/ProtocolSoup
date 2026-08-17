@@ -407,19 +407,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", server.handleHealth)
-	mux.HandleFunc("/authorize", server.handleAuthorize)
-	mux.HandleFunc("/submit", server.handleSubmit)
-	mux.HandleFunc("/api/resolve", server.handleAPIResolve)
-	mux.HandleFunc("/api/session", server.handleAPISession)
-	mux.HandleFunc("/api/issue", server.handleAPIIssue)
-	mux.HandleFunc("/api/import", server.handleAPIImport)
-	mux.HandleFunc("/api/oid4vci/callback", server.handleAPIOID4VCICallback)
-	mux.HandleFunc("/api/preview", server.handleAPIPreview)
-	mux.HandleFunc("/api/present", server.handleAPIPresent)
-	mux.HandleFunc("/.well-known/did.json", server.handleWalletDIDDocument)
-	mux.HandleFunc("/wallet/", server.handleWalletDIDDocument)
-	mux.HandleFunc("/", server.handleWalletApp)
+	server.registerRoutes(mux)
 
 	httpServer := &http.Server{
 		Addr:              listenAddr,
@@ -530,6 +518,15 @@ func (s *walletHarnessServer) handleWalletApp(w http.ResponseWriter, r *http.Req
 	relativePath := strings.TrimPrefix(cleanPath, "/")
 	if relativePath == "." {
 		relativePath = ""
+	}
+
+	s.setAgentHeaders(w, r)
+	if relativePath == "" {
+		w.Header().Add("Vary", "Accept")
+		if prefersMarkdown(r.Header.Get("Accept")) {
+			writePlain(w, http.StatusOK, "text/markdown; charset=utf-8", s.walletSkill(requestBaseURL(r)).body)
+			return
+		}
 	}
 
 	serveIndex := func() {

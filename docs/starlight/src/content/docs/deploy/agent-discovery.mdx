@@ -29,6 +29,9 @@ by the application and needs no operator action.
 | Content signals | `/robots.txt` | Frontend | [Content Signals](https://contentsignals.org/) |
 | Link headers | every page response | Frontend + backend edge | [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) |
 | Markdown representation | every page, via `Accept` | Frontend | Markdown for Agents |
+| Wallet `llms.txt` | `https://wallet.protocolsoup.com/llms.txt` | Wallet harness | [llms.txt](https://llmstxt.org/) |
+| Wallet API catalog | `https://wallet.protocolsoup.com/.well-known/api-catalog` | Wallet harness | RFC 9727 |
+| Wallet agent skill | `https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md` | Wallet harness | Agent Skills Discovery RFC v0.2.0 |
 
 ### Link headers
 
@@ -113,7 +116,28 @@ The skills index lists a `sha256` digest for each artifact. Both the index and
 the artifact route render through the same function, so a consumer that
 verifies the digest against the downloaded `SKILL.md` always gets a match.
 Add or edit skills in `frontend/src/lib/agent-skills.ts`; digests recompute
-automatically.
+automatically. `use-wallet-harness` points at the wallet origin rather than
+duplicating recipes.
+
+### Wallet origin
+
+The wallet is a separate host (`wallet.protocolsoup.com`). An agent that lands
+there should not scrape the JavaScript UI. The wallet process serves:
+
+| Surface | Path |
+|---------|------|
+| Profile | `/llms.txt` |
+| API recipes | `/llms-full.txt`, or `GET /` with `Accept: text/markdown` |
+| API catalog | `/.well-known/api-catalog` |
+| Agent skill | `/.well-known/agent-skills/use-wallet-harness/SKILL.md` |
+| Health | `/health` |
+
+```bash
+curl https://wallet.protocolsoup.com/llms.txt
+curl -H 'Accept: text/markdown' https://wallet.protocolsoup.com/
+```
+
+This host is not an MCP server; `/mcp` remains on `protocolsoup.com`.
 
 ### WebMCP
 

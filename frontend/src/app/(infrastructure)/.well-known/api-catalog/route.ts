@@ -8,6 +8,7 @@ import {
   protocolDocsUrl,
   siteUrl,
 } from '@/lib/agent-discovery'
+import { DOCS_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
 
 /**
  * RFC 9727 API catalog, serialised as an RFC 9264 linkset. The entries are
@@ -56,6 +57,30 @@ function platformEntry(): LinksetEntry {
   }
 }
 
+function walletEntry(): LinksetEntry {
+  return {
+    anchor: `${WALLET_ORIGIN}/`,
+    'service-doc': [
+      {
+        href: `${DOCS_ORIGIN}/deploy/services/wallet/`,
+        type: 'text/html',
+        title: 'Wallet harness runtime contract',
+      },
+    ],
+    describedby: [
+      { href: `${WALLET_ORIGIN}/llms.txt`, type: 'text/plain', title: 'Wallet profile for agents' },
+      {
+        href: `${WALLET_ORIGIN}/.well-known/agent-skills/index.json`,
+        type: 'application/json',
+        title: 'Wallet agent skills index',
+      },
+    ],
+    status: [
+      { href: `${WALLET_ORIGIN}/health`, type: 'application/json', title: 'Wallet runtime health' },
+    ],
+  }
+}
+
 function protocolEntry(protocol: { id: string; name: string; spec: string }): LinksetEntry {
   const contract = PROTOCOL_CONTRACTS[protocol.id]
 
@@ -91,6 +116,7 @@ function protocolEntry(protocol: { id: string; name: string; spec: string }): Li
 export async function GET() {
   const linkset: LinksetEntry[] = [
     platformEntry(),
+    walletEntry(),
     ...PROTOCOL_CATALOG_DATA.map(protocolEntry),
   ]
 
