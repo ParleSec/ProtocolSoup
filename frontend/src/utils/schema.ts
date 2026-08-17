@@ -50,6 +50,7 @@ export function generateWebApplicationSchema() {
       'OpenID Connect testing',
       'OID4VCI issuance flow testing',
       'OID4VP verification flow testing',
+      'Hosted OID4VCI and OID4VP wallet harness',
       'SAML 2.0 SSO debugging',
       'SPIFFE/SPIRE workload identity',
       'SCIM 2.0 provisioning testing',
@@ -97,6 +98,18 @@ export function generateWebsiteSchema() {
     publisher: {
       '@id': `${SITE_CONFIG.baseUrl}#organization`,
     },
+    hasPart: [
+      {
+        '@type': 'WebApplication',
+        name: 'Looking Glass',
+        url: `${SITE_CONFIG.baseUrl}/looking-glass`,
+      },
+      {
+        '@type': 'WebApplication',
+        name: 'Wallet Harness',
+        url: SITE_CONFIG.walletUrl,
+      },
+    ],
   }
 }
 
@@ -255,6 +268,10 @@ export function generateHomepageSchema() {
       {
         question: 'What are verifiable credentials and how do OID4VCI and OID4VP work?',
         answer: 'Verifiable credentials are tamper-evident digital credentials (like diplomas or licenses) that a holder can present to a verifier. OID4VCI (OpenID for Verifiable Credential Issuance) defines how an issuer delivers credentials to a wallet. OID4VP (OpenID for Verifiable Presentations) defines how a verifier requests and validates credential presentations from a wallet.',
+      },
+      {
+        question: 'What is the Protocol Soup wallet harness?',
+        answer: 'The hosted wallet at wallet.protocolsoup.com is a real OID4VCI and OID4VP wallet used by Looking Glass. It issues and presents mdoc and SD-JWT verifiable credentials, including HAIP client and key attestation, instead of simulating wallet behavior in the browser.',
       },
       {
         question: 'What is PKCE and why is it required for OAuth 2.0?',

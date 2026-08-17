@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Eye, Home, ExternalLink, BookOpen, Menu, X, FileText, Search } from 'lucide-react'
+import { Eye, Home, ExternalLink, BookOpen, Menu, X, FileText, Search, Wallet } from 'lucide-react'
 
 import { usePlatformShortcutLabel } from '@/components/palette/usePaletteQuery'
+import { SITE_CONFIG } from '@/config/seo'
 
 function Github({ className }: { className?: string }) {
   return (
@@ -18,6 +19,7 @@ function Github({ className }: { className?: string }) {
 const navItems = [
   { path: '/', icon: Home, label: 'Home' },
   { path: '/looking-glass', icon: Eye, label: 'Looking Glass' },
+  { path: SITE_CONFIG.walletUrl, icon: Wallet, label: 'Wallet', external: true },
   { path: '/protocols', icon: BookOpen, label: 'Protocols' },
 ]
 
@@ -65,21 +67,43 @@ export function LayoutHeader() {
 
             <nav className="hidden lg:flex items-center gap-0.5 flex-shrink-0">
               {navItems.map((item) => {
-                const isActive = currentPath === item.path ||
+                const isExternal = Boolean(item.external)
+                const isActive = !isExternal && (
+                  currentPath === item.path ||
                   (item.path !== '/' && currentPath.startsWith(item.path))
+                )
+                const className = `flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors text-sm whitespace-nowrap flex-shrink-0 ${
+                  isActive
+                    ? 'bg-white/10 text-white'
+                    : 'text-surface-400 hover:text-white hover:bg-white/5'
+                }`
+                const content = (
+                  <>
+                    <item.icon className="w-4 h-4 flex-shrink-0" />
+                    <span>{item.label}</span>
+                  </>
+                )
+                if (isExternal) {
+                  return (
+                    <a
+                      key={item.path}
+                      href={item.path}
+                      rel="noopener noreferrer"
+                      aria-label={`${item.label} (opens on wallet.protocolsoup.com)`}
+                      className={className}
+                    >
+                      {content}
+                    </a>
+                  )
+                }
                 return (
                   <Link
                     key={item.path}
                     href={item.path}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors text-sm whitespace-nowrap flex-shrink-0 ${
-                      isActive
-                        ? 'bg-white/10 text-white'
-                        : 'text-surface-400 hover:text-white hover:bg-white/5'
-                    }`}
+                    className={className}
                   >
-                    <item.icon className="w-4 h-4 flex-shrink-0" />
-                    <span>{item.label}</span>
+                    {content}
                   </Link>
                 )
               })}
@@ -189,20 +213,42 @@ export function LayoutHeader() {
 
               <div className="flex-1 overflow-y-auto p-4 space-y-1">
                 {navItems.map((item) => {
-                  const isActive = currentPath === item.path ||
+                  const isExternal = Boolean(item.external)
+                  const isActive = !isExternal && (
+                    currentPath === item.path ||
                     (item.path !== '/' && currentPath.startsWith(item.path))
+                  )
+                  const className = `flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${
+                    isActive
+                      ? 'bg-white/10 text-white'
+                      : 'text-surface-400 hover:text-white hover:bg-white/5'
+                  }`
+                  const content = (
+                    <>
+                      <item.icon className="w-5 h-5" />
+                      <span className="font-medium">{item.label}</span>
+                      {isExternal && <ExternalLink className="w-4 h-4 ml-auto" />}
+                    </>
+                  )
+                  if (isExternal) {
+                    return (
+                      <a
+                        key={item.path}
+                        href={item.path}
+                        rel="noopener noreferrer"
+                        className={className}
+                      >
+                        {content}
+                      </a>
+                    )
+                  }
                   return (
                     <Link
                       key={item.path}
                       href={item.path}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${
-                        isActive
-                          ? 'bg-white/10 text-white'
-                          : 'text-surface-400 hover:text-white hover:bg-white/5'
-                      }`}
+                      className={className}
                     >
-                      <item.icon className="w-5 h-5" />
-                      <span className="font-medium">{item.label}</span>
+                      {content}
                     </Link>
                   )
                 })}

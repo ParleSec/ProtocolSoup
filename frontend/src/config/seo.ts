@@ -7,7 +7,7 @@
 
 export const SITE_CONFIG = {
   name: 'Protocol Soup',
-  tagline: 'Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM & SSF Testing Playground',
+  tagline: 'Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM & SSF Testing Playground with a hosted wallet harness',
   baseUrl: 'https://protocolsoup.com',
   docsUrl: 'https://docs.protocolsoup.com',
   walletUrl: 'https://wallet.protocolsoup.com',
@@ -34,7 +34,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
   // Homepage - Primary landing page
   '/': {
     title: 'Protocol Soup | Run Real Authentication & Identity Protocol Flows',
-    description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and learn protocols hands-on.',
+    description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and issue or present credentials with the hosted wallet harness.',
     keywords: [
       'oauth2 playground',
       'oauth 2.0 testing tool',
@@ -47,6 +47,12 @@ export const PAGE_SEO: Record<string, PageSEO> = {
       'verifiable credentials',
       'oid4vci playground',
       'oid4vp testing',
+      'oid4vci wallet',
+      'oid4vp wallet',
+      'verifiable credential wallet',
+      'mdoc wallet',
+      'sd-jwt vc wallet',
+      'wallet harness',
       'spiffe spire tutorial',
       'scim 2.0 testing',
       'identity protocol testing',
@@ -78,7 +84,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
   // Looking Glass Tool
   '/looking-glass': {
     title: 'Looking Glass - Live Protocol Flow Execution & Traffic Inspector',
-    description: 'Execute authentication protocol flows in real-time and inspect every HTTP request, response, header, and token. See OAuth 2.0, OIDC, and SAML flows as they happen.',
+    description: 'Execute authentication protocol flows in real-time and inspect every HTTP request, response, header, and token. Run OAuth 2.0, OIDC, SAML, SSF, OID4VCI, and OID4VP — including holder-side hops through the hosted wallet harness.',
     keywords: [
       'protocol debugger',
       'oauth flow inspector',
@@ -86,6 +92,9 @@ export const PAGE_SEO: Record<string, PageSEO> = {
       'authentication debugger',
       'token debugger',
       'api testing tool',
+      'oid4vci debugger',
+      'oid4vp debugger',
+      'verifiable credential inspector',
     ],
     ogType: 'website',
   },

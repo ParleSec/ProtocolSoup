@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import { 
   Shield, Eye, Terminal, Fingerprint, 
-  ChevronRight, Key, KeyRound,
+  ChevronRight, Key, KeyRound, Wallet, ExternalLink,
   Code, FileSearch, Zap, FileKey, Users, Radio
 } from 'lucide-react'
 
 import { HomepagePalette } from '@/components/palette/HomepagePalette'
+import { SITE_CONFIG } from '@/config/seo'
 
 interface SpecLinkItem {
   label: string
@@ -117,7 +118,7 @@ export function Dashboard() {
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">
           Get Started
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <NavCard
             to="/looking-glass"
             icon={Eye}
@@ -125,6 +126,14 @@ export function Dashboard() {
             title="Looking Glass"
             description="Execute OAuth, OIDC, SAML, SSF, and other protocol flows and inspect every step of the exchange in real-time."
             cta="Open Looking Glass"
+          />
+          <NavCard
+            to={SITE_CONFIG.walletUrl}
+            icon={Wallet}
+            color="amber"
+            title="Wallet Harness"
+            description="Issue and present mdoc and SD-JWT credentials with a real OID4VCI and OID4VP wallet, including HAIP attestation."
+            cta="Open Wallet"
           />
           <NavCard
             to="/protocols"
@@ -249,7 +258,7 @@ function NavCard({
 }: {
   to: string
   icon: React.ElementType
-  color: 'cyan' | 'purple'
+  color: 'cyan' | 'purple' | 'amber'
   title: string
   description: string
   cta: string
@@ -269,14 +278,19 @@ function NavCard({
       iconText: 'text-purple-400',
       cta: 'text-purple-400',
     },
+    amber: {
+      border: 'border-amber-500/20 hover:border-amber-500/40',
+      bg: 'from-amber-500/10',
+      icon: 'bg-amber-500/20',
+      iconText: 'text-amber-400',
+      cta: 'text-amber-400',
+    },
   }
   const c = colors[color]
-
-  return (
-    <Link
-      href={to}
-      className={`group relative overflow-hidden rounded-xl border ${c.border} bg-gradient-to-br ${c.bg} to-transparent p-6 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`}
-    >
+  const isExternal = /^https?:\/\//.test(to)
+  const className = `group relative overflow-hidden rounded-xl border ${c.border} bg-gradient-to-br ${c.bg} to-transparent p-6 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`
+  const body = (
+    <>
       <div className={`absolute top-0 right-0 w-32 h-32 ${c.bg.replace('from-', 'bg-')} rounded-full blur-2xl -translate-y-1/2 translate-x-1/2 opacity-50 hidden sm:block`} />
       <div className="relative">
         <div className={`w-12 h-12 rounded-xl ${c.icon} flex items-center justify-center mb-4`}>
@@ -285,9 +299,23 @@ function NavCard({
         <h3 className="text-xl font-semibold text-white mb-2">{title}</h3>
         <p className="text-surface-400 mb-4 leading-relaxed">{description}</p>
         <span className={`inline-flex items-center gap-1.5 ${c.cta} text-sm font-medium group-hover:gap-2.5 transition-all`}>
-          {cta} <ChevronRight className="w-4 h-4" />
+          {cta} {isExternal ? <ExternalLink className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </span>
       </div>
+    </>
+  )
+
+  if (isExternal) {
+    return (
+      <a href={to} rel="noopener noreferrer" className={className}>
+        {body}
+      </a>
+    )
+  }
+
+  return (
+    <Link href={to} className={className}>
+      {body}
     </Link>
   )
 }

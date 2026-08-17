@@ -1,4 +1,4 @@
-import { SITE_ORIGIN } from '@/lib/seo'
+import { SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
 
 /**
  * robots.txt is generated here rather than through Next's metadata route so it
@@ -108,6 +108,7 @@ export async function GET() {
     `Host: ${SITE_ORIGIN}`,
     `Sitemap: ${SITE_ORIGIN}/sitemap-index.xml`,
     `Sitemap: ${SITE_ORIGIN}/sitemap.xml`,
+    `Sitemap: ${WALLET_ORIGIN}/sitemap.xml`,
     '',
   ].join('\n')
 

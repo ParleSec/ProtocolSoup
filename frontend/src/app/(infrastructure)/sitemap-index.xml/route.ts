@@ -1,4 +1,4 @@
-import { DOCS_ORIGIN, SITE_ORIGIN, SITEMAP_LASTMOD } from '@/lib/seo'
+import { DOCS_ORIGIN, SITE_ORIGIN, SITEMAP_LASTMOD, WALLET_ORIGIN } from '@/lib/seo'
 
 function escapeXml(value: string): string {
   return value
@@ -14,12 +14,8 @@ export async function GET() {
   const sitemapUrls: string[] = [
     `${SITE_ORIGIN}/sitemap.xml`,
     `${DOCS_ORIGIN}/sitemap.xml`,
+    String(process.env.WALLET_SITEMAP_URL || '').trim() || `${WALLET_ORIGIN}/sitemap.xml`,
   ]
-
-  const walletSitemap = String(process.env.WALLET_SITEMAP_URL || '').trim()
-  if (walletSitemap) {
-    sitemapUrls.push(walletSitemap)
-  }
 
   const sitemapEntries = sitemapUrls.flatMap((url) => [
     '  <sitemap>',

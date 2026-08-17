@@ -1,5 +1,5 @@
 import { PROTOCOL_CATALOG_DATA } from '@/protocols/presentation/protocol-catalog-data'
-import { DOCS_ORIGIN, SITE_ORIGIN } from '@/lib/seo'
+import { DOCS_ORIGIN, SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
 
 export async function GET() {
   const protocolSections = PROTOCOL_CATALOG_DATA.flatMap((protocol) => {
@@ -27,6 +27,8 @@ export async function GET() {
     '## Platforms',
     `- [Main](${SITE_ORIGIN})`,
     `- [Docs](${DOCS_ORIGIN})`,
+    `- [Wallet harness](${WALLET_ORIGIN})`,
+    `- [Wallet llms.txt](${WALLET_ORIGIN}/llms.txt)`,
     '',
     '## Protocol Catalog',
     ...protocolSections,

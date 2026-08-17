@@ -1,6 +1,7 @@
 import { ReactNode } from 'react'
 import { FileText } from 'lucide-react'
 import { LayoutHeader } from './LayoutHeader.client'
+import { SITE_CONFIG } from '@/config/seo'
 
 function Github({ className }: { className?: string }) {
   return (
@@ -63,6 +64,14 @@ export function Layout({ children }: LayoutProps) {
               >
                 <FileText className="w-3 h-3" />
                 <span>Docs</span>
+              </a>
+              <span className="text-surface-700">·</span>
+              <a
+                href={SITE_CONFIG.walletUrl}
+                rel="noopener noreferrer"
+                className="text-surface-400 hover:text-amber-400 transition-colors"
+              >
+                Wallet
               </a>
               <span className="text-surface-700">·</span>
               <a

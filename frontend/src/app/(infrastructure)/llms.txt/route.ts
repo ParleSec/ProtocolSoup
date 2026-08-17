@@ -20,6 +20,7 @@ export async function GET() {
     `- [Homepage](${SITE_ORIGIN}/)`,
     `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
     `- [Looking Glass](${SITE_ORIGIN}/looking-glass)`,
+    `- [Wallet harness](${WALLET_ORIGIN})`,
     '',
     '## Protocol Guides',
     ...protocolLines,
@@ -30,6 +31,8 @@ export async function GET() {
     '',
     '## Machine-Readable Profiles',
     `- [Full profile](${SITE_ORIGIN}/llms-full.txt)`,
+    `- [Wallet llms.txt](${WALLET_ORIGIN}/llms.txt)`,
+    `- [Wallet agent skill](${WALLET_ORIGIN}/.well-known/agent-skills/use-wallet-harness/SKILL.md)`,
     '',
   ].join('\n')
 
