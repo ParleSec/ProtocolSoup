@@ -1,12 +1,12 @@
 import Link from 'next/link'
 import { 
-  Shield, Eye, Terminal, Fingerprint, 
-  ChevronRight, Key, KeyRound, Wallet, ExternalLink,
-  Code, FileSearch, Zap, FileKey, Users, Radio
+  Shield, Eye, Terminal, Wallet, ExternalLink,
+  ChevronRight, Code, FileSearch, Zap
 } from 'lucide-react'
 
 import { HomepagePalette } from '@/components/palette/HomepagePalette'
 import { SITE_CONFIG } from '@/config/seo'
+import { PROTOCOL_ACCENT_CLASSES, PROTOCOL_CATALOG, COMING_SOON_PROTOCOLS, protocolHomepageBlurb } from '@/protocols/presentation/protocol-catalog'
 
 interface SpecLinkItem {
   label: string
@@ -25,14 +25,18 @@ const SPEC_GROUPS: SpecGroupItem[] = [
     links: [
       { label: 'RFC 6749', url: 'https://datatracker.ietf.org/doc/html/rfc6749', tone: 'rfc' },
       { label: 'RFC 7636', url: 'https://datatracker.ietf.org/doc/html/rfc7636', tone: 'rfc' },
-      { label: 'RFC 6750', url: 'https://datatracker.ietf.org/doc/html/rfc6750', tone: 'rfc' },
-      { label: 'RFC 7519', url: 'https://datatracker.ietf.org/doc/html/rfc7519', tone: 'rfc' },
+      { label: 'RFC 8414', url: 'https://datatracker.ietf.org/doc/html/rfc8414', tone: 'rfc' },
+      { label: 'RFC 9700', url: 'https://datatracker.ietf.org/doc/html/rfc9700', tone: 'rfc' },
+      { label: 'OIDC Core', url: 'https://openid.net/specs/openid-connect-core-1_0.html', tone: 'spec' },
     ],
   },
   {
     label: 'SAML',
     links: [
-      { label: 'RFC 7522', url: 'https://datatracker.ietf.org/doc/rfc7522/', tone: 'rfc' },
+      { label: 'SAML 2.0 Core', url: 'https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf', tone: 'spec' },
+      { label: 'Bindings', url: 'https://docs.oasis-open.org/security/saml/v2.0/saml-bindings-2.0-os.pdf', tone: 'spec' },
+      { label: 'Profiles', url: 'https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf', tone: 'spec' },
+      { label: 'Metadata', url: 'https://docs.oasis-open.org/security/saml/v2.0/saml-metadata-2.0-os.pdf', tone: 'spec' },
     ],
   },
   {
@@ -40,6 +44,7 @@ const SPEC_GROUPS: SpecGroupItem[] = [
     links: [
       { label: 'OpenID4VCI 1.0', url: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0.html', tone: 'spec' },
       { label: 'OpenID4VP 1.0', url: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0.html', tone: 'spec' },
+      { label: 'HAIP 1.0', url: 'https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0.html', tone: 'spec' },
     ],
   },
   {
@@ -77,15 +82,14 @@ export function Dashboard() {
       <header className="py-2 sm:py-4">
         <div className="flex items-center gap-2 text-amber-400 font-mono text-sm mb-3">
           <Terminal className="w-4 h-4" />
-          <span>protocol-soup v1.0</span>
+          <span>live protocol execution</span>
         </div>
         <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-3 flex items-center gap-3">
-          Protocol Soup
+          ProtocolSoup
           <span className="text-2xl sm:text-3xl" aria-hidden="true">🍜</span>
         </h1>
         <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
-          Learn authentication and identity protocols by running them. Execute real protocol flows against working 
-          infrastructure and see exactly what happens at each step.
+          Run real identity protocol flows against live infrastructure. Inspect every request, token, and validation decision.
         </p>
       </header>
 
@@ -99,7 +103,7 @@ export function Dashboard() {
         <ValueCard
           icon={Code}
           title="Real Protocol Execution"
-          description="Not simulations - actual HTTP requests to a working identity provider"
+          description="Live HTTP to working authorization servers, issuers, verifiers, and event transmitters."
         />
         <ValueCard
           icon={FileSearch}
@@ -108,15 +112,15 @@ export function Dashboard() {
         />
         <ValueCard
           icon={Zap}
-          title="Live Token Decoding"
-          description="Decode JWTs instantly as they're issued, examine claims and signatures"
+          title="Live Artifact Decoding"
+          description="Decode JWTs, SAML assertions, SETs, and issued credentials as they are produced"
         />
       </section>
 
       {/* Main Navigation */}
       <section>
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">
-          Get Started
+          Start here
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <NavCard
@@ -124,8 +128,16 @@ export function Dashboard() {
             icon={Eye}
             color="cyan"
             title="Looking Glass"
-            description="Execute OAuth, OIDC, SAML, SSF, and other protocol flows and inspect every step of the exchange in real-time."
+            description="Execute live protocol flows and inspect every hop, token, and validation decision."
             cta="Open Looking Glass"
+          />
+          <NavCard
+            to="/protocols"
+            icon={Shield}
+            color="purple"
+            title="Protocol Reference"
+            description="Guides, sequence diagrams, parameters, and security considerations for every shipped protocol family."
+            cta="Browse Protocols"
           />
           <NavCard
             to={SITE_CONFIG.walletUrl}
@@ -134,14 +146,6 @@ export function Dashboard() {
             title="Wallet Harness"
             description="Issue and present mdoc and SD-JWT credentials with a real OID4VCI and OID4VP wallet, including HAIP attestation."
             cta="Open Wallet"
-          />
-          <NavCard
-            to="/protocols"
-            icon={Shield}
-            color="purple"
-            title="Protocol Reference"
-            description="Documentation with sequence diagrams, parameters, and security considerations."
-            cta="Browse Protocols"
           />
         </div>
       </section>
@@ -152,64 +156,19 @@ export function Dashboard() {
           Supported Protocols
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <ProtocolCard
-            icon={Key}
-            name="OAuth 2.0"
-            description="Authorization framework for delegated access"
-            color="blue"
-            to="/protocol/oauth2"
-          />
-          <ProtocolCard
-            icon={FileKey}
-            name="SAML 2.0"
-            description="XML-based federated identity and SSO"
-            color="cyan"
-            to="/protocol/saml"
-          />
-          <ProtocolCard
-            icon={Fingerprint}
-            name="OpenID Connect"
-            description="Authentication layer built on OAuth 2.0"
-            color="orange"
-            to="/protocol/oidc"
-          />
-          <ProtocolCard
-            icon={Radio}
-            name="SSF"
-            description="Real-time security event sharing framework"
-            color="amber"
-            to="/protocol/ssf"
-          />
-          <ProtocolCard
-            icon={KeyRound}
-            name="OID4VCI"
-            description="Verifiable credential issuance over OpenID"
-            color="green"
-            to="/protocol/oid4vci"
-          />
-          <ProtocolCard
-            icon={Shield}
-            name="SPIFFE/SPIRE"
-            description="Zero-trust workload identity framework"
-            color="green"
-            to="/protocol/spiffe"
-          />
-          <ProtocolCard
-            icon={Eye}
-            name="OID4VP"
-            description="Verifiable presentation requests and verification"
-            color="purple"
-            to="/protocol/oid4vp"
-          />
-          <ProtocolCard
-            icon={Users}
-            name="SCIM 2.0"
-            description="Cross-domain identity provisioning"
-            color="purple"
-            to="/protocol/scim"
-          />
-          <ComingSoonCard name="WebAuthn" description="Passwordless authentication" />
-          <ComingSoonCard name="FIDO2" description="Strong authentication framework" />
+          {PROTOCOL_CATALOG.map((protocol) => (
+            <ProtocolCard
+              key={protocol.id}
+              icon={protocol.icon}
+              name={protocol.name}
+              description={protocolHomepageBlurb(protocol.id, protocol.description)}
+              color={protocol.color}
+              to={`/protocol/${protocol.id}`}
+            />
+          ))}
+          {COMING_SOON_PROTOCOLS.map((item) => (
+            <ComingSoonCard key={item.name} name={item.name} description={item.description} />
+          ))}
         </div>
       </section>
 
@@ -286,7 +245,7 @@ function NavCard({
       cta: 'text-amber-400',
     },
   }
-  const c = colors[color]
+  const c = colors[color] ?? colors.cyan
   const isExternal = /^https?:\/\//.test(to)
   const className = `group relative overflow-hidden rounded-xl border ${c.border} bg-gradient-to-br ${c.bg} to-transparent p-6 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`
   const body = (
@@ -330,51 +289,13 @@ function ProtocolCard({
   icon: React.ElementType
   name: string
   description: string
-  color: 'blue' | 'orange' | 'cyan' | 'green' | 'purple' | 'amber'
+  color: keyof typeof PROTOCOL_ACCENT_CLASSES
   to: string
 }) {
-  const colors = {
-    blue: {
-      border: 'border-blue-500/20 hover:border-blue-500/40',
-      accent: 'bg-blue-500/50',
-      bg: 'bg-blue-500/10',
-      text: 'text-blue-400',
-    },
-    orange: {
-      border: 'border-orange-500/20 hover:border-orange-500/40',
-      accent: 'bg-orange-500/50',
-      bg: 'bg-orange-500/10',
-      text: 'text-orange-400',
-    },
-    cyan: {
-      border: 'border-cyan-500/20 hover:border-cyan-500/40',
-      accent: 'bg-cyan-500/50',
-      bg: 'bg-cyan-500/10',
-      text: 'text-cyan-400',
-    },
-    green: {
-      border: 'border-green-500/20 hover:border-green-500/40',
-      accent: 'bg-green-500/50',
-      bg: 'bg-green-500/10',
-      text: 'text-green-400',
-    },
-    purple: {
-      border: 'border-purple-500/20 hover:border-purple-500/40',
-      accent: 'bg-purple-500/50',
-      bg: 'bg-purple-500/10',
-      text: 'text-purple-400',
-    },
-    amber: {
-      border: 'border-amber-500/20 hover:border-amber-500/40',
-      accent: 'bg-amber-500/50',
-      bg: 'bg-amber-500/10',
-      text: 'text-amber-400',
-    },
-  }
-  const c = colors[color]
+  const c = PROTOCOL_ACCENT_CLASSES[color]
 
   return (
-    <Link href={to} className={`block rounded-xl border ${c.border} bg-surface-900/30 overflow-hidden transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`}>
+    <Link href={to} className={`block rounded-xl border ${c.border} ${c.borderHover} bg-surface-900/30 overflow-hidden transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950`}>
       <div className={`h-0.5 ${c.accent}`} />
       <div className="flex items-center gap-3 p-4">
         <div className={`w-9 h-9 rounded-lg ${c.bg} flex items-center justify-center flex-shrink-0`}>

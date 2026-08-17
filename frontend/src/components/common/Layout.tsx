@@ -1,5 +1,6 @@
 import { ReactNode } from 'react'
-import { FileText } from 'lucide-react'
+import Link from 'next/link'
+import { BookOpen, Eye, FileText, Wallet } from 'lucide-react'
 import { LayoutHeader } from './LayoutHeader.client'
 import { SITE_CONFIG } from '@/config/seo'
 
@@ -37,54 +38,71 @@ export function Layout({ children }: LayoutProps) {
         </div>
       </main>
 
-      <footer className="relative border-t border-white/5 py-4 sm:py-6">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-2">
-            <div className="flex flex-col sm:flex-row items-center gap-2 text-xs text-surface-600">
-              <p>Protocol Soup - explore authentication protocols</p>
-              <span className="hidden sm:inline text-surface-700">·</span>
-              <p className="font-mono">OAuth 2.0 · OIDC · SAML · SPIFFE · SSF</p>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-surface-600">Built by</span>
+      <footer className="relative border-t border-white/5 py-8 sm:py-10">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+          <div className="flex flex-col items-center sm:items-start gap-2">
+            <Link href="/" className="inline-flex items-center gap-2 group">
+              <span className="text-lg" aria-hidden="true">🍜</span>
+              <span className="text-sm font-semibold text-white group-hover:text-amber-100 transition-colors">ProtocolSoup</span>
+            </Link>
+            <p className="font-mono text-[11px] tracking-wide text-amber-400/80">
+              real hops · real tokens · no mocks
+            </p>
+            <p className="text-xs text-surface-600">
+              Built by{' '}
               <a
                 href="https://www.linkedin.com/in/mason-parle/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-surface-400 hover:text-amber-400 transition-colors font-medium"
+                className="text-surface-400 hover:text-amber-400 transition-colors"
               >
                 Mason Parle
               </a>
-              <span className="text-surface-700">·</span>
-              <a
-                href="https://docs.protocolsoup.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-surface-400 hover:text-amber-400 transition-colors inline-flex items-center gap-1"
-              >
-                <FileText className="w-3 h-3" />
-                <span>Docs</span>
-              </a>
-              <span className="text-surface-700">·</span>
-              <a
-                href={SITE_CONFIG.walletUrl}
-                rel="noopener noreferrer"
-                className="text-surface-400 hover:text-amber-400 transition-colors"
-              >
-                Wallet
-              </a>
-              <span className="text-surface-700">·</span>
-              <a
-                href="https://github.com/ParleSec/ProtocolSoup"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-surface-400 hover:text-amber-400 transition-colors inline-flex items-center gap-1"
-              >
-                <Github className="w-3 h-3" />
-                <span>GitHub</span>
-              </a>
-            </div>
+            </p>
           </div>
+          <nav className="flex flex-wrap items-center justify-center sm:justify-end gap-2 text-xs text-surface-400" aria-label="Footer">
+            <Link
+              href="/looking-glass"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Looking Glass
+            </Link>
+            <Link
+              href="/protocols"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              Protocols
+            </Link>
+            <a
+              href={SITE_CONFIG.walletUrl}
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+            >
+              <Wallet className="w-3.5 h-3.5" />
+              Wallet
+            </a>
+            <a
+              href="https://docs.protocolsoup.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Docs
+            </a>
+            <a
+              href="https://github.com/ParleSec/ProtocolSoup"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+            >
+              <Github className="w-3.5 h-3.5" />
+              GitHub
+            </a>
+          </nav>
         </div>
       </footer>
     </div>

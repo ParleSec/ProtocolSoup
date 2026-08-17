@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Eye, Home, ExternalLink, BookOpen, Menu, X, FileText, Search, Wallet } from 'lucide-react'
+import { Eye, ExternalLink, BookOpen, Menu, X, FileText, Search, Wallet } from 'lucide-react'
 
 import { usePlatformShortcutLabel } from '@/components/palette/usePaletteQuery'
 import { SITE_CONFIG } from '@/config/seo'
@@ -17,10 +17,9 @@ function Github({ className }: { className?: string }) {
 }
 
 const navItems = [
-  { path: '/', icon: Home, label: 'Home' },
   { path: '/looking-glass', icon: Eye, label: 'Looking Glass' },
-  { path: SITE_CONFIG.walletUrl, icon: Wallet, label: 'Wallet', external: true },
   { path: '/protocols', icon: BookOpen, label: 'Protocols' },
+  { path: SITE_CONFIG.walletUrl, icon: Wallet, label: 'Wallet', external: true },
 ]
 
 function openPalette() {
@@ -61,7 +60,7 @@ export function LayoutHeader() {
             <div className="flex-1 flex items-center">
               <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group flex-shrink-0">
                 <span className="text-lg sm:text-xl flex-shrink-0">🍜</span>
-                <span className="font-semibold text-white group-hover:text-amber-100 transition-colors text-sm sm:text-base whitespace-nowrap">Protocol Soup</span>
+                <span className="font-semibold text-white group-hover:text-amber-100 transition-colors text-sm sm:text-base whitespace-nowrap">ProtocolSoup</span>
               </Link>
             </div>
 
