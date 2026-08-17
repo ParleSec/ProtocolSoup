@@ -1,8 +1,8 @@
-import { PROTOCOL_CATALOG_DATA } from '@/protocols/presentation/protocol-catalog-data'
+import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import { DOCS_ORIGIN, SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
 
 export async function GET() {
-  const protocolSections = PROTOCOL_CATALOG_DATA.flatMap((protocol) => {
+  const protocolSections = sortedProtocolCatalogData().flatMap((protocol) => {
     const protocolUrl = `${SITE_ORIGIN}/protocol/${protocol.id}`
     const lines = [
       `### ${protocol.name}`,
@@ -20,12 +20,14 @@ export async function GET() {
   })
 
   const body = [
-    '# Protocol Soup - Full LLM Profile',
+    '# ProtocolSoup - Full LLM Profile',
     '',
     '> Deep-link catalog for protocol guides, flow references, and standards coverage.',
     '',
     '## Platforms',
     `- [Main](${SITE_ORIGIN})`,
+    `- [Looking Glass](${SITE_ORIGIN}/looking-glass)`,
+    `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
     `- [Docs](${DOCS_ORIGIN})`,
     `- [Wallet harness](${WALLET_ORIGIN})`,
     `- [Wallet llms.txt](${WALLET_ORIGIN}/llms.txt)`,

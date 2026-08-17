@@ -1,4 +1,4 @@
-import { PROTOCOL_CATALOG_DATA } from '@/protocols/presentation/protocol-catalog-data'
+import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import {
   AGENT_PATHS,
   API_OVERVIEW_URL,
@@ -116,8 +116,8 @@ function protocolEntry(protocol: { id: string; name: string; spec: string }): Li
 export async function GET() {
   const linkset: LinksetEntry[] = [
     platformEntry(),
+    ...sortedProtocolCatalogData().map(protocolEntry),
     walletEntry(),
-    ...PROTOCOL_CATALOG_DATA.map(protocolEntry),
   ]
 
   return new Response(`${JSON.stringify({ linkset }, null, 2)}\n`, {

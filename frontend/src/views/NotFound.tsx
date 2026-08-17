@@ -9,8 +9,8 @@ export function NotFound() {
   const quickLinks = [
     { path: '/', icon: Home, label: 'Home', description: 'Return to dashboard' },
     { path: '/looking-glass', icon: Eye, label: 'Looking Glass', description: 'Inspect protocol flows' },
-    { path: SITE_CONFIG.walletUrl, icon: Wallet, label: 'Wallet Harness', description: 'Issue and present credentials' },
     { path: '/protocols', icon: BookOpen, label: 'Protocols', description: 'Explore protocols' },
+    { path: SITE_CONFIG.walletUrl, icon: Wallet, label: 'Wallet Harness', description: 'Issue and present credentials' },
   ]
 
   return (

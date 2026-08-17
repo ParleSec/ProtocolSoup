@@ -1,15 +1,15 @@
-import { PROTOCOL_CATALOG_DATA } from '@/protocols/presentation/protocol-catalog-data'
+import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import { DOCS_ORIGIN, SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
 
 export async function GET() {
-  const protocolLines = PROTOCOL_CATALOG_DATA.map(
+  const protocolLines = sortedProtocolCatalogData().map(
     (protocol) => `- [${protocol.name}](${SITE_ORIGIN}/protocol/${protocol.id})`,
   )
 
   const body = [
-    '# Protocol Soup',
+    '# ProtocolSoup',
     '',
-    '> Interactive platform for learning authentication, identity, and verifiable credential protocols through real execution.',
+    '> Live execution platform for authentication, identity, and verifiable credential protocols.',
     '',
     '## Canonical Properties',
     `- [Main site](${SITE_ORIGIN})`,
@@ -18,8 +18,8 @@ export async function GET() {
     '',
     '## Priority URLs',
     `- [Homepage](${SITE_ORIGIN}/)`,
-    `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
     `- [Looking Glass](${SITE_ORIGIN}/looking-glass)`,
+    `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
     `- [Wallet harness](${WALLET_ORIGIN})`,
     '',
     '## Protocol Guides',

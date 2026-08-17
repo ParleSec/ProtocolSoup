@@ -1,4 +1,4 @@
-import { PROTOCOL_CATALOG_DATA } from '@/protocols/presentation/protocol-catalog-data'
+import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import { PAGE_SEO } from '@/config/seo'
 import { SITE_ORIGIN, SITEMAP_LASTMOD, absoluteUrl } from '@/lib/seo'
 
@@ -49,8 +49,8 @@ export async function GET() {
   const entries: string[] = []
   const staticRoutes: Array<{ path: string; changefreq: 'weekly' | 'monthly'; priority: number; title: string }> = [
     { path: '', changefreq: 'weekly', priority: 1.0, title: PAGE_SEO['/'].title },
-    { path: '/protocols', changefreq: 'weekly', priority: 0.9, title: PAGE_SEO['/protocols'].title },
     { path: '/looking-glass', changefreq: 'weekly', priority: 0.9, title: PAGE_SEO['/looking-glass'].title },
+    { path: '/protocols', changefreq: 'weekly', priority: 0.8, title: PAGE_SEO['/protocols'].title },
   ]
 
   for (const route of staticRoutes) {
@@ -66,11 +66,11 @@ export async function GET() {
     )
   }
 
-  for (const protocol of PROTOCOL_CATALOG_DATA) {
+  for (const protocol of sortedProtocolCatalogData()) {
     entries.push(
       createUrlEntry({
         loc: `${siteUrl}/protocol/${protocol.id}`,
-        title: PAGE_SEO[`/protocol/${protocol.id}`]?.title || `${protocol.name} Tutorial`,
+        title: PAGE_SEO[`/protocol/${protocol.id}`]?.title || `${protocol.name} Reference`,
         changefreq: 'monthly',
         priority: 0.8,
         image,
