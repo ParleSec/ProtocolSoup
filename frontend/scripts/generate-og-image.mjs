@@ -17,8 +17,8 @@ function escapeXml(str) {
 async function main() {
   const outPath = path.join(process.cwd(), 'public', 'og-image.png')
 
-  const title = 'Protocol Soup'
-  const subtitle = 'An Interactive Protocol Sandbox'
+  const title = 'ProtocolSoup'
+  const subtitle = 'Live identity protocol execution'
   const tagline = 'Real flows against real infrastructure'
   const chips = ['OAuth 2.0', 'OIDC', 'SAML', 'SPIFFE', 'SCIM 2.0', 'SSF', 'OID4VCI', 'OID4VP']
 
@@ -177,7 +177,7 @@ async function main() {
 
   <!-- footer -->
   <text x="244" y="${HEIGHT - 150}" fill="#94a3b8" font-size="22" font-weight="500" font-family="PSpaceGrotesk, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">
-    Inspect requests • Decode tokens • Learn protocol security
+    Inspect requests • Decode tokens • Execute live flows
   </text>
   <text x="244" y="${HEIGHT - 112}" fill="#64748b" font-size="20" font-weight="500" font-family="PSpaceGrotesk, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif">
     protocolsoup.com

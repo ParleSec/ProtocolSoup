@@ -1,13 +1,13 @@
 /**
- * SEO Configuration for Protocol Soup
- * 
+ * SEO configuration for ProtocolSoup.
+ *
  * Centralized SEO metadata, keywords, and configuration for all pages.
  * Optimized for competitive identity/security protocol keywords.
  */
 
 export const SITE_CONFIG = {
-  name: 'Protocol Soup',
-  tagline: 'Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM & SSF Testing Playground with a hosted wallet harness',
+  name: 'ProtocolSoup',
+  tagline: 'Live OAuth 2.0, OIDC, OpenID4VC, SAML, SPIFFE, SCIM and SSF execution with a hosted wallet harness',
   baseUrl: 'https://protocolsoup.com',
   docsUrl: 'https://docs.protocolsoup.com',
   walletUrl: 'https://wallet.protocolsoup.com',
@@ -27,14 +27,16 @@ export interface PageSEO {
 }
 
 /**
- * SEO metadata for each route
- * Keywords are optimized for competitive search rankings
+ * SEO metadata for each route.
+ * Page titles omit the brand; the root layout appends `| ProtocolSoup`.
+ * Keywords keep high-volume search phrases (tutorial, playground) even when
+ * visible copy leads with execute/inspect.
  */
 export const PAGE_SEO: Record<string, PageSEO> = {
   // Homepage - Primary landing page
   '/': {
-    title: 'Protocol Soup | Run Real Authentication & Identity Protocol Flows',
-    description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode JWTs, and issue or present credentials with the hosted wallet harness.',
+    title: 'Live OAuth 2.0, OIDC, and Identity Protocol Execution',
+    description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode tokens and assertions, and issue or present credentials with the hosted wallet harness.',
     keywords: [
       'oauth2 playground',
       'oauth 2.0 testing tool',
@@ -59,14 +61,16 @@ export const PAGE_SEO: Record<string, PageSEO> = {
       'oauth flow visualization',
       'pkce tutorial',
       'security protocol sandbox',
+      'protocolsoup',
+      'protocol soup',
     ],
     ogType: 'website',
   },
 
   // Protocols Hub
   '/protocols': {
-    title: 'Identity Protocol Reference Guide - OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM',
-    description: 'Comprehensive reference for authentication and verifiable credential protocols. Documentation, sequence diagrams, and security considerations for OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, and SCIM 2.0.',
+    title: 'Identity Protocol Reference - OAuth 2.0, OIDC, OpenID4VC, SAML, SPIFFE, SCIM, SSF',
+    description: 'Reference for every shipped identity protocol family. Sequence diagrams, parameters, and security considerations for OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF.',
     keywords: [
       'identity protocol reference',
       'authentication protocols',
@@ -83,8 +87,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Looking Glass Tool
   '/looking-glass': {
-    title: 'Looking Glass - Live Protocol Flow Execution & Traffic Inspector',
-    description: 'Execute authentication protocol flows in real-time and inspect every HTTP request, response, header, and token. Run OAuth 2.0, OIDC, SAML, SSF, OID4VCI, and OID4VP — including holder-side hops through the hosted wallet harness.',
+    title: 'Looking Glass - Live Protocol Flow Execution and Traffic Inspector',
+    description: 'Execute identity protocol flows in real time and inspect every HTTP request, response, header, and token. Run OAuth 2.0, OIDC, SAML, SCIM, SPIFFE, SSF, OID4VCI, and OID4VP — including holder-side hops through the hosted wallet harness.',
     keywords: [
       'protocol debugger',
       'oauth flow inspector',
@@ -101,7 +105,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Legacy SSF sandbox URL (redirects to Looking Glass)
   '/ssf-sandbox': {
-    title: 'SSF Stream Lab - Shared Signals in Looking Glass',
+    title: 'Shared Signals (SSF) in Looking Glass',
     description: 'Fire CAEP and RISC security events in Looking Glass, decode SET tokens, and inspect Transmitter and Receiver traffic on a durable stream session.',
     keywords: [
       'shared signals framework',
@@ -117,8 +121,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OAuth 2.0 Protocol
   '/protocol/oauth2': {
-    title: 'OAuth 2.0 Tutorial - Complete Authorization Framework Guide',
-    description: 'Master OAuth 2.0 with interactive examples. Learn Authorization Code, Client Credentials, PKCE, Token Introspection, and Revocation flows with live demonstrations.',
+    title: 'OAuth 2.0 Reference - Authorization Framework',
+    description: 'Execute live OAuth 2.0 Authorization Code, PKCE, Client Credentials, Refresh Token, Introspection, and Revocation against a working authorization server. Inspect every request, token, and RFC 9700 check.',
     keywords: [
       'oauth 2.0 tutorial',
       'oauth authorization code flow',
@@ -132,8 +136,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OpenID Connect Protocol
   '/protocol/oidc': {
-    title: 'OpenID Connect Tutorial - Authentication Layer for OAuth 2.0',
-    description: 'Learn OpenID Connect (OIDC) with hands-on examples. Understand ID tokens, UserInfo endpoint, Discovery, and how OIDC adds authentication to OAuth 2.0.',
+    title: 'OpenID Connect Reference - Authentication Layer for OAuth 2.0',
+    description: 'Run OpenID Connect against a live OpenID Provider. Inspect ID tokens, UserInfo, Discovery, Hybrid, and Implicit flows, and see how OIDC adds authentication to OAuth 2.0.',
     keywords: [
       'openid connect tutorial',
       'oidc authentication',
@@ -147,8 +151,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OID4VCI Protocol
   '/protocol/oid4vci': {
-    title: 'OID4VCI Tutorial - Verifiable Credential Issuance with OpenID',
-    description: 'Learn OpenID for Verifiable Credential Issuance (OID4VCI) with interactive examples. Explore credential offers, pre-authorized code grants, tx_code challenges, proof binding, c_nonce freshness, and deferred issuance.',
+    title: 'OID4VCI Reference - Verifiable Credential Issuance with OpenID',
+    description: 'Issue verifiable credentials with live OID4VCI. Inspect credential offers, pre-authorized code grants, tx_code challenges, proof binding, c_nonce freshness, and deferred issuance.',
     keywords: [
       'oid4vci tutorial',
       'openid for verifiable credential issuance',
@@ -162,8 +166,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OID4VP Protocol
   '/protocol/oid4vp': {
-    title: 'OID4VP Tutorial - Verifiable Presentation Requests and Validation',
-    description: 'Learn OpenID for Verifiable Presentations (OID4VP) with interactive verifier flows. Understand DCQL queries, request objects, direct_post/direct_post.jwt, holder binding, and policy evaluation.',
+    title: 'OID4VP Reference - Verifiable Presentation Requests and Validation',
+    description: 'Run OpenID for Verifiable Presentations against a live verifier. Inspect DCQL queries, request objects, direct_post/direct_post.jwt, holder binding, and policy evaluation.',
     keywords: [
       'oid4vp tutorial',
       'openid for verifiable presentations',
@@ -177,8 +181,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // SAML 2.0 Protocol
   '/protocol/saml': {
-    title: 'SAML 2.0 Tutorial - Enterprise SSO & Federation Explained',
-    description: 'Master SAML 2.0 for enterprise single sign-on. Learn SP-Initiated SSO, IdP-Initiated SSO, Single Logout, and metadata exchange with interactive examples.',
+    title: 'SAML 2.0 Reference - Enterprise SSO and Federation',
+    description: 'Execute live SAML 2.0 SP-Initiated SSO, IdP-Initiated SSO, Single Logout, and metadata exchange. Inspect assertions, AuthnRequests, and XML signatures.',
     keywords: [
       'saml 2.0 tutorial',
       'saml sso explained',
@@ -193,8 +197,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // SPIFFE/SPIRE Protocol
   '/protocol/spiffe': {
-    title: 'SPIFFE/SPIRE Tutorial - Zero Trust Workload Identity',
-    description: 'Learn SPIFFE and SPIRE for zero-trust workload identity. Understand X.509-SVIDs, JWT-SVIDs, mTLS authentication, and automatic certificate rotation.',
+    title: 'SPIFFE/SPIRE Reference - Zero Trust Workload Identity',
+    description: 'Run SPIFFE/SPIRE Workload API flows: X.509-SVID issuance, JWT-SVID issuance, mTLS, and certificate rotation. Inspect SVIDs and trust bundles as they are issued.',
     keywords: [
       'spiffe tutorial',
       'spire workload identity',
@@ -209,8 +213,8 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // SCIM 2.0 Protocol
   '/protocol/scim': {
-    title: 'SCIM 2.0 Tutorial - Cross-Domain Identity Provisioning',
-    description: 'Master SCIM 2.0 for automated user provisioning. Learn user lifecycle management, group operations, filter queries, schema discovery, and bulk operations.',
+    title: 'SCIM 2.0 Reference - Cross-Domain Identity Provisioning',
+    description: 'Execute live SCIM 2.0 user lifecycle, group management, filter queries, and schema discovery against a working SCIM server. Inspect Users, Groups, PATCH, and filter traffic.',
     keywords: [
       'scim 2.0 tutorial',
       'scim provisioning',
@@ -222,10 +226,26 @@ export const PAGE_SEO: Record<string, PageSEO> = {
     ogType: 'article',
   },
 
+  // Shared Signals Framework
+  '/protocol/ssf': {
+    title: 'Shared Signals (SSF) Reference - CAEP, RISC, and SET Delivery',
+    description: 'Execute Shared Signals Framework streams in Looking Glass. Configure Transmitter and Receiver sessions, fire CAEP and RISC events, and inspect Security Event Tokens over push and poll delivery.',
+    keywords: [
+      'shared signals framework',
+      'ssf',
+      'caep',
+      'risc',
+      'security event token',
+      'rfc 8417',
+      'continuous access evaluation',
+    ],
+    ogType: 'article',
+  },
+
   // Agentic Registration (auth.md)
   '/protocol/agentauth': {
     title: 'Agentic Registration - Agent Identity and Claim Ceremony',
-    description: 'Learn anonymous agent registration, identity assertions, RFC 7523 JWT bearer grants, and the claim ceremony that binds an agent to a person.',
+    description: 'Register an anonymous agent, inspect identity assertions and RFC 7523 JWT bearer grants, and run the claim ceremony that binds an agent to a person.',
     keywords: [
       'agentic registration',
       'agent auth',
@@ -241,7 +261,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
   // Model Context Protocol
   '/protocol/mcp': {
     title: 'Model Context Protocol - MCP Server Discovery and Tool Calls',
-    description: 'Explore MCP Streamable HTTP, Server Cards, AI Catalog discovery, and JSON-RPC tool calls against Protocol Soup\'s remote MCP server.',
+    description: 'Explore MCP Streamable HTTP, Server Cards, AI Catalog discovery, and JSON-RPC tool calls against ProtocolSoup\'s remote MCP server.',
     keywords: [
       'model context protocol',
       'mcp tutorial',
@@ -314,8 +334,8 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
   const keywords = flowKeywords[flowId] || [`${protocolId} ${flowId}`, flowName.toLowerCase()]
 
   return {
-    title: `${flowName} - ${protocolName} Flow Step-by-Step Guide`,
-    description: `Learn the ${flowName} flow with interactive examples. Understand each step, see the HTTP requests, and decode tokens in real-time. Complete ${protocolName} implementation guide.`,
+    title: `${flowName} — ${protocolName} Flow`,
+    description: `Execute the ${flowName} flow in Looking Glass. Inspect each HTTP hop, token, and validation decision for ${protocolName}.`,
     keywords: [
       ...keywords,
       `${protocolId} tutorial`,
@@ -332,10 +352,9 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
 export function getProtocolSEO(protocolId: string): PageSEO {
   const key = `/protocol/${protocolId}`
   return PAGE_SEO[key] || {
-    title: `${protocolId.toUpperCase()} Protocol - Protocol Soup`,
-    description: `Learn ${protocolId.toUpperCase()} protocol with interactive examples and documentation.`,
+    title: `${protocolId.toUpperCase()} Protocol`,
+    description: `Execute ${protocolId.toUpperCase()} flows against live infrastructure, with request inspection and spec-linked reference.`,
     keywords: [protocolId, 'authentication', 'identity protocol'],
     ogType: 'article',
   }
 }
-

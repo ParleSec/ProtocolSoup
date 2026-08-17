@@ -68,6 +68,9 @@ export function createPageMetadata({
 }: CreatePageMetadataInput): Metadata {
   const canonicalUrl = absoluteUrl(path)
   const openGraphImage = absoluteUrl(imagePath)
+  const brandedTitle = title.includes(SITE_CONFIG.name)
+    ? title
+    : `${title} | ${SITE_CONFIG.name}`
 
   return {
     title,
@@ -77,7 +80,7 @@ export function createPageMetadata({
     openGraph: {
       type,
       siteName: SITE_CONFIG.name,
-      title,
+      title: brandedTitle,
       description,
       url: canonicalUrl,
       locale: SITE_CONFIG.locale,
@@ -86,13 +89,13 @@ export function createPageMetadata({
           url: openGraphImage,
           width: 1200,
           height: 630,
-          alt: imageAlt || `${title} | ${SITE_CONFIG.name}`,
+          alt: imageAlt || brandedTitle,
         },
       ],
     },
     twitter: {
       card: 'summary_large_image',
-      title,
+      title: brandedTitle,
       description,
       images: [openGraphImage],
       site: SITE_CONFIG.twitterHandle,

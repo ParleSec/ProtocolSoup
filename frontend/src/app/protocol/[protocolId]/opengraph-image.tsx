@@ -37,7 +37,7 @@ export default async function ProtocolOpenGraphImage({ params }: ProtocolImagePr
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 30, fontWeight: 700 }}>
-          <span>Protocol Soup</span>
+          <span>ProtocolSoup</span>
           <span style={{ fontSize: 26 }}>🍜</span>
         </div>
 
@@ -50,7 +50,7 @@ export default async function ProtocolOpenGraphImage({ params }: ProtocolImagePr
           </div>
         </div>
 
-        <div style={{ fontSize: 21, color: '#93c5fd' }}>Protocol Guide + Interactive Flows</div>
+        <div style={{ fontSize: 21, color: '#93c5fd' }}>Protocol reference + live Looking Glass runs</div>
       </div>
     ),
     size,

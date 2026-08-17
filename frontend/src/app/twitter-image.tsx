@@ -7,7 +7,7 @@ export const size = {
   width: 1200,
   height: 630,
 }
-export const alt = 'Protocol Soup - Identity Protocol Playground'
+export const alt = 'ProtocolSoup - Live Identity Protocol Execution'
 
 export default function TwitterImage() {
   return new ImageResponse(
@@ -27,13 +27,13 @@ export default function TwitterImage() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <span style={{ fontSize: 34, fontWeight: 700 }}>Protocol Soup</span>
+          <span style={{ fontSize: 34, fontWeight: 700 }}>ProtocolSoup</span>
           <span style={{ fontSize: 28 }}>🍜</span>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ fontSize: 50, lineHeight: 1.08, fontWeight: 700, letterSpacing: '-0.02em' }}>
-            Interactive Identity Protocol Testing
+            Live Identity Protocol Execution
           </div>
           <div style={{ fontSize: 24, lineHeight: 1.3, color: '#d4d4d8' }}>
             OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM, and SSF.

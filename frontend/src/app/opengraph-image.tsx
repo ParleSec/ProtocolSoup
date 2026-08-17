@@ -7,7 +7,7 @@ export const size = {
   width: 1200,
   height: 630,
 }
-export const alt = 'Protocol Soup - Interactive Identity Protocol Testing'
+export const alt = 'ProtocolSoup - Live Identity Protocol Execution'
 
 export default function OpenGraphImage() {
   return new ImageResponse(
@@ -36,7 +36,7 @@ export default function OpenGraphImage() {
             letterSpacing: '-0.02em',
           }}
         >
-          <span>Protocol Soup</span>
+          <span>ProtocolSoup</span>
           <span style={{ fontSize: 30 }}>🍜</span>
         </div>
 
@@ -74,7 +74,7 @@ export default function OpenGraphImage() {
           }}
         >
           <span>{SITE_CONFIG.baseUrl.replace(/^https?:\/\//, '')}</span>
-          <span>Identity Protocol Playground</span>
+          <span>Live identity protocol execution</span>
         </div>
       </div>
     ),

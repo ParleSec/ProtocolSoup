@@ -16,6 +16,7 @@ export function generateOrganizationSchema() {
     '@type': 'Organization',
     '@id': `${SITE_CONFIG.baseUrl}#organization`,
     name: SITE_CONFIG.name,
+    alternateName: 'Protocol Soup',
     url: SITE_CONFIG.baseUrl,
     logo: `${SITE_CONFIG.baseUrl}/icons/icon-512.svg`,
     sameAs: [
@@ -33,7 +34,7 @@ export function generateWebApplicationSchema() {
     '@context': 'https://schema.org',
     '@type': 'WebApplication',
     name: SITE_CONFIG.name,
-    description: 'Interactive playground for learning authentication and verifiable credential protocols by running real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, and SCIM flows.',
+    description: 'Live execution platform for authentication, identity, and verifiable credential protocols. Run real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM, and SSF flows.',
     url: SITE_CONFIG.baseUrl,
     applicationCategory: 'DeveloperApplication',
     operatingSystem: 'Web Browser',
@@ -45,7 +46,7 @@ export function generateWebApplicationSchema() {
     featureList: [
       'Real protocol execution against working infrastructure',
       'Live HTTP traffic inspection',
-      'JWT token decoding and validation',
+      'JWT, SAML, SET, and credential decoding',
       'OAuth 2.0 flow visualization',
       'OpenID Connect testing',
       'OID4VCI issuance flow testing',
@@ -54,6 +55,7 @@ export function generateWebApplicationSchema() {
       'SAML 2.0 SSO debugging',
       'SPIFFE/SPIRE workload identity',
       'SCIM 2.0 provisioning testing',
+      'Shared Signals CAEP and RISC events',
     ],
     screenshot: `${SITE_CONFIG.baseUrl}/opengraph-image`,
     softwareVersion: '1.0.0',
@@ -72,7 +74,7 @@ export function generateSoftwareApplicationSchema() {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
     name: SITE_CONFIG.name,
-    description: 'Learn authentication and identity protocols by executing real flows. Interactive OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, and SCIM testing tool.',
+    description: 'Execute authentication and identity protocols against live infrastructure. OAuth 2.0, OIDC, OID4VCI, OID4VP, SAML, SPIFFE, SCIM, and SSF.',
     url: SITE_CONFIG.baseUrl,
     applicationCategory: 'SecurityApplication',
     operatingSystem: 'Any',
@@ -93,6 +95,7 @@ export function generateWebsiteSchema() {
     '@type': 'WebSite',
     '@id': `${SITE_CONFIG.baseUrl}#website`,
     name: SITE_CONFIG.name,
+    alternateName: 'Protocol Soup',
     url: SITE_CONFIG.baseUrl,
     inLanguage: 'en-US',
     publisher: {
@@ -103,6 +106,11 @@ export function generateWebsiteSchema() {
         '@type': 'WebApplication',
         name: 'Looking Glass',
         url: `${SITE_CONFIG.baseUrl}/looking-glass`,
+      },
+      {
+        '@type': 'CollectionPage',
+        name: 'Protocol Reference',
+        url: `${SITE_CONFIG.baseUrl}/protocols`,
       },
       {
         '@type': 'WebApplication',
@@ -254,12 +262,12 @@ export function generateHomepageSchema() {
     generateOrganizationSchema(),
     generateFAQSchema([
       {
-        question: 'What is Protocol Soup?',
-        answer: 'Protocol Soup is a free, interactive testing tool for authentication and identity protocols. Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against live infrastructure, inspect every HTTP exchange, and decode tokens in real-time.',
+        question: 'What is ProtocolSoup?',
+        answer: 'ProtocolSoup is a free, live execution platform for authentication and identity protocols. Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF flows against live infrastructure, inspect every HTTP exchange, and decode tokens in real time.',
       },
       {
         question: 'How do I test OAuth 2.0 flows?',
-        answer: 'Protocol Soup lets you execute real OAuth 2.0 flows — Authorization Code, Authorization Code + PKCE, Client Credentials, Refresh Token, Token Introspection, and Token Revocation — against a working authorization server. You see every request, response, header, and token as it happens.',
+        answer: 'ProtocolSoup lets you execute real OAuth 2.0 flows — Authorization Code, Authorization Code + PKCE, Client Credentials, Refresh Token, Token Introspection, and Token Revocation — against a working authorization server. You see every request, response, header, and token as it happens.',
       },
       {
         question: 'What is the difference between OAuth 2.0 and OpenID Connect?',
@@ -270,7 +278,7 @@ export function generateHomepageSchema() {
         answer: 'Verifiable credentials are tamper-evident digital credentials (like diplomas or licenses) that a holder can present to a verifier. OID4VCI (OpenID for Verifiable Credential Issuance) defines how an issuer delivers credentials to a wallet. OID4VP (OpenID for Verifiable Presentations) defines how a verifier requests and validates credential presentations from a wallet.',
       },
       {
-        question: 'What is the Protocol Soup wallet harness?',
+        question: 'What is the ProtocolSoup wallet harness?',
         answer: 'The hosted wallet at wallet.protocolsoup.com is a real OID4VCI and OID4VP wallet used by Looking Glass. It issues and presents mdoc and SD-JWT verifiable credentials, including HAIP client and key attestation, instead of simulating wallet behavior in the browser.',
       },
       {
@@ -307,10 +315,10 @@ export function generateProtocolPageSchema(
   flows: Array<{ name: string; description: string }>
 ) {
   const techArticle = generateTechArticleSchema({
-    title: `${protocolName} Tutorial - Complete Guide`,
+    title: `${protocolName} Reference`,
     description,
     url,
-    keywords: [protocolName.toLowerCase(), 'authentication', 'identity', 'tutorial'],
+    keywords: [protocolName.toLowerCase(), 'authentication', 'identity', 'reference'],
   })
 
   const breadcrumbs = generateBreadcrumbSchema([
@@ -342,7 +350,7 @@ export function generateFlowPageSchema(
   const protocolSlug = protocolId || protocolName.toLowerCase().replace(/[^a-z0-9]/g, '')
 
   const howTo = generateHowToSchema({
-    name: `How to implement ${flowName} in ${protocolName}`,
+    name: `How to execute ${flowName} in ${protocolName}`,
     description,
     url,
     totalTime: 'PT15M',
@@ -350,11 +358,11 @@ export function generateFlowPageSchema(
       name: step.name,
       description: step.description,
     })),
-    tools: ['Web Browser', 'Protocol Soup', 'Code Editor'],
+    tools: ['Web Browser', 'ProtocolSoup', 'Code Editor'],
   })
 
   const techArticle = generateTechArticleSchema({
-    title: `${flowName} - ${protocolName} Flow Guide`,
+    title: `${flowName} — ${protocolName} Flow`,
     description,
     url,
     keywords: [flowName.toLowerCase(), protocolName.toLowerCase(), 'tutorial', 'implementation'],
