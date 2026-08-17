@@ -1,6 +1,10 @@
 import 'server-only'
 
 import type { FlowDefinition, Protocol } from '@/protocols/registry'
+import {
+  getCatalogProtocol,
+  isAgentSurfaceProtocol,
+} from '@/protocols/presentation/protocol-catalog-data'
 
 const BACKEND_ORIGIN = process.env.BACKEND_ORIGIN || 'http://localhost:8080'
 
@@ -22,6 +26,31 @@ function isBackendRequestError(error: unknown): error is BackendRequestError {
 
 export function isBackendNotFoundError(error: unknown): boolean {
   return isBackendRequestError(error) && error.status === 404
+}
+
+function catalogFallback(protocolId: string): { protocol: Protocol; flows: FlowDefinition[] } | null {
+  const catalog = getCatalogProtocol(protocolId)
+  if (!catalog) {
+    return null
+  }
+
+  const executable = !isAgentSurfaceProtocol(protocolId)
+  return {
+    protocol: {
+      id: catalog.id,
+      name: catalog.name,
+      version: catalog.spec,
+      description: catalog.description,
+      tags: [],
+    },
+    flows: catalog.flows.map((flow) => ({
+      id: flow.backendId || flow.id,
+      name: flow.name,
+      description: flow.rfc,
+      steps: [],
+      executable: executable && flow.lookingGlass !== false,
+    })),
+  }
 }
 
 async function fetchBackendJSON<T>(
@@ -50,14 +79,22 @@ export async function getProtocolPageData(protocolId: string): Promise<{
   protocol: Protocol
   flows: FlowDefinition[]
 }> {
-  const [protocol, flowResponse] = await Promise.all([
-    fetchBackendJSON<Protocol>(`/api/protocols/${protocolId}`, 3600),
-    fetchBackendJSON<{ flows: FlowDefinition[] }>(`/api/protocols/${protocolId}/flows`, 3600),
-  ])
+  try {
+    const [protocol, flowResponse] = await Promise.all([
+      fetchBackendJSON<Protocol>(`/api/protocols/${protocolId}`, 3600),
+      fetchBackendJSON<{ flows: FlowDefinition[] }>(`/api/protocols/${protocolId}/flows`, 3600),
+    ])
 
-  return {
-    protocol,
-    flows: flowResponse.flows,
+    return {
+      protocol,
+      flows: flowResponse.flows,
+    }
+  } catch (error) {
+    const fallback = catalogFallback(protocolId)
+    if (fallback) {
+      return fallback
+    }
+    throw error
   }
 }
 
@@ -66,6 +103,17 @@ export async function getFlowPageData(
 ): Promise<{
   flows: FlowDefinition[]
 }> {
-  const flowResponse = await fetchBackendJSON<{ flows: FlowDefinition[] }>(`/api/protocols/${protocolId}/flows`, 86400)
-  return { flows: flowResponse.flows }
+  try {
+    const flowResponse = await fetchBackendJSON<{ flows: FlowDefinition[] }>(
+      `/api/protocols/${protocolId}/flows`,
+      86400,
+    )
+    return { flows: flowResponse.flows }
+  } catch (error) {
+    const fallback = catalogFallback(protocolId)
+    if (fallback) {
+      return { flows: fallback.flows }
+    }
+    throw error
+  }
 }
