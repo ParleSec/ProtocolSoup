@@ -1,7 +1,7 @@
 {
   "name": "protocol-soup",
   "version": "1.0.0",
-  "description": "Protocol Soup - A sandbox for exploring authentication and identity protocols",
+  "description": "ProtocolSoup - Live execution platform for authentication and identity protocols",
   "author": "Mason Parle <https://github.com/ParleSec>",
   "repository": {
     "type": "git",

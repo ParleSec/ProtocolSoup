@@ -59,7 +59,7 @@ func (p *Plugin) handleProtectedResourceMetadata(w http.ResponseWriter, r *http.
 func userInfoResourceMetadata(issuer string) map[string]interface{} {
 	return map[string]interface{}{
 		"resource":              issuer + userInfoResourcePath,
-		"resource_name":         "Protocol Soup UserInfo Endpoint",
+		"resource_name":         "ProtocolSoup UserInfo Endpoint",
 		"authorization_servers": []string{issuer},
 		"scopes_supported":      scopesSupported,
 		// RFC 6750 Section 2.1 (Authorization header) and Section 2.2
@@ -77,7 +77,7 @@ func userInfoResourceMetadata(issuer string) map[string]interface{} {
 func originResourceMetadata(issuer string) map[string]interface{} {
 	return map[string]interface{}{
 		"resource":      issuer,
-		"resource_name": "Protocol Soup",
+		"resource_name": "ProtocolSoup",
 		// The OpenID Provider issuer is the site origin; the OAuth 2.0
 		// authorization server uses the /oauth2 path issuer and the agentic
 		// registration server the /agentauth path issuer (RFC 8414

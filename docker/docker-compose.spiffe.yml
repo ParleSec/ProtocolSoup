@@ -1,4 +1,4 @@
-# Protocol Soup - SPIFFE/SPIRE Overlay
+# ProtocolSoup - SPIFFE/SPIRE Overlay
 # Run with: docker compose -f docker-compose.yml -f docker-compose.spiffe.yml up -d
 #
 # ==============================================

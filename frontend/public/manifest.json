@@ -1,7 +1,7 @@
 {
-  "name": "Protocol Soup",
-  "short_name": "Protocol Soup",
-  "description": "A sandbox for exploring authentication and identity protocols",
+  "name": "ProtocolSoup",
+  "short_name": "ProtocolSoup",
+  "description": "Live execution platform for authentication and identity protocols",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",

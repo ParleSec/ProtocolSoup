@@ -294,7 +294,7 @@ func main() {
 	listenAddr := envOrDefault("WALLET_LISTEN_ADDR", ":8080")
 	targetBaseURL := strings.TrimRight(strings.TrimSpace(envOrDefault("WALLET_TARGET_BASE_URL", "https://protocolsoup.com")), "/")
 	issuerBaseURL := strings.TrimRight(strings.TrimSpace(envOrDefault("WALLET_ISSUER_BASE_URL", targetBaseURL)), "/")
-	appTitle := strings.TrimSpace(envOrDefault("WALLET_APP_TITLE", "Protocol Soup Wallet"))
+	appTitle := strings.TrimSpace(envOrDefault("WALLET_APP_TITLE", "ProtocolSoup Wallet"))
 	defaultWalletSubject := strings.TrimSpace(envOrDefault("WALLET_DEFAULT_SUBJECT", "did:example:wallet:alice"))
 	walletDIDMethod, err := resolveWalletDIDMethod(envOrDefault("WALLET_DID_METHOD", "key"))
 	if err != nil {

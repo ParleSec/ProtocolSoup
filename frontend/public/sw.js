@@ -1,4 +1,4 @@
-// Protocol Soup Service Worker
+// ProtocolSoup Service Worker
 // Optimized for Cloudflare + Fly.io deployment
 // Best practices: network-first HTML, cache-first for hashed assets
 
@@ -114,7 +114,7 @@ function offlinePage() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Offline - Protocol Soup</title>
+  <title>Offline - ProtocolSoup</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { 

@@ -23,9 +23,9 @@ export default function ProtocolsPage() {
     ]),
     generateFAQSchema([
       {
-        question: 'What authentication protocols does Protocol Soup support?',
+        question: 'What authentication protocols does ProtocolSoup support?',
         answer:
-          'Protocol Soup supports OAuth 2.0, OpenID Connect (OIDC), OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF (Shared Signals Framework). Each protocol includes multiple flows and detailed documentation.',
+          'ProtocolSoup supports OAuth 2.0, OpenID Connect (OIDC), OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF (Shared Signals Framework). Each protocol includes multiple flows and detailed documentation.',
       },
       {
         question: 'What is the difference between OAuth 2.0 and OpenID Connect?',

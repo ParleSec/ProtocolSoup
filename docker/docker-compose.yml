@@ -1,4 +1,4 @@
-# Protocol Soup - Split Backend Services (Base)
+# ProtocolSoup - Split Backend Services (Base)
 # Run with: docker compose up -d --build
 # After pulling new code, always pass --build so frontend and gateway images
 # are rebuilt from source (palette UI and /api/palette/query are baked in).

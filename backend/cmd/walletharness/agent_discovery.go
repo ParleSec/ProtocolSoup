@@ -107,7 +107,7 @@ func (s *walletHarnessServer) handleAPICatalog(w http.ResponseWriter, r *http.Re
 					{"href": origin + "/llms.txt", "type": "text/plain", "title": "Wallet profile for agents"},
 					{"href": origin + "/llms-full.txt", "type": "text/plain", "title": "Wallet API recipes for agents"},
 					{"href": origin + "/.well-known/agent-skills/index.json", "type": "application/json", "title": "Agent skills index"},
-					{"href": site + "/", "type": "text/html", "title": "Protocol Soup Looking Glass"},
+					{"href": site + "/", "type": "text/html", "title": "ProtocolSoup Looking Glass"},
 				},
 				"status": []map[string]string{
 					{"href": origin + "/health", "type": "application/json", "title": "Runtime health"},
@@ -169,11 +169,11 @@ func (s *walletHarnessServer) handleAgentSkill(w http.ResponseWriter, r *http.Re
 func (s *walletHarnessServer) setAgentHeaders(w http.ResponseWriter, r *http.Request) {
 	origin := requestBaseURL(r)
 	w.Header().Set("Link", strings.Join([]string{
-		`<`+origin+`/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
-		`<`+walletDocsURL+`>; rel="service-doc"; type="text/html"`,
-		`<`+origin+`/.well-known/agent-skills/index.json>; rel="describedby"; type="application/json"`,
-		`<`+origin+`/llms.txt>; rel="describedby"; type="text/plain"`,
-		`<`+origin+`/health>; rel="status"; type="application/json"`,
+		`<` + origin + `/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
+		`<` + walletDocsURL + `>; rel="service-doc"; type="text/html"`,
+		`<` + origin + `/.well-known/agent-skills/index.json>; rel="describedby"; type="application/json"`,
+		`<` + origin + `/llms.txt>; rel="describedby"; type="text/plain"`,
+		`<` + origin + `/health>; rel="status"; type="application/json"`,
 	}, ", "))
 }
 
@@ -192,7 +192,7 @@ func (s *walletHarnessServer) walletSkill(origin string) walletAgentSkill {
 	body = strings.ReplaceAll(body, "{{DOCS}}", walletDocsURL)
 	return walletAgentSkill{
 		name:        walletAgentSkillName,
-		description: "Issue and present verifiable credentials through the Protocol Soup OID4VCI/OID4VP wallet harness.",
+		description: "Issue and present verifiable credentials through the ProtocolSoup OID4VCI/OID4VP wallet harness.",
 		body:        body,
 	}
 }
@@ -266,7 +266,7 @@ func prefersMarkdown(acceptHeader string) bool {
 
 func walletLLMsTxt(origin, site string) string {
 	return strings.Join([]string{
-		"# Protocol Soup Wallet Harness",
+		"# ProtocolSoup Wallet Harness",
 		"",
 		"> Real OID4VCI issuance and OID4VP presentation wallet. This host is the holder, not Looking Glass and not an MCP server.",
 		"",
@@ -284,14 +284,14 @@ func walletLLMsTxt(origin, site string) string {
 		"- [Health](" + origin + "/health)",
 		"- [Runtime docs](" + walletDocsURL + ")",
 		"- [Looking Glass](" + site + "/looking-glass)",
-		"- [Protocol Soup MCP](" + site + "/mcp) — not served on this host",
+		"- [ProtocolSoup MCP](" + site + "/mcp) — not served on this host",
 		"",
 		"Ask for `Accept: text/markdown` on `" + origin + "/` to receive the same recipes without executing JavaScript.",
 		"",
 	}, "\n")
 }
 
-const walletSkillMarkdown = `# Use the Protocol Soup Wallet Harness
+const walletSkillMarkdown = `# Use the ProtocolSoup Wallet Harness
 
 This origin is a **real OID4VCI / OID4VP wallet**. It is not Looking Glass, not a mock, and not an MCP server. MCP lives at {{SITE}}/mcp.
 
@@ -317,7 +317,7 @@ Returns {"status":"ok"}. Optional commit is the deployed source SHA.
 
 ## Issue a credential (OID4VCI)
 
-### Bootstrap against the configured Protocol Soup issuer
+### Bootstrap against the configured ProtocolSoup issuer
 
     POST {{ORIGIN}}/api/issue
     Content-Type: application/json

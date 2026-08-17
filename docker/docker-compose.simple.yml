@@ -1,4 +1,4 @@
-# Protocol Soup - Simple Stack (no SPIFFE/SPIRE)
+# ProtocolSoup - Simple Stack (no SPIFFE/SPIRE)
 # Run with: docker compose -f docker-compose.simple.yml up -d
 #
 # Single-process backend (cmd/server) with frontend. Registers OAuth 2.0, OIDC,

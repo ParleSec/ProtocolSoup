@@ -121,7 +121,7 @@ func TestWalletHomepageMarkdownNegotiation(t *testing.T) {
 	if !strings.Contains(resp.Header.Get("Vary"), "Accept") {
 		t.Fatalf("missing Vary: Accept")
 	}
-	if !strings.Contains(string(body), "Use the Protocol Soup Wallet Harness") {
+	if !strings.Contains(string(body), "Use the ProtocolSoup Wallet Harness") {
 		t.Fatalf("markdown body missing skill title\n%s", body)
 	}
 }

@@ -73,7 +73,7 @@ export function WebMcpTools() {
       {
         name: 'search_protocols',
         description:
-          'List the authentication and identity protocols Protocol Soup implements, optionally filtered by a search term matched against protocol name, description, and tags.',
+          'List the authentication and identity protocols ProtocolSoup implements, optionally filtered by a search term matched against protocol name, description, and tags.',
         inputSchema: {
           type: 'object',
           properties: {

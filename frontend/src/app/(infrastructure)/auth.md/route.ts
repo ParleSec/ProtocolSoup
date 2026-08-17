@@ -15,7 +15,7 @@ const AGENT_AUTH_ISSUER = `${SITE_ORIGIN}/agentauth`
 export async function GET() {
   const body = `# auth.md
 
-How autonomous agents register with and authenticate to Protocol Soup
+How autonomous agents register with and authenticate to ProtocolSoup
 (${SITE_ORIGIN}).
 
 Machine-readable companions to this document:
@@ -28,8 +28,8 @@ Machine-readable companions to this document:
 
 ## Audience
 
-This document is for autonomous agents and API clients. Protocol Soup is an
-educational sandbox for authentication and identity protocols: agents read the
+This document is for autonomous agents and API clients. ProtocolSoup is a
+live execution platform for authentication and identity protocols: agents read the
 protocol catalog, start real protocol flows, and decode the resulting tokens.
 
 ## Registration

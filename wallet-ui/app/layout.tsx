@@ -11,17 +11,17 @@ import '../src/index.css'
 
 const WALLET_ORIGIN = (process.env.WALLET_SITE_URL || 'https://wallet.protocolsoup.com').replace(/\/+$/, '')
 const SITE_ORIGIN = 'https://protocolsoup.com'
-const TITLE = 'Protocol Soup Wallet Harness — OID4VCI Issuance & OID4VP Presentation'
+const TITLE = 'ProtocolSoup Wallet Harness — OID4VCI Issuance & OID4VP Presentation'
 const DESCRIPTION =
-  'Hosted OID4VCI and OID4VP wallet for Protocol Soup. Issue and present mdoc and SD-JWT verifiable credentials, complete QR and deeplink handoffs, and exercise HAIP client and key attestation against live issuer and verifier traffic.'
+  'Hosted OID4VCI and OID4VP wallet for ProtocolSoup. Issue and present mdoc and SD-JWT verifiable credentials, complete QR and deeplink handoffs, and exercise HAIP client and key attestation against live issuer and verifier traffic.'
 
 export const metadata: Metadata = {
   metadataBase: new URL(WALLET_ORIGIN),
   title: {
     default: TITLE,
-    template: '%s | Protocol Soup Wallet',
+    template: '%s | ProtocolSoup Wallet',
   },
-  applicationName: 'Protocol Soup Wallet Harness',
+  applicationName: 'ProtocolSoup Wallet Harness',
   description: DESCRIPTION,
   keywords: [
     'oid4vci wallet',
@@ -50,7 +50,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: 'website',
-    siteName: 'Protocol Soup Wallet Harness',
+    siteName: 'ProtocolSoup Wallet Harness',
     title: TITLE,
     description: DESCRIPTION,
     url: WALLET_ORIGIN,
@@ -60,7 +60,7 @@ export const metadata: Metadata = {
         url: `${SITE_ORIGIN}/opengraph-image`,
         width: 1200,
         height: 630,
-        alt: 'Protocol Soup Wallet Harness',
+        alt: 'ProtocolSoup Wallet Harness',
       },
     ],
   },
@@ -81,14 +81,15 @@ export const viewport: Viewport = {
 const walletSchema = {
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
-  name: 'Protocol Soup Wallet Harness',
+  name: 'ProtocolSoup Wallet Harness',
   url: WALLET_ORIGIN,
   description: DESCRIPTION,
   applicationCategory: 'DeveloperApplication',
   operatingSystem: 'Web Browser',
   isPartOf: {
     '@type': 'WebSite',
-    name: 'Protocol Soup',
+    name: 'ProtocolSoup',
+    alternateName: 'Protocol Soup',
     url: SITE_ORIGIN,
   },
   offers: {
@@ -112,7 +113,7 @@ export default function RootLayout({
         />
         <noscript>
           <main>
-            <h1>Protocol Soup Wallet Harness</h1>
+            <h1>ProtocolSoup Wallet Harness</h1>
             <p>
               Real OID4VCI issuance and OID4VP presentation wallet. This host is
               the holder, not Looking Glass and not an MCP server.

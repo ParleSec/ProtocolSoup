@@ -195,7 +195,7 @@ func (p *Plugin) handleClaimPage(w http.ResponseWriter, r *http.Request) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Approve an agent - Protocol Soup</title>
+<title>Approve an agent - ProtocolSoup</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; min-height:100vh; display:grid; place-items:center;

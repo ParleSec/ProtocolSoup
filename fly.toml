@@ -1,4 +1,4 @@
-# fly.toml - Protocol Soup main application
+# fly.toml - ProtocolSoup main application
 # Deploy with: fly deploy
 #
 # For SPIFFE support, first deploy the SPIRE Server:

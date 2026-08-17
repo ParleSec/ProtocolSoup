@@ -1699,7 +1699,7 @@ export default function WalletApp() {
   const credentialSummary = activeCredentialSummary
   const supportsSelectiveDisclosure = Boolean(credentialSummary?.is_sd_jwt)
   const policyReasons = useMemo(() => normalizeClaims(result?.upstream_body?.reasons), [result?.upstream_body?.reasons])
-  const appTitle = String(session?.app_title || 'Protocol Soup Wallet')
+  const appTitle = String(session?.app_title || 'ProtocolSoup Wallet')
 
   const bannerConfig = useMemo(() => {
     if (!statusBanner) return null
@@ -2465,7 +2465,7 @@ export default function WalletApp() {
 
         {/* Footer */}
         <footer className="border-t border-white/5 pt-4 pb-2 flex items-center justify-between text-[10px] text-surface-600">
-          <span>Protocol Soup Wallet</span>
+          <span>ProtocolSoup Wallet</span>
           <a href="https://protocolsoup.com" target="_blank" rel="noopener noreferrer" className="hover:text-surface-400 transition-colors">protocolsoup.com</a>
         </footer>
       </div>

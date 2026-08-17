@@ -22,8 +22,8 @@ const SKILLS: AgentSkill[] = [
   {
     name: 'browse-protocol-catalog',
     description:
-      'Discover which authentication and identity protocols Protocol Soup implements and which flows each one can execute.',
-    body: `# Browse the Protocol Soup Protocol Catalog
+      'Discover which authentication and identity protocols ProtocolSoup implements and which flows each one can execute.',
+    body: `# Browse the ProtocolSoup Protocol Catalog
 
 Use this skill to find out which protocols and flows are available before
 starting any work against ${SITE_ORIGIN}.
@@ -82,7 +82,7 @@ Only flows with \`"executable": true\` can be started with the
       'Start a real OAuth 2.0, OIDC, SAML, SCIM, SPIFFE, SSF, OID4VCI, or OID4VP flow and follow every request it makes.',
     body: `# Run a Real Protocol Flow
 
-Protocol Soup executes genuine protocol flows against live infrastructure and
+ProtocolSoup executes genuine protocol flows against live infrastructure and
 records every step. Use \`browse-protocol-catalog\` first to pick a protocol id
 and an executable flow id.
 
@@ -139,7 +139,7 @@ valid nowhere else. Decode them with the \`decode-token\` skill.
       'Decode and explain a JWT, SAML assertion, or verifiable credential, including signature verification and per-claim specification references.',
     body: `# Decode a Token or Credential
 
-Protocol Soup decodes security tokens and explains each claim against the
+ProtocolSoup decodes security tokens and explains each claim against the
 specification that defines it.
 
 ## Decode a JWT
@@ -183,8 +183,8 @@ client's credentials as described at ${siteUrl(AGENT_PATHS.authMd)}.
   {
     name: 'use-wallet-harness',
     description:
-      'Issue and present verifiable credentials through the Protocol Soup OID4VCI/OID4VP wallet at wallet.protocolsoup.com.',
-    body: `# Use the Protocol Soup Wallet Harness
+      'Issue and present verifiable credentials through the ProtocolSoup OID4VCI/OID4VP wallet at wallet.protocolsoup.com.',
+    body: `# Use the ProtocolSoup Wallet Harness
 
 The wallet is a **separate origin**. This host is Looking Glass and the protocol APIs; the holder is ${WALLET_ORIGIN}.
 

@@ -62,7 +62,7 @@ func (p *Plugin) buildServerCard() serverCard {
 		Name:        serverName,
 		Version:     serverVersion,
 		Description: cardDescription,
-		Title:       "Protocol Soup",
+		Title:       "ProtocolSoup",
 		WebsiteURL:  p.origin(),
 		Repository: &repository{
 			URL:       "https://github.com/ParleSec/ProtocolSoup",

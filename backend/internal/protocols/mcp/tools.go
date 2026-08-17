@@ -166,7 +166,7 @@ func (p *Plugin) discoverResult() map[string]interface{} {
 		"capabilities": map[string]interface{}{
 			"tools": map[string]interface{}{},
 		},
-		"instructions": "Protocol Soup is a sandbox that runs real authentication and identity protocols so their traffic can be inspected. Start with list_protocols to see what is implemented, then list_protocol_flows and describe_protocol_flow to read how a given exchange proceeds step by step. decode_jwt inspects any token, including one you obtained from the sandbox's own OAuth and OIDC endpoints. Every tool is read-only.",
+		"instructions": "ProtocolSoup is a sandbox that runs real authentication and identity protocols so their traffic can be inspected. Start with list_protocols to see what is implemented, then list_protocol_flows and describe_protocol_flow to read how a given exchange proceeds step by step. decode_jwt inspects any token, including one you obtained from the sandbox's own OAuth and OIDC endpoints. Every tool is read-only.",
 		"ttlMs":        toolsListTTLMs,
 		"cacheScope":   "public",
 	}
