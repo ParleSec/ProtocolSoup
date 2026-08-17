@@ -358,20 +358,9 @@ This prevents:
 | `oidc_authorization_code` | OIDC Authorization Code | Full OIDC flow with ID Token, PKCE, nonce |
 | `oidc_implicit` | OIDC Implicit Flow | ID Token returned in fragment (legacy) |
 | `oidc_hybrid` | OIDC Hybrid Flow | Code in query + tokens in fragment |
+| `oidc_userinfo` | UserInfo | Claims retrieval from the UserInfo endpoint |
 | `oidc_discovery` | OIDC Discovery | Fetch and inspect provider metadata |
-| `authorization_code` | OAuth 2.0 Auth Code | Standard OAuth 2.0 with PKCE |
-| `implicit` | OAuth 2.0 Implicit | Access token in fragment (legacy) |
-| `client_credentials` | Client Credentials | Machine-to-machine authentication |
-| `refresh_token` | Token Refresh | Obtain new tokens using refresh token |
-| `token_introspection` | Token Introspection | Validate and inspect active tokens |
-| `token_revocation` | Token Revocation | Invalidate tokens |
-
-### Reference-Only Flows
-
-| Flow ID | Name | Why Not Executable |
-|---------|------|-------------------|
-| `device_code` | Device Authorization | Requires polling and user code display |
-| `resource_owner` | Resource Owner Password | Exposes credentials (not recommended) |
+| `interaction-code` | Interaction Code | Interactive authorization with PKCE |
 
 ## Configuration
 

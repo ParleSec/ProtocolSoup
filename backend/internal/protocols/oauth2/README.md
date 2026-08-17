@@ -9,7 +9,6 @@ This implementation provides:
 - **Authorization Code Grant**: Standard flow for web applications with PKCE support
 - **Client Credentials Grant**: Machine-to-machine authentication
 - **private_key_jwt**: RSA, P-256, or Ed25519 client assertions with registered JWKS/JWKS URI keys
-- **Implicit Grant**: Legacy browser-based flow (deprecated, for reference)
 - **Refresh Token Grant**: Token renewal without user interaction
 - **Token Introspection**: RFC 7662 compliant active token validation
 - **Token Revocation**: RFC 7009 compliant token invalidation
@@ -422,19 +421,14 @@ The following events are emitted for real-time visualization:
 
 | Flow ID | Name | Description |
 |---------|------|-------------|
-| `authorization_code` | Authorization Code Flow | Standard web app flow with PKCE |
+| `authorization_code` | Authorization Code Flow | Standard web app flow |
+| `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
 | `client_credentials` | Client Credentials | Machine-to-machine authentication; client auth (`client_secret_basic`/`private_key_jwt`) and access-token protection (Bearer/RFC 9449 DPoP) are independent selectors |
-| `implicit` | Implicit Flow | Legacy browser flow (deprecated) |
 | `refresh_token` | Refresh Token | Token renewal |
 | `token_introspection` | Token Introspection | Validate active tokens |
 | `token_revocation` | Token Revocation | Invalidate tokens |
 
-### Reference-Only Flows
-
-| Flow ID | Name | Why Not Executable |
-|---------|------|-------------------|
-| `device_code` | Device Authorization | Requires polling/user code display |
-| `resource_owner` | Resource Owner Password | Exposes credentials (anti-pattern) |
+The authorization server advertises `response_types_supported: ["code"]` and `grant_types_supported: ["authorization_code", "refresh_token", "client_credentials"]`. Device Code, Implicit, and Resource Owner Password are not implemented.
 
 ## Configuration
 
@@ -507,7 +501,6 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 
 - ✅ Authorization Code Grant
 - ✅ Client Credentials Grant
-- ✅ Implicit Grant (legacy)
 - ✅ Refresh Token Grant
 - ✅ PKCE (S256, plain)
 - ✅ Token Introspection

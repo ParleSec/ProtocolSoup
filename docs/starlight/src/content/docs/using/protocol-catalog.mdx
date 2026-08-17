@@ -5,7 +5,7 @@ description: All protocol families, flows, and demo scenarios available in Proto
 
 ## OAuth 2.0
 
-**Standards:** RFC 6749, RFC 7636 (PKCE), RFC 7662 (Introspection), RFC 7009 (Revocation), RFC 8628 (Device Code)
+**Standards:** RFC 6749, RFC 7636 (PKCE), RFC 7662 (Introspection), RFC 7009 (Revocation)
 
 | Flow | Description |
 |------|-------------|
@@ -15,9 +15,6 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | Refresh Token | Token renewal without re-authorization |
 | Token Introspection | Validate and inspect active tokens |
 | Token Revocation | Invalidate access or refresh tokens |
-| Device Code | Authorization for input-constrained devices |
-| Implicit | Legacy browser-based flow (deprecated) |
-| Resource Owner Password | Legacy direct credential exchange (deprecated) |
 
 ## OpenID Connect
 
@@ -52,11 +49,10 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | Flow | Description |
 |------|-------------|
 | User Lifecycle | Create, read, update, deactivate users |
-| Group Membership | Group CRUD and membership management |
-| User Discovery | Filter expressions and search queries |
-| Bulk Operations | Batch create/update/delete |
+| Group Management | Group CRUD and membership management |
+| Filter Queries | Filter expressions and search queries |
+| Bulk Operations | Batch create/update/delete (documented; Looking Glass does not run this flow) |
 | Schema Discovery | ServiceProviderConfig, ResourceTypes, Schemas |
-| Outbound Provisioning | Client-initiated provisioning sync |
 
 ## SPIFFE/SPIRE
 
@@ -68,10 +64,8 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | JWT-SVID Issuance | Retrieve JWT workload identity token |
 | mTLS Handshake | Mutual TLS using X.509-SVIDs |
 | Certificate Rotation | Automatic SVID renewal |
-| Workload Registration | Register workload entries in SPIRE |
-| Node Attestation | Node identity verification |
-| Workload Attestation | Workload identity verification |
-| Trust Bundle Federation | Cross-trust-domain bundle exchange |
+
+SPIRE admin processes (workload registration, node/workload attestation, trust-bundle federation) are documented in the plugin. They are not Looking Glass runs.
 
 **Requires:** SPIFFE compose overlay (`docker-compose.spiffe.yml`) for full mode. Demo mode returns 503.
 
@@ -81,7 +75,7 @@ description: All protocol families, flows, and demo scenarios available in Proto
 
 | Catalog row | Looking Glass role |
 |-------------|--------------------|
-| Stream Lab | Default durable session (`/looking-glass?protocol=ssf`) |
+| Looking Glass session | Default durable session (`/looking-glass?protocol=ssf`) |
 | Stream Configuration | Preset: **Verify stream** (discovery, `GET /stream`, JWKS, `POST /verify`). Does not change RP account state |
 | Push Delivery | Preset: delivery = RFC 8935, then **Fire event** |
 | Poll Delivery | Preset: delivery = RFC 8936, then **Fire event** |
@@ -90,9 +84,9 @@ description: All protocol families, flows, and demo scenarios available in Proto
 | RISC Account Disabled | Preset: event = `account-disabled`, then **Fire event** |
 | RISC Credential Compromise | Preset: event = `credential-compromise`, then **Fire event** |
 
-**Demo scenarios:** SSF Stream Lab (Looking Glass), Push vs Poll Comparison
+**Demo scenarios:** SSF in Looking Glass, Push vs Poll Comparison
 
-SSF stays a split service (`protocolsoup-ssf`). Looking Glass is the run surface: catalog rows are presets into one durable stream lab session.
+SSF stays a split service (`protocolsoup-ssf`). Looking Glass is the run surface: catalog rows are presets into one durable session.
 
 ## OID4VCI
 

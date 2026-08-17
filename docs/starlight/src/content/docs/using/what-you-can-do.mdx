@@ -7,13 +7,13 @@ ProtocolSoup executes real protocol flows and shows you every request, response,
 
 ## Execute Protocol Flows
 
-Run 42+ flows across 8 protocol families:
+Run live flows across 8 protocol families:
 
-- **OAuth 2.0** -- Authorization Code, PKCE, Client Credentials, Refresh Token, Device Code, Implicit, Token Introspection, Token Revocation
+- **OAuth 2.0** -- Authorization Code, PKCE, Client Credentials, Refresh Token, Token Introspection, Token Revocation
 - **OpenID Connect** -- Authorization Code, Hybrid, Implicit, UserInfo, Discovery, Interaction Code
 - **SAML 2.0** -- SP-Initiated SSO, IdP-Initiated SSO, Single Logout, Metadata Exchange
-- **SCIM 2.0** -- User Lifecycle, Group Membership, Filter Queries, Bulk Operations, Schema Discovery, Outbound Provisioning
-- **SPIFFE/SPIRE** -- X.509-SVID Issuance, JWT-SVID Issuance, mTLS Handshake, Certificate Rotation, Node/Workload Attestation, Trust Bundle Federation
+- **SCIM 2.0** -- User Lifecycle, Group Membership, Filter Queries, Schema Discovery
+- **SPIFFE/SPIRE** -- X.509-SVID Issuance, JWT-SVID Issuance, mTLS Handshake, Certificate Rotation
 - **Shared Signals (SSF)** -- Stream Configuration, Push/Poll Delivery, CAEP Session Revoked, CAEP Credential Change, RISC Account Disabled, RISC Credential Compromise
 - **OID4VCI** -- Pre-Authorized Code, Pre-Authorized + tx_code, Deferred Issuance
 - **OID4VP** -- DCQL + direct_post, DCQL + direct_post.jwt
@@ -42,6 +42,7 @@ Use the same workflow across every protocol to compare:
 | Feature | What It Does |
 |---------|-------------|
 | **Looking Glass** | Real-time execution console with step-by-step flow visualization, WebSocket event streaming, and SSF CAEP/RISC stream sessions |
+| **Protocol Reference** | Guides, sequence diagrams, and security considerations for each shipped protocol family |
 | **Wallet Harness** | Hosted OID4VCI/OID4VP wallet at [wallet.protocolsoup.com](https://wallet.protocolsoup.com) for issuance, presentation, QR handoff, and HAIP attestation |
 | **Token Inspector** | Decode and inspect JWT, SAML, X.509, and SET tokens from any flow |
 | **Mock IdP** | Built-in identity provider with configurable demo users and clients |

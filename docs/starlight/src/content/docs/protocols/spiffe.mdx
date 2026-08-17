@@ -15,16 +15,16 @@ description: "Workload identity with X.509 and JWT SVIDs, mTLS, and certificate 
 
 ## Available Flows
 
+Looking Glass runs Workload API flows. These four are executable when the SPIFFE overlay is up:
+
 | Flow ID | Name | Description |
 |---------|------|-------------|
-| `workload-registration` | Workload Registration | Register workload entries in SPIRE |
-| `node-attestation` | Node Attestation | Node identity verification |
-| `workload-attestation` | Workload Attestation | Workload identity verification |
 | `x509-svid-issuance` | X.509-SVID Issuance | Retrieve X.509 workload identity certificate |
 | `jwt-svid-issuance` | JWT-SVID Issuance | Retrieve JWT workload identity token |
 | `mtls-handshake` | mTLS Handshake | Mutual TLS using X.509-SVIDs |
 | `certificate-rotation` | Certificate Rotation | Automatic SVID renewal |
-| `trust-bundle-federation` | Trust Bundle Federation | Cross-trust-domain bundle exchange |
+
+SPIRE admin processes (`workload-registration`, `node-attestation`, `workload-attestation`, `trust-bundle-federation`) are documented in the plugin for reference. They are not Looking Glass runs: they need SPIRE Server admin APIs, not the Workload API.
 
 ## Demo Scenarios
 

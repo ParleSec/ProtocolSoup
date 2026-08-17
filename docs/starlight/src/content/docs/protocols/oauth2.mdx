@@ -1,6 +1,6 @@
 ---
 title: "OAuth 2.0"
-description: "Delegated authorization flows with PKCE, private_key_jwt, introspection, revocation, and device code."
+description: "Delegated authorization flows with PKCE, private_key_jwt, introspection, and revocation."
 ---
 
 # OAuth 2.0
@@ -11,11 +11,11 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 - RFC 7636 -- Proof Key for Code Exchange (PKCE)
 - RFC 7662 -- Token Introspection
 - RFC 7009 -- Token Revocation
-- RFC 8628 -- Device Authorization Grant
 - RFC 7523 §2.2 -- JWT Profile for OAuth 2.0 Client Authentication
 - RFC 7517 -- JSON Web Key Sets
 - RFC 8414 -- Authorization Server Metadata
 - RFC 9449 -- OAuth 2.0 Demonstrating Proof of Possession (DPoP), opt-in
+- RFC 9700 -- OAuth 2.0 Security Best Current Practice
 
 ## Available Flows
 
@@ -27,9 +27,6 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 | `refresh_token` | Refresh Token | Token renewal without re-authorization |
 | `token_introspection` | Token Introspection | Validate and inspect active tokens (RFC 7662) |
 | `token_revocation` | Token Revocation | Invalidate tokens (RFC 7009) |
-| `device_code` | Device Code | Authorization for input-constrained devices (RFC 8628) |
-| `implicit` | Implicit (Legacy) | Browser-based flow, deprecated per security BCP |
-| `password` | Resource Owner Password (Legacy) | Direct credential exchange, deprecated |
 
 ## Demo Scenarios
 
