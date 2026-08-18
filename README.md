@@ -113,11 +113,29 @@ The docs site is the source of truth. This README is only an entry point.
 - [API reference](https://docs.protocolsoup.com/api/overview/) - backed by the contracts in [`openapi/v1/`](openapi/v1)
 - [Environment variables](https://docs.protocolsoup.com/deploy/environment-variables/) - every variable, per service
 - [Container images](https://docs.protocolsoup.com/deploy/services/overview/) - per-service deployment and configuration
+- [Agent discovery](https://docs.protocolsoup.com/deploy/agent-discovery/) - `llms.txt`, API catalog, wallet skill
 - [Deployment topologies](https://docs.protocolsoup.com/deploy/deployment-models/) - full stack, single service, monolith, or custom
 - [Development setup](https://docs.protocolsoup.com/developers/development-setup/) - prerequisites and the validation matrix
 - [Adding a protocol](https://docs.protocolsoup.com/developers/extending/add-a-protocol/) - the plugin walkthrough
 
 In-repo: [CONTRIBUTING.md](CONTRIBUTING.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [CHANGELOG.md](CHANGELOG.md), [SECURITY.md](SECURITY.md), [SUPPORT.md](SUPPORT.md).
+
+<br>
+
+---
+
+<br>
+
+## For agents
+
+Fetch these URLs directly rather than scraping the JavaScript UI. The wallet is a separate origin.
+
+- [https://protocolsoup.com/llms.txt](https://protocolsoup.com/llms.txt)
+- [https://docs.protocolsoup.com/llms.txt](https://docs.protocolsoup.com/llms.txt)
+- [https://wallet.protocolsoup.com/llms.txt](https://wallet.protocolsoup.com/llms.txt)
+- [https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md](https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md)
+
+Headless wallet interface: `POST /api/issue`, `POST /api/import`, `POST /api/resolve`, `POST /api/present`, `GET /api/session`, `POST /submit`. QR and deeplinks are human handoffs. Apex MCP at `/mcp` is read-only catalog/decode and does not drive the wallet. Pin the skill template in [`backend/cmd/walletharness/agent-skills/use-wallet-harness.md`](backend/cmd/walletharness/agent-skills/use-wallet-harness.md) by git SHA and verify the `sha256` in the wallet skills index.
 
 <br>
 

@@ -2,12 +2,16 @@ package main
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 )
+
+//go:embed agent-skills/use-wallet-harness.md
+var walletSkillMarkdown string
 
 const (
 	walletDocsURL           = "https://docs.protocolsoup.com/deploy/services/wallet/"
@@ -107,6 +111,7 @@ func (s *walletHarnessServer) handleAPICatalog(w http.ResponseWriter, r *http.Re
 					{"href": origin + "/llms.txt", "type": "text/plain", "title": "Wallet profile for agents"},
 					{"href": origin + "/llms-full.txt", "type": "text/plain", "title": "Wallet API recipes for agents"},
 					{"href": origin + "/.well-known/agent-skills/index.json", "type": "application/json", "title": "Agent skills index"},
+					{"href": origin + "/.well-known/agent-skills/" + walletAgentSkillName + "/SKILL.md", "type": "text/markdown", "title": "Wallet agent skill"},
 					{"href": site + "/", "type": "text/html", "title": "ProtocolSoup Looking Glass"},
 				},
 				"status": []map[string]string{
@@ -172,7 +177,8 @@ func (s *walletHarnessServer) setAgentHeaders(w http.ResponseWriter, r *http.Req
 		`<` + origin + `/.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"`,
 		`<` + walletDocsURL + `>; rel="service-doc"; type="text/html"`,
 		`<` + origin + `/.well-known/agent-skills/index.json>; rel="describedby"; type="application/json"`,
-		`<` + origin + `/llms.txt>; rel="describedby"; type="text/plain"`,
+		`<` + origin + `/llms.txt>; rel="alternate describedby"; type="text/plain"; title="llms.txt"`,
+		`<` + origin + `/.well-known/agent-skills/` + walletAgentSkillName + `/SKILL.md>; rel="alternate"; type="text/markdown"; title="agent skill"`,
 		`<` + origin + `/health>; rel="status"; type="application/json"`,
 	}, ", "))
 }
@@ -275,6 +281,7 @@ func walletLLMsTxt(origin, site string) string {
 		"- Issue mdoc (`mso_mdoc`) and SD-JWT VC credentials from a live issuer.",
 		"- Present those credentials to a live verifier (`direct_post` / `direct_post.jwt`, including HAIP).",
 		"- Looking Glass on " + site + " creates issuer/verifier traffic; this wallet performs the holder-side hops.",
+		"- Headless interface: HTTP JSON (`/api/issue`, `/api/import`, `/api/resolve`, `/api/present`, `/api/session`, `/submit`). QR and deeplinks are human handoffs.",
 		"",
 		"## Start here",
 		"",
@@ -283,105 +290,11 @@ func walletLLMsTxt(origin, site string) string {
 		"- [API catalog](" + origin + "/.well-known/api-catalog)",
 		"- [Health](" + origin + "/health)",
 		"- [Runtime docs](" + walletDocsURL + ")",
+		"- [Docs llms.txt](https://docs.protocolsoup.com/llms.txt)",
 		"- [Looking Glass](" + site + "/looking-glass)",
-		"- [ProtocolSoup MCP](" + site + "/mcp) — not served on this host",
+		"- [ProtocolSoup MCP](" + site + "/mcp) — read-only catalog/decode on the apex host; not served here",
 		"",
-		"Ask for `Accept: text/markdown` on `" + origin + "/` to receive the same recipes without executing JavaScript.",
+		"`Accept: text/markdown` on `" + origin + "/` returns the same recipes without executing JavaScript.",
 		"",
 	}, "\n")
 }
-
-const walletSkillMarkdown = `# Use the ProtocolSoup Wallet Harness
-
-This origin is a **real OID4VCI / OID4VP wallet**. It is not Looking Glass, not a mock, and not an MCP server. MCP lives at {{SITE}}/mcp.
-
-Human UI: {{ORIGIN}}/
-Machine recipes: {{ORIGIN}}/llms-full.txt
-Runtime contract: {{DOCS}}
-
-## Isolation
-
-Send a stable session on every API call:
-
-    X-Wallet-Session: {opaque-id}
-
-The browser UI uses an HttpOnly cookie instead. When driving a Looking Glass run, also pass looking_glass_session_id in the JSON body so events attach to that glass session.
-
-Do not GET {{ORIGIN}}/authorize unless you have a live OID4VP request_uri. That path is a protocol hop, not a docs page.
-
-## Health
-
-    GET {{ORIGIN}}/health
-
-Returns {"status":"ok"}. Optional commit is the deployed source SHA.
-
-## Issue a credential (OID4VCI)
-
-### Bootstrap against the configured ProtocolSoup issuer
-
-    POST {{ORIGIN}}/api/issue
-    Content-Type: application/json
-    X-Wallet-Session: {opaque-id}
-
-    {
-      "credential_format": "mso_mdoc",
-      "credential_configuration_id": "MobileDrivingLicenceMsoMdoc"
-    }
-
-Omit credential_format to use the wallet default (mso_mdoc). Set force_issue to true to mint a new credential even when the session already has one.
-
-### Redeem an offer (Looking Glass pre-authorized path)
-
-    POST {{ORIGIN}}/api/import
-    Content-Type: application/json
-    X-Wallet-Session: {opaque-id}
-
-    {
-      "offer": "openid-credential-offer://?credential_offer=...",
-      "tx_code": "optional",
-      "looking_glass_session_id": "optional-lg-session"
-    }
-
-Provide exactly one of offer, credential, credential_issuer, or discovery_url+resource_endpoint+scope.
-
-A successful import returns the stored credential plus _protocol_exchanges (real wallet-to-issuer HTTP hops) and _looking_glass_events.
-
-If the grant is authorization_code, the response includes authorization_url. Open it, then the issuer redirects to GET {{ORIGIN}}/api/oid4vci/callback.
-
-HAIP configurations require attester JWKs on this process. Without them import returns HTTP 400 explaining that the configuration requires HAIP attestation material.
-
-## Present a credential (OID4VP)
-
-### One-click submit (Looking Glass / automation)
-
-    POST {{ORIGIN}}/submit
-    Content-Type: application/json
-
-    {
-      "request_id": "{verifier-request-id}",
-      "request": "{signed-request-jwt-or-omit-if-request_uri-already-resolved}",
-      "mode": "one_click",
-      "looking_glass_session_id": "optional-lg-session"
-    }
-
-mode=one_click bootstraps a matching credential if the store has no DCQL match, builds the presentation, and POSTs to the verifier response_uri. For direct_post.jwt the wallet encrypts the Authorization Response.
-
-Stepwise alternative: mode=stepwise with step of bootstrap, issue_credential, build_presentation, or submit_response.
-
-### Resolve then present (wallet UI path)
-
-    POST {{ORIGIN}}/api/resolve
-    {"request_uri": "https://verifier.example/request/...", "request_uri_method": "post"}
-
-    POST {{ORIGIN}}/api/present
-    {"request_id": "...", "approve_external_trust": false}
-
-GET {{ORIGIN}}/api/session returns the current store for the X-Wallet-Session scope.
-
-## Related hosts
-
-- Looking Glass: {{SITE}}/looking-glass
-- Protocol catalog: {{SITE}}/api/protocols
-- Agent skills on the main site: {{SITE}}/.well-known/agent-skills/index.json
-- This host does not serve /mcp.
-`

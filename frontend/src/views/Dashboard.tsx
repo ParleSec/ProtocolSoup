@@ -150,6 +150,49 @@ export function Dashboard() {
         </div>
       </section>
 
+      <section aria-label="For agents">
+        <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-3">
+          For agents
+        </h2>
+        <p className="text-sm text-surface-400 mb-3 max-w-2xl">
+          Machine-readable start files. The wallet is a separate origin; fetch its files directly rather than scraping the UI.
+        </p>
+        <ul className="flex flex-wrap gap-x-4 gap-y-2 text-sm font-mono">
+          <li>
+            <a href="/llms.txt" className="text-amber-300/90 hover:text-amber-200 hover:underline">
+              /llms.txt
+            </a>
+          </li>
+          <li>
+            <a
+              href={`${SITE_CONFIG.walletUrl}/llms.txt`}
+              rel="noopener noreferrer"
+              className="text-amber-300/90 hover:text-amber-200 hover:underline"
+            >
+              wallet /llms.txt
+            </a>
+          </li>
+          <li>
+            <a
+              href={`${SITE_CONFIG.walletUrl}/.well-known/agent-skills/use-wallet-harness/SKILL.md`}
+              rel="noopener noreferrer"
+              className="text-amber-300/90 hover:text-amber-200 hover:underline"
+            >
+              wallet SKILL.md
+            </a>
+          </li>
+          <li>
+            <a
+              href="https://docs.protocolsoup.com/deploy/agent-discovery/"
+              rel="noopener noreferrer"
+              className="text-amber-300/90 hover:text-amber-200 hover:underline"
+            >
+              agent discovery
+            </a>
+          </li>
+        </ul>
+      </section>
+
       {/* Available Protocols */}
       <section>
         <h2 className="text-sm font-medium text-surface-400 uppercase tracking-wider mb-4">

@@ -19,6 +19,24 @@ export default defineConfig({
       customCss: ['./src/styles/custom.css'],
       head: [
         { tag: 'meta', attrs: { name: 'theme-color', content: '#a855f7' } },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'alternate',
+            type: 'text/plain',
+            href: 'https://docs.protocolsoup.com/llms.txt',
+            title: 'llms.txt',
+          },
+        },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'alternate',
+            type: 'text/plain',
+            href: 'https://wallet.protocolsoup.com/llms.txt',
+            title: 'Wallet llms.txt',
+          },
+        },
       ],
       editLink: {
         baseUrl: 'https://github.com/ParleSec/ProtocolSoup/edit/master/docs/starlight/',
@@ -30,6 +48,7 @@ export default defineConfig({
             { slug: 'start-here/overview' },
             { slug: 'start-here/quickstart' },
             { slug: 'start-here/platform-at-a-glance' },
+            { slug: 'deploy/agent-discovery' },
           ],
         },
         {

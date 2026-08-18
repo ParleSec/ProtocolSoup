@@ -1,4 +1,4 @@
-import { DOCS_ORIGIN, SITE_ORIGIN } from '@/lib/seo'
+import { DOCS_ORIGIN, SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
 
 /**
  * Shared source of truth for the machine-readable surfaces agents use to
@@ -84,7 +84,10 @@ export function protocolDocsUrl(protocolId: string): string {
 /**
  * RFC 8288 Link header advertised on page responses. Relation types are drawn
  * from the IANA Link Relations registry: `api-catalog` and `status` are
- * registered by RFC 9727, `service-desc` and `service-doc` by RFC 8631.
+ * registered by RFC 9727, `service-desc` and `service-doc` by RFC 8631,
+ * `alternate` and `describedby` by the IANA registry. `llms.txt` is advertised
+ * as `rel="alternate describedby"` with `type="text/plain"` rather than an
+ * unregistered `rel="llms"`.
  */
 export const AGENT_LINK_HEADER = [
   `<${AGENT_PATHS.apiCatalog}>; rel="api-catalog"; type="application/linkset+json"`,
@@ -92,7 +95,8 @@ export const AGENT_LINK_HEADER = [
   `<${API_REFERENCE_URL}>; rel="service-doc"; type="text/html"`,
   `<${AGENT_PATHS.skillsIndex}>; rel="describedby"; type="application/json"`,
   `<${AGENT_PATHS.aiCatalog}>; rel="describedby"; type="application/ai-catalog+json"`,
-  `<${AGENT_PATHS.llms}>; rel="describedby"; type="text/plain"`,
+  `<${AGENT_PATHS.llms}>; rel="alternate describedby"; type="text/plain"; title="llms.txt"`,
+  `<${WALLET_ORIGIN}/llms.txt>; rel="alternate describedby"; type="text/plain"; title="Wallet llms.txt"`,
   `<${AGENT_PATHS.health}>; rel="status"; type="application/json"`,
 ].join(', ')
 

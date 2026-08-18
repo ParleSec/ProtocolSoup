@@ -3,7 +3,7 @@ import { WebMcpTools } from '@/components/agent/WebMcpTools.client'
 import { Layout } from '@/components/common/Layout'
 import { CmdKPalette } from '@/components/palette/CmdKPalette'
 import { SITE_CONFIG } from '@/config/seo'
-import { SITE_ORIGIN, absoluteUrl } from '@/lib/seo'
+import { SITE_ORIGIN, WALLET_ORIGIN, absoluteUrl } from '@/lib/seo'
 import { generateOrganizationSchema, generateWebsiteSchema } from '@/utils/schema'
 import '../index.css'
 
@@ -15,7 +15,15 @@ export const metadata: Metadata = {
   },
   applicationName: SITE_CONFIG.name,
   description: SITE_CONFIG.tagline,
-  alternates: { canonical: '/' },
+  alternates: {
+    canonical: '/',
+    types: {
+      'text/plain': [
+        { url: '/llms.txt', title: 'llms.txt' },
+        { url: `${WALLET_ORIGIN}/llms.txt`, title: 'Wallet llms.txt' },
+      ],
+    },
+  },
   category: 'Technology',
   creator: SITE_CONFIG.author,
   publisher: SITE_CONFIG.name,

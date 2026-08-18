@@ -117,6 +117,16 @@ export function generateWebsiteSchema() {
         name: 'Wallet Harness',
         url: SITE_CONFIG.walletUrl,
       },
+      {
+        '@type': 'WebPage',
+        name: 'llms.txt',
+        url: `${SITE_CONFIG.baseUrl}/llms.txt`,
+      },
+      {
+        '@type': 'WebPage',
+        name: 'Wallet llms.txt',
+        url: `${SITE_CONFIG.walletUrl}/llms.txt`,
+      },
     ],
   }
 }

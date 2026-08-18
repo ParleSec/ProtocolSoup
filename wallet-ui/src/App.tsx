@@ -806,7 +806,17 @@ function IssueStep({
   )
 }
 
-function Expandable({ title, icon: Icon, defaultOpen, children }: { title: string; icon?: typeof FileCode2; defaultOpen?: boolean; children: React.ReactNode }) {
+function Expandable({
+  title,
+  icon: Icon,
+  defaultOpen,
+  children,
+}: {
+  title: string
+  icon?: typeof FileCode2
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
   const [open, setOpen] = useState(Boolean(defaultOpen))
   return (
     <div className="rounded-xl border border-white/10 bg-surface-900/50 overflow-hidden">
@@ -829,7 +839,11 @@ function Expandable({ title, icon: Icon, defaultOpen, children }: { title: strin
             className="overflow-hidden"
           >
             <div className="border-t border-white/10 px-3 sm:px-4 py-3">
-              <pre className="text-[11px] sm:text-xs leading-relaxed text-surface-400 whitespace-pre-wrap break-all overflow-x-auto font-mono">{children}</pre>
+              <pre
+                className="text-[11px] sm:text-xs leading-relaxed text-surface-400 whitespace-pre-wrap break-all overflow-x-auto font-mono"
+              >
+                {children}
+              </pre>
             </div>
           </motion.div>
         )}
@@ -2464,9 +2478,13 @@ export default function WalletApp() {
         </section>
 
         {/* Footer */}
-        <footer className="border-t border-white/5 pt-4 pb-2 flex items-center justify-between text-[10px] text-surface-600">
+        <footer className="border-t border-white/5 pt-4 pb-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-surface-600">
           <span>ProtocolSoup Wallet</span>
-          <a href="https://protocolsoup.com" target="_blank" rel="noopener noreferrer" className="hover:text-surface-400 transition-colors">protocolsoup.com</a>
+          <nav className="flex flex-wrap items-center gap-3" aria-label="Agent and site links">
+            <a href="/llms.txt" className="hover:text-surface-400 transition-colors">llms.txt</a>
+            <a href="/.well-known/agent-skills/use-wallet-harness/SKILL.md" className="hover:text-surface-400 transition-colors">SKILL.md</a>
+            <a href="https://protocolsoup.com" target="_blank" rel="noopener noreferrer" className="hover:text-surface-400 transition-colors">protocolsoup.com</a>
+          </nav>
         </footer>
       </div>
 

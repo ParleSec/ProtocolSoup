@@ -15,6 +15,18 @@ Execute flows, inspect artifacts, and compare protocol mechanics.
 
 Best for: security engineers, architects, product teams evaluating protocol behavior.
 
+## For agents
+
+Fetch these URLs directly. Do not scrape the JavaScript UI.
+
+- [Docs `llms.txt`](https://docs.protocolsoup.com/llms.txt)
+- [Apex `llms.txt`](https://protocolsoup.com/llms.txt)
+- [Wallet `llms.txt`](https://wallet.protocolsoup.com/llms.txt)
+- [Wallet agent skill](https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md)
+- [Agent discovery](/deploy/agent-discovery/) -- catalogs, Link headers, MCP, and DNS-AID
+
+The wallet HTTP JSON API is the headless interface. QR and deeplinks are human handoffs. Apex MCP is read-only catalog/decode and does not drive the wallet.
+
 ## Deploy Services
 
 Pull container images from GHCR and run services without building from source.

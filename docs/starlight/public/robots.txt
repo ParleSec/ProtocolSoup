@@ -13,3 +13,5 @@ Content-Signal: search=yes, ai-input=yes, ai-train=no
 Allow: /
 
 Sitemap: https://docs.protocolsoup.com/sitemap.xml
+Sitemap: https://protocolsoup.com/sitemap-index.xml
+Sitemap: https://wallet.protocolsoup.com/sitemap.xml

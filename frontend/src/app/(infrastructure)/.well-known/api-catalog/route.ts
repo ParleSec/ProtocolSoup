@@ -69,10 +69,16 @@ function walletEntry(): LinksetEntry {
     ],
     describedby: [
       { href: `${WALLET_ORIGIN}/llms.txt`, type: 'text/plain', title: 'Wallet profile for agents' },
+      { href: `${WALLET_ORIGIN}/llms-full.txt`, type: 'text/plain', title: 'Wallet API recipes for agents' },
       {
         href: `${WALLET_ORIGIN}/.well-known/agent-skills/index.json`,
         type: 'application/json',
         title: 'Wallet agent skills index',
+      },
+      {
+        href: `${WALLET_ORIGIN}/.well-known/agent-skills/use-wallet-harness/SKILL.md`,
+        type: 'text/markdown',
+        title: 'Wallet agent skill',
       },
     ],
     status: [

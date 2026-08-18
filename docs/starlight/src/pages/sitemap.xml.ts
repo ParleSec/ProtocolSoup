@@ -52,7 +52,7 @@ export const GET: APIRoute = async () => {
   const lastmod = resolveLastmodDate()
 
   const docsEntries = await getCollection('docs')
-  const staticPaths = ['/api/reference/']
+  const staticPaths = ['/api/reference/', '/llms.txt']
   const allPaths = [
     ...docsEntries.map((entry) => normalizeDocsPath(entry.id)),
     ...staticPaths,

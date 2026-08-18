@@ -32,14 +32,26 @@ by the application and needs no operator action.
 | Wallet `llms.txt` | `https://wallet.protocolsoup.com/llms.txt` | Wallet harness | [llms.txt](https://llmstxt.org/) |
 | Wallet API catalog | `https://wallet.protocolsoup.com/.well-known/api-catalog` | Wallet harness | RFC 9727 |
 | Wallet agent skill | `https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md` | Wallet harness | Agent Skills Discovery RFC v0.2.0 |
+| Docs `llms.txt` | `https://docs.protocolsoup.com/llms.txt` | Docs site | [llms.txt](https://llmstxt.org/) |
+
+HTML page responses also advertise `llms.txt` with a registered
+[`alternate`](https://www.iana.org/assignments/link-relations/link-relations.xhtml)
+link (`type="text/plain"`). There is no IANA `rel="llms"` relation; minting one
+would be the same class of unregistered relation this deployment already refuses
+for MCP well-known paths.
+
+An allowlist-style fetcher that only follows URLs seen in a prior search or
+fetch will not discover the wallet origin unless an indexed page names those
+URLs. They are linked from this page, the docs homepage, [Start Here](/start-here/overview/),
+the GitHub README, `protocolsoup.com`, and each host's `/llms.txt`.
 
 ### Link headers
 
 Page responses carry an RFC 8288 `Link` header pointing at the API catalog, the
 gateway OpenAPI contract, the rendered API reference, the agent skills index,
-`llms.txt`, and the health endpoint. The relation types are all registered:
+`llms.txt`, the wallet `llms.txt`, and the health endpoint. The relation types are all registered:
 `api-catalog` and `status` come from RFC 9727, `service-desc` and `service-doc`
-from RFC 8631.
+from RFC 8631, `alternate` and `describedby` from the IANA link relation registry.
 
 ### Markdown for agents
 
@@ -116,8 +128,14 @@ The skills index lists a `sha256` digest for each artifact. Both the index and
 the artifact route render through the same function, so a consumer that
 verifies the digest against the downloaded `SKILL.md` always gets a match.
 Add or edit skills in `frontend/src/lib/agent-skills.ts`; digests recompute
-automatically. `use-wallet-harness` points at the wallet origin rather than
+automatically. `use-wallet-harness` on the apex points at the wallet origin rather than
 duplicating recipes.
+
+The wallet skill template is in the public repository at
+[`backend/cmd/walletharness/agent-skills/use-wallet-harness.md`](https://github.com/ParleSec/ProtocolSoup/blob/master/backend/cmd/walletharness/agent-skills/use-wallet-harness.md).
+Pin a reviewed git SHA of that file, then verify the `sha256` digest in
+`https://wallet.protocolsoup.com/.well-known/agent-skills/index.json` against the
+bytes actually served (the served artifact substitutes the request origin).
 
 ### Wallet origin
 
@@ -130,6 +148,9 @@ there should not scrape the JavaScript UI. The wallet process serves:
 | API recipes | `/llms-full.txt`, or `GET /` with `Accept: text/markdown` |
 | API catalog | `/.well-known/api-catalog` |
 | Agent skill | `/.well-known/agent-skills/use-wallet-harness/SKILL.md` |
+| Session JSON | `GET /api/session` |
+| Issue / import | `POST /api/issue`, `POST /api/import` |
+| Resolve / present | `POST /api/resolve`, `POST /api/present`, `POST /submit` |
 | Health | `/health` |
 
 ```bash
@@ -137,7 +158,20 @@ curl https://wallet.protocolsoup.com/llms.txt
 curl -H 'Accept: text/markdown' https://wallet.protocolsoup.com/
 ```
 
-This host is not an MCP server; `/mcp` remains on `protocolsoup.com`.
+QR scanning and `openid4vp://` / `openid-credential-offer://` deeplinks are
+human handoffs. The HTTP JSON API is the headless equivalent: create or reuse
+an `X-Wallet-Session`, call issue/import or resolve/present, then `GET /api/session`
+for the store.
+
+This host is not an MCP server; `/mcp` remains on `protocolsoup.com`. Apex MCP
+tools are read-only catalog, flow description, and JWT decode. They do not
+proxy wallet issuance or presentation. Driving the wallet is an HTTP call to
+`wallet.protocolsoup.com`, not a tool call on `/mcp`.
+
+API errors are JSON objects with a stable `error` token and a prose
+`error_description` (OAuth-style), not RFC 9457 Problem Details. The origin
+does not currently send `Retry-After`. Named canned fixtures (known-good
+issuance, broken trust chain, failing attestation) are not published.
 
 ### WebMCP
 

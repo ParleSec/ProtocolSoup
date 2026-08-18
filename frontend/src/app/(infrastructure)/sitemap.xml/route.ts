@@ -91,6 +91,27 @@ export async function GET() {
     }
   }
 
+  const agentDocuments = [
+    { path: '/llms.txt', priority: 0.6 },
+    { path: '/llms-full.txt', priority: 0.5 },
+    { path: '/.well-known/api-catalog', priority: 0.5 },
+    { path: '/.well-known/agent-skills/index.json', priority: 0.5 },
+    { path: '/.well-known/agent-skills/use-wallet-harness/SKILL.md', priority: 0.5 },
+    { path: '/auth.md', priority: 0.4 },
+  ]
+  for (const doc of agentDocuments) {
+    entries.push(
+      [
+        '<url>',
+        `  <loc>${escapeXml(`${siteUrl}${doc.path}`)}</loc>`,
+        `  <lastmod>${lastmod}</lastmod>`,
+        '  <changefreq>weekly</changefreq>',
+        `  <priority>${doc.priority.toFixed(1)}</priority>`,
+        '</url>',
+      ].join('\n'),
+    )
+  }
+
   const xml = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"',
