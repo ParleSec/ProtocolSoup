@@ -84,6 +84,9 @@ func TestWalletAgentDiscoverySurfaces(t *testing.T) {
 		if !strings.Contains(skillBody, "POST "+ts.URL+"/api/import") {
 			t.Fatalf("skill missing import recipe\n%s", skillBody)
 		}
+		if !strings.Contains(skillBody, "backend/cmd/walletharness/agent-skills/use-wallet-harness.md") {
+			t.Fatalf("skill missing pin URL\n%s", skillBody)
+		}
 	})
 
 	t.Run("unknown skill is 404", func(t *testing.T) {
@@ -117,6 +120,9 @@ func TestWalletHomepageMarkdownNegotiation(t *testing.T) {
 	}
 	if !strings.Contains(resp.Header.Get("Link"), `rel="api-catalog"`) {
 		t.Fatalf("missing api-catalog link header: %q", resp.Header.Get("Link"))
+	}
+	if !strings.Contains(resp.Header.Get("Link"), `title="llms.txt"`) {
+		t.Fatalf("missing llms.txt alternate link: %q", resp.Header.Get("Link"))
 	}
 	if !strings.Contains(resp.Header.Get("Vary"), "Accept") {
 		t.Fatalf("missing Vary: Accept")
