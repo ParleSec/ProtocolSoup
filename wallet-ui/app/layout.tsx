@@ -36,7 +36,21 @@ export const metadata: Metadata = {
     'wallet harness',
     'protocol soup wallet',
   ],
-  alternates: { canonical: '/' },
+  alternates: {
+    canonical: '/',
+    types: {
+      'text/plain': [
+        { url: '/llms.txt', title: 'llms.txt' },
+        { url: '/llms-full.txt', title: 'llms-full.txt' },
+      ],
+      'text/markdown': [
+        {
+          url: '/.well-known/agent-skills/use-wallet-harness/SKILL.md',
+          title: 'Agent skill',
+        },
+      ],
+    },
+  },
   robots: {
     index: true,
     follow: true,
@@ -92,6 +106,10 @@ const walletSchema = {
     alternateName: 'Protocol Soup',
     url: SITE_ORIGIN,
   },
+  significantLink: [
+    `${WALLET_ORIGIN}/llms.txt`,
+    `${WALLET_ORIGIN}/.well-known/agent-skills/use-wallet-harness/SKILL.md`,
+  ],
   offers: {
     '@type': 'Offer',
     price: '0',
