@@ -89,4 +89,6 @@ The wallet's metadata-driven OID4VCI client supports:
 
 ## Agent discovery
 
-An agent that hits this origin should start at `GET /llms.txt` (or `Accept: text/markdown` on `/`). The process also serves `/.well-known/api-catalog`, `/.well-known/agent-skills/use-wallet-harness/SKILL.md`, and RFC 8288 `Link` headers on the HTML UI. This image is not an MCP server.
+An agent that hits this origin should start at `GET /llms.txt` (or `Accept: text/markdown` on `/`). The process also serves `/.well-known/api-catalog`, `/.well-known/agent-skills/use-wallet-harness/SKILL.md`, and RFC 8288 `Link` headers on the HTML UI. Indexed copies of those URLs live on [docs.protocolsoup.com/llms.txt](https://docs.protocolsoup.com/llms.txt), the [GitHub README](https://github.com/ParleSec/ProtocolSoup), and [agent discovery](/deploy/agent-discovery/).
+
+The HTTP JSON API (`POST /api/issue`, `POST /api/import`, `POST /api/resolve`, `POST /api/present`, `GET /api/session`, `POST /submit`) is the headless interface. QR and deeplinks are human handoffs. This image is not an MCP server; apex `/mcp` is read-only catalog/decode and does not proxy the wallet. API errors use a stable `error` token plus `error_description`, not RFC 9457.

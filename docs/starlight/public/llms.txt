@@ -1,0 +1,28 @@
+# ProtocolSoup Documentation
+
+> Docs for the live ProtocolSoup execution platform. This host is documentation, not Looking Glass and not the wallet.
+
+## Canonical properties
+
+- [Main site](https://protocolsoup.com)
+- [Documentation](https://docs.protocolsoup.com)
+- [Wallet harness](https://wallet.protocolsoup.com)
+
+## Start here if you are an agent
+
+- [Apex llms.txt](https://protocolsoup.com/llms.txt)
+- [Wallet llms.txt](https://wallet.protocolsoup.com/llms.txt)
+- [Wallet agent skill](https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md)
+- [Agent discovery](https://docs.protocolsoup.com/deploy/agent-discovery/)
+- [API catalog](https://protocolsoup.com/.well-known/api-catalog)
+- [Agent skills index](https://protocolsoup.com/.well-known/agent-skills/index.json)
+
+The wallet is a separate origin. Its HTTP JSON API is the headless interface (issue, import, resolve, present, session, submit). QR and deeplinks are human handoffs. Apex MCP at https://protocolsoup.com/mcp is read-only catalog/decode and does not drive the wallet.
+
+## Human guides
+
+- [Start here](https://docs.protocolsoup.com/start-here/overview/)
+- [Looking Glass](https://docs.protocolsoup.com/using/looking-glass/)
+- [Wallet runtime](https://docs.protocolsoup.com/deploy/services/wallet/)
+- [OID4VCI](https://docs.protocolsoup.com/protocols/oid4vci/)
+- [OID4VP](https://docs.protocolsoup.com/protocols/oid4vp/)
