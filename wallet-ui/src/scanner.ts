@@ -1,6 +1,8 @@
 type ScanDecodeCallback = (decodedText: string) => void
 type ScanStatusCallback = (message: string) => void
 
+import type { Html5Qrcode } from 'html5-qrcode'
+
 type ScannerHandle = {
   stop: () => Promise<void>
 }
@@ -10,21 +12,7 @@ type Html5QrcodeCamera = {
   label?: string
 }
 
-type Html5QrcodeInstance = {
-  start: (
-    cameraConfig: string | { facingMode: string | { exact: string } },
-    config: { fps: number; qrbox: { width: number; height: number } },
-    onScanSuccess: (decodedText: string) => void,
-    onScanFailure: (_errorMessage: string) => void,
-  ) => Promise<void>
-  stop: () => Promise<void>
-  clear: () => Promise<void>
-}
-
-type Html5QrcodeCtor = {
-  new (containerID: string): Html5QrcodeInstance
-  getCameras: () => Promise<Html5QrcodeCamera[]>
-}
+type Html5QrcodeClass = typeof Html5Qrcode
 
 type BarcodeDetectionResult = {
   rawValue?: string
@@ -117,22 +105,10 @@ async function requestNativeCameraStream(): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ audio: false, video: true })
 }
 
-async function loadHtml5QrcodeCtor(): Promise<Html5QrcodeCtor | null> {
+async function loadHtml5QrcodeCtor(): Promise<Html5QrcodeClass | null> {
   try {
-    const mod = await import('html5-qrcode') as {
-      Html5Qrcode?: Html5QrcodeCtor
-      default?: Html5QrcodeCtor | { Html5Qrcode?: Html5QrcodeCtor }
-    }
-    if (mod.Html5Qrcode) {
-      return mod.Html5Qrcode
-    }
-    if (typeof mod.default === 'function') {
-      return mod.default
-    }
-    if (mod.default && typeof mod.default === 'object' && mod.default.Html5Qrcode) {
-      return mod.default.Html5Qrcode
-    }
-    return null
+    const { Html5Qrcode: Html5QrcodeImpl } = await import('html5-qrcode')
+    return Html5QrcodeImpl ?? null
   } catch {
     return null
   }
@@ -146,9 +122,9 @@ export interface WalletScanner {
 export function createWalletScanner(): WalletScanner {
   let active = false
   let scanner: ScannerHandle | null = null
-  let html5Ctor: Html5QrcodeCtor | null = null
+  let html5Ctor: Html5QrcodeClass | null = null
   let html5Availability: 'unknown' | 'ready' | 'unavailable' = 'unknown'
-  let html5LoadingPromise: Promise<Html5QrcodeCtor | null> | null = null
+  let html5LoadingPromise: Promise<Html5QrcodeClass | null> | null = null
 
   async function stopCurrent(): Promise<void> {
     if (!active || !scanner) {
@@ -269,7 +245,7 @@ export function createWalletScanner(): WalletScanner {
     return true
   }
 
-  async function ensureHtml5QrcodeAvailable(): Promise<Html5QrcodeCtor | null> {
+  async function ensureHtml5QrcodeAvailable(): Promise<Html5QrcodeClass | null> {
     if (typeof window === 'undefined') {
       return null
     }
