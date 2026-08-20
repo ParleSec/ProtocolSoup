@@ -221,6 +221,24 @@ jobs:
           category: code-security
           wait-for-processing: true
 
+  # Job 3b: Tracked private key material
+  repository-private-key-scan:
+    name: Repository Private Key Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Fail if tracked files contain private key PEM material
+        run: |
+          set -euo pipefail
+          if git grep -I -n -E -- 'BEGIN ([A-Z0-9]+ )?PRIVATE KEY' .; then
+            echo "::error::Tracked files contain PEM private key material"
+            exit 1
+          fi
+          echo "No PEM private key material in tracked files"
+
   # Job 4: Frontend Linting and Type Checking
   frontend-lint-and-typecheck:
     name: Frontend Lint & Type Check
@@ -435,7 +453,7 @@ jobs:
   deploy:
     name: Deploy Main App to Fly.io
     runs-on: ubuntu-latest
-    needs: [docker-build-test, code-security-scan]
+    needs: [docker-build-test, code-security-scan, repository-private-key-scan]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: read

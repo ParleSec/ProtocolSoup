@@ -136,6 +136,37 @@ func (s *Storage) Close() error {
 	return s.db.Close()
 }
 
+// PurgeExpired deletes users and groups whose updated_at is before cutoff.
+// This is operator retention, not a SCIM client DELETE (RFC 7644 Section 3.6).
+// Subsequent GET of a purged id returns 404, matching RFC 7644 Section 3.4.1.
+// scim_group_members rows cascade through the existing foreign keys.
+func (s *Storage) PurgeExpired(ctx context.Context, cutoff time.Time) (users int, groups int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cutoffStr := cutoff.UTC().Format(time.RFC3339)
+
+	userResult, err := s.db.ExecContext(ctx, `DELETE FROM scim_users WHERE updated_at < ?`, cutoffStr)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to purge expired users: %w", err)
+	}
+	userCount, err := userResult.RowsAffected()
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to count purged users: %w", err)
+	}
+
+	groupResult, err := s.db.ExecContext(ctx, `DELETE FROM scim_groups WHERE updated_at < ?`, cutoffStr)
+	if err != nil {
+		return int(userCount), 0, fmt.Errorf("failed to purge expired groups: %w", err)
+	}
+	groupCount, err := groupResult.RowsAffected()
+	if err != nil {
+		return int(userCount), 0, fmt.Errorf("failed to count purged groups: %w", err)
+	}
+
+	return int(userCount), int(groupCount), nil
+}
+
 // ================== User Operations ==================
 
 // CreateUser creates a new user

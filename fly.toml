@@ -57,11 +57,12 @@ primary_region = 'syd'
 
   # Cross-service CAEP: SSF receiver POSTs to federation over loopback HTTP.
   FEDERATION_SERVICE_URL = 'http://127.0.0.1:8080'
-  SSF_TO_FEDERATION_TOKEN = 'ssf-federation-caep-lab'
 
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
 # - SCIM_API_TOKEN: Bearer token for SCIM authentication
+# - SSF_TO_FEDERATION_TOKEN: Bearer token shared with federation for the CAEP
+#   session-revoked demo hop. Without it the hop returns 401.
 # - OAUTH2_REPLAY_REDIS_URL: rediss:// URL for shared private_key_jwt replay protection;
 #   also backs the RFC 9449 DPoP proof jti replay stores for oauth2 and OID4VCI
 #   (distinct key prefix/instance). Optional SHOWCASE_DPOP_NONCE_REQUIRED and

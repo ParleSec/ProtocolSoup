@@ -103,6 +103,13 @@ export const PAGE_SEO: Record<string, PageSEO> = {
     ogType: 'website',
   },
 
+  '/trust': {
+    title: 'Trust',
+    description: 'Placeholder Trust page. Content will be published after live-environment facts are collected.',
+    keywords: ['trust', 'security', 'protocolsoup'],
+    ogType: 'website',
+  },
+
   // Legacy SSF sandbox URL (redirects to Looking Glass)
   '/ssf-sandbox': {
     title: 'Shared Signals (SSF) in Looking Glass',

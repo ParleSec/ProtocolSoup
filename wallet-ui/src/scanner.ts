@@ -1,6 +1,8 @@
 type ScanDecodeCallback = (decodedText: string) => void
 type ScanStatusCallback = (message: string) => void
 
+import type { Html5Qrcode } from 'html5-qrcode'
+
 type ScannerHandle = {
   stop: () => Promise<void>
 }
@@ -10,21 +12,7 @@ type Html5QrcodeCamera = {
   label?: string
 }
 
-type Html5QrcodeInstance = {
-  start: (
-    cameraConfig: string | { facingMode: string | { exact: string } },
-    config: { fps: number; qrbox: { width: number; height: number } },
-    onScanSuccess: (decodedText: string) => void,
-    onScanFailure: (_errorMessage: string) => void,
-  ) => Promise<void>
-  stop: () => Promise<void>
-  clear: () => Promise<void>
-}
-
-type Html5QrcodeCtor = {
-  new (containerID: string): Html5QrcodeInstance
-  getCameras: () => Promise<Html5QrcodeCamera[]>
-}
+type Html5QrcodeClass = typeof Html5Qrcode
 
 type BarcodeDetectionResult = {
   rawValue?: string
@@ -37,16 +25,10 @@ type BarcodeDetectorInstance = {
 type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorInstance
 
 type WindowWithScannerSupport = Window & {
-  Html5Qrcode?: Html5QrcodeCtor
   BarcodeDetector?: BarcodeDetectorCtor
 }
 
 const CAMERA_POLL_MS = 200
-const HTML5_QRCODE_CANDIDATES = [
-  'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
-  'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js',
-]
 
 function emitStatus(callback: ScanStatusCallback | undefined, message: string): void {
   if (callback) {
@@ -123,20 +105,13 @@ async function requestNativeCameraStream(): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ audio: false, video: true })
 }
 
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const existingScript = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null
-    if (existingScript) {
-      resolve()
-      return
-    }
-    const script = document.createElement('script')
-    script.src = src
-    script.async = true
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error(`Failed to load ${src}`))
-    document.head.appendChild(script)
-  })
+async function loadHtml5QrcodeCtor(): Promise<Html5QrcodeClass | null> {
+  try {
+    const { Html5Qrcode: Html5QrcodeImpl } = await import('html5-qrcode')
+    return Html5QrcodeImpl ?? null
+  } catch {
+    return null
+  }
 }
 
 export interface WalletScanner {
@@ -147,8 +122,9 @@ export interface WalletScanner {
 export function createWalletScanner(): WalletScanner {
   let active = false
   let scanner: ScannerHandle | null = null
+  let html5Ctor: Html5QrcodeClass | null = null
   let html5Availability: 'unknown' | 'ready' | 'unavailable' = 'unknown'
-  let html5LoadingPromise: Promise<boolean> | null = null
+  let html5LoadingPromise: Promise<Html5QrcodeClass | null> | null = null
 
   async function stopCurrent(): Promise<void> {
     if (!active || !scanner) {
@@ -269,35 +245,28 @@ export function createWalletScanner(): WalletScanner {
     return true
   }
 
-  async function ensureHtml5QrcodeAvailable(): Promise<boolean> {
+  async function ensureHtml5QrcodeAvailable(): Promise<Html5QrcodeClass | null> {
     if (typeof window === 'undefined') {
-      return false
+      return null
     }
-    const scannerWindow = window as WindowWithScannerSupport
-    if (scannerWindow.Html5Qrcode) {
-      html5Availability = 'ready'
-      return true
+    if (html5Ctor) {
+      return html5Ctor
     }
     if (html5Availability === 'unavailable') {
-      return false
+      return null
     }
     if (html5LoadingPromise) {
       return html5LoadingPromise
     }
     html5LoadingPromise = (async () => {
-      for (const src of HTML5_QRCODE_CANDIDATES) {
-        try {
-          await loadScript(src)
-        } catch {
-          continue
-        }
-        if (scannerWindow.Html5Qrcode) {
-          html5Availability = 'ready'
-          return true
-        }
+      const ctor = await loadHtml5QrcodeCtor()
+      if (ctor) {
+        html5Ctor = ctor
+        html5Availability = 'ready'
+        return ctor
       }
       html5Availability = 'unavailable'
-      return false
+      return null
     })()
     const loaded = await html5LoadingPromise
     html5LoadingPromise = null
@@ -309,13 +278,12 @@ export function createWalletScanner(): WalletScanner {
     onDecoded: ScanDecodeCallback,
     onStatus?: ScanStatusCallback,
   ): Promise<boolean> {
-    const html5Loaded = await ensureHtml5QrcodeAvailable()
-    const scannerWindow = (typeof window !== 'undefined' ? window : {}) as WindowWithScannerSupport
-    if (!html5Loaded || !scannerWindow.Html5Qrcode) {
+    const Html5QrcodeImpl = await ensureHtml5QrcodeAvailable()
+    if (!Html5QrcodeImpl) {
       return false
     }
     const containerID = ensureContainerID(container)
-    const html5Scanner = new scannerWindow.Html5Qrcode(containerID)
+    const html5Scanner = new Html5QrcodeImpl(containerID)
     let hasDecoded = false
 
     const startWithCameraConfig = async (
@@ -347,7 +315,7 @@ export function createWalletScanner(): WalletScanner {
       } catch {
         let cameras: Html5QrcodeCamera[]
         try {
-          cameras = await scannerWindow.Html5Qrcode.getCameras()
+          cameras = await Html5QrcodeImpl.getCameras()
         } catch (cameraError) {
           emitStatus(onStatus, `Unable to access camera ${String(cameraError)}`)
           return false

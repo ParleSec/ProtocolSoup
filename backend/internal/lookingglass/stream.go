@@ -28,10 +28,11 @@ var upgrader = websocket.Upgrader{
 
 // Client represents a WebSocket client connection
 type Client struct {
-	conn    *websocket.Conn
-	send    chan []byte
-	done    chan struct{}
-	session *Session
+	conn      *websocket.Conn
+	send      chan []byte
+	done      chan struct{}
+	session   *Session
+	closeOnce sync.Once
 }
 
 // Message represents a WebSocket message
@@ -62,14 +63,13 @@ func (e *Engine) HandleWebSocket(w http.ResponseWriter, r *http.Request, session
 		session: session,
 	}
 
-	// Register client with session
 	session.registerClient(client)
-
-	// Start client goroutines
 	go client.writePump()
 	go client.readPump()
-
-	// Send existing events to the new client
+	if _, ok := e.GetSession(session.ID); !ok {
+		client.closeForEviction()
+		return
+	}
 	client.sendHistory()
 }
 
@@ -101,8 +101,34 @@ func (s *Session) unregisterClient(client *Client) {
 	defer s.mu.Unlock()
 	if _, ok := s.clients[client]; ok {
 		delete(s.clients, client)
-		close(client.done)
+		client.closeDone()
 	}
+}
+
+func (c *Client) closeDone() {
+	if c == nil {
+		return
+	}
+	c.closeOnce.Do(func() {
+		close(c.done)
+	})
+}
+
+func (c *Client) closeForEviction() {
+	if c == nil {
+		return
+	}
+	c.closeDone()
+	if c.conn == nil {
+		return
+	}
+	deadline := time.Now().Add(time.Second)
+	_ = c.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "session expired"),
+		deadline,
+	)
+	_ = c.conn.Close()
 }
 
 func (s *Session) broadcast(event Event) {

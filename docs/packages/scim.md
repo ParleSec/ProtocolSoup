@@ -28,6 +28,7 @@ RFC alignment target: RFC 7642, RFC 7643, and RFC 7644.
 | `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `SCIM_API_TOKEN` | No (Yes for production) | `(none)` | Bearer token for SCIM auth; if unset, auth is disabled |
 | `SCIM_DATA_DIR` | No | `./data` (container default path resolves to `/app/data`) | SQLite storage directory |
+| `SCIM_RETENTION` | No | `24h` | How long visitor-created users and groups are kept, based on `updated_at`. `0` disables deletion. Each sweep re-seeds demo data. |
 | `SCIM_LOOKING_GLASS` | No | `true` | Enable Looking Glass capture for SCIM events |
 
 ### Storage And Volumes
@@ -120,6 +121,10 @@ services:
 - Restrict `SHOWCASE_CORS_ORIGINS` to trusted origins.
 - Persist data to a managed volume and protect that volume as sensitive identity state.
 - Rotate `SCIM_API_TOKEN` on a regular cadence.
+
+| Hosted instance | Not for real identity data |
+| --- | --- |
+| Visitors may create users and groups. Records older than `SCIM_RETENTION` (default 24h) are deleted and demo data is restored. Do not send real employee or customer records to the hosted instance. |
 
 ## Troubleshooting
 

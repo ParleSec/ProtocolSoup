@@ -56,6 +56,7 @@ Production targets must use HTTPS and must not resolve to a loopback, private, o
 | `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External base URL |
 | `SCIM_API_TOKEN` | Yes in production | - | Bearer token for authenticated requests and outbound client operations |
 | `SCIM_DATA_DIR` | No | `./data` | SQLite database directory |
+| `SCIM_RETENTION` | No | `24h` | Retention for visitor-created users and groups (`updated_at`). `0` disables the reaper. Demo data is re-seeded after each sweep. |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
 
 ## Run
@@ -76,3 +77,7 @@ docker run -p 8080:8080 \
 - `SCIM_API_TOKEN` is checked via bearer auth middleware. Treat it as a credential.
 - The same bearer authentication protects `/scim/client/*`, including outbound provisioning and sync.
 - Mount `SCIM_DATA_DIR` for persistent provisioning state across container restarts.
+
+| Hosted instance | Not for real identity data |
+| --- | --- |
+| Visitors may create users and groups. Records older than `SCIM_RETENTION` (default 24h) are deleted and demo data is restored. Do not send real employee or customer records to the hosted instance. |
