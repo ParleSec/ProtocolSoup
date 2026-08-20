@@ -1,6 +1,6 @@
 import { ReactNode } from 'react'
 import Link from 'next/link'
-import { BookOpen, Eye, FileText, Wallet } from 'lucide-react'
+import { BookOpen, Eye, FileText, Shield, Wallet } from 'lucide-react'
 import { LayoutHeader } from './LayoutHeader.client'
 import { SITE_CONFIG } from '@/config/seo'
 
@@ -68,6 +68,13 @@ export function Layout({ children }: LayoutProps) {
             >
               <Eye className="w-3.5 h-3.5" />
               Looking Glass
+            </Link>
+            <Link
+              href="/trust"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 bg-white/[0.03] hover:border-amber-500/40 hover:text-amber-300 transition-colors"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              Trust
             </Link>
             <Link
               href="/protocols"

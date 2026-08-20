@@ -50,6 +50,7 @@ export async function GET() {
   const staticRoutes: Array<{ path: string; changefreq: 'weekly' | 'monthly'; priority: number; title: string }> = [
     { path: '', changefreq: 'weekly', priority: 1.0, title: PAGE_SEO['/'].title },
     { path: '/looking-glass', changefreq: 'weekly', priority: 0.9, title: PAGE_SEO['/looking-glass'].title },
+    { path: '/trust', changefreq: 'monthly', priority: 0.7, title: PAGE_SEO['/trust'].title },
     { path: '/protocols', changefreq: 'weekly', priority: 0.8, title: PAGE_SEO['/protocols'].title },
   ]
 

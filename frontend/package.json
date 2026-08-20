@@ -13,6 +13,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0",
+    "typecheck": "tsc --noEmit",
     "verify-refs": "node scripts/verify-references.mjs",
     "verify-jwk-thumbprint": "node --experimental-strip-types scripts/verify-jwk-thumbprint.mjs",
     "verify-dpop": "node --experimental-strip-types scripts/verify-dpop.mjs",
