@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
@@ -20,6 +22,8 @@ type Plugin struct {
 	lookingGlass *lookingglass.Engine
 	baseURL      string
 	client       *Client
+	retentionStop context.CancelFunc
+	retentionWG   sync.WaitGroup
 }
 
 // NewPlugin creates a new SCIM 2.0 plugin
@@ -62,6 +66,8 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		log.Printf("Warning: failed to seed SCIM demo data: %v", err)
 	}
 
+	p.startRetentionReaper()
+
 	// Initialize SCIM client for outbound provisioning
 	p.client = NewClient("", "") // Empty URL, configured per-request
 
@@ -71,10 +77,73 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 
 // Shutdown cleans up plugin resources
 func (p *Plugin) Shutdown(ctx context.Context) error {
+	if p.retentionStop != nil {
+		p.retentionStop()
+		p.retentionWG.Wait()
+	}
 	if p.storage != nil {
 		return p.storage.Close()
 	}
 	return nil
+}
+
+func parseSCIMRetention(raw string) (time.Duration, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 24 * time.Hour, true
+	}
+	parsed, err := time.ParseDuration(trimmed)
+	if err != nil {
+		log.Printf("SCIM_RETENTION %q is invalid (%v); using 24h", raw, err)
+		return 24 * time.Hour, true
+	}
+	if parsed <= 0 {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func (p *Plugin) startRetentionReaper() {
+	retention, enabled := parseSCIMRetention(os.Getenv("SCIM_RETENTION"))
+	if !enabled {
+		log.Printf("SCIM retention reaper disabled (SCIM_RETENTION=0)")
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	p.retentionStop = cancel
+	p.retentionWG.Add(1)
+	go p.runRetentionReaper(ctx, retention)
+}
+
+func (p *Plugin) runRetentionReaper(ctx context.Context, retention time.Duration) {
+	defer p.retentionWG.Done()
+	p.sweepRetention(ctx, retention)
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.sweepRetention(ctx, retention)
+		}
+	}
+}
+
+func (p *Plugin) sweepRetention(ctx context.Context, retention time.Duration) {
+	if p.storage == nil {
+		return
+	}
+	cutoff := time.Now().UTC().Add(-retention)
+	users, groups, err := p.storage.PurgeExpired(ctx, cutoff)
+	if err != nil {
+		log.Printf("SCIM retention sweep failed: %v", err)
+		return
+	}
+	if err := p.storage.SeedDemoData(ctx, p.baseURL); err != nil {
+		log.Printf("SCIM retention sweep: failed to re-seed demo data: %v", err)
+	}
+	log.Printf("SCIM retention sweep: deleted %d users and %d groups (cutoff %s)", users, groups, cutoff.Format(time.RFC3339))
 }
 
 // RegisterRoutes registers SCIM HTTP endpoints
