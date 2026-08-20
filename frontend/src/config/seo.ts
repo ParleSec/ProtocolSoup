@@ -105,8 +105,15 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   '/trust': {
     title: 'Trust',
-    description: 'Placeholder Trust page. Content will be published after live-environment facts are collected.',
-    keywords: ['trust', 'security', 'protocolsoup'],
+    description:
+      'Hosted-instance facts for protocolsoup.com: trust boundary, scanner behaviour, supply-chain verification, retention, OIDF listings, and vulnerability disclosure.',
+    keywords: [
+      'protocolsoup trust',
+      'security.txt',
+      'vulnerability disclosure',
+      'supply chain attestation',
+      'OIDF certification',
+    ],
     ogType: 'website',
   },
 
