@@ -1,6 +1,7 @@
 package lookingglass
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,15 +82,35 @@ func TestSweepExpiredClosesConnectedClientWithoutPanic(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		session.mu.Lock()
+		registered := len(session.clients) > 0
+		session.mu.Unlock()
+		if registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("websocket client did not register before eviction")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
 	session.mu.Lock()
 	session.UpdatedAt = time.Now().Add(-engine.idleTTL - time.Second)
 	session.mu.Unlock()
 	engine.sweepExpired(time.Now())
 
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, _, readErr := conn.ReadMessage()
-	if readErr == nil {
-		t.Fatal("expected websocket close after session eviction")
+	for {
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _, readErr := conn.ReadMessage()
+		if readErr == nil {
+			continue
+		}
+		if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
+			t.Fatal("expected websocket close after session eviction")
+		}
+		break
 	}
 	if _, ok := engine.GetSession(session.ID); ok {
 		t.Fatal("evicted session still present")
