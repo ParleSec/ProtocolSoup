@@ -54,9 +54,14 @@ ProtocolSoup is an **educational tool** designed to demonstrate how identity pro
 
 ## Supported Versions
 
-| Version | Supported |
-| ------- | --------- |
-| Latest  | ✅        |
-| < 1.0   | ❌        |
+Security fixes land on the latest minor release. Older minors and previous majors are not patched.
 
-We only provide security updates for the latest version. Please keep your installation up to date.
+Version tags are immutable. A released version is never retagged: Cosign signatures and SLSA provenance are attached to image digests, so rewriting a tag would orphan those attestations.
+
+| Version | Security updates |
+| ------- | ---------------- |
+| Latest minor (`vX.Y.Z`) | Yes |
+| Older minors of the current major | No — upgrade to the latest minor |
+| Previous majors | No |
+
+`latest` on GHCR moves with every push to `master` and is not a support commitment. Pin a `vX.Y.Z` tag or an image digest for a stable target. Pre-release tags (`vX.Y.Z-rc.N`) are not supported for security updates.
