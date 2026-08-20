@@ -32,7 +32,7 @@
 | `SSF_RECEIVER_PORT` | No | `8081` | Standalone receiver listener port |
 | `SSF_RECEIVER_TOKEN` | No | `(auto-generated)` | Bearer token expected by receiver push delivery |
 | `FEDERATION_SERVICE_URL` | No | loopback from `SHOWCASE_LISTEN_ADDR` | Federation base URL for post-CAEP `revoke-subject` |
-| `SSF_TO_FEDERATION_TOKEN` | No | `(empty)` | Bearer token shared with federation for that demo API |
+| `SSF_TO_FEDERATION_TOKEN` | No | `(empty)` | Bearer token shared with federation for that demo API. Production secret — set via `fly secrets set`, Without it the CAEP `session-revoked` demo hop returns 401. |
 
 ### Storage And Volumes
 
