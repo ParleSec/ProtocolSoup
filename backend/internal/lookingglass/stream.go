@@ -105,6 +105,27 @@ func (s *Session) unregisterClient(client *Client) {
 	}
 }
 
+func (c *Client) closeForEviction() {
+	if c == nil {
+		return
+	}
+	select {
+	case <-c.done:
+	default:
+		close(c.done)
+	}
+	if c.conn == nil {
+		return
+	}
+	deadline := time.Now().Add(time.Second)
+	_ = c.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "session expired"),
+		deadline,
+	)
+	_ = c.conn.Close()
+}
+
 func (s *Session) broadcast(event Event) {
 	msg := Message{
 		Type:    string(event.Type),

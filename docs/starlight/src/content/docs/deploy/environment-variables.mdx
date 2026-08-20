@@ -55,6 +55,14 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SCIM_API_TOKEN` | - | Bearer token required for all SCIM API requests and outbound client operations. The SCIM service refuses to start without it in production. |
+| `SCIM_RETENTION` | `24h` | Go duration after which visitor-created SCIM users and groups are deleted, based on `updated_at`. `0` disables the reaper. After each sweep, demo users and groups are re-seeded. |
+
+## Looking Glass
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LOOKINGGLASS_SESSION_IDLE_TTL` | `30m` | Idle lifetime of an in-memory Looking Glass session, measured from last activity (`updated_at`). |
+| `LOOKINGGLASS_SESSION_MAX_TTL` | `4h` | Absolute lifetime of an in-memory Looking Glass session, measured from creation. Connected websockets are closed on eviction. |
 
 ## SSF Service
 
@@ -62,7 +70,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 |----------|---------|-------------|
 | `SSF_RECEIVER_TOKEN` | - | Bearer token the receiver accepts for event delivery. |
 | `FEDERATION_SERVICE_URL` | loopback from listen addr | On the SSF service, federation base URL for CAEP `revoke-subject`. Compose: `http://federation-service:8080`. Fly/monolith: `http://127.0.0.1:8080`. |
-| `SSF_TO_FEDERATION_TOKEN` | - | Shared bearer token; set on both SSF and federation. |
+| `SSF_TO_FEDERATION_TOKEN` | - | Shared bearer token; set on both SSF and federation. Production secret — set via `fly secrets set`, never via committed config. Without it the CAEP `session-revoked` demo hop returns 401. |
 
 ## SPIFFE Service
 

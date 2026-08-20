@@ -12,6 +12,7 @@ import (
 
 func TestLookingGlassWebSocketRequiresOwnerSubprotocol(t *testing.T) {
 	engine := NewEngine()
+	t.Cleanup(engine.Stop)
 	session, ownerToken, err := engine.CreateSession("oauth2", "client_credentials")
 	if err != nil {
 		t.Fatal(err)
@@ -48,6 +49,7 @@ func TestLookingGlassWebSocketRequiresOwnerSubprotocol(t *testing.T) {
 
 func TestSendHistoryStopsWhenClientUnregisters(t *testing.T) {
 	engine := NewEngine()
+	t.Cleanup(engine.Stop)
 	session, _, err := engine.CreateSession("oauth2", "client_credentials")
 	if err != nil {
 		t.Fatal(err)

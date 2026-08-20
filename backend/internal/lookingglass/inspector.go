@@ -6,6 +6,8 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,16 +15,100 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	defaultSessionIdleTTL = 30 * time.Minute
+	defaultSessionMaxTTL  = 4 * time.Hour
+	sessionSweepInterval  = 5 * time.Minute
+)
+
 // Engine is the main looking glass inspection engine
 type Engine struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
+	idleTTL  time.Duration
+	maxTTL   time.Duration
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 // NewEngine creates a new looking glass engine
 func NewEngine() *Engine {
-	return &Engine{
+	engine := &Engine{
 		sessions: make(map[string]*Session),
+		idleTTL:  durationFromEnv("LOOKINGGLASS_SESSION_IDLE_TTL", defaultSessionIdleTTL),
+		maxTTL:   durationFromEnv("LOOKINGGLASS_SESSION_MAX_TTL", defaultSessionMaxTTL),
+		stop:     make(chan struct{}),
+	}
+	go engine.runSessionSweeper()
+	return engine
+}
+
+// Stop ends the session sweeper. Tests call this so the goroutine cannot outlive them.
+func (e *Engine) Stop() {
+	if e == nil {
+		return
+	}
+	e.stopOnce.Do(func() {
+		close(e.stop)
+	})
+}
+
+func durationFromEnv(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func (e *Engine) runSessionSweeper() {
+	ticker := time.NewTicker(sessionSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-e.stop:
+			return
+		case now := <-ticker.C:
+			e.sweepExpired(now)
+		}
+	}
+}
+
+func (e *Engine) sweepExpired(now time.Time) {
+	type eviction struct {
+		session *Session
+		clients []*Client
+	}
+	var evictions []eviction
+
+	e.mu.Lock()
+	for id, session := range e.sessions {
+		session.mu.Lock()
+		idleExpired := now.Sub(session.UpdatedAt) >= e.idleTTL
+		maxExpired := now.Sub(session.CreatedAt) >= e.maxTTL
+		if !idleExpired && !maxExpired {
+			session.mu.Unlock()
+			continue
+		}
+		clients := make([]*Client, 0, len(session.clients))
+		for client := range session.clients {
+			clients = append(clients, client)
+		}
+		session.clients = make(map[*Client]bool)
+		session.mu.Unlock()
+		delete(e.sessions, id)
+		evictions = append(evictions, eviction{session: session, clients: clients})
+	}
+	e.mu.Unlock()
+
+	for _, item := range evictions {
+		for _, client := range item.clients {
+			client.closeForEviction()
+		}
 	}
 }
 

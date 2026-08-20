@@ -7,8 +7,15 @@ import (
 	"testing"
 )
 
-func TestSessionOwnerCapabilityAuthorizesOnlyItsSession(t *testing.T) {
+func newTestEngine(t *testing.T) *Engine {
+	t.Helper()
 	engine := NewEngine()
+	t.Cleanup(engine.Stop)
+	return engine
+}
+
+func TestSessionOwnerCapabilityAuthorizesOnlyItsSession(t *testing.T) {
+	engine := newTestEngine(t)
 	first, firstToken, err := engine.CreateSession("oauth2", "client_credentials")
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +40,7 @@ func TestSessionOwnerCapabilityAuthorizesOnlyItsSession(t *testing.T) {
 }
 
 func TestPrivateKeyJWTRegistrationClaimIsAtomicAndOneShot(t *testing.T) {
-	engine := NewEngine()
+	engine := newTestEngine(t)
 	session, ownerToken, err := engine.CreateSession("oauth2", "client_credentials")
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +71,7 @@ func TestPrivateKeyJWTRegistrationClaimIsAtomicAndOneShot(t *testing.T) {
 }
 
 func TestPrivateKeyJWTRegistrationRequiresActiveMatchingSession(t *testing.T) {
-	engine := NewEngine()
+	engine := newTestEngine(t)
 	wrongFlow, wrongFlowToken, err := engine.CreateSession("oauth2", "authorization_code")
 	if err != nil {
 		t.Fatal(err)
