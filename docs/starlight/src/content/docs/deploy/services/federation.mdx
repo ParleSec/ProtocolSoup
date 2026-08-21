@@ -32,6 +32,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 - `POST /oauth2/demo/caep/revoke-subject` (SSF CAEP session-revoked hook; bearer `SSF_TO_FEDERATION_TOKEN`)
 - `/oauth2/token` optionally accepts a `DPoP` proof header (RFC 9449), binding the issued access token (and, for `authorization_code` public clients, the refresh token) to the proof's key
 - Client credentials tokens with `ssf.read` / `ssf.manage` last 900 seconds and carry `aud` = `SSF_RESOURCE` (default `SHOWCASE_BASE_URL`)
+- Seeded confidential client `ssf-stream-client` (`client_credentials`, `ssf.read` / `ssf.manage`); secret from `SSF_STREAM_CLIENT_SECRET` or auto-generated, listed at `GET /oauth2/demo/clients`
 
 ### OIDC
 
@@ -69,6 +70,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |
 | `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
+| `SSF_STREAM_CLIENT_SECRET` | No | auto-generated | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |

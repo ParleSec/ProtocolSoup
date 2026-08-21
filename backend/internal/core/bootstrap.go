@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
@@ -12,7 +11,6 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
-	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
 // BootstrapOptions controls which shared dependencies are initialized.
@@ -67,7 +65,6 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		}
 		idp = mockidp.NewMockIdP(keySet)
 		idp.SetIssuer(cfg.BaseURL)
-		registerSSFConformanceClients(idp)
 		log.Printf("Mock Identity Provider initialized with issuer: %s", cfg.BaseURL)
 	}
 
@@ -151,32 +148,4 @@ func validateProductionBaseURL(cfg *Config) error {
 		return fmt.Errorf("SHOWCASE_BASE_URL must be a pathless HTTPS origin in production")
 	}
 	return nil
-}
-
-// registerSSFConformanceClients provisions confidential client_credentials
-// clients for the CAEP Interop transmitter plan. A secretless confidential
-// client is never registered; both id and secret must be supplied.
-func registerSSFConformanceClients(idp *mockidp.MockIdP) {
-	if idp == nil {
-		return
-	}
-	register := func(idEnv, secretEnv, name string) {
-		id := strings.TrimSpace(os.Getenv(idEnv))
-		secret := os.Getenv(secretEnv)
-		if id == "" || secret == "" {
-			return
-		}
-		idp.RegisterClient(&models.Client{
-			ID:                      id,
-			Secret:                  secret,
-			Name:                    name,
-			GrantTypes:              []string{"client_credentials"},
-			Scopes:                  []string{"ssf.read", "ssf.manage"},
-			Public:                  false,
-			TokenEndpointAuthMethod: "client_secret_post",
-		})
-		log.Printf("Registered SSF Stream Management client %s", id)
-	}
-	register("SSF_CONFORMANCE_CLIENT_ID", "SSF_CONFORMANCE_CLIENT_SECRET", "SSF CAEP Interop transmitter")
-	register("SSF_CONFORMANCE_CLIENT_ID_2", "SSF_CONFORMANCE_CLIENT_SECRET_2", "SSF CAEP Interop isolation")
 }

@@ -115,6 +115,8 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 
 ### Stream Management (SSF §8.1.1)
 
+When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` with `ssf.read` or `ssf.manage`, or a Looking Glass session header. Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/ssf/stream` | POST | Create a new stream (**201**; nested `delivery`; default method poll if omitted) |

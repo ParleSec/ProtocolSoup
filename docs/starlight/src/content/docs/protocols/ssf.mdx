@@ -98,7 +98,7 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 - Stream configuration: nested `delivery: { method, endpoint_url }`, `events_supported` vs `events_delivered`
 - Discovery: `GET /.well-known/ssf-configuration`, `spec_version` `"1_0"`, `issuer` identical to SET `iss`, `authorization_schemes` includes `urn:ietf:rfc:6749`, `default_subjects` `"ALL"`
 - Stream management is `stream_id` addressed. `GET /ssf/stream` without `stream_id` returns that Receiver's list (`[]` when none). Create is **201**. Delete is **204**.
-- Stream Management is an OAuth 2.0 resource server when `SSF_AS_JWKS_URI` is set: `ssf.read` / `ssf.manage`, bearer header only (no query `access_token`)
+- Stream Management is an OAuth 2.0 resource server when `SSF_AS_JWKS_URI` is set: `ssf.read` / `ssf.manage`, bearer header only (no query `access_token`). The federation AS seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
 - SET structure: `iss`, `iat`, `jti`, `aud`, `events` (exactly one event), top-level `sub_id`, no JWT `sub` or `exp`, `typ=secevent+jwt`, RS256
 - Push delivery: `Content-Type: application/secevent+jwt`, signature, **202** (not 200); push URL is the Receiver's `delivery.endpoint_url`
 - Poll delivery: `sets` map keyed by `jti`; unacknowledged SETs retransmit; `maxEvents: 0` is ack-only; `acks` / `setErrs` on the next poll

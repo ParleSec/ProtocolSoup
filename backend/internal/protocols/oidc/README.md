@@ -375,6 +375,7 @@ This prevents:
 | `MOCKIDP_ADMIN_PASSWORD` | Admin user password | (auto-generated) |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | demo-app client secret | (auto-generated) |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | machine-client secret | (auto-generated) |
+| `SSF_STREAM_CLIENT_SECRET` | ssf-stream-client secret | (auto-generated) |
 
 ### Registered Clients
 
@@ -383,6 +384,7 @@ This prevents:
 | `public-app` | Public | authorization_code, refresh_token |
 | `demo-app` | Confidential | authorization_code, refresh_token |
 | `machine-client` | Confidential | client_credentials |
+| `ssf-stream-client` | Confidential | client_credentials (`ssf.read`, `ssf.manage`) |
 
 ## Discovery Document
 

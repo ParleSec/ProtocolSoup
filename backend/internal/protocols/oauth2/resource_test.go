@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
-	"github.com/ParleSec/ProtocolSoup/pkg/models"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -292,18 +292,15 @@ func TestProtectedResourceRejectsMissingAuthorization(t *testing.T) {
 
 func TestSSFClientCredentialsIssuesShortLivedResourceAudience(t *testing.T) {
 	server := newOAuthAssertionTestServer(t)
-	server.idp.RegisterClient(&models.Client{
-		ID:         "ssf-manage-client",
-		Secret:     "ssf-manage-secret",
-		Name:       "SSF Stream Management",
-		GrantTypes: []string{"client_credentials"},
-		Scopes:     []string{"ssf.read", "ssf.manage"},
-	})
+	client, exists := server.idp.GetClient(mockidp.SSFStreamClientID)
+	if !exists || client == nil || client.Secret == "" {
+		t.Fatal("seeded ssf-stream-client is required for Stream Management tokens")
+	}
 
 	tokenRequest, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/token", strings.NewReader(url.Values{
 		"grant_type":    {"client_credentials"},
-		"client_id":     {"ssf-manage-client"},
-		"client_secret": {"ssf-manage-secret"},
+		"client_id":     {mockidp.SSFStreamClientID},
+		"client_secret": {client.Secret},
 		"scope":         {"ssf.manage"},
 	}.Encode()))
 	if err != nil {

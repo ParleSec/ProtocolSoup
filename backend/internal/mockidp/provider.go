@@ -21,23 +21,29 @@ import (
 // 60 seconds (stricter than RFC 6749's recommended 10 minutes).
 const AuthorizationCodeTTL = 60 * time.Second
 
+// SSFStreamClientID is the seeded confidential client for SSF Stream
+// Management. It is always registered with client_credentials and the
+// ssf.read / ssf.manage scopes. Pin SSF_STREAM_CLIENT_SECRET in production
+// so the secret survives restarts; otherwise it is generated at process start.
+const SSFStreamClientID = "ssf-stream-client"
+
 // MockIdP provides a mock identity provider for demonstrations
 type MockIdP struct {
-	users          map[string]*models.User
-	clients        map[string]*models.Client
-	authCodes      map[string]*models.AuthorizationCode
-	sessions       map[string]*models.Session
-	refreshTokens  map[string]*models.RefreshToken
-	revokedTokens  map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
-	usedCodes      map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
-	pushedRequests map[string]*PushedAuthorizationRequest
+	users            map[string]*models.User
+	clients          map[string]*models.Client
+	authCodes        map[string]*models.AuthorizationCode
+	sessions         map[string]*models.Session
+	refreshTokens    map[string]*models.RefreshToken
+	revokedTokens    map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
+	usedCodes        map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
+	pushedRequests   map[string]*PushedAuthorizationRequest
 	accessJTIsByUser map[string][]string
-	keySet         *crypto.KeySet
-	jwtService     *crypto.JWTService
-	issuer         string
-	defaultUserID  string
-	pairwiseSalt   []byte
-	mu             sync.RWMutex
+	keySet           *crypto.KeySet
+	jwtService       *crypto.JWTService
+	issuer           string
+	defaultUserID    string
+	pairwiseSalt     []byte
+	mu               sync.RWMutex
 }
 
 // usedAuthorizationCode records an authorization code that has already been
@@ -54,16 +60,16 @@ type usedAuthorizationCode struct {
 // PushedAuthorizationRequest is the validated RFC 9126 request state shared
 // between the OID4VCI PAR endpoint and the OIDC authorization endpoint.
 type PushedAuthorizationRequest struct {
-	RequestURI                     string
-	ClientID                       string
-	RedirectURI                    string
-	ResponseType                   string
-	Scope                          string
-	State                          string
-	Nonce                          string
-	CodeChallenge                  string
-	CodeChallengeMethod            string
-	CredentialConfigurationIDs     []string
+	RequestURI                 string
+	ClientID                   string
+	RedirectURI                string
+	ResponseType               string
+	Scope                      string
+	State                      string
+	Nonce                      string
+	CodeChallenge              string
+	CodeChallengeMethod        string
+	CredentialConfigurationIDs []string
 	// AuthorizationDetailsUsed is true when the wallet supplied RFC 9396
 	// authorization_details in the PAR. Scope-only OID4VCI requests leave this
 	// false so the token endpoint does not invent an authorization_details
@@ -87,18 +93,18 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		panic("generate pairwise subject salt: " + err.Error())
 	}
 	idp := &MockIdP{
-		users:          make(map[string]*models.User),
-		clients:        make(map[string]*models.Client),
-		authCodes:      make(map[string]*models.AuthorizationCode),
-		sessions:       make(map[string]*models.Session),
-		refreshTokens:  make(map[string]*models.RefreshToken),
+		users:            make(map[string]*models.User),
+		clients:          make(map[string]*models.Client),
+		authCodes:        make(map[string]*models.AuthorizationCode),
+		sessions:         make(map[string]*models.Session),
+		refreshTokens:    make(map[string]*models.RefreshToken),
 		revokedTokens:    make(map[string]time.Time),              // RFC 7009: Revoked token tracking
 		usedCodes:        make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
 		pushedRequests:   make(map[string]*PushedAuthorizationRequest),
 		accessJTIsByUser: make(map[string][]string),
-		keySet:         keySet,
-		issuer:         "http://localhost:8080",
-		pairwiseSalt:   pairwiseSalt,
+		keySet:           keySet,
+		issuer:           "http://localhost:8080",
+		pairwiseSalt:     pairwiseSalt,
 	}
 
 	idp.jwtService = crypto.NewJWTService(keySet, idp.issuer)
@@ -214,6 +220,7 @@ func (idp *MockIdP) initDemoData() {
 	adminPassword := envOrRandom("MOCKIDP_ADMIN_PASSWORD", 24)
 	demoClientSecret := envOrRandom("MOCKIDP_DEMO_CLIENT_SECRET", 32)
 	machineClientSecret := envOrRandom("MOCKIDP_MACHINE_CLIENT_SECRET", 32)
+	ssfStreamClientSecret := envOrRandom("SSF_STREAM_CLIENT_SECRET", 32)
 
 	// Demo users
 	alice := &models.User{
@@ -378,6 +385,17 @@ func (idp *MockIdP) initDemoData() {
 		RedirectURIs: []string{},
 		GrantTypes:   []string{"client_credentials"},
 		Scopes:       []string{"api:read", "api:write"},
+		Public:       false,
+		CreatedAt:    time.Now(),
+	}
+
+	idp.clients[SSFStreamClientID] = &models.Client{
+		ID:           SSFStreamClientID,
+		Secret:       ssfStreamClientSecret,
+		Name:         "SSF Stream Management Client",
+		RedirectURIs: []string{},
+		GrantTypes:   []string{"client_credentials"},
+		Scopes:       []string{"ssf.read", "ssf.manage"},
 		Public:       false,
 		CreatedAt:    time.Now(),
 	}
