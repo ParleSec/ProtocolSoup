@@ -64,10 +64,8 @@ __debug_bin
 *.db*
 *.sqlite
 
-# Temporary
-tmp/
-temp/
-.tmp/
+# Local OIDF / protocol findings logs (keep on disk, do not commit)
+docs/conformance/
 
 # SPIFFE bootstrap private keys (stored in Fly secrets)
 docker/spire/server-fly/bootstrap-ca.key
