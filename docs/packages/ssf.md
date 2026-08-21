@@ -34,8 +34,6 @@
 | `SSF_AS_ISSUER` | No | `(empty)` | Authorization server `iss` for Stream Management access tokens. Required with `SSF_AS_JWKS_URI` when the Transmitter acts as an OAuth resource server. |
 | `SSF_AS_JWKS_URI` | No | `(empty)` | JWKS URL used to verify those access tokens. When set, Stream Management requires `Authorization: Bearer` or a Looking Glass session. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | JWT `aud` the Transmitter expects. Federation issues `ssf.read` / `ssf.manage` tokens with this audience. |
-| `SSF_CONFORMANCE_CLIENT_ID` | No | `(empty)` | Confidential client id registered at the main AS for Stream Management. Ignored unless `SSF_CONFORMANCE_CLIENT_SECRET` is also set. |
-| `SSF_CONFORMANCE_CLIENT_SECRET` | No | `(empty)` | Client secret for that confidential client. Never register a secretless confidential client. |
 | `FEDERATION_SERVICE_URL` | No | loopback from `SHOWCASE_LISTEN_ADDR` | Federation base URL for post-CAEP `revoke-subject` |
 | `SSF_TO_FEDERATION_TOKEN` | No | `(empty)` | Bearer token shared with federation for that demo API. Production secret — set via `fly secrets set`, Without it the CAEP `session-revoked` demo hop returns 401. |
 
@@ -122,7 +120,7 @@ services:
 ## Security Hardening
 
 - Set `SSF_RECEIVER_TOKEN` explicitly outside local demos.
-- Set `SSF_AS_ISSUER` and `SSF_AS_JWKS_URI` when Stream Management is exposed beyond Looking Glass. Tokens are JWTs from the main authorization server (`ssf.read` / `ssf.manage`, client credentials, 900s).
+- Set `SSF_AS_ISSUER` and `SSF_AS_JWKS_URI` when Stream Management is exposed beyond Looking Glass. Tokens are JWTs from the main authorization server (`ssf.read` / `ssf.manage`, client credentials, 900s). Federation seeds confidential client `ssf-stream-client` for those scopes; pin `SSF_STREAM_CLIENT_SECRET` when the secret must survive restarts.
 - Set `SSF_TO_FEDERATION_TOKEN` on both `ssf-service` and `federation-service`.
 - Keep `8081` receiver port internal unless external push testing requires exposure.
 - Restrict `SHOWCASE_CORS_ORIGINS` to trusted frontend origins.
@@ -132,6 +130,7 @@ services:
 
 - **No push events are processed:** verify receiver token alignment and `SSF_RECEIVER_PORT`.
 - **Looking Glass appears empty:** mint a session with `POST /api/protocols/ssf/demo/ssf-stream-lab` and send `X-Looking-Glass-Session` on `/ssf/*` requests. The engine drops events for unknown sessions. Fire event mutates RP state; Verify stream does not.
+- **Stream Management returns 401 without a Looking Glass session:** obtain a bearer token from federation using seeded client `ssf-stream-client` (`GET /oauth2/demo/clients`) with scope `ssf.read` or `ssf.manage`.
 - **State resets after restart:** mount persistent storage and set `SSF_DATA_DIR`.
 - **Gateway path issues:** confirm `SSF_SERVICE_URL` points to this service in gateway config.
 

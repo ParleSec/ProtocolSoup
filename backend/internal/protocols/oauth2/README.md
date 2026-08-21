@@ -442,6 +442,7 @@ The authorization server advertises `response_types_supported: ["code"]` and `gr
 | `SHOWCASE_DPOP_NONCE_REQUIRED` | Enables the RFC 9449 §8 nonce challenge at `/oauth2/token` | `false` |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | demo-app client secret | (auto-generated) |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | machine-client secret | (auto-generated) |
+| `SSF_STREAM_CLIENT_SECRET` | ssf-stream-client secret | (auto-generated) |
 
 ### Registered Clients
 
@@ -450,6 +451,7 @@ The authorization server advertises `response_types_supported: ["code"]` and `gr
 | `public-app` | Public | authorization_code, refresh_token | - |
 | `demo-app` | Confidential | authorization_code, refresh_token | (env or auto) |
 | `machine-client` | Confidential | client_credentials | (env or auto) |
+| `ssf-stream-client` | Confidential | client_credentials (`ssf.read`, `ssf.manage`) | (env or auto) |
 
 ## Development
 
@@ -473,6 +475,12 @@ SECRET=$(curl -s http://localhost:8080/oauth2/demo/clients | jq -r '.clients[] |
 curl -X POST http://localhost:8080/oauth2/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=machine-client&client_secret=$SECRET&scope=read"
+
+# SSF Stream Management (seeded ssf-stream-client)
+SSF_SECRET=$(curl -s http://localhost:8080/oauth2/demo/clients | jq -r '.clients[] | select(.id=="ssf-stream-client") | .secret')
+curl -X POST http://localhost:8080/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=ssf-stream-client&client_secret=$SSF_SECRET&scope=ssf.manage"
 
 # Introspect token
 curl -X POST http://localhost:8080/oauth2/introspect \

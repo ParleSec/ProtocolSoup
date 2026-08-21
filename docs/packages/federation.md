@@ -39,9 +39,8 @@
 | `MOCKIDP_ADMIN_PASSWORD` | No | `(auto-generated)` | Demo user password override |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | No | `(auto-generated)` | OAuth/OIDC demo-app client secret override |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | No | `(auto-generated)` | OAuth machine-client secret override |
+| `SSF_STREAM_CLIENT_SECRET` | No | `(auto-generated)` | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
-| `SSF_CONFORMANCE_CLIENT_ID` | No | `(empty)` | Optional confidential Stream Management client. Requires `SSF_CONFORMANCE_CLIENT_SECRET`. |
-| `SSF_CONFORMANCE_CLIENT_SECRET` | No | `(empty)` | Matching secret. A secretless confidential client is never registered. |
 
 ### Storage And Volumes
 
@@ -165,6 +164,7 @@ services:
 
 - **OIDC discovery issuer mismatch:** ensure `SHOWCASE_BASE_URL` matches the URL clients call.
 - **Login succeeds but client exchange fails:** verify demo client secret via `/oauth2/demo/clients`.
+- **SSF Stream Management returns 401 with a bearer token:** confirm the token was issued for `ssf-stream-client` with `ssf.read` or `ssf.manage` (`GET /oauth2/demo/clients`) and that `SSF_AS_JWKS_URI` matches this authorization server.
 - **OID4VP result not found after restart:** configure persistent `SHOWCASE_DATA_DIR`.
 - **Browser CORS errors:** check `SHOWCASE_CORS_ORIGINS` includes the frontend origin.
 
