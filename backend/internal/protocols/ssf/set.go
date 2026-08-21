@@ -47,6 +47,7 @@ type EventPayload struct {
 	OldValue         string                 `json:"old-value,omitempty"`
 	Claims           map[string]interface{} `json:"claims,omitempty"` // CAEP §3.2: changed claims
 	State            string                 `json:"state,omitempty"`  // SSF §7: verification event state
+	StreamStatus     string                 `json:"status,omitempty"` // SSF §8.1.5 stream-updated
 }
 
 // SETEncoder handles encoding security events into SET tokens
@@ -93,9 +94,13 @@ func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) 
 	// MUST NOT include a nested subject claim. Verification (SSF §8.1.4.1)
 	// is only {state} inside the event object plus opaque sub_id = stream_id.
 	eventPayload := EventPayload{}
-	if event.EventType == EventTypeVerification {
+	switch event.EventType {
+	case EventTypeVerification:
 		eventPayload.State = event.State
-	} else {
+	case EventTypeStreamUpdated:
+		eventPayload.StreamStatus = event.StreamStatus
+		eventPayload.Reason = event.Reason
+	default:
 		if !event.EventTimestamp.IsZero() {
 			eventPayload.EventTimestamp = event.EventTimestamp.Unix()
 		}
@@ -209,6 +214,21 @@ func (d *SETDecoder) Decode(tokenString string) (*DecodedSET, error) {
 	claims, ok := token.Claims.(*SETClaims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid SET claims")
+	}
+
+	// SSF §4.1.2 / §4.1.3: the JWT sub claim MUST NOT be present.
+	if claims.Subject != "" {
+		return nil, fmt.Errorf("SET MUST NOT contain JWT sub (SSF §4.1.2)")
+	}
+	// SSF §4.1.7 / §4.1.3: the JWT exp claim MUST NOT be present.
+	if claims.ExpiresAt != nil {
+		return nil, fmt.Errorf("SET MUST NOT contain JWT exp (SSF §4.1.7)")
+	}
+	if claims.SubjectID == nil {
+		return nil, fmt.Errorf("SET MUST contain top-level sub_id (SSF §3.1)")
+	}
+	if len(claims.Events) != 1 {
+		return nil, fmt.Errorf("SET events claim MUST contain exactly one event")
 	}
 
 	// Validate issuer

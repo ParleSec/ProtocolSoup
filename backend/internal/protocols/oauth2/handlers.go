@@ -1036,11 +1036,19 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		// RFC 9449 Section 4.1: bind the token to the presented proof key.
 		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
 	}
+	audience := clientID
+	ttl := time.Hour
+	expiresIn := 3600
+	if grantsSSFScope(scope) {
+		audience = p.ssfResourceAudience()
+		ttl = 15 * time.Minute
+		expiresIn = 900
+	}
 	accessToken, err := jwtService.CreateAccessToken(
 		clientID, // Subject is the client itself
-		clientID,
+		audience,
 		scope,
-		time.Hour,
+		ttl,
 		accessTokenClaims,
 	)
 	if err != nil {
@@ -1056,7 +1064,7 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 	tokenResponse := models.TokenResponse{
 		AccessToken: accessToken,
 		TokenType:   tokenType,
-		ExpiresIn:   3600,
+		ExpiresIn:   expiresIn,
 		Scope:       scope,
 	}
 
@@ -1067,7 +1075,7 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 		"to":                "Client",
 		"access_token":      tokenResponse.AccessToken,
 		"token_type":        tokenType,
-		"expires_in":        3600,
+		"expires_in":        expiresIn,
 		"scope":             scope,
 		"scopes":            strings.Fields(scope),
 		"has_refresh_token": false,
@@ -1436,6 +1444,22 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Pragma", "no-cache")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
+}
+
+func grantsSSFScope(scope string) bool {
+	for _, item := range strings.Fields(scope) {
+		if item == "ssf.read" || item == "ssf.manage" {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Plugin) ssfResourceAudience() string {
+	if v := strings.TrimSpace(os.Getenv("SSF_RESOURCE")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return strings.TrimRight(p.baseURL, "/")
 }
 
 // RFC 6749 Section 5.2 error URIs - links to relevant documentation

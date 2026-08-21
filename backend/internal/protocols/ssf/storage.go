@@ -62,6 +62,11 @@ func (s *Storage) initSchema() error {
 		delivery_endpoint TEXT,
 		bearer_token TEXT,
 		status TEXT NOT NULL DEFAULT 'enabled',
+		receiver_id TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		authorization_header TEXT NOT NULL DEFAULT '',
+		last_verification_at DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -140,6 +145,13 @@ func (s *Storage) initSchema() error {
 
 	// Migration: add session_id column to events if it doesn't already exist (for pre-existing DBs)
 	_, _ = s.db.Exec(`ALTER TABLE events ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE streams ADD COLUMN receiver_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE streams ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE streams ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE streams ADD COLUMN authorization_header TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE streams ADD COLUMN last_verification_at DATETIME`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_streams_receiver ON streams(receiver_id)`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_streams_session ON streams(session_id)`)
 
 	return nil
 }
@@ -148,36 +160,43 @@ func (s *Storage) initSchema() error {
 // Wire JSON follows OpenID SSF 1.0 Final §8.1.1 (nested delivery, distinct
 // events_supported / events_delivered). Internal fields stay unexported-on-wire.
 type Stream struct {
-	ID               string    `json:"stream_id"`
-	Issuer           string    `json:"iss"`
-	Audience         []string  `json:"aud"`
-	EventsSupported  []string  `json:"-"`
-	EventsRequested  []string  `json:"events_requested"`
-	DeliveryMethod   string    `json:"-"`
-	DeliveryEndpoint string    `json:"-"`
-	BearerToken      string    `json:"-"`
-	Status           string    `json:"status"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID                  string
+	Issuer              string
+	Audience            []string
+	EventsSupported     []string
+	EventsRequested     []string
+	DeliveryMethod      string
+	DeliveryEndpoint    string
+	BearerToken         string
+	AuthorizationHeader string
+	Status              string
+	ReceiverID          string
+	SessionID           string
+	Description         string
+	MinVerificationSecs int
+	LastVerificationAt  *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // StreamDelivery is the SSF §8.1.1 nested delivery object.
 type StreamDelivery struct {
-	Method      string `json:"method"`
-	EndpointURL string `json:"endpoint_url,omitempty"`
+	Method              string `json:"method"`
+	EndpointURL         string `json:"endpoint_url,omitempty"`
+	AuthorizationHeader string `json:"authorization_header,omitempty"`
 }
 
 type streamWire struct {
-	StreamID         string         `json:"stream_id"`
-	Iss              string         `json:"iss"`
-	Aud              []string       `json:"aud"`
-	EventsSupported  []string       `json:"events_supported"`
-	EventsRequested  []string       `json:"events_requested"`
-	EventsDelivered  []string       `json:"events_delivered"`
-	Delivery         StreamDelivery `json:"delivery"`
-	Status           string         `json:"status"`
-	CreatedAt        time.Time      `json:"created_at,omitempty"`
-	UpdatedAt        time.Time      `json:"updated_at,omitempty"`
+	StreamID                string         `json:"stream_id"`
+	Iss                     string         `json:"iss"`
+	Aud                     []string       `json:"aud"`
+	EventsSupported         []string       `json:"events_supported"`
+	EventsRequested         []string       `json:"events_requested"`
+	EventsDelivered         []string       `json:"events_delivered"`
+	Delivery                StreamDelivery `json:"delivery"`
+	Status                  string         `json:"status"`
+	Description             string         `json:"description,omitempty"`
+	MinVerificationInterval int            `json:"min_verification_interval,omitempty"`
 }
 
 func eventsDelivered(supported, requested []string) []string {
@@ -203,12 +222,13 @@ func (s Stream) MarshalJSON() ([]byte, error) {
 		EventsRequested: s.EventsRequested,
 		EventsDelivered: eventsDelivered(s.EventsSupported, s.EventsRequested),
 		Delivery: StreamDelivery{
-			Method:      s.DeliveryMethod,
-			EndpointURL: s.DeliveryEndpoint,
+			Method:              s.DeliveryMethod,
+			EndpointURL:         s.DeliveryEndpoint,
+			AuthorizationHeader: s.AuthorizationHeader,
 		},
-		Status:    s.Status,
-		CreatedAt: s.CreatedAt,
-		UpdatedAt: s.UpdatedAt,
+		Status:                  s.Status,
+		Description:             s.Description,
+		MinVerificationInterval: s.MinVerificationSecs,
 	})
 }
 
@@ -224,9 +244,10 @@ func (s *Stream) UnmarshalJSON(data []byte) error {
 	s.EventsRequested = wire.EventsRequested
 	s.DeliveryMethod = wire.Delivery.Method
 	s.DeliveryEndpoint = wire.Delivery.EndpointURL
+	s.AuthorizationHeader = wire.Delivery.AuthorizationHeader
 	s.Status = wire.Status
-	s.CreatedAt = wire.CreatedAt
-	s.UpdatedAt = wire.UpdatedAt
+	s.Description = wire.Description
+	s.MinVerificationSecs = wire.MinVerificationInterval
 	return nil
 }
 
@@ -250,66 +271,91 @@ func (s *Storage) CreateStream(ctx context.Context, stream Stream) error {
 	requested, _ := json.Marshal(stream.EventsRequested)
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO streams (id, issuer, audience, events_supported, events_requested, 
-			delivery_method, delivery_endpoint, bearer_token, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO streams (id, issuer, audience, events_supported, events_requested,
+			delivery_method, delivery_endpoint, bearer_token, status,
+			receiver_id, session_id, description, authorization_header)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		stream.ID, stream.Issuer, string(audience), string(supported), string(requested),
-		stream.DeliveryMethod, stream.DeliveryEndpoint, stream.BearerToken, stream.Status)
+		stream.DeliveryMethod, stream.DeliveryEndpoint, stream.BearerToken, stream.Status,
+		stream.ReceiverID, stream.SessionID, stream.Description, stream.AuthorizationHeader)
 	return err
 }
 
-// GetStream retrieves a stream by ID
-func (s *Storage) GetStream(ctx context.Context, streamID string) (*Stream, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT id, issuer, audience, events_supported, events_requested, 
-			delivery_method, delivery_endpoint, COALESCE(bearer_token, ''), status, created_at, updated_at
-		FROM streams WHERE id = ?`, streamID)
+const streamSelectCols = `id, issuer, audience, events_supported, events_requested,
+	delivery_method, delivery_endpoint, COALESCE(bearer_token, ''), status, created_at, updated_at,
+	COALESCE(receiver_id, ''), COALESCE(session_id, ''), COALESCE(description, ''),
+	COALESCE(authorization_header, ''), last_verification_at`
 
+func scanStream(scanner interface {
+	Scan(dest ...any) error
+}) (*Stream, error) {
 	var stream Stream
 	var audience, supported, requested string
-	err := row.Scan(&stream.ID, &stream.Issuer, &audience, &supported, &requested,
+	var lastVerify sql.NullTime
+	err := scanner.Scan(&stream.ID, &stream.Issuer, &audience, &supported, &requested,
 		&stream.DeliveryMethod, &stream.DeliveryEndpoint, &stream.BearerToken, &stream.Status,
-		&stream.CreatedAt, &stream.UpdatedAt)
+		&stream.CreatedAt, &stream.UpdatedAt,
+		&stream.ReceiverID, &stream.SessionID, &stream.Description, &stream.AuthorizationHeader,
+		&lastVerify)
 	if err != nil {
 		return nil, err
 	}
-
 	_ = json.Unmarshal([]byte(audience), &stream.Audience)
 	_ = json.Unmarshal([]byte(supported), &stream.EventsSupported)
 	_ = json.Unmarshal([]byte(requested), &stream.EventsRequested)
-
+	if lastVerify.Valid {
+		stream.LastVerificationAt = &lastVerify.Time
+	}
 	return &stream, nil
 }
 
-// ListStreams returns every stored stream (SSF §8.1.1.2 GET without stream_id).
-func (s *Storage) ListStreams(ctx context.Context) ([]Stream, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, issuer, audience, events_supported, events_requested,
-			delivery_method, delivery_endpoint, COALESCE(bearer_token, ''), status, created_at, updated_at
-		FROM streams ORDER BY created_at ASC`)
+// GetStream retrieves a stream by ID.
+func (s *Storage) GetStream(ctx context.Context, streamID string) (*Stream, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+streamSelectCols+` FROM streams WHERE id = ?`, streamID)
+	return scanStream(row)
+}
+
+// GetStreamByID is the spec-facing lookup ([SSF] §8.1.1).
+func (s *Storage) GetStreamByID(ctx context.Context, streamID string) (*Stream, error) {
+	return s.GetStream(ctx, streamID)
+}
+
+func (s *Storage) listStreams(ctx context.Context, where string, args ...any) ([]Stream, error) {
+	query := `SELECT ` + streamSelectCols + ` FROM streams`
+	if where != "" {
+		query += " WHERE " + where
+	}
+	query += " ORDER BY created_at ASC"
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var streams []Stream
+	streams := []Stream{}
 	for rows.Next() {
-		var stream Stream
-		var audience, supported, requested string
-		if err := rows.Scan(&stream.ID, &stream.Issuer, &audience, &supported, &requested,
-			&stream.DeliveryMethod, &stream.DeliveryEndpoint, &stream.BearerToken, &stream.Status,
-			&stream.CreatedAt, &stream.UpdatedAt); err != nil {
+		stream, err := scanStream(rows)
+		if err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(audience), &stream.Audience)
-		_ = json.Unmarshal([]byte(supported), &stream.EventsSupported)
-		_ = json.Unmarshal([]byte(requested), &stream.EventsRequested)
-		streams = append(streams, stream)
-	}
-	if streams == nil {
-		streams = []Stream{}
+		streams = append(streams, *stream)
 	}
 	return streams, rows.Err()
+}
+
+// ListStreams returns every stored stream. Prefer ListStreamsForReceiver on spec endpoints.
+func (s *Storage) ListStreams(ctx context.Context) ([]Stream, error) {
+	return s.listStreams(ctx, "")
+}
+
+// ListStreamsForReceiver returns streams owned by receiverID ([SSF] §8.1.1.2).
+func (s *Storage) ListStreamsForReceiver(ctx context.Context, receiverID string) ([]Stream, error) {
+	return s.listStreams(ctx, "receiver_id = ?", receiverID)
+}
+
+// ListStreamsForSession returns streams tagged with a Looking Glass session.
+func (s *Storage) ListStreamsForSession(ctx context.Context, sessionID string) ([]Stream, error) {
+	return s.listStreams(ctx, "session_id = ?", sessionID)
 }
 
 // GetDefaultStream gets or creates a default stream for the sandbox
@@ -329,6 +375,7 @@ func (s *Storage) GetDefaultStream(ctx context.Context, issuer string) (*Stream,
 		DeliveryMethod:   DeliveryMethodPush,
 		DeliveryEndpoint: issuer + "/ssf/push",
 		Status:           StreamStatusEnabled,
+		ReceiverID:       "anonymous",
 	}
 
 	if err := s.CreateStream(ctx, defaultStream); err != nil {
@@ -348,10 +395,21 @@ func (s *Storage) UpdateStream(ctx context.Context, stream Stream) error {
 		UPDATE streams SET 
 			audience = ?, events_supported = ?, events_requested = ?,
 			delivery_method = ?, delivery_endpoint = ?, bearer_token = ?, status = ?,
+			receiver_id = ?, session_id = ?, description = ?, authorization_header = ?,
 			updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		string(audience), string(supported), string(requested),
-		stream.DeliveryMethod, stream.DeliveryEndpoint, stream.BearerToken, stream.Status, stream.ID)
+		stream.DeliveryMethod, stream.DeliveryEndpoint, stream.BearerToken, stream.Status,
+		stream.ReceiverID, stream.SessionID, stream.Description, stream.AuthorizationHeader,
+		stream.ID)
+	return err
+}
+
+// RecordVerification stamps last_verification_at for min_verification_interval.
+func (s *Storage) RecordVerification(ctx context.Context, streamID string, at time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE streams SET last_verification_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		at, streamID)
 	return err
 }
 
@@ -599,7 +657,7 @@ func (s *Storage) CleanupSecurityStates(ctx context.Context, maxAge time.Duratio
 	res, err := s.db.ExecContext(ctx, `
 		DELETE FROM security_states
 		WHERE stream_id IN (
-			SELECT id FROM streams WHERE id LIKE 'session-%' AND updated_at < ?
+			SELECT id FROM streams WHERE session_id != '' AND updated_at < ?
 		)`, cutoff)
 	if err != nil {
 		return 0, err
@@ -843,27 +901,19 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 	return nil
 }
 
-// GetSessionStream gets or creates a stream for a specific session.
+// GetSessionStream gets or creates a stream for a Looking Glass session.
 // deliveryEndpoint and bearerToken configure push delivery to the standalone receiver.
 func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer, deliveryEndpoint, bearerToken string) (*Stream, error) {
-	streamID := "session-" + sessionID
-
-	stream, err := s.GetStream(ctx, streamID)
-	if err == nil {
-		// Ensure the delivery endpoint stays in sync with the current configuration.
-		// Existing session streams may point to a stale endpoint if the backend
-		// was restarted with updated routing.
-		if stream.DeliveryEndpoint != deliveryEndpoint || stream.BearerToken != bearerToken {
-			stream.DeliveryEndpoint = deliveryEndpoint
-			stream.BearerToken = bearerToken
-			_ = s.UpdateStream(ctx, *stream)
-		}
-		return stream, nil
+	existing, err := s.ListStreamsForSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		return &existing[0], nil
 	}
 
-	// Create session-specific stream pointing to the standalone receiver
 	sessionStream := Stream{
-		ID:               streamID,
+		ID:               generateStreamID(),
 		Issuer:           issuer,
 		Audience:         []string{issuer + "/receiver"},
 		EventsSupported:  GetSupportedEventURIs(),
@@ -872,6 +922,8 @@ func (s *Storage) GetSessionStream(ctx context.Context, sessionID, issuer, deliv
 		DeliveryEndpoint: deliveryEndpoint,
 		BearerToken:      bearerToken,
 		Status:           StreamStatusEnabled,
+		ReceiverID:       "session:" + sessionID,
+		SessionID:        sessionID,
 	}
 
 	if err := s.CreateStream(ctx, sessionStream); err != nil {
@@ -945,15 +997,14 @@ func (s *Storage) CleanupOldSessions(ctx context.Context, maxAge time.Duration) 
 	var count int
 	row := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM streams 
-		WHERE id LIKE 'session-%' AND updated_at < ?`, cutoff)
+		WHERE session_id != '' AND updated_at < ?`, cutoff)
 	if err := row.Scan(&count); err != nil {
 		return 0, err
 	}
 
-	// Delete old session streams (cascades to subjects and events)
 	_, err := s.db.ExecContext(ctx, `
 		DELETE FROM streams 
-		WHERE id LIKE 'session-%' AND updated_at < ?`, cutoff)
+		WHERE session_id != '' AND updated_at < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}

@@ -52,8 +52,15 @@ primary_region = 'syd'
   # SCIM Configuration - uses subdirectory of shared volume
   SCIM_DATA_DIR = '/data/scim'
 
-  # SSF stream and RP posture persistence on the shared volume
+	# SSF stream and RP posture persistence on the shared volume
   SSF_DATA_DIR = '/data/ssf'
+
+  # SSF Transmitter as an OAuth 2.0 resource server (CAEP Interop Profile).
+  # The AS is federation on this host; the Transmitter validates bearer JWTs
+  # against the same JWKS. Conformance client secrets are fly secrets, not env.
+  SSF_AS_ISSUER = 'https://protocolsoup.com'
+  SSF_AS_JWKS_URI = 'https://protocolsoup.com/api/.well-known/jwks.json'
+  SSF_RESOURCE = 'https://protocolsoup.com'
 
   # Cross-service CAEP: SSF receiver POSTs to federation over loopback HTTP.
   FEDERATION_SERVICE_URL = 'http://127.0.0.1:8080'
@@ -63,6 +70,10 @@ primary_region = 'syd'
 # - SCIM_API_TOKEN: Bearer token for SCIM authentication
 # - SSF_TO_FEDERATION_TOKEN: Bearer token shared with federation for the CAEP
 #   session-revoked demo hop. Without it the hop returns 401.
+# - SSF_CONFORMANCE_CLIENT_ID / SSF_CONFORMANCE_CLIENT_SECRET: confidential
+#   client_credentials client allowed to call SSF Stream Management (ssf.manage).
+#   Optional SSF_CONFORMANCE_CLIENT_ID_2 / SSF_CONFORMANCE_CLIENT_SECRET_2 for
+#   a second receiver used in isolation tests. Never set an id without a secret.
 # - OAUTH2_REPLAY_REDIS_URL: rediss:// URL for shared private_key_jwt replay protection;
 #   also backs the RFC 9449 DPoP proof jti replay stores for oauth2 and OID4VCI
 #   (distinct key prefix/instance). Optional SHOWCASE_DPOP_NONCE_REQUIRED and

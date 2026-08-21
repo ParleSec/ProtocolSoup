@@ -58,9 +58,9 @@ The lab action `sessions-revoked` maps to CAEP `session-revoked` (all sessions).
 |------|---------|---------|
 | `/.well-known/ssf-configuration` | GET | SSF discovery (issuer insertion, SSF §7.2) |
 | `/ssf/jwks` | GET | Transmitter JWKS |
-| `/ssf/stream` | POST, GET, PATCH, DELETE | Stream CRUD (`GET` without `stream_id` returns a list; nested `delivery`) |
-| `/ssf/status` | GET, POST | Stream status |
-| `/ssf/verify` | POST | Stream verification (`stream_id` required; **204** empty) |
+| `/ssf/stream` | POST, GET, PATCH, DELETE | Stream CRUD (`GET` without `stream_id` returns that Receiver's list; nested `delivery`) |
+| `/ssf/status` | GET, POST | Stream status (`stream_id` required; body includes `stream_id`) |
+| `/ssf/verify` | POST | Stream verification (`stream_id` required; `state` optional; **204** empty) |
 | `/ssf/subjects` | GET, POST | Subject management |
 | `/ssf/actions/{action}` | POST | Trigger event action |
 | `/ssf/poll` | GET, POST | Poll delivery (RFC 8936 `sets` / `acks` / `setErrs`) |
@@ -96,10 +96,12 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 ## What To Validate
 
 - Stream configuration: nested `delivery: { method, endpoint_url }`, `events_supported` vs `events_delivered`
-- Discovery: `GET /.well-known/ssf-configuration`, `spec_version` `"1_0"`, `issuer` identical to SET `iss`
-- SET structure: `iss`, `iat`, `jti`, `aud`, `events`, top-level `sub_id`, no JWT `sub`, `typ=secevent+jwt`
-- Push delivery: `Content-Type: application/secevent+jwt`, signature, **202** (not 200)
+- Discovery: `GET /.well-known/ssf-configuration`, `spec_version` `"1_0"`, `issuer` identical to SET `iss`, `authorization_schemes` includes `urn:ietf:rfc:6749`, `default_subjects` `"ALL"`
+- Stream management is `stream_id` addressed. `GET /ssf/stream` without `stream_id` returns that Receiver's list (`[]` when none). Create is **201**. Delete is **204**.
+- Stream Management is an OAuth 2.0 resource server when `SSF_AS_JWKS_URI` is set: `ssf.read` / `ssf.manage`, bearer header only (no query `access_token`)
+- SET structure: `iss`, `iat`, `jti`, `aud`, `events` (exactly one event), top-level `sub_id`, no JWT `sub` or `exp`, `typ=secevent+jwt`, RS256
+- Push delivery: `Content-Type: application/secevent+jwt`, signature, **202** (not 200); push URL is the Receiver's `delivery.endpoint_url`
 - Poll delivery: `sets` map keyed by `jti`; unacknowledged SETs retransmit; `maxEvents: 0` is ack-only; `acks` / `setErrs` on the next poll
-- Verification: `stream_id` required, **204** empty, verification SET `sub_id` opaque stream id
+- Verification: `stream_id` required, **204** empty, verification SET `sub_id` opaque stream id; `state` echoed only when supplied
 - CAEP/RISC members: `namespace` + `current_level`; `credential_type`; `not-compliant`; RISC `reason` only `hijacking` | `bulk-account`
 - Looking Glass Flow tab is the Looking Glass bus only (no executor-local spoof timeline)

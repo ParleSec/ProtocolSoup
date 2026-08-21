@@ -76,7 +76,7 @@ export class SSFLabExecutor extends FlowExecutorBase {
     })
   }
 
-  private async resolveStreamID(): Promise<string> {
+	private async resolveStreamID(): Promise<string> {
     const { data } = await this.jsonRequest('GET', `${this.config.baseUrl}/stream`, {
       step: 'List stream configuration',
       rfcReference: 'OpenID SSF 1.0 Section 8.1.1.2',
@@ -89,7 +89,18 @@ export class SSFLabExecutor extends FlowExecutorBase {
       const id = (data as { stream_id?: string }).stream_id
       if (id) return id
     }
-    throw new Error('stream_id missing from GET /stream')
+    const created = await this.jsonRequest('POST', `${this.config.baseUrl}/stream`, {
+      body: {
+        delivery: { method: SSF_DELIVERY_PUSH },
+      },
+      step: 'Create Event Stream',
+      rfcReference: 'OpenID SSF 1.0 Section 8.1.1.1',
+    })
+    const streamId = (created.data as { stream_id?: string })?.stream_id
+    if (!streamId) {
+      throw new Error('stream_id missing from POST /stream')
+    }
+    return streamId
   }
 
   private async patchDelivery(method: string): Promise<void> {

@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -109,20 +111,24 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		return nil, fmt.Errorf("stream not found: %w", err)
 	}
 
-	// SSF §6: Enforce stream status. Disabled/paused streams MUST NOT generate events.
-	// Empty status is treated as enabled for backward compatibility with pre-existing streams.
-	switch stream.Status {
-	case StreamStatusDisabled:
-		return nil, fmt.Errorf("stream is disabled")
-	case StreamStatusPaused:
-		return nil, fmt.Errorf("stream is paused")
-	case StreamStatusEnabled, "":
-		// OK - proceed
+	// SSF §6: Enforce stream status. Disabled/paused streams MUST NOT generate
+	// events. Verification and stream-updated are framework events: verification
+	// is always permitted ([SSF] §8.1.4), and stream-updated MUST be sent before
+	// the Transmitter pauses or disables the stream ([SSF] §8.1.5).
+	frameworkEvent := event.EventType == EventTypeVerification || event.EventType == EventTypeStreamUpdated
+	if !frameworkEvent {
+		switch stream.Status {
+		case StreamStatusDisabled:
+			return nil, fmt.Errorf("stream is disabled")
+		case StreamStatusPaused:
+			return nil, fmt.Errorf("stream is paused")
+		case StreamStatusEnabled, "":
+		}
 	}
 
 	// Check if event type is requested by receiver.
-	// Verification events (SSF §7) are framework-level and always permitted.
-	if event.EventType != EventTypeVerification {
+	// Framework events MAY be sent even when not listed in events_requested ([SSF] §8.1.5).
+	if !frameworkEvent {
 		eventRequested := false
 		for _, requested := range stream.EventsRequested {
 			if requested == event.EventType {
@@ -143,6 +149,10 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 	event.IssuedAt = time.Now()
 	if event.EventTimestamp.IsZero() {
 		event.EventTimestamp = event.IssuedAt
+	}
+	// SSF §4.1.9 SHOULD set txn; ProtocolSoup demos share one cause across SETs.
+	if event.TransactionID == "" {
+		event.TransactionID = uuid.New().String()
 	}
 
 	// Broadcast: Action Triggered
@@ -386,13 +396,16 @@ func (t *Transmitter) attemptDelivery(ctx context.Context, stream *Stream, event
 	// (full SET body, RFC 8935). Skip CaptureMiddleware so Wire is not duplicated.
 	req.Header.Set(lookingglass.SkipCaptureHeader, "1")
 
-	// Add bearer token if configured for authenticated push delivery
-	if stream.BearerToken != "" {
+	// [SSF] §6.1.1: honour Receiver-supplied authorization_header on every push.
+	if strings.TrimSpace(stream.AuthorizationHeader) != "" {
+		req.Header.Set("Authorization", stream.AuthorizationHeader)
+	} else if stream.BearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+stream.BearerToken)
 	}
 
-	// Session id travels on the delivery header, not inside the SET (RFC 8417).
-	if event.SessionID != "" {
+	// Looking Glass session is a presentation-layer header for the internal
+	// receiver only. Never send it to an external conformance push URL.
+	if event.SessionID != "" && isInternalPushEndpoint(t.baseURL, stream.DeliveryEndpoint) {
 		req.Header.Set(lookingGlassSessionHeader, event.SessionID)
 	}
 
@@ -570,6 +583,7 @@ func (t *Transmitter) TriggerCredentialChangeWithSession(ctx context.Context, st
 		CredentialType:   credentialType,
 		ChangeType:       changeType, // CAEP §3.3: REQUIRED (create | revoke | update | delete)
 		InitiatingEntity: initiator,
+		ReasonAdmin:      &ReasonInfo{EN: "Credential " + changeType + " for " + credentialType},
 	}
 	return t.GenerateEvent(ctx, streamID, event)
 }
@@ -833,4 +847,56 @@ func (t *Transmitter) TriggerSessionsRevokedWithSession(ctx context.Context, str
 	}
 
 	return t.GenerateEvent(ctx, streamID, event)
+}
+
+// TriggerStreamUpdated emits a stream-updated SET ([SSF] §8.1.5) with opaque
+// sub_id equal to stream_id. Call this before a Transmitter-initiated pause
+// or disable, and after a Transmitter-initiated re-enable.
+func (t *Transmitter) TriggerStreamUpdated(ctx context.Context, streamID, status, reason, sessionID string) (*StoredEvent, error) {
+	event := SecurityEvent{
+		EventType:      EventTypeStreamUpdated,
+		EventTimestamp: time.Now(),
+		SessionID:      sessionID,
+		StreamStatus:   status,
+		Reason:         reason,
+		Subject: SubjectIdentifier{
+			Format: SubjectFormatOpaque,
+			ID:     streamID,
+		},
+	}
+	return t.GenerateEvent(ctx, streamID, event)
+}
+
+// UpdateStatusAsTransmitter sends stream-updated, then writes the new status.
+// Receiver-initiated POST /status does not use this path ([SSF] §8.1.2).
+func (t *Transmitter) UpdateStatusAsTransmitter(ctx context.Context, streamID, status, reason, sessionID string) error {
+	if _, err := t.TriggerStreamUpdated(ctx, streamID, status, reason, sessionID); err != nil {
+		return err
+	}
+	stream, err := t.storage.GetStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	stream.Status = status
+	return t.storage.UpdateStream(ctx, *stream)
+}
+
+func isInternalPushEndpoint(baseURL, endpoint string) bool {
+	if endpoint == "" {
+		return false
+	}
+	base := strings.TrimRight(baseURL, "/")
+	if base != "" && (strings.HasPrefix(endpoint, base+"/ssf/receiver/") ||
+		strings.HasPrefix(endpoint, base+"/ssf/push")) {
+		return true
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return strings.Contains(parsed.Path, "/ssf/")
+	}
+	return false
 }

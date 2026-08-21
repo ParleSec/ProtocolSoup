@@ -2,6 +2,7 @@ package ssf
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // getSessionID extracts or generates a session ID from the request
@@ -59,11 +61,15 @@ func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) 
 			DeliveryMethodPush,
 			DeliveryMethodPoll,
 		},
-		"configuration_endpoint":  p.baseURL + "/ssf/stream",
-		"status_endpoint":         p.baseURL + "/ssf/status",
-		"verification_endpoint":   p.baseURL + "/ssf/verify",
-		"add_subject_endpoint":    p.baseURL + "/ssf/subjects",
+		"configuration_endpoint": p.baseURL + "/ssf/stream",
+		"status_endpoint":        p.baseURL + "/ssf/status",
+		"verification_endpoint":  p.baseURL + "/ssf/verify",
+		"add_subject_endpoint":   p.baseURL + "/ssf/subjects",
 		"remove_subject_endpoint": p.baseURL + "/ssf/subjects",
+		"authorization_schemes": []map[string]string{
+			{"spec_urn": "urn:ietf:rfc:6749"},
+		},
+		"default_subjects": "ALL",
 		"critical_subject_members": []string{
 			"user",
 			"device",
@@ -89,29 +95,34 @@ func (p *Plugin) handleJWKS(w http.ResponseWriter, r *http.Request) {
 // handleGetStream returns stream configuration (SSF §8.1.1.2).
 // Without stream_id the Transmitter returns a list. With stream_id, one stream or 404.
 func (p *Plugin) handleGetStream(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFRead)
+	if !ok {
+		return
+	}
+
 	streamID := strings.TrimSpace(r.URL.Query().Get("stream_id"))
 	if streamID == "" {
-		streams, err := p.listStreamsForRequest(r)
+		streams, err := p.storage.ListStreamsForReceiver(r.Context(), ident.ID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to list streams")
 			return
 		}
-		writeJSON(w, http.StatusOK, streams)
+		writeStreamJSON(w, http.StatusOK, streams)
 		return
 	}
 
-	stream, err := p.getStreamForRequest(r, streamID)
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Stream not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, stream)
+	writeStreamJSON(w, http.StatusOK, stream)
 }
 
 type streamConfigBody struct {
 	StreamID        string          `json:"stream_id"`
 	EventsRequested []string        `json:"events_requested"`
 	Delivery        *StreamDelivery `json:"delivery"`
+	Description     string          `json:"description"`
 	Status          string          `json:"status"`
 }
 
@@ -122,31 +133,26 @@ func requestStreamID(r *http.Request, bodyID string) string {
 	return strings.TrimSpace(bodyID)
 }
 
-func (p *Plugin) listStreamsForRequest(r *http.Request) ([]Stream, error) {
-	sessionID := getSessionID(r)
-	if sessionID != "" {
-		stream, err := p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
-		if err != nil {
-			return nil, err
-		}
-		return []Stream{*stream}, nil
-	}
-	return p.storage.ListStreams(r.Context())
-}
-
-func (p *Plugin) getStreamForRequest(r *http.Request, streamID string) (*Stream, error) {
-	stream, err := p.storage.GetStream(r.Context(), streamID)
+func (p *Plugin) ownedStream(ctx context.Context, ident receiverIdentity, streamID string, w http.ResponseWriter) (*Stream, error) {
+	stream, err := p.storage.GetStreamByID(ctx, streamID)
 	if err != nil {
+		writeError(w, http.StatusNotFound, "Stream not found")
 		return nil, err
 	}
-	if sessionID := getSessionID(r); sessionID != "" && stream.ID != "session-"+sessionID {
-		return nil, fmt.Errorf("stream not found")
+	if stream.ReceiverID != ident.ID {
+		p.writeBearerError(w, http.StatusForbidden, "insufficient_scope", "the Event Receiver is not allowed to access this stream")
+		return nil, fmt.Errorf("forbidden")
 	}
 	return stream, nil
 }
 
 // handleUpdateStream updates stream configuration (SSF §8.1.1). stream_id is REQUIRED.
 func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return
+	}
+
 	var update streamConfigBody
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -159,9 +165,8 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, err := p.getStreamForRequest(r, streamID)
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Stream not found")
 		return
 	}
 
@@ -179,9 +184,15 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 		if update.Delivery.EndpointURL != "" {
 			stream.DeliveryEndpoint = update.Delivery.EndpointURL
 		}
+		if update.Delivery.AuthorizationHeader != "" {
+			stream.AuthorizationHeader = update.Delivery.AuthorizationHeader
+		}
 	}
-	if len(update.EventsRequested) > 0 {
+	if update.EventsRequested != nil {
 		stream.EventsRequested = update.EventsRequested
+	}
+	if update.Description != "" {
+		stream.Description = update.Description
 	}
 	if update.Status != "" {
 		stream.Status = update.Status
@@ -192,39 +203,55 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, stream)
+	writeStreamJSON(w, http.StatusOK, stream)
 }
 
-// handleCreateStream creates a new stream per SSF §8.1.1.
+// handleCreateStream creates a new stream per SSF §8.1.1.1.
 func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
-	var req streamConfigBody
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
-	if req.Delivery == nil || req.Delivery.Method == "" {
-		writeError(w, http.StatusBadRequest, "delivery.method is required")
-		return
+	var req streamConfigBody
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
 	}
 
-	switch req.Delivery.Method {
+	deliveryMethod := DeliveryMethodPoll
+	endpointURL := ""
+	authzHeader := ""
+	if req.Delivery != nil {
+		if req.Delivery.Method != "" {
+			deliveryMethod = req.Delivery.Method
+		}
+		endpointURL = req.Delivery.EndpointURL
+		authzHeader = req.Delivery.AuthorizationHeader
+	}
+
+	switch deliveryMethod {
 	case DeliveryMethodPush, DeliveryMethodPoll:
 	default:
 		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("Invalid delivery.method: %q (must be %q or %q)", req.Delivery.Method, DeliveryMethodPush, DeliveryMethodPoll))
+			fmt.Sprintf("Invalid delivery.method: %q (must be %q or %q)", deliveryMethod, DeliveryMethodPush, DeliveryMethodPoll))
 		return
 	}
 
-	if req.Delivery.Method == DeliveryMethodPush && req.Delivery.EndpointURL == "" {
-		writeError(w, http.StatusBadRequest, "delivery.endpoint_url is required for push delivery")
-		return
-	}
-
-	sessionID := getSessionID(r)
-	streamID := generateID()
-	if sessionID != "" {
-		streamID = "session-" + sessionID
+	if deliveryMethod == DeliveryMethodPush && endpointURL == "" {
+		if strings.HasPrefix(ident.ID, "session:") {
+			endpointURL = p.receiverEndpoint
+		} else {
+			writeError(w, http.StatusBadRequest, "delivery.endpoint_url is required for push delivery")
+			return
+		}
 	}
 
 	eventsRequested := req.EventsRequested
@@ -232,15 +259,31 @@ func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		eventsRequested = GetSupportedEventURIs()
 	}
 
+	audience := []string{ident.ID}
+	if strings.HasPrefix(ident.ID, "session:") || ident.ID == "anonymous" {
+		audience = []string{p.baseURL + "/receiver"}
+	}
+
+	bearer := ""
+	if strings.HasPrefix(ident.ID, "session:") {
+		bearer = p.receiverToken
+	}
+
 	stream := Stream{
-		ID:               streamID,
-		Issuer:           p.baseURL,
-		Audience:         []string{p.baseURL + "/receiver"},
-		EventsSupported:  GetSupportedEventURIs(),
-		EventsRequested:  eventsRequested,
-		DeliveryMethod:   req.Delivery.Method,
-		DeliveryEndpoint: req.Delivery.EndpointURL,
-		Status:           StreamStatusEnabled,
+		ID:                  generateStreamID(),
+		Issuer:              p.baseURL,
+		Audience:            audience,
+		EventsSupported:     GetSupportedEventURIs(),
+		EventsRequested:     eventsRequested,
+		DeliveryMethod:      deliveryMethod,
+		DeliveryEndpoint:    endpointURL,
+		AuthorizationHeader: authzHeader,
+		BearerToken:         bearer,
+		Status:              StreamStatusEnabled,
+		ReceiverID:          ident.ID,
+		SessionID:           getSessionID(r),
+		Description:         req.Description,
+		MinVerificationSecs: p.minVerifyInt,
 	}
 
 	if err := p.storage.CreateStream(r.Context(), stream); err != nil {
@@ -248,11 +291,16 @@ func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, stream)
+	writeStreamJSON(w, http.StatusCreated, stream)
 }
 
-// handleDeleteStream deletes a stream. stream_id is REQUIRED (SSF §8.1.1).
+// handleDeleteStream deletes a stream. stream_id is REQUIRED (SSF §8.1.1.5).
 func (p *Plugin) handleDeleteStream(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return
+	}
+
 	var req streamConfigBody
 	if r.Body != nil && r.Body != http.NoBody {
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -263,8 +311,7 @@ func (p *Plugin) handleDeleteStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := p.getStreamForRequest(r, streamID); err != nil {
-		writeError(w, http.StatusNotFound, "Stream not found")
+	if _, err := p.ownedStream(r.Context(), ident, streamID, w); err != nil {
 		return
 	}
 
@@ -273,7 +320,7 @@ func (p *Plugin) handleDeleteStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	writeNoContent(w)
 }
 
 // ====================
@@ -715,9 +762,99 @@ func (p *Plugin) handleAcknowledge(w http.ResponseWriter, r *http.Request) {
 // handleVerification triggers a verification SET per SSF §8.1.4.2.
 // Success is 204 No Content with an empty body. stream_id is REQUIRED.
 func (p *Plugin) handleVerification(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
 	var req struct {
 		StreamID string `json:"stream_id"`
 		State    string `json:"state"`
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid request body")
+			return
+		}
+	}
+
+	streamID := requestStreamID(r, req.StreamID)
+	if streamID == "" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "stream_id is required")
+		return
+	}
+
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
+	if err != nil {
+		return
+	}
+
+	interval := stream.MinVerificationSecs
+	if interval <= 0 {
+		interval = p.minVerifyInt
+	}
+	if interval > 0 && stream.LastVerificationAt != nil {
+		elapsed := time.Since(*stream.LastVerificationAt)
+		if elapsed < time.Duration(interval)*time.Second {
+			writeError(w, http.StatusTooManyRequests, "verification requests exceed min_verification_interval")
+			return
+		}
+	}
+
+	if _, err := p.transmitter.TriggerVerification(r.Context(), stream.ID, req.State, getSessionID(r)); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = p.storage.RecordVerification(r.Context(), stream.ID, time.Now())
+
+	writeNoContent(w)
+}
+
+// ====================
+// Stream Status (SSF §6)
+// ====================
+
+// handleGetStatus returns the current stream status per SSF §6.
+func (p *Plugin) handleGetStatus(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFRead)
+	if !ok {
+		return
+	}
+
+	streamID := strings.TrimSpace(r.URL.Query().Get("stream_id"))
+	if streamID == "" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "stream_id is required")
+		return
+	}
+
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
+	if err != nil {
+		return
+	}
+
+	writeStreamJSON(w, http.StatusOK, map[string]interface{}{
+		"stream_id": stream.ID,
+		"status":    stream.Status,
+	})
+}
+
+// handleUpdateStatus updates the stream status per SSF §6.
+// Accepts: enabled, paused, disabled.
+func (p *Plugin) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		StreamID string `json:"stream_id"`
+		Status   string `json:"status"`
+		Reason   string `json:"reason"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -731,86 +868,16 @@ func (p *Plugin) handleVerification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.State == "" {
-		writeError(w, http.StatusBadRequest, "state is required per SSF §8.1.4")
-		return
-	}
-
-	stream, err := p.getStreamForRequest(r, streamID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "Stream not found")
-		return
-	}
-
-	if _, err := p.transmitter.TriggerVerification(r.Context(), stream.ID, req.State, getSessionID(r)); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// ====================
-// Stream Status (SSF §6)
-// ====================
-
-// handleGetStatus returns the current stream status per SSF §6.
-func (p *Plugin) handleGetStatus(w http.ResponseWriter, r *http.Request) {
-	sessionID := getSessionID(r)
-	var stream *Stream
-	var err error
-
-	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
-	} else {
-		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
-	}
-
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get stream")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": stream.Status,
-	})
-}
-
-// handleUpdateStatus updates the stream status per SSF §6.
-// Accepts: enabled, paused, disabled.
-func (p *Plugin) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
-	sessionID := getSessionID(r)
-
-	var req struct {
-		Status string `json:"status"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	// Validate status value
 	switch req.Status {
 	case StreamStatusEnabled, StreamStatusPaused, StreamStatusDisabled:
-		// Valid
 	default:
 		writeError(w, http.StatusBadRequest,
 			fmt.Sprintf("Invalid status: %q (must be enabled, paused, or disabled)", req.Status))
 		return
 	}
 
-	var stream *Stream
-	var err error
-
-	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
-	} else {
-		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
-	}
-
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get stream")
 		return
 	}
 
@@ -820,8 +887,9 @@ func (p *Plugin) handleUpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": stream.Status,
+	writeStreamJSON(w, http.StatusOK, map[string]interface{}{
+		"stream_id": stream.ID,
+		"status":    stream.Status,
 	})
 }
 
@@ -946,6 +1014,10 @@ func writeSSFError(w http.ResponseWriter, status int, errCode, description strin
 
 func generateID() string {
 	return randomString(8)
+}
+
+func generateStreamID() string {
+	return strings.ReplaceAll(uuid.New().String(), "-", "")
 }
 
 func randomString(n int) string {

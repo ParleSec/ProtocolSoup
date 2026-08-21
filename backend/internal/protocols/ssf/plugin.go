@@ -30,6 +30,14 @@ type Plugin struct {
 	receiverPort     int
 	receiverToken    string // Bearer token for authenticated push delivery
 	receiverEndpoint string // Public-facing receiver push URL (baseURL/ssf/receiver/push)
+
+	// Authorization server used to validate Stream Management access tokens.
+	// [CAEPINTEROP] §2.7: the AS MAY be a different entity from the Transmitter.
+	asIssuer     string
+	asJWKSURI    string
+	asAudience   string
+	jwksFetch    *crypto.JWKSFetcher
+	minVerifyInt int // seconds; SSF §8.1.1 min_verification_interval
 }
 
 // NewPlugin creates a new SSF plugin
@@ -79,6 +87,18 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	// 2. No localhost URLs leak into event data shown to users
 	// 3. Real HTTP traffic still flows between transmitter and receiver
 	p.receiverEndpoint = strings.TrimRight(p.baseURL, "/") + "/ssf/receiver/push"
+
+	p.asIssuer = strings.TrimRight(strings.TrimSpace(os.Getenv("SSF_AS_ISSUER")), "/")
+	p.asJWKSURI = strings.TrimSpace(os.Getenv("SSF_AS_JWKS_URI"))
+	p.asAudience = strings.TrimRight(strings.TrimSpace(os.Getenv("SSF_RESOURCE")), "/")
+	if p.asAudience == "" {
+		p.asAudience = strings.TrimRight(p.baseURL, "/")
+	}
+	p.jwksFetch = crypto.NewJWKSFetcher(5 * time.Minute)
+	p.minVerifyInt = 10
+	if strings.EqualFold(config.Environment, "production") && p.asJWKSURI == "" {
+		log.Printf("[SSF] WARNING: SSF_AS_JWKS_URI is unset in production; Stream Management will not require bearer tokens")
+	}
 
 	// Initialize SQLite storage
 	dataDir := getDataDir()
