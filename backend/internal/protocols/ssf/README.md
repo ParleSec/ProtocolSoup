@@ -53,11 +53,11 @@ The service also starts a **standalone receiver** on `SSF_RECEIVER_PORT` (defaul
 
 ## Session-Based Isolation
 
-Looking Glass owns the session. SSF does not mint a parallel `ssf_session_id`.
+Looking Glass owns the session. SSF does not mint a parallel `ssf_session_id`. Spec Stream Management is addressed by `stream_id` ([SSF] §8.1.1). `X-Looking-Glass-Session` is a presentation-layer filter that tags lab streams; it is not a substitute for `stream_id` on `/ssf/stream`, `/ssf/status`, or `/ssf/verify`.
 
 1. **Session ID**: Looking Glass `POST /api/protocols/ssf/demo/{flow}` returns an owned session. Catalog flow IDs are presets into that same Looking Glass session.
-2. **Header Propagation**: Client and server-to-server hops send `X-Looking-Glass-Session` (query `lg_session` when headers cannot be set). Push delivery copies the same header. The SET itself MUST NOT carry the session id (RFC 8417).
-3. **Database Storage**: Session ID is stored in `events.session_id`, not in SET claims.
+2. **Header Propagation**: Client and lab hops send `X-Looking-Glass-Session` (query `lg_session` when headers cannot be set). Push delivery copies that header only when the destination is the internal receiver. External `endpoint_url` values do not receive it. The SET itself MUST NOT carry the session id (RFC 8417).
+3. **Database Storage**: Session ID is stored in `events.session_id` and `streams.session_id`, not in SET claims.
 4. **RP state**: `ReceiverActionExecutor` keys posture as `sessionID:email` in SQLite on this service. Alice/Bob emails match MockIdP users for identifier continuity only.
 
 ```
@@ -117,18 +117,18 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/stream` | POST | Create a new stream (nested `delivery`) |
-| `/ssf/stream` | GET | List streams, or one stream with `?stream_id=` |
+| `/ssf/stream` | POST | Create a new stream (**201**; nested `delivery`; default method poll if omitted) |
+| `/ssf/stream` | GET | List this Receiver's streams, or one stream with `?stream_id=` |
 | `/ssf/stream` | PATCH | Update a stream (`stream_id` required) |
-| `/ssf/stream` | DELETE | Delete a stream (`stream_id` required) |
+| `/ssf/stream` | DELETE | Delete a stream (`stream_id` query required; **204**) |
 
 ### Stream Status & Verification (SSF §8.1.4)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/status` | GET | Get stream status |
+| `/ssf/status` | GET | Get stream status (`stream_id` required; `{stream_id, status}`) |
 | `/ssf/status` | POST | Update stream status (enabled/paused/disabled) |
-| `/ssf/verify` | POST | Trigger verification SET (`stream_id` required; **204**) |
+| `/ssf/verify` | POST | Trigger verification SET (`stream_id` required; `state` optional; **204**) |
 
 ### Subject Management
 

@@ -144,10 +144,26 @@ func (e *ssfTestEnv) sessionStreamID(t *testing.T, sessionID string) string {
 	if err := json.Unmarshal(body, &streams); err != nil {
 		t.Fatalf("decode stream list: %v %s", err, body)
 	}
-	if len(streams) == 0 || streams[0].ID == "" {
-		t.Fatal("GET /stream without stream_id must return a list")
+	if len(streams) > 0 && streams[0].ID != "" {
+		return streams[0].ID
 	}
-	return streams[0].ID
+	status, body = e.doJSON(t, http.MethodPost, "/ssf/stream", sessionID, map[string]any{
+		"delivery": map[string]string{
+			"method":       DeliveryMethodPush,
+			"endpoint_url": e.server.URL + "/ssf/receiver/push",
+		},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("create stream %d: %s", status, body)
+	}
+	var created Stream
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatalf("decode created stream: %v %s", err, body)
+	}
+	if created.ID == "" {
+		t.Fatal("created stream missing stream_id")
+	}
+	return created.ID
 }
 
 func compactSETFromSession(t *testing.T, env *ssfTestEnv, sessionID string) (token string, claims jwt.MapClaims) {

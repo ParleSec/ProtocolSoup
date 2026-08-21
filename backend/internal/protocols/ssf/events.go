@@ -1,11 +1,16 @@
 package ssf
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // SSF Framework event types
 const (
-	// Verification event per SSF §7
+	// Verification event per SSF §7 / §8.1.4.1
 	EventTypeVerification = "https://schemas.openid.net/secevent/ssf/event-type/verification"
+	// Stream Updated event per SSF §8.1.5
+	EventTypeStreamUpdated = "https://schemas.openid.net/secevent/ssf/event-type/stream-updated"
 )
 
 // Event URIs for CAEP (Continuous Access Evaluation Profile)
@@ -63,6 +68,7 @@ type EventCategory string
 const (
 	CategoryCAEP EventCategory = "CAEP"
 	CategoryRISC EventCategory = "RISC"
+	CategorySSF  EventCategory = "SSF"
 )
 
 // EventMetadata contains metadata about an event type
@@ -91,6 +97,18 @@ func GetEventMetadata(eventURI string) EventMetadata {
 
 // eventMetadataRegistry contains all supported event types with their metadata
 var eventMetadataRegistry = map[string]EventMetadata{
+	EventTypeVerification: {
+		URI:         EventTypeVerification,
+		Name:        "Verification",
+		Description: "Transmitter verification event for an Event Stream",
+		Category:    CategorySSF,
+	},
+	EventTypeStreamUpdated: {
+		URI:         EventTypeStreamUpdated,
+		Name:        "Stream Updated",
+		Description: "Transmitter-initiated Event Stream status change",
+		Category:    CategorySSF,
+	},
 	// CAEP Events
 	EventTypeSessionRevoked: {
 		URI:         EventTypeSessionRevoked,
@@ -253,6 +271,7 @@ func GetAllEventTypes() map[EventCategory][]EventMetadata {
 	result := map[EventCategory][]EventMetadata{
 		CategoryCAEP: {},
 		CategoryRISC: {},
+		CategorySSF:  {},
 	}
 	for _, meta := range eventMetadataRegistry {
 		result[meta.Category] = append(result[meta.Category], meta)
@@ -264,8 +283,12 @@ func GetAllEventTypes() map[EventCategory][]EventMetadata {
 func GetSupportedEventURIs() []string {
 	uris := make([]string, 0, len(eventMetadataRegistry))
 	for uri := range eventMetadataRegistry {
+		if uri == EventTypeVerification || uri == EventTypeStreamUpdated {
+			continue
+		}
 		uris = append(uris, uri)
 	}
+	sort.Strings(uris)
 	return uris
 }
 
@@ -311,6 +334,9 @@ type SecurityEvent struct {
 
 	// For verification events (SSF §7)
 	State string `json:"state,omitempty"`
+
+	// For stream-updated events (SSF §8.1.5)
+	StreamStatus string `json:"stream_status,omitempty"`
 }
 
 // ReasonInfo provides human-readable reason information
