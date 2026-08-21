@@ -8,6 +8,45 @@ import (
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
+func TestSSFStreamClientIsSeeded(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	client, exists := idp.GetClient(SSFStreamClientID)
+	if !exists || client == nil {
+		t.Fatal("ssf-stream-client was not seeded")
+	}
+	if client.Public || client.Secret == "" {
+		t.Fatal("ssf-stream-client must be a confidential client with a secret")
+	}
+	hasRead, hasManage := false, false
+	for _, scope := range client.Scopes {
+		switch scope {
+		case "ssf.read":
+			hasRead = true
+		case "ssf.manage":
+			hasManage = true
+		}
+	}
+	if !hasRead || !hasManage {
+		t.Fatalf("ssf-stream-client scopes = %v, want ssf.read and ssf.manage", client.Scopes)
+	}
+	found := false
+	for _, preset := range idp.GetDemoClientPresets() {
+		if preset.ID == SSFStreamClientID {
+			found = true
+			if preset.Secret == "" {
+				t.Fatal("ssf-stream-client demo preset omitted the secret")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("ssf-stream-client missing from demo client presets")
+	}
+}
+
 func TestPrivateKeyJWTClientExistsOnlyAfterSessionRegistration(t *testing.T) {
 	keySet, err := crypto.NewKeySet()
 	if err != nil {
@@ -123,4 +162,3 @@ func TestValidateAuthorizationCodeRejectsExpiredCode(t *testing.T) {
 		t.Fatalf("ValidateAuthorizationCode = %v, want authorization code expired", err)
 	}
 }
-

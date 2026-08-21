@@ -391,6 +391,7 @@ type DemoClientPreset struct {
 func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 	demoAppSecret := idp.getClientSecret("demo-app")
 	machineSecret := idp.getClientSecret("machine-client")
+	ssfStreamSecret := idp.getClientSecret(SSFStreamClientID)
 
 	return []DemoClientPreset{
 		{
@@ -418,6 +419,15 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 			GrantTypes:  []string{"client_credentials"},
 			Scopes:      []string{"api:read", "api:write"},
 			Secret:      machineSecret,
+		},
+		{
+			ID:          SSFStreamClientID,
+			Name:        "SSF Stream Management Client",
+			Description: "Confidential client_credentials client for SSF Stream Management (ssf.read and ssf.manage)",
+			Type:        "machine",
+			GrantTypes:  []string{"client_credentials"},
+			Scopes:      []string{"ssf.read", "ssf.manage"},
+			Secret:      ssfStreamSecret,
 		},
 	}
 }
