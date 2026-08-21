@@ -69,6 +69,11 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SSF_RECEIVER_TOKEN` | - | Bearer token the receiver accepts for event delivery. |
+| `SSF_AS_ISSUER` | - | Authorization server `iss` checked on Stream Management access tokens. |
+| `SSF_AS_JWKS_URI` | - | JWKS URL used to verify Stream Management bearer JWTs. When set, those APIs require `Authorization: Bearer` or `X-Looking-Glass-Session`. |
+| `SSF_RESOURCE` | `SHOWCASE_BASE_URL` | JWT `aud` the SSF Transmitter expects. The OAuth 2.0 token endpoint issues `ssf.read` / `ssf.manage` client-credentials tokens with this audience and a 900 second lifetime. |
+| `SSF_CONFORMANCE_CLIENT_ID` | - | Optional confidential client id registered at process start for Stream Management. Ignored unless `SSF_CONFORMANCE_CLIENT_SECRET` is also set. |
+| `SSF_CONFORMANCE_CLIENT_SECRET` | - | Matching client secret. A secretless confidential client is never registered. Optional `_2` pair: `SSF_CONFORMANCE_CLIENT_ID_2` / `SSF_CONFORMANCE_CLIENT_SECRET_2`. |
 | `FEDERATION_SERVICE_URL` | loopback from listen addr | On the SSF service, federation base URL for CAEP `revoke-subject`. Compose: `http://federation-service:8080`. Fly/monolith: `http://127.0.0.1:8080`. |
 | `SSF_TO_FEDERATION_TOKEN` | - | Shared bearer token; set on both SSF and federation. Production secret — set via `fly secrets set`, never via committed config. Without it the CAEP `session-revoked` demo hop returns 401. |
 

@@ -123,7 +123,7 @@ The built-in token decoder is available at `POST /api/lookingglass/decode`. It h
 SSF is a protocol in Looking Glass (`/looking-glass?protocol=ssf`), not a separate sandbox. Catalog flow IDs (`caep-session-revoked`, `ssf-push-delivery`, …) are presets into one durable session: they fill the subject/event/delivery chrome. They are not a second execute path.
 
 - **Fire event** sends a CAEP/RISC SET for the chrome subject and event. That is what changes RP posture on the State tab (and, for `session-revoked`, the federation revoke-subject hop).
-- **Verify stream** only does `GET /.well-known/ssf-configuration`, `GET /stream`, JWKS, and `POST /verify`. It does not revoke sessions or disable accounts.
+- **Verify stream** only does `GET /.well-known/ssf-configuration`, stream configuration (`GET` list, `POST` create if the list is empty), JWKS, and `POST /verify`. It does not revoke sessions or disable accounts.
 - Transmitter and Receiver timeline plus unstripped SET/JWKS wire capture (Flow tab is Looking Glass bus only)
 - After CAEP `session-revoked`, a real HTTP hop to federation `POST /oauth2/demo/caep/revoke-subject` so OAuth sessions die
 - SET metadata overlay on the Tokens tab (decoded from the signed compact JWT)

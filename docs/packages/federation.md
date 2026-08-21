@@ -39,6 +39,9 @@
 | `MOCKIDP_ADMIN_PASSWORD` | No | `(auto-generated)` | Demo user password override |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | No | `(auto-generated)` | OAuth/OIDC demo-app client secret override |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | No | `(auto-generated)` | OAuth machine-client secret override |
+| `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
+| `SSF_CONFORMANCE_CLIENT_ID` | No | `(empty)` | Optional confidential Stream Management client. Requires `SSF_CONFORMANCE_CLIENT_SECRET`. |
+| `SSF_CONFORMANCE_CLIENT_SECRET` | No | `(empty)` | Matching secret. A secretless confidential client is never registered. |
 
 ### Storage And Volumes
 
@@ -71,7 +74,10 @@
 - `POST /oauth2/demo/caep/revoke-subject` (SSF receiver CAEP hook; bearer `SSF_TO_FEDERATION_TOKEN`)
 
 The OAuth token endpoint supports `private_key_jwt` for the
-`client_credentials` grant with RS256, ES256, and EdDSA assertions. The
+`client_credentials` grant with RS256, ES256, and EdDSA assertions. Client
+credentials tokens that include `ssf.read` or `ssf.manage` last 900 seconds and
+use `SSF_RESOURCE` (default `SHOWCASE_BASE_URL`) as `aud` so the SSF Transmitter
+can validate them as a resource server. The
 browser registration endpoint requires the session's one-time-returned owner
 capability, accepts one public JWK Set while the session is active, creates the
 real isolated client ID, expires it after 10 minutes, and returns the exact

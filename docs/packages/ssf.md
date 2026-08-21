@@ -5,7 +5,7 @@
 - **Image:** `ghcr.io/parlesec/protocolsoup-ssf`
 - **Purpose:** Provide SSF transmitter and receiver behavior for CAEP/RISC event workflows with real SET generation and processing. Looking Glass is the run surface; this image stays independent of federation.
 - **Topology role:** Can run standalone or behind `protocolsoup-gateway` as `/ssf`; includes a secondary receiver listener for push-delivery demos.
-- **Discovery:** `GET /.well-known/ssf-configuration` on the issuer (`spec_version` `"1_0"`). Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`).
+- **Discovery:** `GET /.well-known/ssf-configuration` on the issuer (`spec_version` `"1_0"`). Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). The document includes `authorization_schemes` (`urn:ietf:rfc:6749`) and `default_subjects` `"ALL"`.
 
 ## Runtime Contract
 
@@ -31,6 +31,11 @@
 | `SSF_DATA_DIR` | No | `./data` | SQLite storage directory |
 | `SSF_RECEIVER_PORT` | No | `8081` | Standalone receiver listener port |
 | `SSF_RECEIVER_TOKEN` | No | `(auto-generated)` | Bearer token expected by receiver push delivery |
+| `SSF_AS_ISSUER` | No | `(empty)` | Authorization server `iss` for Stream Management access tokens. Required with `SSF_AS_JWKS_URI` when the Transmitter acts as an OAuth resource server. |
+| `SSF_AS_JWKS_URI` | No | `(empty)` | JWKS URL used to verify those access tokens. When set, Stream Management requires `Authorization: Bearer` or a Looking Glass session. |
+| `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | JWT `aud` the Transmitter expects. Federation issues `ssf.read` / `ssf.manage` tokens with this audience. |
+| `SSF_CONFORMANCE_CLIENT_ID` | No | `(empty)` | Confidential client id registered at the main AS for Stream Management. Ignored unless `SSF_CONFORMANCE_CLIENT_SECRET` is also set. |
+| `SSF_CONFORMANCE_CLIENT_SECRET` | No | `(empty)` | Client secret for that confidential client. Never register a secretless confidential client. |
 | `FEDERATION_SERVICE_URL` | No | loopback from `SHOWCASE_LISTEN_ADDR` | Federation base URL for post-CAEP `revoke-subject` |
 | `SSF_TO_FEDERATION_TOKEN` | No | `(empty)` | Bearer token shared with federation for that demo API. Production secret — set via `fly secrets set`, Without it the CAEP `session-revoked` demo hop returns 401. |
 
@@ -56,9 +61,9 @@
 
 ### Stream, Subject, And Delivery APIs
 
-- `POST|GET|PATCH|DELETE /ssf/stream` (nested `delivery`; GET without `stream_id` returns a list)
-- `GET|POST /ssf/status`
-- `POST /ssf/verify` (`stream_id` required; 204 empty)
+- `POST|GET|PATCH|DELETE /ssf/stream` (nested `delivery`; GET without `stream_id` returns that Receiver's stream list, including `[]`)
+- `GET|POST /ssf/status` (`stream_id` required; status body includes `stream_id`)
+- `POST /ssf/verify` (`stream_id` required; `state` optional; 204 empty)
 - `GET|POST /ssf/subjects`
 - `DELETE /ssf/subjects/{id}`
 - `GET|POST /ssf/poll`
@@ -117,6 +122,7 @@ services:
 ## Security Hardening
 
 - Set `SSF_RECEIVER_TOKEN` explicitly outside local demos.
+- Set `SSF_AS_ISSUER` and `SSF_AS_JWKS_URI` when Stream Management is exposed beyond Looking Glass. Tokens are JWTs from the main authorization server (`ssf.read` / `ssf.manage`, client credentials, 900s).
 - Set `SSF_TO_FEDERATION_TOKEN` on both `ssf-service` and `federation-service`.
 - Keep `8081` receiver port internal unless external push testing requires exposure.
 - Restrict `SHOWCASE_CORS_ORIGINS` to trusted frontend origins.
