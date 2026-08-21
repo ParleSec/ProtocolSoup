@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
+	"github.com/ParleSec/ProtocolSoup/pkg/models"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // computeTestATH mirrors the unexported dpop.computeATH (RFC 9449 Section
@@ -285,5 +287,57 @@ func TestProtectedResourceRejectsMissingAuthorization(t *testing.T) {
 	}
 	if headers.Get("WWW-Authenticate") == "" {
 		t.Fatal("expected a WWW-Authenticate challenge header")
+	}
+}
+
+func TestSSFClientCredentialsIssuesShortLivedResourceAudience(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	server.idp.RegisterClient(&models.Client{
+		ID:         "ssf-manage-client",
+		Secret:     "ssf-manage-secret",
+		Name:       "SSF Stream Management",
+		GrantTypes: []string{"client_credentials"},
+		Scopes:     []string{"ssf.read", "ssf.manage"},
+	})
+
+	tokenRequest, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/token", strings.NewReader(url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"ssf-manage-client"},
+		"client_secret": {"ssf-manage-secret"},
+		"scope":         {"ssf.manage"},
+	}.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenResponse, err := http.DefaultClient.Do(tokenRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tokenResponse.Body.Close()
+	var tokenBody map[string]interface{}
+	if err := json.NewDecoder(tokenResponse.Body).Decode(&tokenBody); err != nil {
+		t.Fatal(err)
+	}
+	if tokenResponse.StatusCode != http.StatusOK {
+		t.Fatalf("token status = %d body %#v", tokenResponse.StatusCode, tokenBody)
+	}
+	if expires, _ := tokenBody["expires_in"].(float64); expires != 900 {
+		t.Fatalf("expires_in = %v, want 900 [CAEPINTEROP short-lived]", tokenBody["expires_in"])
+	}
+	accessToken, _ := tokenBody["access_token"].(string)
+	if accessToken == "" {
+		t.Fatal("missing access_token")
+	}
+	parsed, _, err := jwt.NewParser().ParseUnverified(accessToken, jwt.MapClaims{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, _ := parsed.Claims.(jwt.MapClaims)
+	if got, _ := claims["aud"].(string); got != server.plugin.baseURL {
+		t.Fatalf("aud %v want %s", claims["aud"], server.plugin.baseURL)
+	}
+	if claims["scope"] != "ssf.manage" {
+		t.Fatalf("scope %v", claims["scope"])
 	}
 }

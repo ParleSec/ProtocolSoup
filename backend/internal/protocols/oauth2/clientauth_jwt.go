@@ -828,7 +828,7 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"authorization_endpoint":                issuer + "/authorize",
 		"token_endpoint":                        issuer + "/token",
 		"jwks_uri":                              strings.TrimRight(p.baseURL, "/") + "/api/.well-known/jwks.json",
-		"scopes_supported":                      []string{"profile", "email", "api:read", "api:write"},
+		"scopes_supported":                      []string{"profile", "email", "api:read", "api:write", "ssf.read", "ssf.manage"},
 		"response_types_supported":              []string{"code"},
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token", "client_credentials"},
 		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
