@@ -104,9 +104,9 @@ export const PAGE_SEO: Record<string, PageSEO> = {
   },
 
   '/trust': {
-    title: 'Trust',
+    title: 'Trust & Verification',
     description:
-      'Hosted-instance facts for protocolsoup.com: trust boundary, scanner behaviour, supply-chain verification, retention, OIDF listings, and vulnerability disclosure.',
+      'Triage ProtocolSoup security alerts, inspect its trust boundary and data handling, verify signed images, or run the open-source service yourself.',
     keywords: [
       'protocolsoup trust',
       'security.txt',
