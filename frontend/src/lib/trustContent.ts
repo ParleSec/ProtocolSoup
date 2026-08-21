@@ -195,8 +195,8 @@ export const TRUST_SECTIONS: TrustSection[] = [
   },
   {
     id: 'self-hosting',
-    title: 'Do not trust the hosted instance',
-    summary: 'Run the published code inside your own boundary.',
+    title: 'Self-hosting and verification',
+    summary: 'Run the published code inside a boundary you control.',
     blocks: [
       callout(
         'Strongest verification option',
@@ -267,31 +267,46 @@ export const TRUST_SECTIONS: TrustSection[] = [
   {
     id: 'conformance',
     title: 'Certified surface',
-    summary: 'Exactly which ProtocolSoup v4.1.0 profiles are listed by OIDF.',
+    summary: 'The versioned ProtocolSoup profiles listed by OIDF.',
     blocks: [
       callout(
         'OpenID Certified',
-        'The OpenID Foundation lists ProtocolSoup v4.1.0 as certified for 14 named OpenID4VP and OpenID4VCI profiles across wallet, verifier, and issuer roles.',
+        'The OpenID Foundation lists 14 named OpenID4VP and OpenID4VCI profiles across two ProtocolSoup releases: two wallet profiles for v4.1.0 and twelve wallet, verifier, and issuer profiles for v4.0.0.',
       ),
       table(
-        ['Role', 'Certified profiles'],
+        ['Version', 'Role', 'Certified profiles'],
         [
-          ['OID4VP Wallet', 'sd_jwt_vc direct_post.jwt; iso_mdl direct_post.jwt'],
-          ['OID4VP Verifier', 'sd_jwt_vc direct_post.jwt; iso_mdl direct_post.jwt'],
           [
+            'v4.1.0',
             'OID4VCI Wallet',
-            'sd_jwt_vc and mdoc: wallet_initiated by_value; issuer_initiated by_value; issuer_initiated by_reference',
+            'sd_jwt_vc issuer_initiated by_reference; mdoc issuer_initiated by_value',
           ],
           [
+            'v4.0.0',
+            'OID4VP Wallet',
+            'iso_mdl direct_post.jwt; sd_jwt_vc direct_post.jwt',
+          ],
+          [
+            'v4.0.0',
+            'OID4VP Verifier',
+            'sd_jwt_vc direct_post.jwt; iso_mdl direct_post.jwt',
+          ],
+          [
+            'v4.0.0',
             'OID4VCI Issuer',
-            'sd_jwt_vc and mdoc: issuer_initiated; wallet_initiated',
+            'mdoc issuer_initiated; sd_jwt_vc wallet_initiated; mdoc wallet_initiated; sd_jwt_vc issuer_initiated',
+          ],
+          [
+            'v4.0.0',
+            'OID4VCI Wallet',
+            'mdoc issuer_initiated by_reference; sd_jwt_vc issuer_initiated by_value; sd_jwt_vc wallet_initiated by_value; mdoc wallet_initiated by_value',
           ],
         ],
       ),
       p(
         'Check the current ',
         { href: OIDF_IMPLEMENTATIONS, label: 'OpenID Foundation certified implementations register' },
-        ' for the version and exact profile names. Certification applies to those named version/profile pairs; it is not a blanket certification of every ProtocolSoup feature or hosted deployment setting.',
+        ' for the exact version and profile names. Each name above has the OID4VCI-1.0-FINAL+HAIP-1.0-FINAL or OID4VP-1.0-FINAL+HAIP-1.0-FINAL prefix shown in the register. Certification applies to those named version/profile pairs; it is not a blanket certification of every ProtocolSoup feature or hosted deployment setting.',
       ),
     ],
   },
