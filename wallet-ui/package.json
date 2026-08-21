@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "next dev -p 4174",
-    "build": "next build && node scripts/sync-walletharness-static.mjs",
+    "generate-seo-assets": "node scripts/generate-seo-assets.mjs",
+    "build": "npm run generate-seo-assets && next build && node scripts/sync-walletharness-static.mjs",
     "start": "next start -p 4174"
   },
   "dependencies": {

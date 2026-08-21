@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="bowl" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#64748b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="20" fill="#0f172a"/>
+  <path d="M33 30 Q30 24, 33 18" stroke="#f97316" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M50 26 Q47 19, 50 12" stroke="#a855f7" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M67 30 Q70 24, 67 18" stroke="#06b6d4" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <rect x="36" y="30" width="34" height="22" rx="3" fill="#22c55e" opacity="0.85" transform="rotate(-6 53 41)"/>
+  <rect x="30" y="32" width="36" height="22" rx="3" fill="#a855f7" transform="rotate(4 48 43)"/>
+  <rect x="16" y="44" width="68" height="40" rx="10" fill="url(#bowl)"/>
+  <rect x="54" y="56" width="32" height="18" rx="9" fill="#0f172a"/>
+  <circle cx="70" cy="65" r="5.5" fill="#fbbf24"/>
+</svg>

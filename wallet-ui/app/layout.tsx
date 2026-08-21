@@ -14,6 +14,13 @@ const SITE_ORIGIN = 'https://protocolsoup.com'
 const TITLE = 'ProtocolSoup Wallet Harness — OID4VCI Issuance & OID4VP Presentation'
 const DESCRIPTION =
   'Hosted OID4VCI and OID4VP wallet for ProtocolSoup. Issue and present mdoc and SD-JWT verifiable credentials, complete QR and deeplink handoffs, and exercise HAIP client and key attestation against live issuer and verifier traffic.'
+const OG_IMAGE = {
+  url: '/opengraph-image.png',
+  width: 1200,
+  height: 630,
+  alt: 'ProtocolSoup Wallet Harness - OID4VCI issuance and OID4VP presentation',
+  type: 'image/png' as const,
+}
 
 export const metadata: Metadata = {
   metadataBase: new URL(WALLET_ORIGIN),
@@ -23,6 +30,11 @@ export const metadata: Metadata = {
   },
   applicationName: 'ProtocolSoup Wallet Harness',
   description: DESCRIPTION,
+  category: 'Technology',
+  creator: 'Mason Parle',
+  publisher: 'ProtocolSoup',
+  authors: [{ name: 'Mason Parle' }],
+  referrer: 'origin-when-cross-origin',
   keywords: [
     'oid4vci wallet',
     'oid4vp wallet',
@@ -69,20 +81,37 @@ export const metadata: Metadata = {
     description: DESCRIPTION,
     url: WALLET_ORIGIN,
     locale: 'en_US',
-    images: [
-      {
-        url: `${SITE_ORIGIN}/opengraph-image`,
-        width: 1200,
-        height: 630,
-        alt: 'ProtocolSoup Wallet Harness',
-      },
-    ],
+    images: [OG_IMAGE],
   },
   twitter: {
     card: 'summary_large_image',
     title: TITLE,
     description: DESCRIPTION,
-    images: [`${SITE_ORIGIN}/opengraph-image`],
+    images: [
+      {
+        url: '/twitter-image.png',
+        width: 1200,
+        height: 630,
+        alt: OG_IMAGE.alt,
+      },
+    ],
+    site: '@protocolsoup',
+    creator: '@protocolsoup',
+  },
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    title: 'ProtocolSoup Wallet',
+    statusBarStyle: 'black-translucent',
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: '48x48', type: 'image/x-icon' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/icons/icon-192.svg', sizes: '192x192', type: 'image/svg+xml' },
+      { url: '/icons/icon-512.svg', sizes: '512x512', type: 'image/svg+xml' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 }
 
@@ -95,11 +124,49 @@ export const viewport: Viewport = {
 const walletSchema = {
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
+  '@id': `${WALLET_ORIGIN}#wallet`,
   name: 'ProtocolSoup Wallet Harness',
   url: WALLET_ORIGIN,
   description: DESCRIPTION,
   applicationCategory: 'DeveloperApplication',
   operatingSystem: 'Web Browser',
+  inLanguage: 'en-US',
+  image: {
+    '@type': 'ImageObject',
+    url: `${WALLET_ORIGIN}/opengraph-image.png`,
+    width: 1200,
+    height: 630,
+  },
+  logo: {
+    '@type': 'ImageObject',
+    url: `${WALLET_ORIGIN}/icons/icon-512.svg`,
+  },
+  screenshot: `${WALLET_ORIGIN}/opengraph-image.png`,
+  featureList: [
+    'OID4VCI credential issuance',
+    'OID4VP presentation',
+    'mdoc and SD-JWT VC',
+    'HAIP client and key attestation',
+    'QR and deeplink handoffs',
+  ],
+  author: {
+    '@type': 'Person',
+    name: 'Mason Parle',
+  },
+  publisher: {
+    '@type': 'Organization',
+    name: 'ProtocolSoup',
+    alternateName: 'Protocol Soup',
+    url: SITE_ORIGIN,
+    logo: {
+      '@type': 'ImageObject',
+      url: `${SITE_ORIGIN}/icons/icon-512.svg`,
+    },
+  },
+  sameAs: [
+    'https://twitter.com/protocolsoup',
+    'https://github.com/ParleSec/ProtocolSoup',
+  ],
   isPartOf: {
     '@type': 'WebSite',
     name: 'ProtocolSoup',
