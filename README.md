@@ -13,19 +13,12 @@
   <a href="https://wallet.protocolsoup.com">Wallet</a>
   &nbsp;·&nbsp;
   <a href="https://protocolsoup.com/trust">Trust</a>
-</p>
-<p>
+   &nbsp;·&nbsp;
   <a href="https://docs.protocolsoup.com/">Docs</a>
   &nbsp;·&nbsp;
   <a href="https://docs.protocolsoup.com/start-here/quickstart/">Quickstart</a>
 </p>
 
-<p>
-  <a href="https://protocolsoup.com/trust#conformance"><img src="frontend/public/openid-certified.png" alt="OpenID Certified" height="48"></a>
-</p>
-<p>
-  <a href="https://protocolsoup.com/trust#conformance">OpenID Certified™ by ProtocolSoup for the OID4VCI Issuer, OID4VP Verifier and OID4VP Wallet profiles.</a>
-</p>
 
 <img src="frontend/public/og-image.png" alt="ProtocolSoup - an interactive protocol sandbox. Real flows against real infrastructure." width="100%">
 
