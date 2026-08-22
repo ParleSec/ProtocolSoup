@@ -1128,12 +1128,16 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Client Auth Failed", map[string]interface{}{
-			"client_id":          clientID,
-			"client_auth_method": clientAuthMethod,
-		})
-		writeOAuth2Error(w, "invalid_client", "Client authentication required", "")
-		return
+		bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if bearer == "" || subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Client Auth Failed", map[string]interface{}{
+				"client_id":          clientID,
+				"client_auth_method": clientAuthMethod,
+			})
+			writeOAuth2Error(w, "invalid_client", "Client authentication required", "")
+			return
+		}
+		clientAuthMethod = "bearer"
 	}
 
 	// Validate the token
