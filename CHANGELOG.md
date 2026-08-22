@@ -50,6 +50,7 @@ Change `cliff.toml` rather than editing entries by hand.
 - Certification doc references
 - OpenID Certified mark on trust, homepage, and README ([#131](https://github.com/ParleSec/ProtocolSoup/pull/131))
 - Readme
+- Security docs
 
 ### Fixed
 
