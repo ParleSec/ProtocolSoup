@@ -1,12 +1,20 @@
 package ssf
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+type tokenRevoker interface {
+	IsTokenRevoked(token string) bool
+}
 
 // CAEP Interoperability Profile §2.7.3 OAuth Scopes.
 const (
@@ -180,6 +188,10 @@ func (p *Plugin) validateBearerJWT(tokenString string) (receiverIdentity, error)
 		}
 	}
 
+	if err := p.checkAccessTokenRevocation(tokenString); err != nil {
+		return receiverIdentity{}, err
+	}
+
 	clientID, _ := claims["sub"].(string)
 	if clientID == "" {
 		clientID, _ = claims["client_id"].(string)
@@ -192,6 +204,46 @@ func (p *Plugin) validateBearerJWT(tokenString string) (receiverIdentity, error)
 		ID:     clientID,
 		Scopes: parseScopeClaim(claims["scope"]),
 	}, nil
+}
+
+func (p *Plugin) checkAccessTokenRevocation(tokenString string) error {
+	if p.revoker != nil {
+		if p.revoker.IsTokenRevoked(tokenString) {
+			return fmt.Errorf("access token has been revoked")
+		}
+		return nil
+	}
+	if strings.TrimSpace(p.introspectURL) == "" {
+		return nil
+	}
+	form := url.Values{}
+	form.Set("token", tokenString)
+	req, err := http.NewRequest(http.MethodPost, p.introspectURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer "+tokenString)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("token introspection failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("token introspection HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		Active bool `json:"active"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("token introspection response: %w", err)
+	}
+	if !out.Active {
+		return fmt.Errorf("access token is not active")
+	}
+	return nil
 }
 
 // writeBearerError returns an RFC 6750 Section 3.1 error response.

@@ -176,6 +176,7 @@ services:
       - SSF_TO_FEDERATION_TOKEN=${SSF_TO_FEDERATION_TOKEN:-ssf-federation-caep-lab}
       - SSF_AS_ISSUER=http://localhost:8080
       - SSF_AS_JWKS_URI=http://federation-service:8080/api/.well-known/jwks.json
+      - SSF_AS_INTROSPECT_URI=http://federation-service:8080/oauth2/introspect
       - SSF_RESOURCE=http://localhost:8080
     depends_on:
       federation-service:

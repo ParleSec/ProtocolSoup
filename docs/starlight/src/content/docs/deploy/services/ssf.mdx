@@ -25,13 +25,14 @@ Use SSF service to test security event stream configuration, CAEP/RISC event del
 
 ### Transmitter
 
-- `POST|GET|PATCH|DELETE /ssf/stream` -- stream management (nested `delivery`; GET without `stream_id` returns that Receiver's list)
+- `POST|GET|PUT|PATCH|DELETE /ssf/stream` -- stream management (nested `delivery`; GET without `stream_id` returns that Receiver's list; PUT replaces Receiver-Supplied properties)
 - `GET|POST /ssf/status` -- stream status (`stream_id` required)
 - `POST /ssf/verify` -- verification (`stream_id` required; `state` optional; **204**)
-- `GET|POST /ssf/subjects` -- subject management
+- `GET /ssf/subjects` -- Looking Glass demo identities
+- `POST /ssf/subjects/add` -- add subject (`stream_id` + RFC 9493 `subject`; **200**)
+- `POST /ssf/subjects/remove` -- remove subject (`stream_id` + RFC 9493 `subject`; **204**)
 - `POST /ssf/actions/{action}` -- trigger event actions
-- `GET|POST /ssf/poll` -- poll delivery
-- `POST /ssf/ack` -- thin alias for poll acks
+- `POST /ssf/poll/{stream_id}` -- poll delivery (Transmitter-supplied URL)
 
 ### Receiver
 
@@ -65,6 +66,7 @@ Lab action `sessions-revoked` emits CAEP `session-revoked` (all sessions).
 | `SSF_RECEIVER_TOKEN` | No | auto-generated | Bearer token for push delivery authentication |
 | `SSF_AS_ISSUER` | No | empty | Authorization server issuer for Stream Management JWTs |
 | `SSF_AS_JWKS_URI` | No | empty | JWKS URL used to verify Stream Management access tokens |
+| `SSF_AS_INTROSPECT_URI` | No | empty | RFC 7662 introspection URL for revocation checks on the split SSF image |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Expected JWT `aud` for those tokens |
 | `FEDERATION_SERVICE_URL` | No | loopback | Federation base URL for CAEP `revoke-subject` |
 | `SSF_TO_FEDERATION_TOKEN` | No | empty | Shared bearer token with federation |
@@ -84,7 +86,7 @@ docker run -p 8080:8080 -p 8081:8081 \
 - Port `8081` runs the standalone receiver. Keep it private unless you intentionally test external push delivery.
 - Push delivery to `{baseURL}/ssf/receiver/push` is proxied to the internal receiver on port `8081` and returns **202**.
 - Discovery is `GET /.well-known/ssf-configuration` on the issuer (`spec_version` `"1_0"`). Local/demo issuer may be `http://`. The document includes `authorization_schemes` and `default_subjects` `"ALL"`.
-- Stream Management is `stream_id` addressed. When `SSF_AS_JWKS_URI` is set, those endpoints require an OAuth bearer token (`ssf.read` / `ssf.manage`) or a Looking Glass session header. Looking Glass remains a presentation-layer filter; it is not a spec Stream identifier. Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
+- Stream Management is `stream_id` addressed. When `SSF_AS_JWKS_URI` is set, those endpoints require an OAuth bearer token (`ssf.read` / `ssf.manage`) or a Looking Glass session header. The Transmitter checks token revocation (in-process MockIdP, or `SSF_AS_INTROSPECT_URI` on this image). Looking Glass remains a presentation-layer filter; it is not a spec Stream identifier. Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
 - After a verified CAEP `session-revoked` SET, the receiver POSTs to `FEDERATION_SERVICE_URL/oauth2/demo/caep/revoke-subject` so MockIdP sessions and tokens die. The hop is visible on Looking Glass. If federation is unreachable, the SET still succeeds and the glass box shows the failed outbound request.
 - The receiver validates SETs and executes response actions (session revocation, credential compromise, etc.) via `ReceiverActionExecutor` on this service. RP posture stays in SSF SQLite; OAuth death is the HTTP call above, not shared memory.
 - Looking Glass is the run surface: `/looking-glass?protocol=ssf`. The Flow tab is Looking Glass bus events only. Catalog flow IDs are presets into one durable Looking Glass session. Do not fold this image into federation.

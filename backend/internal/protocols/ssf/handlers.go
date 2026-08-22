@@ -64,8 +64,8 @@ func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) 
 		"configuration_endpoint": p.baseURL + "/ssf/stream",
 		"status_endpoint":        p.baseURL + "/ssf/status",
 		"verification_endpoint":  p.baseURL + "/ssf/verify",
-		"add_subject_endpoint":   p.baseURL + "/ssf/subjects",
-		"remove_subject_endpoint": p.baseURL + "/ssf/subjects",
+		"add_subject_endpoint":    p.baseURL + "/ssf/subjects/add",
+		"remove_subject_endpoint": p.baseURL + "/ssf/subjects/remove",
 		"authorization_schemes": []map[string]string{
 			{"spec_urn": "urn:ietf:rfc:6749"},
 		},
@@ -146,6 +146,52 @@ func (p *Plugin) ownedStream(ctx context.Context, ident receiverIdentity, stream
 	return stream, nil
 }
 
+func (p *Plugin) pollEndpointURL(streamID string) string {
+	return strings.TrimRight(p.baseURL, "/") + "/ssf/poll/" + streamID
+}
+
+// applyTransmitterPollURL sets delivery.endpoint_url for RFC 8936. SSF §6.1.2:
+// the URL is specified by the Transmitter and MUST be unique per stream for a
+// given Receiver.
+func (p *Plugin) applyTransmitterPollURL(stream *Stream) {
+	stream.DeliveryMethod = DeliveryMethodPoll
+	stream.DeliveryEndpoint = p.pollEndpointURL(stream.ID)
+}
+
+func (p *Plugin) applyDelivery(stream *Stream, delivery *StreamDelivery, ident receiverIdentity, w http.ResponseWriter) bool {
+	if delivery == nil {
+		p.applyTransmitterPollURL(stream)
+		return true
+	}
+	method := delivery.Method
+	if method == "" {
+		method = DeliveryMethodPoll
+	}
+	switch method {
+	case DeliveryMethodPush:
+		stream.DeliveryMethod = DeliveryMethodPush
+		if delivery.EndpointURL == "" {
+			if strings.HasPrefix(ident.ID, "session:") {
+				stream.DeliveryEndpoint = p.receiverEndpoint
+			} else {
+				writeError(w, http.StatusBadRequest, "delivery.endpoint_url is required for push delivery")
+				return false
+			}
+		} else {
+			stream.DeliveryEndpoint = delivery.EndpointURL
+		}
+		stream.AuthorizationHeader = delivery.AuthorizationHeader
+	case DeliveryMethodPoll:
+		p.applyTransmitterPollURL(stream)
+		stream.AuthorizationHeader = ""
+	default:
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("Invalid delivery.method: %q (must be %q or %q)", method, DeliveryMethodPush, DeliveryMethodPoll))
+		return false
+	}
+	return true
+}
+
 // handleUpdateStream updates stream configuration (SSF §8.1.1). stream_id is REQUIRED.
 func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
@@ -171,21 +217,8 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if update.Delivery != nil {
-		if update.Delivery.Method != "" {
-			switch update.Delivery.Method {
-			case DeliveryMethodPush, DeliveryMethodPoll:
-				stream.DeliveryMethod = update.Delivery.Method
-			default:
-				writeError(w, http.StatusBadRequest,
-					fmt.Sprintf("Invalid delivery.method: %q (must be %q or %q)", update.Delivery.Method, DeliveryMethodPush, DeliveryMethodPoll))
-				return
-			}
-		}
-		if update.Delivery.EndpointURL != "" {
-			stream.DeliveryEndpoint = update.Delivery.EndpointURL
-		}
-		if update.Delivery.AuthorizationHeader != "" {
-			stream.AuthorizationHeader = update.Delivery.AuthorizationHeader
+		if !p.applyDelivery(stream, update.Delivery, ident, w) {
+			return
 		}
 	}
 	if update.EventsRequested != nil {
@@ -204,6 +237,99 @@ func (p *Plugin) handleUpdateStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeStreamJSON(w, http.StatusOK, stream)
+}
+
+// handleReplaceStream replaces stream configuration (SSF §8.1.1.3).
+// The stream_id and the full set of Receiver-Supplied properties MUST be present.
+func (p *Plugin) handleReplaceStream(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	var req streamConfigBody
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	streamID := requestStreamID(r, req.StreamID)
+	if streamID == "" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "stream_id is required")
+		return
+	}
+
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
+	if err != nil {
+		return
+	}
+
+	if issRaw, ok := raw["iss"]; ok {
+		var iss string
+		if err := json.Unmarshal(issRaw, &iss); err != nil || iss != stream.Issuer {
+			writeError(w, http.StatusBadRequest, "Transmitter-Supplied iss MUST match the expected value")
+			return
+		}
+	}
+	if deliveredRaw, ok := raw["events_delivered"]; ok {
+		var delivered []string
+		if err := json.Unmarshal(deliveredRaw, &delivered); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid events_delivered")
+			return
+		}
+		expected := eventsDelivered(stream.EventsSupported, stream.EventsRequested)
+		if !equalStringSlices(delivered, expected) {
+			writeError(w, http.StatusBadRequest, "events_delivered MUST match the value before the replace")
+			return
+		}
+	}
+
+	if _, ok := raw["delivery"]; !ok {
+		p.applyTransmitterPollURL(stream)
+		stream.AuthorizationHeader = ""
+	} else if !p.applyDelivery(stream, req.Delivery, ident, w) {
+		return
+	}
+
+	if _, ok := raw["events_requested"]; !ok {
+		stream.EventsRequested = nil
+	} else {
+		stream.EventsRequested = req.EventsRequested
+	}
+	if _, ok := raw["description"]; !ok {
+		stream.Description = ""
+	} else {
+		stream.Description = req.Description
+	}
+
+	if err := p.storage.UpdateStream(r.Context(), *stream); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to replace stream")
+		return
+	}
+
+	writeStreamJSON(w, http.StatusOK, stream)
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // handleCreateStream creates a new stream per SSF §8.1.1.1.
@@ -226,34 +352,6 @@ func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	deliveryMethod := DeliveryMethodPoll
-	endpointURL := ""
-	authzHeader := ""
-	if req.Delivery != nil {
-		if req.Delivery.Method != "" {
-			deliveryMethod = req.Delivery.Method
-		}
-		endpointURL = req.Delivery.EndpointURL
-		authzHeader = req.Delivery.AuthorizationHeader
-	}
-
-	switch deliveryMethod {
-	case DeliveryMethodPush, DeliveryMethodPoll:
-	default:
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("Invalid delivery.method: %q (must be %q or %q)", deliveryMethod, DeliveryMethodPush, DeliveryMethodPoll))
-		return
-	}
-
-	if deliveryMethod == DeliveryMethodPush && endpointURL == "" {
-		if strings.HasPrefix(ident.ID, "session:") {
-			endpointURL = p.receiverEndpoint
-		} else {
-			writeError(w, http.StatusBadRequest, "delivery.endpoint_url is required for push delivery")
-			return
-		}
-	}
-
 	eventsRequested := req.EventsRequested
 	if len(eventsRequested) == 0 {
 		eventsRequested = GetSupportedEventURIs()
@@ -269,21 +367,22 @@ func (p *Plugin) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 		bearer = p.receiverToken
 	}
 
+	streamID := generateStreamID()
 	stream := Stream{
-		ID:                  generateStreamID(),
+		ID:                  streamID,
 		Issuer:              p.baseURL,
 		Audience:            audience,
 		EventsSupported:     GetSupportedEventURIs(),
 		EventsRequested:     eventsRequested,
-		DeliveryMethod:      deliveryMethod,
-		DeliveryEndpoint:    endpointURL,
-		AuthorizationHeader: authzHeader,
 		BearerToken:         bearer,
 		Status:              StreamStatusEnabled,
 		ReceiverID:          ident.ID,
 		SessionID:           getSessionID(r),
 		Description:         req.Description,
 		MinVerificationSecs: p.minVerifyInt,
+	}
+	if !p.applyDelivery(&stream, req.Delivery, ident, w) {
+		return
 	}
 
 	if err := p.storage.CreateStream(r.Context(), stream); err != nil {
@@ -364,89 +463,68 @@ func (p *Plugin) handleListSubjects(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAddSubject adds a new subject
-func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
-	sessionID := getSessionID(r)
+type subjectManagementBody struct {
+	StreamID string          `json:"stream_id"`
+	Subject  json.RawMessage `json:"subject"`
+	Verified *bool           `json:"verified"`
+}
 
-	var req struct {
-		Format      string `json:"format"`
-		Identifier  string `json:"identifier"`
-		DisplayName string `json:"display_name"`
+func (p *Plugin) readSubjectManagement(w http.ResponseWriter, r *http.Request) (receiverIdentity, *Stream, subjectClaim, bool) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFManage)
+	if !ok {
+		return receiverIdentity{}, nil, nil, false
 	}
-
+	var req subjectManagementBody
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
+		return receiverIdentity{}, nil, nil, false
 	}
-
-	if req.Format == "" {
-		req.Format = SubjectFormatEmail
+	streamID := requestStreamID(r, req.StreamID)
+	if streamID == "" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "stream_id is required")
+		return receiverIdentity{}, nil, nil, false
 	}
-	if req.Identifier == "" {
-		writeError(w, http.StatusBadRequest, "Identifier is required")
-		return
+	if len(bytes.TrimSpace(req.Subject)) == 0 {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "subject is required")
+		return receiverIdentity{}, nil, nil, false
 	}
-
-	var stream *Stream
-	var err error
-
-	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
-	} else {
-		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+	claim, err := parseSubjectClaim(req.Subject)
+	if err != nil || stringClaim(claim, "format") == "" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "subject MUST be an RFC 9493 Subject Identifier")
+		return receiverIdentity{}, nil, nil, false
 	}
-
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		return receiverIdentity{}, nil, nil, false
+	}
+	return ident, stream, claim, true
+}
+
+// handleAddSubject implements SSF §8.1.3.1. Success is 200 OK with an empty body.
+func (p *Plugin) handleAddSubject(w http.ResponseWriter, r *http.Request) {
+	_, stream, claim, ok := p.readSubjectManagement(w, r)
+	if !ok {
 		return
 	}
-
-	subjectID := generateID()
-	if sessionID != "" {
-		subjectID = sessionID + "-" + subjectID
-	}
-
-	subject := Subject{
-		ID:             subjectID,
-		StreamID:       stream.ID,
-		Format:         req.Format,
-		Identifier:     req.Identifier,
-		DisplayName:    req.DisplayName,
-		Status:         SubjectStatusActive,
-		ActiveSessions: 1,
-	}
-
-	if err := p.storage.AddSubject(r.Context(), subject); err != nil {
+	if err := p.storage.AddStreamSubject(r.Context(), stream.ID, claim); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to add subject")
 		return
 	}
-
-	if p.actionExecutor != nil {
-		p.actionExecutor.ResetUserStateForSession(sessionID, subject.Identifier, subject.ActiveSessions)
-	}
-
-	writeJSON(w, http.StatusCreated, subject)
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
 }
 
-// handleDeleteSubject removes a subject
-func (p *Plugin) handleDeleteSubject(w http.ResponseWriter, r *http.Request) {
-	subjectID := chi.URLParam(r, "id")
-	if subjectID == "" {
-		writeError(w, http.StatusBadRequest, "Subject ID is required")
+// handleRemoveSubject implements SSF §8.1.3.2. Success is 204 No Content.
+func (p *Plugin) handleRemoveSubject(w http.ResponseWriter, r *http.Request) {
+	_, stream, claim, ok := p.readSubjectManagement(w, r)
+	if !ok {
 		return
 	}
-
-	subject, err := p.storage.GetSubject(r.Context(), subjectID)
-	if err == nil {
-		_ = p.storage.DeleteSecurityState(r.Context(), subject.StreamID, subject.Identifier)
-	}
-
-	if err := p.storage.DeleteSubject(r.Context(), subjectID); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to delete subject")
+	if err := p.storage.RemoveStreamSubject(r.Context(), stream.ID, claim); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to remove subject")
 		return
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	writeNoContent(w)
 }
 
 // ====================
@@ -611,6 +689,10 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		if err == ErrSubjectNotInStream {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -661,13 +743,39 @@ type ActionResponse struct {
 // Event Delivery
 // ====================
 
-// handlePoll handles RFC 8936 poll requests. /ssf/ack remains a thin alias
-// that does not replace poll acks (acks belong in the next poll body).
+// handlePoll handles RFC 8936 poll requests for the stream identified by the
+// Transmitter-supplied poll URL (SSF §6.1.2). Acks belong in this POST body.
 func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
+	ident, ok := p.authenticateReceiver(w, r, ScopeSSFRead)
+	if !ok {
+		return
+	}
+
+	streamID := strings.TrimSpace(chi.URLParam(r, "streamID"))
+	if streamID == "" {
+		writeSSFError(w, http.StatusBadRequest, "invalid_request", "stream_id is required")
+		return
+	}
+	stream, err := p.ownedStream(r.Context(), ident, streamID, w)
+	if err != nil {
+		return
+	}
+
 	var req PollRequest
-	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			req = PollRequest{}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if len(bytes.TrimSpace(body)) > 0 {
+		ct := strings.ToLower(r.Header.Get("Content-Type"))
+		if ct != "" && !strings.Contains(ct, "application/json") {
+			writeError(w, http.StatusBadRequest, "Content-Type MUST be application/json (RFC 8936 §2.2)")
+			return
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "Invalid request body")
+			return
 		}
 	}
 
@@ -678,21 +786,6 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		} else if *req.MaxEvents > 0 {
 			maxEvents = *req.MaxEvents
 		}
-	}
-
-	sessionID := getSessionID(r)
-	var stream *Stream
-	var err error
-
-	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
-	} else {
-		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
-	}
-
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get stream")
-		return
 	}
 
 	returnImmediately := true
@@ -726,7 +819,7 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if len(sets) > 0 {
+	if len(sets) > 0 && strings.HasPrefix(ident.ID, "session:") {
 		p.receiverService.ProcessPollResponse(r.Context(), sets, sessionIDs)
 	}
 
@@ -734,25 +827,6 @@ func (p *Plugin) handlePoll(w http.ResponseWriter, r *http.Request) {
 		Sets:          sets,
 		MoreAvailable: moreAvailable,
 	})
-}
-
-// handleAcknowledge acknowledges received events
-func (p *Plugin) handleAcknowledge(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Ack []string `json:"ack"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if err := p.storage.AcknowledgeEvents(r.Context(), req.Ack); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // ====================
@@ -1010,10 +1084,6 @@ func writeSSFError(w http.ResponseWriter, status int, errCode, description strin
 		"err":         errCode,
 		"description": description,
 	})
-}
-
-func generateID() string {
-	return randomString(8)
 }
 
 func generateStreamID() string {

@@ -68,6 +68,7 @@ type ActionExecutor interface {
 	EnableUserForSession(ctx context.Context, sessionID, email string) error
 	ForcePasswordResetForSession(ctx context.Context, sessionID, email string) error
 	InvalidateTokensForSession(ctx context.Context, sessionID, email string) error
+	ApplyDeviceComplianceForSession(ctx context.Context, sessionID, email, deviceID, status string) error
 	InitSessionUserStates(sessionID string)
 	GetUserStateForSession(sessionID, email string) (*UserSecurityState, error)
 }
@@ -606,7 +607,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	// Extract subject email from the decoded SET
 	var subjectEmail string
 	if decoded.Subject != nil {
-		subjectEmail = decoded.Subject.Email
+		subjectEmail = decoded.Subject.EmailAddress()
 	}
 
 	// Session ID comes from X-Looking-Glass-Session delivery header (not the SET)
@@ -622,7 +623,7 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 	// Process events and execute response actions
 	for _, event := range decoded.Events {
 		log.Printf("[SSF Receiver] Processing event: %s for subject: %s (session: %s)", event.Type, subjectEmail, sessionID)
-		rs.executeResponseActions(ctx, jti, event, subjectEmail, sessionID)
+		rs.executeResponseActions(ctx, jti, event, subjectEmail, sessionID, decoded.Subject)
 		if event.Type == EventTypeSessionRevoked && subjectEmail != "" {
 			rs.revokeFederationSubject(ctx, sessionID, subjectEmail)
 		}
@@ -652,13 +653,13 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 }
 
 // executeResponseActions delegates to the shared EventProcessor
-func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string) {
+func (rs *ReceiverService) executeResponseActions(_ context.Context, eventID string, event DecodedEvent, subjectEmail, sessionID string, subject *SETSubject) {
 	var before *UserSecurityState
 	if rs.actionExecutor != nil && subjectEmail != "" {
 		before, _ = rs.actionExecutor.GetUserStateForSession(sessionID, subjectEmail)
 	}
 
-	actions := ExecuteResponseActions(rs.actionExecutor, eventID, event, subjectEmail, sessionID)
+	actions := ExecuteResponseActions(rs.actionExecutor, eventID, event, subjectEmail, sessionID, subject)
 	for _, action := range actions {
 		rs.addResponseAction(action)
 		log.Printf("[SSF Receiver] Action recorded: %s - %s (session: %s)", action.Action, action.Status, sessionID)
@@ -905,29 +906,7 @@ func buildDecodedSETFromClaims(claims jwt.MapClaims, header map[string]interface
 
 	// Parse sub_id
 	if subID, ok := claims["sub_id"].(map[string]interface{}); ok {
-		subject := &SETSubject{}
-		if f, ok := subID["format"].(string); ok {
-			subject.Format = f
-		}
-		if e, ok := subID["email"].(string); ok {
-			subject.Email = e
-		}
-		if p, ok := subID["phone_number"].(string); ok {
-			subject.PhoneNumber = p
-		}
-		if i, ok := subID["iss"].(string); ok {
-			subject.Issuer = i
-		}
-		if s, ok := subID["sub"].(string); ok {
-			subject.Subject = s
-		}
-		if id, ok := subID["id"].(string); ok {
-			subject.ID = id
-		}
-		if u, ok := subID["uri"].(string); ok {
-			subject.URI = u
-		}
-		decoded.Subject = subject
+		decoded.Subject = setSubjectFromMap(subID)
 	}
 
 	// Parse events

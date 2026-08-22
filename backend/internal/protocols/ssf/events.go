@@ -60,6 +60,14 @@ type SubjectIdentifier struct {
 	ID string `json:"id,omitempty"`
 	// For uri format
 	URI string `json:"uri,omitempty"`
+	// Complex Subject members (SSF §3). Each value is itself a Subject Identifier.
+	User        *SubjectIdentifier `json:"user,omitempty"`
+	Device      *SubjectIdentifier `json:"device,omitempty"`
+	Session     *SubjectIdentifier `json:"session,omitempty"`
+	Application *SubjectIdentifier `json:"application,omitempty"`
+	Tenant      *SubjectIdentifier `json:"tenant,omitempty"`
+	OrgUnit     *SubjectIdentifier `json:"org_unit,omitempty"`
+	Group       *SubjectIdentifier `json:"group,omitempty"`
 }
 
 // EventCategory represents the category of SSF event

@@ -65,7 +65,7 @@
 - `GET|POST /oauth2/authorize`
 - `POST /oauth2/token`
 - `GET /.well-known/oauth-authorization-server/oauth2`
-- `POST /oauth2/introspect`
+- `POST /oauth2/introspect` (RFC 7662; confidential client auth, or the access token presented as Bearer when it is the token being introspected)
 - `POST /oauth2/revoke`
 - `GET /oauth2/demo/users`
 - `GET /oauth2/demo/clients`

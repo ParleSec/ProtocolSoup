@@ -1112,6 +1112,15 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		clientAuthMethod = "post"
 	}
 
+	_, clientErr := p.mockIdP.ValidateClient(clientID, clientSecret)
+	if clientErr != nil {
+		bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if bearer != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1 {
+			clientAuthMethod = "bearer"
+			clientErr = nil
+		}
+	}
+
 	// Emit introspection request
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Introspection Request", map[string]interface{}{
 		"endpoint":           "/oauth2/introspect",
@@ -1127,7 +1136,7 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		Reference:   "RFC 7662",
 	})
 
-	if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
+	if clientErr != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Client Auth Failed", map[string]interface{}{
 			"client_id":          clientID,
 			"client_auth_method": clientAuthMethod,

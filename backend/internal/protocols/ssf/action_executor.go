@@ -26,6 +26,9 @@ type UserSecurityState struct {
 	AccountEnabled        bool      `json:"account_enabled"`
 	PasswordResetRequired bool      `json:"password_reset_required"`
 	TokensValid           bool      `json:"tokens_valid"`
+	DeviceID              string    `json:"device_id,omitempty"`
+	DeviceCompliance      string    `json:"device_compliance,omitempty"`
+	AccessRestricted      bool      `json:"access_restricted"`
 	LastModified          time.Time `json:"last_modified"`
 	ModifiedBy            string    `json:"modified_by"`
 }
@@ -268,6 +271,29 @@ func (e *ReceiverActionExecutor) InvalidateTokensForSession(ctx context.Context,
 	return nil
 }
 
+func (e *ReceiverActionExecutor) ApplyDeviceComplianceForSession(ctx context.Context, sessionID, email, deviceID, status string) error {
+	state, streamID, err := e.getOrCreateState(ctx, sessionID, email)
+	if err != nil {
+		return err
+	}
+	state.DeviceID = deviceID
+	state.DeviceCompliance = status
+	state.AccessRestricted = status == ComplianceStatusNonCompliant
+	if state.AccessRestricted {
+		state.SessionsActive = 0
+		state.TokensValid = false
+	}
+	state.LastModified = time.Now()
+	state.ModifiedBy = "ssf-receiver"
+	if err := e.storage.UpsertSecurityState(ctx, streamID, *state); err != nil {
+		return err
+	}
+	e.updateSubjectState(ctx, streamID, email, state.SessionsActive, state.AccountEnabled)
+	log.Printf("[ActionExecutor] Device %s compliance=%s restricted=%v for %s (session: %s)",
+		redactIdentifier(deviceID), status, state.AccessRestricted, redactIdentifier(email), redactSessionID(sessionID))
+	return nil
+}
+
 // GetUserStateForSession returns the current security state for a user in a specific session
 func (e *ReceiverActionExecutor) GetUserStateForSession(sessionID, email string) (*UserSecurityState, error) {
 	stream, err := e.streamForSession(context.Background(), sessionID)
@@ -316,6 +342,9 @@ func (e *ReceiverActionExecutor) ResetUserStateForSession(sessionID, email strin
 		AccountEnabled:        true,
 		PasswordResetRequired: false,
 		TokensValid:           true,
+		DeviceID:              "",
+		DeviceCompliance:      "",
+		AccessRestricted:      false,
 		LastModified:          time.Now(),
 		ModifiedBy:            "system-reset",
 	}

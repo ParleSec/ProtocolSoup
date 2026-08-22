@@ -18,6 +18,9 @@ export interface SecurityState {
   account_enabled: boolean
   password_reset_required: boolean
   tokens_valid: boolean
+  device_id?: string
+  device_compliance?: string
+  access_restricted?: boolean
   last_modified: string
   modified_by: string
 }

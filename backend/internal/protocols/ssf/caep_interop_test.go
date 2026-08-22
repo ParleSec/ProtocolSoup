@@ -50,11 +50,14 @@ func TestCAEPInteropTransmitterMetadata(t *testing.T) {
 	if !strings.Contains(joined, DeliveryMethodPush) || !strings.Contains(joined, DeliveryMethodPoll) {
 		t.Fatalf("delivery_methods_supported %v", methods)
 	}
-	for _, key := range []string{"jwks_uri", "configuration_endpoint", "status_endpoint", "verification_endpoint"} {
+	for _, key := range []string{"jwks_uri", "configuration_endpoint", "status_endpoint", "verification_endpoint", "add_subject_endpoint", "remove_subject_endpoint"} {
 		val, _ := cfg[key].(string)
 		if val == "" {
 			t.Errorf("missing %s [CAEPINTEROP Transmitters]", key)
 		}
+	}
+	if cfg["add_subject_endpoint"] == cfg["remove_subject_endpoint"] {
+		t.Fatal("add_subject_endpoint and remove_subject_endpoint MUST be distinct [SSF §7.1]")
 	}
 
 	status, body = env.doJSON(t, http.MethodPost, "/ssf/actions/session-revoked", "", map[string]string{
@@ -149,6 +152,10 @@ func TestStreamIDLifecycleWithoutLookingGlassHeader(t *testing.T) {
 	}
 	if pollStream.DeliveryMethod != DeliveryMethodPoll {
 		t.Fatalf("absent delivery must default to poll URN, got %s [SSF §8.1.1.1]", pollStream.DeliveryMethod)
+	}
+	wantPollURL := env.server.URL + "/ssf/poll/" + pollStream.ID
+	if pollStream.DeliveryEndpoint != wantPollURL {
+		t.Fatalf("poll endpoint_url %q want %q [SSF §6.1.2 unique per stream]", pollStream.DeliveryEndpoint, wantPollURL)
 	}
 
 	status, body = env.doJSON(t, http.MethodGet, "/ssf/stream?stream_id="+created.ID, "", nil)
@@ -514,4 +521,157 @@ func mustJSON(v any) []byte {
 		panic(err)
 	}
 	return raw
+}
+
+func TestReplaceStreamPUT(t *testing.T) {
+	env := startSSFTestEnv(t)
+	status, body := env.doJSON(t, http.MethodPost, "/ssf/stream", "", map[string]any{
+		"delivery": map[string]string{
+			"method":       DeliveryMethodPush,
+			"endpoint_url": "https://receiver.example/ssf-push",
+		},
+		"description": "original",
+		"events_requested": []string{
+			EventTypeSessionRevoked,
+			EventTypeCredentialChange,
+		},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("create %d: %s", status, body)
+	}
+	var created Stream
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	status, body = env.doJSON(t, http.MethodPut, "/ssf/stream", "", map[string]any{
+		"stream_id": created.ID,
+		"delivery": map[string]string{
+			"method": DeliveryMethodPoll,
+		},
+		"events_requested": []string{EventTypeSessionRevoked},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("PUT %d: %s", status, body)
+	}
+	var replaced Stream
+	if err := json.Unmarshal(body, &replaced); err != nil {
+		t.Fatal(err)
+	}
+	if replaced.DeliveryMethod != DeliveryMethodPoll {
+		t.Fatalf("method %s", replaced.DeliveryMethod)
+	}
+	if replaced.DeliveryEndpoint != env.server.URL+"/ssf/poll/"+created.ID {
+		t.Fatalf("poll URL %s [SSF §6.1.2]", replaced.DeliveryEndpoint)
+	}
+	if replaced.Description != "" {
+		t.Fatalf("missing description MUST be deleted, got %q [SSF §8.1.1.3]", replaced.Description)
+	}
+	if len(replaced.EventsRequested) != 1 || replaced.EventsRequested[0] != EventTypeSessionRevoked {
+		t.Fatalf("events_requested %#v", replaced.EventsRequested)
+	}
+}
+
+func TestSubjectAddRemoveFiltersTransmission(t *testing.T) {
+	env := startSSFTestEnv(t)
+	status, body := env.doJSON(t, http.MethodPost, "/ssf/stream", "", map[string]any{
+		"delivery": map[string]string{"method": DeliveryMethodPoll},
+		"events_requested": []string{EventTypeSessionRevoked},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("create %d: %s", status, body)
+	}
+	var stream Stream
+	if err := json.Unmarshal(body, &stream); err != nil {
+		t.Fatal(err)
+	}
+
+	alice := map[string]string{"format": SubjectFormatEmail, "email": "alice@example.com"}
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/subjects/remove", "", map[string]any{
+		"stream_id": stream.ID,
+		"subject":   alice,
+	})
+	if status != http.StatusNoContent {
+		t.Fatalf("remove %d: %s [SSF §8.1.3.2]", status, body)
+	}
+
+	subject := SubjectIdentifier{Format: SubjectFormatEmail, Email: "alice@example.com"}
+	_, err := env.plugin.transmitter.TriggerSessionRevoked(t.Context(), stream.ID, subject, "revoked", InitiatingEntityAdmin)
+	if err != ErrSubjectNotInStream {
+		t.Fatalf("removed subject still transmitted: %v", err)
+	}
+
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/subjects/add", "", map[string]any{
+		"stream_id": stream.ID,
+		"subject":   alice,
+		"verified":  true,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("add %d: %s [SSF §8.1.3.1]", status, body)
+	}
+
+	if _, err := env.plugin.transmitter.TriggerSessionRevoked(t.Context(), stream.ID, subject, "revoked", InitiatingEntityAdmin); err != nil {
+		t.Fatalf("re-added subject: %v", err)
+	}
+
+	pollPath := "/ssf/poll/" + stream.ID
+	status, body = env.doJSON(t, http.MethodPost, pollPath, "", map[string]any{
+		"maxEvents":         10,
+		"returnImmediately": true,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("poll %d: %s", status, body)
+	}
+	var poll PollResponse
+	if err := json.Unmarshal(body, &poll); err != nil {
+		t.Fatal(err)
+	}
+	if len(poll.Sets) == 0 {
+		t.Fatal("re-added subject SET missing from poll")
+	}
+}
+
+func TestRevokedAccessTokenRejected(t *testing.T) {
+	asKeys, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwksSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(asKeys.PublicJWKS())
+	}))
+	t.Cleanup(jwksSrv.Close)
+
+	t.Setenv("SSF_AS_ISSUER", "https://as.example")
+	t.Setenv("SSF_AS_JWKS_URI", jwksSrv.URL)
+	env := startSSFTestEnv(t)
+	revoker := &mapRevoker{revoked: map[string]bool{}}
+	env.plugin.revoker = revoker
+
+	jwtSvc := crypto.NewJWTService(asKeys, "https://as.example")
+	token, err := jwtSvc.CreateAccessToken("client-a", env.server.URL, ScopeSSFManage, 15*time.Minute, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, body := env.doBearerJSON(t, http.MethodPost, "/ssf/stream", token, map[string]any{
+		"delivery": map[string]string{"method": DeliveryMethodPoll},
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("create %d: %s", status, body)
+	}
+
+	revoker.revoked[token] = true
+	status, body = env.doBearerJSON(t, http.MethodGet, "/ssf/stream", token, nil)
+	if status != http.StatusUnauthorized {
+		t.Fatalf("revoked token %d, want 401: %s [CAEPINTEROP Transmitter as RS]", status, body)
+	}
+}
+
+type mapRevoker struct {
+	revoked map[string]bool
+}
+
+func (m *mapRevoker) IsTokenRevoked(token string) bool {
+	return m.revoked[token]
 }

@@ -169,15 +169,24 @@ export class SSFLabExecutor extends FlowExecutorBase {
   }
 
   private async pollAndAck(): Promise<void> {
-    const { data } = await this.jsonRequest('POST', `${this.config.baseUrl}/poll`, {
+    const streamId = await this.resolveStreamID()
+    const { data } = await this.jsonRequest('GET', `${this.config.baseUrl}/stream?stream_id=${encodeURIComponent(streamId)}`, {
+      step: 'Read poll delivery URL',
+      rfcReference: 'OpenID SSF 1.0 Section 6.1.2',
+    })
+    const pollURL = (data as { delivery?: { endpoint_url?: string } })?.delivery?.endpoint_url
+    if (!pollURL) {
+      throw new Error('poll delivery.endpoint_url missing from stream configuration')
+    }
+    const { data: pollData } = await this.jsonRequest('POST', pollURL, {
       body: { maxEvents: 10, returnImmediately: true },
       step: 'Poll Transmitter for SETs',
       rfcReference: 'RFC 8936 Section 2',
     })
-    const sets = (data as { sets?: Record<string, string> })?.sets || {}
+    const sets = (pollData as { sets?: Record<string, string> })?.sets || {}
     const acks = Object.keys(sets)
     if (acks.length > 0) {
-      await this.jsonRequest('POST', `${this.config.baseUrl}/poll`, {
+      await this.jsonRequest('POST', pollURL, {
         body: { ack: acks, maxEvents: 0, returnImmediately: true },
         step: 'Acknowledge polled SETs',
         rfcReference: 'RFC 8936 Section 2.4',
