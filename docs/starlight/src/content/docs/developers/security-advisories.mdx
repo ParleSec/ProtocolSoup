@@ -1,0 +1,42 @@
+---
+title: Security Advisories
+description: Published ProtocolSoup vulnerabilities, GHSA and CVE identifiers, affected versions, and how maintainers request CVEs through GitHub.
+---
+
+ProtocolSoup publishes vulnerabilities as [GitHub repository security advisories](https://github.com/ParleSec/ProtocolSoup/security/advisories). GitHub is the CVE Numbering Authority for those records: the GHSA description becomes the CVE text. Report new issues privately per [SECURITY.md](https://github.com/ParleSec/ProtocolSoup/blob/master/SECURITY.md). Do not open a public issue for an unpatched vulnerability.
+
+Supported versions and tag immutability are in that same security policy. Fixes land on the **latest minor** as a new patch tag. Older minors and previous majors are not rebuilt.
+
+## Published and in-progress advisories
+
+| ID | CVE | Severity | Component | Vulnerable tags | Status |
+|----|-----|----------|-----------|-----------------|--------|
+| [GHSA-q7jr-2q6f-gw44](https://github.com/ParleSec/ProtocolSoup/security/advisories/GHSA-q7jr-2q6f-gw44) | Pending GitHub CNA assignment | High (CVSS 3.1 **7.2**) | `protocolsoup-wallet` / `POST /api/resolve` `request_uri` fetch | `v2.0.0`–`v4.1.0` | Draft until a patched tag is published |
+
+The GHSA link 404s for anonymous users while the advisory is still a draft. After publish it stays the canonical record (CVE, CVSS, credits).
+
+### GHSA-q7jr-2q6f-gw44 — wallet harness SSRF
+
+The wallet harness fetched caller-supplied OID4VP `request_uri` values (and other outbound URLs) after checking only whether the **hostname text** was a literal private or loopback IP. DNS names and HTTP redirect targets were not re-checked. `POST /api/resolve` requires no authentication, and external fetches default to on. Non-success upstream bodies were returned in `error_description`.
+
+**CWE:** CWE-918 (Server-Side Request Forgery).
+
+**Not affected:** git tag `v1.0.0`; images other than `ghcr.io/parlesec/protocolsoup-wallet`.
+
+**Workaround (self-hosted, if you cannot upgrade yet):** set `WALLET_ALLOW_EXTERNAL_VERIFIERS=false` so only the configured target/issuer origin is fetched. That disables third-party `request_uri` and external OID4VCI import. It is not sufficient for the hosted wallet at `wallet.protocolsoup.com`, which must run a patched image.
+
+**Fix:** upgrade `protocolsoup-wallet` to the patched tag named in the GHSA (planned `v4.1.1` once cut). The wallet URL policy resolves DNS, requires HTTPS for untrusted hosts, re-validates redirects, dials only allowed addresses, and does not reflect upstream error bodies. See the [wallet service](/deploy/services/wallet/) runtime contract.
+
+Credit: [EQSTLab](https://github.com/EQSTLab).
+
+## Maintainer process (GitHub CNA)
+
+1. Keep the report private (draft GHSA). Collaborate with the reporter on the advisory.
+2. Rewrite the description to impact, affected versions, patches, and workarounds. **Remove proof-of-concept code** before requesting a CVE.
+3. Set Go module `github.com/ParleSec/ProtocolSoup` version ranges using GitHub's range syntax **without** a `v` prefix (for example `>= 2.0.0, <= 4.1.0`). Verify every existing git tag, not only the latest.
+4. Score with a CVSS 3.1 vector. Do not set both `severity` and `cvss_vector_string`.
+5. Click **Request CVE** on the draft. Wait for `CVE-YYYY-NNNNN`.
+6. Merge the fix, tag the latest minor (`vX.Y.Z+1`), set **Patched versions**, then **Publish advisory**.
+7. Deploy the patched wallet image and record the CVE on this page.
+
+Maintainer field-level notes for GHSA-q7jr-2q6f-gw44 live in-repo at `docs/security/GHSA-q7jr-2q6f-gw44.md`.
