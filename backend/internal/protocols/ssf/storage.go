@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
 
@@ -130,6 +131,15 @@ func (s *Storage) initSchema() error {
 		FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
 	);
 
+	-- SSF §8.1.3 subject membership. default_subjects ALL: excluded=1 means do not transmit.
+	CREATE TABLE IF NOT EXISTS stream_subject_membership (
+		id TEXT PRIMARY KEY,
+		stream_id TEXT NOT NULL,
+		subject_json TEXT NOT NULL,
+		excluded INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE
+	);
+
 	-- Indexes
 	CREATE INDEX IF NOT EXISTS idx_events_stream ON events(stream_id);
 	CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
@@ -152,6 +162,10 @@ func (s *Storage) initSchema() error {
 	_, _ = s.db.Exec(`ALTER TABLE streams ADD COLUMN last_verification_at DATETIME`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_streams_receiver ON streams(receiver_id)`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_streams_session ON streams(session_id)`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_stream_subject_membership_stream ON stream_subject_membership(stream_id)`)
+	_, _ = s.db.Exec(`ALTER TABLE security_states ADD COLUMN device_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE security_states ADD COLUMN device_compliance TEXT NOT NULL DEFAULT ''`)
+	_, _ = s.db.Exec(`ALTER TABLE security_states ADD COLUMN access_restricted INTEGER NOT NULL DEFAULT 0`)
 
 	return nil
 }
@@ -554,16 +568,19 @@ func (s *Storage) UpsertSecurityState(ctx context.Context, streamID string, stat
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO security_states (
 			stream_id, identifier, sessions_active, account_enabled, password_reset_required,
-			tokens_valid, last_modified, modified_by
+			tokens_valid, last_modified, modified_by, device_id, device_compliance, access_restricted
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(stream_id, identifier) DO UPDATE SET
 			sessions_active = excluded.sessions_active,
 			account_enabled = excluded.account_enabled,
 			password_reset_required = excluded.password_reset_required,
 			tokens_valid = excluded.tokens_valid,
 			last_modified = excluded.last_modified,
-			modified_by = excluded.modified_by
+			modified_by = excluded.modified_by,
+			device_id = excluded.device_id,
+			device_compliance = excluded.device_compliance,
+			access_restricted = excluded.access_restricted
 	`,
 		streamID,
 		state.Email,
@@ -573,6 +590,9 @@ func (s *Storage) UpsertSecurityState(ctx context.Context, streamID string, stat
 		boolToInt(state.TokensValid),
 		lastModified,
 		state.ModifiedBy,
+		state.DeviceID,
+		state.DeviceCompliance,
+		boolToInt(state.AccessRestricted),
 	)
 	return err
 }
@@ -581,12 +601,12 @@ func (s *Storage) UpsertSecurityState(ctx context.Context, streamID string, stat
 func (s *Storage) GetSecurityState(ctx context.Context, streamID, identifier string) (*UserSecurityState, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT identifier, sessions_active, account_enabled, password_reset_required,
-			tokens_valid, last_modified, modified_by
+			tokens_valid, last_modified, modified_by, device_id, device_compliance, access_restricted
 		FROM security_states
 		WHERE stream_id = ? AND identifier = ?`, streamID, identifier)
 
 	var state UserSecurityState
-	var accountEnabled, passwordResetRequired, tokensValid int
+	var accountEnabled, passwordResetRequired, tokensValid, accessRestricted int
 	if err := row.Scan(
 		&state.Email,
 		&state.SessionsActive,
@@ -595,6 +615,9 @@ func (s *Storage) GetSecurityState(ctx context.Context, streamID, identifier str
 		&tokensValid,
 		&state.LastModified,
 		&state.ModifiedBy,
+		&state.DeviceID,
+		&state.DeviceCompliance,
+		&accessRestricted,
 	); err != nil {
 		return nil, err
 	}
@@ -602,6 +625,7 @@ func (s *Storage) GetSecurityState(ctx context.Context, streamID, identifier str
 	state.AccountEnabled = intToBool(accountEnabled)
 	state.PasswordResetRequired = intToBool(passwordResetRequired)
 	state.TokensValid = intToBool(tokensValid)
+	state.AccessRestricted = intToBool(accessRestricted)
 
 	return &state, nil
 }
@@ -610,7 +634,7 @@ func (s *Storage) GetSecurityState(ctx context.Context, streamID, identifier str
 func (s *Storage) ListSecurityStates(ctx context.Context, streamID string) (map[string]*UserSecurityState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT identifier, sessions_active, account_enabled, password_reset_required,
-			tokens_valid, last_modified, modified_by
+			tokens_valid, last_modified, modified_by, device_id, device_compliance, access_restricted
 		FROM security_states
 		WHERE stream_id = ?
 		ORDER BY identifier ASC`, streamID)
@@ -622,7 +646,7 @@ func (s *Storage) ListSecurityStates(ctx context.Context, streamID string) (map[
 	states := make(map[string]*UserSecurityState)
 	for rows.Next() {
 		var state UserSecurityState
-		var accountEnabled, passwordResetRequired, tokensValid int
+		var accountEnabled, passwordResetRequired, tokensValid, accessRestricted int
 		if err := rows.Scan(
 			&state.Email,
 			&state.SessionsActive,
@@ -631,12 +655,16 @@ func (s *Storage) ListSecurityStates(ctx context.Context, streamID string) (map[
 			&tokensValid,
 			&state.LastModified,
 			&state.ModifiedBy,
+			&state.DeviceID,
+			&state.DeviceCompliance,
+			&accessRestricted,
 		); err != nil {
 			return nil, err
 		}
 		state.AccountEnabled = intToBool(accountEnabled)
 		state.PasswordResetRequired = intToBool(passwordResetRequired)
 		state.TokensValid = intToBool(tokensValid)
+		state.AccessRestricted = intToBool(accessRestricted)
 		states[state.Email] = &state
 	}
 
@@ -1010,6 +1038,92 @@ func (s *Storage) CleanupOldSessions(ctx context.Context, maxAge time.Duration) 
 	}
 
 	return count, nil
+}
+
+type streamSubjectMembership struct {
+	RawJSON  string
+	Claim    subjectClaim
+	Excluded bool
+}
+
+func (s *Storage) listSubjectMembership(ctx context.Context, streamID string) ([]streamSubjectMembership, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT subject_json, excluded FROM stream_subject_membership WHERE stream_id = ?`, streamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []streamSubjectMembership
+	for rows.Next() {
+		var raw string
+		var excluded int
+		if err := rows.Scan(&raw, &excluded); err != nil {
+			return nil, err
+		}
+		claim, err := parseSubjectClaim([]byte(raw))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, streamSubjectMembership{RawJSON: raw, Claim: claim, Excluded: excluded != 0})
+	}
+	return out, rows.Err()
+}
+
+func (s *Storage) SubjectIsTransmittable(ctx context.Context, streamID string, claim subjectClaim) (bool, error) {
+	members, err := s.listSubjectMembership(ctx, streamID)
+	if err != nil {
+		return false, err
+	}
+	for _, member := range members {
+		if member.Excluded && subjectsMatch(member.Claim, claim) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *Storage) AddStreamSubject(ctx context.Context, streamID string, claim subjectClaim) error {
+	members, err := s.listSubjectMembership(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if subjectsMatch(member.Claim, claim) && member.Excluded {
+			_, err := s.db.ExecContext(ctx, `
+				DELETE FROM stream_subject_membership
+				WHERE stream_id = ? AND excluded = 1 AND subject_json = ?`,
+				streamID, member.RawJSON)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Storage) RemoveStreamSubject(ctx context.Context, streamID string, claim subjectClaim) error {
+	members, err := s.listSubjectMembership(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if subjectsMatch(member.Claim, claim) {
+			_, err := s.db.ExecContext(ctx, `
+				UPDATE stream_subject_membership SET excluded = 1
+				WHERE stream_id = ? AND subject_json = ?`,
+				streamID, member.RawJSON)
+			return err
+		}
+	}
+	body, err := json.Marshal(claim)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO stream_subject_membership (id, stream_id, subject_json, excluded)
+		VALUES (?, ?, ?, 1)`, uuid.NewString(), streamID, string(body))
+	return err
 }
 
 func boolToInt(value bool) int {
