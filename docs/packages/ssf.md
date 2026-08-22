@@ -34,6 +34,7 @@
 | `SSF_AS_ISSUER` | No | `(empty)` | Authorization server `iss` for Stream Management access tokens. Required with `SSF_AS_JWKS_URI` when the Transmitter acts as an OAuth resource server. |
 | `SSF_AS_JWKS_URI` | No | `(empty)` | JWKS URL used to verify those access tokens. When set, Stream Management requires `Authorization: Bearer` or a Looking Glass session. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | JWT `aud` the Transmitter expects. Federation issues `ssf.read` / `ssf.manage` tokens with this audience. |
+| `SSF_AS_INTROSPECT_URI` | No | `(empty)` | RFC 7662 introspection URL used to check Stream Management token revocation when MockIdP is not in-process (split `protocolsoup-ssf`). |
 | `FEDERATION_SERVICE_URL` | No | loopback from `SHOWCASE_LISTEN_ADDR` | Federation base URL for post-CAEP `revoke-subject` |
 | `SSF_TO_FEDERATION_TOKEN` | No | `(empty)` | Bearer token shared with federation for that demo API. Production secret — set via `fly secrets set`, Without it the CAEP `session-revoked` demo hop returns 401. |
 
@@ -59,13 +60,13 @@
 
 ### Stream, Subject, And Delivery APIs
 
-- `POST|GET|PATCH|DELETE /ssf/stream` (nested `delivery`; GET without `stream_id` returns that Receiver's stream list, including `[]`)
+- `POST|GET|PUT|PATCH|DELETE /ssf/stream` (nested `delivery`; GET without `stream_id` returns that Receiver's stream list, including `[]`; PUT is full replace)
 - `GET|POST /ssf/status` (`stream_id` required; status body includes `stream_id`)
 - `POST /ssf/verify` (`stream_id` required; `state` optional; 204 empty)
-- `GET|POST /ssf/subjects`
-- `DELETE /ssf/subjects/{id}`
-- `GET|POST /ssf/poll`
-- `POST /ssf/ack`
+- `GET /ssf/subjects` (Looking Glass demo identities)
+- `POST /ssf/subjects/add` (SSF §8.1.3.1; `stream_id` + RFC 9493 `subject`; 200 empty)
+- `POST /ssf/subjects/remove` (SSF §8.1.3.2; `stream_id` + RFC 9493 `subject`; 204)
+- `POST /ssf/poll/{stream_id}` (RFC 8936; URL is Transmitter-supplied)
 
 ### Lab And Inspection APIs
 
@@ -120,7 +121,7 @@ services:
 ## Security Hardening
 
 - Set `SSF_RECEIVER_TOKEN` explicitly outside local demos.
-- Set `SSF_AS_ISSUER` and `SSF_AS_JWKS_URI` when Stream Management is exposed beyond Looking Glass. Tokens are JWTs from the main authorization server (`ssf.read` / `ssf.manage`, client credentials, 900s). Federation seeds confidential client `ssf-stream-client` for those scopes; pin `SSF_STREAM_CLIENT_SECRET` when the secret must survive restarts.
+- Set `SSF_AS_ISSUER` and `SSF_AS_JWKS_URI` when Stream Management is exposed beyond Looking Glass. Tokens are JWTs from the main authorization server (`ssf.read` / `ssf.manage`, client credentials, 900s). Federation seeds confidential client `ssf-stream-client` for those scopes; pin `SSF_STREAM_CLIENT_SECRET` when the secret must survive restarts. On the split SSF image, set `SSF_AS_INTROSPECT_URI` so the Transmitter can check RFC 7009 revocation status.
 - Set `SSF_TO_FEDERATION_TOKEN` on both `ssf-service` and `federation-service`.
 - Keep `8081` receiver port internal unless external push testing requires exposure.
 - Restrict `SHOWCASE_CORS_ORIGINS` to trusted frontend origins.

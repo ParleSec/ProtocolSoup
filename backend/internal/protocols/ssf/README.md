@@ -115,12 +115,13 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 
 ### Stream Management (SSF §8.1.1)
 
-When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` with `ssf.read` or `ssf.manage`, or a Looking Glass session header. Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
+When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` with `ssf.read` or `ssf.manage`, or a Looking Glass session header. The Transmitter verifies signature, expiry, audience, scope, and revocation status (in-process MockIdP, or `SSF_AS_INTROSPECT_URI` on the split SSF image). Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/ssf/stream` | POST | Create a new stream (**201**; nested `delivery`; default method poll if omitted) |
 | `/ssf/stream` | GET | List this Receiver's streams, or one stream with `?stream_id=` |
+| `/ssf/stream` | PUT | Replace Receiver-Supplied properties (`stream_id` required) |
 | `/ssf/stream` | PATCH | Update a stream (`stream_id` required) |
 | `/ssf/stream` | DELETE | Delete a stream (`stream_id` query required; **204**) |
 
@@ -136,9 +137,9 @@ When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` w
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/subjects` | GET | List all subjects |
-| `/ssf/subjects` | POST | Add a new subject |
-| `/ssf/subjects/{id}` | DELETE | Remove a subject |
+| `/ssf/subjects` | GET | List Looking Glass demo identities |
+| `/ssf/subjects/add` | POST | Add Subject (`stream_id` + RFC 9493 `subject`; **200** empty) |
+| `/ssf/subjects/remove` | POST | Remove Subject (`stream_id` + RFC 9493 `subject`; **204**) |
 
 ### Event Triggers
 
@@ -159,9 +160,9 @@ When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` w
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/ssf/stream` | PUT | Replace stream configuration (SSF §8.1.1.3) |
 | `/ssf/receiver/push` | POST | Push delivery endpoint (RFC 8935; **202**) |
-| `/ssf/poll` | POST | Poll for pending events (RFC 8936) |
-| `/ssf/ack` | POST | Thin alias for poll `acks` |
+| `/ssf/poll/{stream_id}` | POST | Poll for pending events (RFC 8936; Transmitter-supplied URL) |
 
 ### Event History & Logs
 
