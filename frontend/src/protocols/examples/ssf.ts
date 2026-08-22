@@ -139,7 +139,7 @@ app.post('/ssf/push', async (req, res) => {
 
 import * as jose from 'jose';
 
-const POLL_ENDPOINT = TRANSMITTER_URL + '/ssf/poll';
+const POLL_ENDPOINT = stream.delivery.endpoint_url; // Transmitter-supplied, unique per stream
 const pendingAcks: string[] = [];
 
 async function pollForEvents() {
@@ -151,13 +151,13 @@ async function pollForEvents() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      max_events: 10,
+      maxEvents: 10,
       ack: pendingAcks.splice(0),  // Acknowledge previously processed SETs
       // returnImmediately: false   // Long-polling (optional)
     }),
   }).then(r => r.json());
 
-  // Response: { "sets": { "jti1": "eyJ...", "jti2": "eyJ..." }, "more_available": true }
+  // Response: { "sets": { "jti1": "eyJ...", "jti2": "eyJ..." }, "moreAvailable": true }
 
   // Process each SET
   const jwks = jose.createRemoteJWKSet(
