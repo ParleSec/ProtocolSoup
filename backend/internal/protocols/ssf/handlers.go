@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -531,6 +532,8 @@ func (p *Plugin) handleRemoveSubject(w http.ResponseWriter, r *http.Request) {
 // Action Handlers (Interactive Triggers)
 // ====================
 
+var errUnknownAction = errors.New("unknown action")
+
 // handleTriggerAction handles all action triggers. A security event is a
 // Transmitter-wide fact: every enabled stream that requested the event type
 // and still includes the subject receives a SET (push or poll). Looking Glass
@@ -576,7 +579,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		}
 		event, triggerErr := p.triggerActionOnStream(r.Context(), action, stream.ID, sessionID, req)
 		if triggerErr != nil {
-			if strings.HasPrefix(triggerErr.Error(), "Unknown action:") {
+			if errors.Is(triggerErr, errUnknownAction) {
 				writeError(w, http.StatusBadRequest, triggerErr.Error())
 				return
 			}
@@ -736,7 +739,7 @@ func (p *Plugin) triggerActionOnStream(ctx context.Context, action, streamID, se
 		return p.transmitter.TriggerSessionsRevokedWithSession(ctx, streamID, sessionID, subject, reason, initiator)
 
 	default:
-		return nil, fmt.Errorf("Unknown action: %s", action)
+		return nil, fmt.Errorf("%w: %s", errUnknownAction, action)
 	}
 }
 
