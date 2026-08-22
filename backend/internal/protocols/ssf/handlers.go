@@ -61,9 +61,9 @@ func (p *Plugin) handleSSFConfiguration(w http.ResponseWriter, r *http.Request) 
 			DeliveryMethodPush,
 			DeliveryMethodPoll,
 		},
-		"configuration_endpoint": p.baseURL + "/ssf/stream",
-		"status_endpoint":        p.baseURL + "/ssf/status",
-		"verification_endpoint":  p.baseURL + "/ssf/verify",
+		"configuration_endpoint":  p.baseURL + "/ssf/stream",
+		"status_endpoint":         p.baseURL + "/ssf/status",
+		"verification_endpoint":   p.baseURL + "/ssf/verify",
 		"add_subject_endpoint":    p.baseURL + "/ssf/subjects/add",
 		"remove_subject_endpoint": p.baseURL + "/ssf/subjects/remove",
 		"authorization_schemes": []map[string]string{
@@ -531,7 +531,10 @@ func (p *Plugin) handleRemoveSubject(w http.ResponseWriter, r *http.Request) {
 // Action Handlers (Interactive Triggers)
 // ====================
 
-// handleTriggerAction handles all action triggers
+// handleTriggerAction handles all action triggers. A security event is a
+// Transmitter-wide fact: every enabled stream that requested the event type
+// and still includes the subject receives a SET (push or poll). Looking Glass
+// sessions stay isolated from each other.
 func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 	action := chi.URLParam(r, "action")
 	sessionID := getSessionID(r)
@@ -547,20 +550,75 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var stream *Stream
-	var err error
-
 	if sessionID != "" {
-		stream, err = p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken)
-	} else {
-		stream, err = p.storage.GetDefaultStream(r.Context(), p.baseURL)
+		if _, err := p.storage.GetSessionStream(r.Context(), sessionID, p.baseURL, p.receiverEndpoint, p.receiverToken); err != nil {
+			writeError(w, http.StatusInternalServerError, "Failed to get stream")
+			return
+		}
 	}
 
+	streams, err := p.storage.ListStreams(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to get stream")
+		writeError(w, http.StatusInternalServerError, "Failed to list streams")
 		return
 	}
 
+	var (
+		primary       *StoredEvent
+		primaryStream *Stream
+		delivered     int
+		hardErr       error
+	)
+	for i := range streams {
+		stream := streams[i]
+		if stream.SessionID != "" && stream.SessionID != sessionID {
+			continue
+		}
+		event, triggerErr := p.triggerActionOnStream(r.Context(), action, stream.ID, sessionID, req)
+		if triggerErr != nil {
+			if strings.HasPrefix(triggerErr.Error(), "Unknown action:") {
+				writeError(w, http.StatusBadRequest, triggerErr.Error())
+				return
+			}
+			if skippableDeliveryErr(triggerErr) {
+				continue
+			}
+			hardErr = triggerErr
+			continue
+		}
+		delivered++
+		if primary == nil || stream.SessionID == sessionID {
+			primary = event
+			s := stream
+			primaryStream = &s
+		}
+	}
+
+	if primary == nil {
+		if hardErr != nil {
+			writeError(w, http.StatusInternalServerError, hardErr.Error())
+			return
+		}
+		writeError(w, http.StatusNotFound, "no enabled stream accepts this event")
+		return
+	}
+
+	metadata := GetEventMetadata(primary.EventType)
+	writeJSON(w, http.StatusOK, ActionResponse{
+		EventID:          primary.ID,
+		EventType:        primary.EventType,
+		EventName:        metadata.Name,
+		Category:         string(metadata.Category),
+		Subject:          req.SubjectIdentifier,
+		Status:           primary.Status,
+		DeliveryMethod:   primaryStream.DeliveryMethod,
+		ResponseActions:  metadata.ResponseActions,
+		ZeroTrustImpact:  metadata.ZeroTrustImpact,
+		StreamsDelivered: delivered,
+	})
+}
+
+func (p *Plugin) triggerActionOnStream(ctx context.Context, action, streamID, sessionID string, req ActionRequest) (*StoredEvent, error) {
 	subject := SubjectIdentifier{
 		Format: SubjectFormatEmail,
 		Email:  req.SubjectIdentifier,
@@ -571,15 +629,13 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		initiator = InitiatingEntityAdmin
 	}
 
-	var event *StoredEvent
-
 	switch action {
 	case "session-revoked":
 		reason := req.Reason
 		if reason == "" {
 			reason = "Session revoked by administrator"
 		}
-		event, err = p.transmitter.TriggerSessionRevokedWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
+		return p.transmitter.TriggerSessionRevokedWithSession(ctx, streamID, sessionID, subject, reason, initiator)
 
 	case "credential-change":
 		credType := req.CredentialType
@@ -590,7 +646,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if changeType == "" {
 			changeType = "update" // CAEP §3.3 default
 		}
-		event, err = p.transmitter.TriggerCredentialChangeWithSession(r.Context(), stream.ID, sessionID, subject, credType, changeType, initiator)
+		return p.transmitter.TriggerCredentialChangeWithSession(ctx, streamID, sessionID, subject, credType, changeType, initiator)
 
 	case "device-compliance-change":
 		current := req.CurrentStatus
@@ -601,7 +657,7 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if previous == "" {
 			previous = ComplianceStatusCompliant
 		}
-		event, err = p.transmitter.TriggerDeviceComplianceChangeWithSession(r.Context(), stream.ID, sessionID, subject, current, previous)
+		return p.transmitter.TriggerDeviceComplianceChangeWithSession(ctx, streamID, sessionID, subject, current, previous)
 
 	case "credential-compromise":
 		reason := req.Reason
@@ -612,25 +668,23 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if credType == "" {
 			credType = CredentialTypePassword
 		}
-		event, err = p.transmitter.TriggerCredentialCompromiseWithSession(r.Context(), stream.ID, sessionID, subject, reason, credType)
+		return p.transmitter.TriggerCredentialCompromiseWithSession(ctx, streamID, sessionID, subject, reason, credType)
 
 	case "account-disabled":
-		reason := req.Reason
-		event, err = p.transmitter.TriggerAccountDisabledWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
+		return p.transmitter.TriggerAccountDisabledWithSession(ctx, streamID, sessionID, subject, req.Reason, initiator)
 
 	case "account-enabled":
-		event, err = p.transmitter.TriggerAccountEnabledWithSession(r.Context(), stream.ID, sessionID, subject, initiator)
+		return p.transmitter.TriggerAccountEnabledWithSession(ctx, streamID, sessionID, subject, initiator)
 
 	case "account-purged":
-		event, err = p.transmitter.TriggerAccountPurgedWithSession(r.Context(), stream.ID, sessionID, subject, initiator)
+		return p.transmitter.TriggerAccountPurgedWithSession(ctx, streamID, sessionID, subject, initiator)
 
 	case "identifier-changed":
 		newValue := req.NewValue
 		if newValue == "" {
-			// Default: simulate an email change for the subject
 			newValue = "updated-" + req.SubjectIdentifier
 		}
-		event, err = p.transmitter.TriggerIdentifierChangedWithSession(r.Context(), stream.ID, sessionID, subject,
+		return p.transmitter.TriggerIdentifierChangedWithSession(ctx, streamID, sessionID, subject,
 			req.SubjectIdentifier, newValue, initiator)
 
 	case "assurance-level-change":
@@ -646,71 +700,44 @@ func (p *Plugin) handleTriggerAction(w http.ResponseWriter, r *http.Request) {
 		if namespace == "" {
 			namespace = AssuranceNamespaceNIST
 		}
-		event, err = p.transmitter.TriggerAssuranceLevelChangeWithSession(r.Context(), stream.ID, sessionID, subject, current, previous, namespace)
+		return p.transmitter.TriggerAssuranceLevelChangeWithSession(ctx, streamID, sessionID, subject, current, previous, namespace)
 
 	case "token-claims-change":
-		// CAEP §3.2: claims is a JSON object of changed claim names -> new values
 		claims := map[string]interface{}{
 			"role":  "viewer",
 			"group": []string{"security-team"},
 			"exp":   time.Now().Add(1 * time.Hour).Unix(),
 		}
 		if req.CurrentStatus != "" {
-			claims["role"] = req.CurrentStatus // allow overriding via request
+			claims["role"] = req.CurrentStatus
 		}
-		event, err = p.transmitter.TriggerTokenClaimsChangeWithSession(r.Context(), stream.ID, sessionID, subject, claims)
+		return p.transmitter.TriggerTokenClaimsChangeWithSession(ctx, streamID, sessionID, subject, claims)
 
 	case "identifier-recycled":
-		oldValue := req.SubjectIdentifier // current subject is the new holder
+		oldValue := req.SubjectIdentifier
 		newValue := req.NewValue
 		if newValue == "" {
-			newValue = "recycled-" + req.SubjectIdentifier // show what the identifier was reassigned to
+			newValue = "recycled-" + req.SubjectIdentifier
 		}
-		event, err = p.transmitter.TriggerIdentifierRecycledWithSession(r.Context(), stream.ID, sessionID, subject, oldValue, newValue)
+		return p.transmitter.TriggerIdentifierRecycledWithSession(ctx, streamID, sessionID, subject, oldValue, newValue)
 
 	case "account-credential-change-required":
 		reason := req.Reason
 		if reason == "" {
 			reason = "Credential rotation policy triggered"
 		}
-		event, err = p.transmitter.TriggerAccountCredentialChangeRequiredWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
+		return p.transmitter.TriggerAccountCredentialChangeRequiredWithSession(ctx, streamID, sessionID, subject, reason, initiator)
 
 	case "sessions-revoked":
-		// RISC §2.11: emit CAEP session-revoked for all sessions, not RISC sessions-revoked.
 		reason := req.Reason
 		if reason == "" {
 			reason = "All sessions revoked due to security incident"
 		}
-		event, err = p.transmitter.TriggerSessionsRevokedWithSession(r.Context(), stream.ID, sessionID, subject, reason, initiator)
+		return p.transmitter.TriggerSessionsRevokedWithSession(ctx, streamID, sessionID, subject, reason, initiator)
 
 	default:
-		writeError(w, http.StatusBadRequest, "Unknown action: "+action)
-		return
+		return nil, fmt.Errorf("Unknown action: %s", action)
 	}
-
-	if err != nil {
-		if err == ErrSubjectNotInStream {
-			writeError(w, http.StatusForbidden, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Get event metadata for response
-	metadata := GetEventMetadata(event.EventType)
-
-	writeJSON(w, http.StatusOK, ActionResponse{
-		EventID:         event.ID,
-		EventType:       event.EventType,
-		EventName:       metadata.Name,
-		Category:        string(metadata.Category),
-		Subject:         req.SubjectIdentifier,
-		Status:          event.Status,
-		DeliveryMethod:  stream.DeliveryMethod,
-		ResponseActions: metadata.ResponseActions,
-		ZeroTrustImpact: metadata.ZeroTrustImpact,
-	})
 }
 
 // ActionRequest represents a request to trigger an action
@@ -728,15 +755,16 @@ type ActionRequest struct {
 
 // ActionResponse represents the response after triggering an action
 type ActionResponse struct {
-	EventID         string                   `json:"event_id"`
-	EventType       string                   `json:"event_type"`
-	EventName       string                   `json:"event_name"`
-	Category        string                   `json:"category"`
-	Subject         string                   `json:"subject"`
-	Status          string                   `json:"status"`
-	DeliveryMethod  string                   `json:"delivery_method"`
-	ResponseActions []string                 `json:"response_actions"`
-	ZeroTrustImpact string   `json:"zero_trust_impact"`
+	EventID          string   `json:"event_id"`
+	EventType        string   `json:"event_type"`
+	EventName        string   `json:"event_name"`
+	Category         string   `json:"category"`
+	Subject          string   `json:"subject"`
+	Status           string   `json:"status"`
+	DeliveryMethod   string   `json:"delivery_method"`
+	ResponseActions  []string `json:"response_actions"`
+	ZeroTrustImpact  string   `json:"zero_trust_impact"`
+	StreamsDelivered int      `json:"streams_delivered"`
 }
 
 // ====================
@@ -1059,7 +1087,6 @@ func (p *Plugin) handleDecodeSET(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, decoded)
 }
-
 
 // ====================
 // Helpers
