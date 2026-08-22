@@ -70,7 +70,7 @@
 
 ### Lab And Inspection APIs
 
-- `POST /ssf/actions/{action}`
+- `POST /ssf/actions/{action}` -- transmitter-wide event: every enabled stream that requested the type and still includes the subject gets a SET (Looking Glass sessions stay isolated from each other)
 - `GET /ssf/events`
 - `GET /ssf/received`
 - `GET /ssf/responses`

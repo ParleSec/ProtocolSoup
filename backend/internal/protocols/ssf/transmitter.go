@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,6 +30,21 @@ type Transmitter struct {
 	// Event broadcast channels
 	eventListeners []chan<- TransmitterEvent
 	listenerMu     sync.RWMutex
+}
+
+// Delivery skip errors: the Transmitter omits this stream and continues
+// fan-out to other Receivers.
+var (
+	ErrStreamDisabled    = errors.New("stream is disabled")
+	ErrStreamPaused      = errors.New("stream is paused")
+	ErrEventNotRequested = errors.New("event type not requested by receiver")
+)
+
+func skippableDeliveryErr(err error) bool {
+	return errors.Is(err, ErrSubjectNotInStream) ||
+		errors.Is(err, ErrStreamDisabled) ||
+		errors.Is(err, ErrStreamPaused) ||
+		errors.Is(err, ErrEventNotRequested)
 }
 
 // TransmitterEvent represents an event in the transmission pipeline
@@ -119,9 +135,9 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 	if !frameworkEvent {
 		switch stream.Status {
 		case StreamStatusDisabled:
-			return nil, fmt.Errorf("stream is disabled")
+			return nil, ErrStreamDisabled
 		case StreamStatusPaused:
-			return nil, fmt.Errorf("stream is paused")
+			return nil, ErrStreamPaused
 		case StreamStatusEnabled, "":
 		}
 	}
@@ -137,7 +153,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 			}
 		}
 		if !eventRequested {
-			return nil, fmt.Errorf("event type %s not requested by receiver", event.EventType)
+			return nil, fmt.Errorf("%w: %s", ErrEventNotRequested, event.EventType)
 		}
 
 		allowed, allowErr := t.storage.SubjectIsTransmittable(ctx, streamID, subjectToClaim(event.Subject))
@@ -212,7 +228,7 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		SubjectID: event.Subject.Email,
 		EventType: event.EventType,
 		SessionID: event.SessionID,
-		Data: glassData,
+		Data:      glassData,
 	})
 
 	// Broadcast: SET Signed

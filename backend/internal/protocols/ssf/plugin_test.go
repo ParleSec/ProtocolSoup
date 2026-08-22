@@ -577,6 +577,10 @@ func TestLookingGlassSessionIsolation(t *testing.T) {
 	env := startSSFTestEnv(t)
 	sessionA, _ := env.session(t)
 	sessionB, _ := env.session(t)
+	_ = env.sessionStreamID(t, sessionA)
+	streamB := env.sessionStreamID(t, sessionB)
+	sessBBefore, _ := env.lg.GetSession(sessionB)
+	eventsBeforeB := len(sessBBefore.Events)
 
 	status, body := env.doJSON(t, http.MethodPost, "/ssf/actions/session-revoked", sessionA, map[string]string{
 		"subject_identifier": "alice@example.com",
@@ -590,8 +594,15 @@ func TestLookingGlassSessionIsolation(t *testing.T) {
 	if len(sessA.Events) == 0 {
 		t.Fatal("session A should receive transmitter/receiver events")
 	}
-	if len(sessB.Events) != 0 {
-		t.Fatalf("session B leaked %d events from session A", len(sessB.Events))
+	if len(sessB.Events) != eventsBeforeB {
+		t.Fatalf("session B leaked %d events from session A", len(sessB.Events)-eventsBeforeB)
+	}
+	pendingB, err := env.plugin.storage.GetPendingEvents(t.Context(), streamB, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pendingB) != 0 {
+		t.Fatalf("session B stream queued %d events from session A fire", len(pendingB))
 	}
 }
 

@@ -31,7 +31,7 @@ Use SSF service to test security event stream configuration, CAEP/RISC event del
 - `GET /ssf/subjects` -- Looking Glass demo identities
 - `POST /ssf/subjects/add` -- add subject (`stream_id` + RFC 9493 `subject`; **200**)
 - `POST /ssf/subjects/remove` -- remove subject (`stream_id` + RFC 9493 `subject`; **204**)
-- `POST /ssf/actions/{action}` -- trigger event actions
+- `POST /ssf/actions/{action}` -- trigger event actions for every eligible stream (push and poll)
 - `POST /ssf/poll/{stream_id}` -- poll delivery (Transmitter-supplied URL)
 
 ### Receiver
