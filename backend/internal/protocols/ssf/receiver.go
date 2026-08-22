@@ -104,7 +104,7 @@ type PollResponse struct {
 // ExecuteResponseActions executes security response actions for a decoded event.
 // Only actions that mutate RP state are marked executed. Generic strings
 // (alert security team, re-evaluate policy) are logged or not_applicable.
-func ExecuteResponseActions(executor ActionExecutor, eventID string, event DecodedEvent, subjectEmail, sessionID string) []ResponseAction {
+func ExecuteResponseActions(executor ActionExecutor, eventID string, event DecodedEvent, subjectEmail, sessionID string, subject *SETSubject) []ResponseAction {
 	metadata := event.Metadata
 	var actions []ResponseAction
 
@@ -142,6 +142,14 @@ func ExecuteResponseActions(executor ActionExecutor, eventID string, event Decod
 		case EventTypeAccountPurged:
 			log.Printf("[SSF Receiver] Executing: Disable and revoke for purged %s (session: %s)", subjectEmail, sessionID)
 			mutateErr = executor.DisableUserForSession(ctx, sessionID, subjectEmail)
+			mutated = true
+		case EventTypeDeviceComplianceChange:
+			deviceID := ""
+			if subject != nil {
+				deviceID = subject.DeviceSubject()
+			}
+			log.Printf("[SSF Receiver] Executing: Device compliance for %s device=%s (session: %s)", subjectEmail, deviceID, sessionID)
+			mutateErr = executor.ApplyDeviceComplianceForSession(ctx, sessionID, subjectEmail, deviceID, event.Payload.CurrentStatus)
 			mutated = true
 		}
 	}
@@ -186,7 +194,8 @@ func isPrimaryMutationAction(desc string) bool {
 		containsAnyOf(lower, "enable", "reactivate") ||
 		containsAnyOf(lower, "password") ||
 		(containsAnyOf(lower, "revoke") && containsAnyOf(lower, "token")) ||
-		(containsAnyOf(lower, "invalidate") && containsAnyOf(lower, "token"))
+		(containsAnyOf(lower, "invalidate") && containsAnyOf(lower, "token")) ||
+		containsAnyOf(lower, "restrict network")
 }
 
 func actionStatusForDescription(desc string) string {
