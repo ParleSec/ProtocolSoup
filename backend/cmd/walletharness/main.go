@@ -38,6 +38,8 @@ import (
 
 type walletHarnessServer struct {
 	httpClient  *http.Client
+	lookupIPs   func(context.Context, string) ([]net.IP, error)
+	dialContext func(context.Context, string, string) (net.Conn, error)
 	jwksFetcher *intcrypto.JWKSFetcher
 
 	targetBaseURL     string
@@ -376,9 +378,6 @@ func main() {
 	}
 
 	server := &walletHarnessServer{
-		httpClient: &http.Client{
-			Timeout: clientTimeout,
-		},
 		jwksFetcher:                       intcrypto.NewJWKSFetcher(5 * time.Minute),
 		targetBaseURL:                     targetBaseURL,
 		targetHost:                        targetHost,
@@ -405,6 +404,7 @@ func main() {
 		wallets:                           make(map[string]*walletMaterial),
 		oid4vciAuthStates:                 make(map[string]*pendingOID4VCIAuthState),
 	}
+	server.httpClient = server.newOutboundHTTPClient(clientTimeout)
 
 	mux := http.NewServeMux()
 	server.registerRoutes(mux)
@@ -1683,54 +1683,12 @@ func parseOpenID4VPURI(raw string) (requestURI string, requestJWT string, client
 	return requestURI, requestJWT, clientID, requestURIMethod, nil
 }
 
-func (s *walletHarnessServer) validateExternalURL(raw string) (string, error) {
-	normalized := strings.TrimSpace(raw)
-	parsed, err := url.ParseRequestURI(normalized)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL %q: %w", raw, err)
-	}
-	if parsed.User != nil {
-		return "", fmt.Errorf("URL userinfo is not allowed")
-	}
-	hostWithPort := strings.ToLower(strings.TrimSpace(parsed.Host))
-	if hostWithPort == "" {
-		return "", fmt.Errorf("URL host is required")
-	}
-	trustedHosts := []string{strings.ToLower(strings.TrimSpace(s.targetHost))}
-	if issuerURL, parseErr := url.Parse(strings.TrimSpace(s.issuerBaseURL)); parseErr == nil {
-		trustedHosts = append(trustedHosts, strings.ToLower(strings.TrimSpace(issuerURL.Host)))
-	}
-	for _, trustedHost := range trustedHosts {
-		if trustedHost != "" && hostWithPort == trustedHost {
-			return parsed.String(), nil
-		}
-	}
-	if !s.allowExternal {
-		return "", fmt.Errorf("URL host %q is not allowed", hostWithPort)
-	}
-
-	hostName := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if hostName == "" {
-		return "", fmt.Errorf("URL hostname is required")
-	}
-	if parsed.Scheme != "https" {
-		isLocalDevHost := hostName == "localhost" || strings.HasPrefix(hostName, "127.")
-		if !isLocalDevHost {
-			return "", fmt.Errorf("external URL scheme %q is not allowed", parsed.Scheme)
-		}
-	}
-	if hostName == "localhost" || strings.HasSuffix(hostName, ".local") || strings.HasSuffix(hostName, ".internal") {
-		return "", fmt.Errorf("external URL host %q is not allowed", hostName)
-	}
-	if parsedIP := net.ParseIP(hostName); parsedIP != nil {
-		if parsedIP.IsLoopback() || parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() || parsedIP.IsMulticast() || parsedIP.IsUnspecified() {
-			return "", fmt.Errorf("external URL host %q is not allowed", hostName)
-		}
-	}
-	return parsed.String(), nil
-}
-
 func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI string, method string) (string, string, error) {
+	normalizedRequestURI, err := s.validateOutboundURL(ctx, requestURI)
+	if err != nil {
+		return "", "", fmt.Errorf("request_uri is not allowed: %w", err)
+	}
+	requestURI = normalizedRequestURI
 	normalizedMethod := strings.ToLower(strings.TrimSpace(method))
 	if normalizedMethod == "" {
 		normalizedMethod = "get"
@@ -1738,7 +1696,6 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 
 	var (
 		req *http.Request
-		err error
 	)
 	switch normalizedMethod {
 	case "get":
@@ -1765,12 +1722,15 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 		return "", "", fmt.Errorf("request_uri %s failed: %w", strings.ToUpper(normalizedMethod), err)
 	}
 	defer resp.Body.Close()
-	responseBytes, readErr := io.ReadAll(resp.Body)
+	responseBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxRequestObjectBytes+1))
 	if readErr != nil {
 		return "", "", fmt.Errorf("read request_uri response: %w", readErr)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", "", fmt.Errorf("request_uri %s returned %d: %s", strings.ToUpper(normalizedMethod), resp.StatusCode, oneLine(string(responseBytes)))
+		return "", "", fmt.Errorf("request_uri %s returned %d", strings.ToUpper(normalizedMethod), resp.StatusCode)
+	}
+	if len(responseBytes) > maxRequestObjectBytes {
+		return "", "", fmt.Errorf("request_uri %s body is too large", strings.ToUpper(normalizedMethod))
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
 	if contentType != "application/oauth-authz-req+jwt" {
@@ -1922,7 +1882,7 @@ func (s *walletHarnessServer) resolveDIDWeb(ctx context.Context, did string) did
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		result.Error = fmt.Sprintf("did:web document returned %d: %s", resp.StatusCode, oneLine(string(body)))
+		result.Error = fmt.Sprintf("did:web document returned %d", resp.StatusCode)
 		return result
 	}
 	var payload map[string]interface{}

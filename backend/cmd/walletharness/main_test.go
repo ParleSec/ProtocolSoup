@@ -914,7 +914,8 @@ func TestFetchRequestObjectConsumesFinalCompactJWTBody(t *testing.T) {
 	}))
 	defer requestServer.Close()
 
-	server := &walletHarnessServer{httpClient: requestServer.Client()}
+	host, _ := url.Parse(requestServer.URL)
+	server := &walletHarnessServer{httpClient: requestServer.Client(), targetHost: host.Host}
 	gotJWT, requestID, err := server.fetchRequestObject(context.Background(), requestServer.URL, "get")
 	if err != nil {
 		t.Fatalf("fetchRequestObject: %v", err)
@@ -941,6 +942,7 @@ func TestResolveRequestContextWithOptionsAllowsExternalWhenEnabled(t *testing.T)
 		targetHost:        "protocolsoup.com",
 		targetResponseURI: "https://protocolsoup.com/oid4vp/response",
 		allowExternal:     true,
+		lookupIPs:         lookupPublicUnicastIPs,
 	}
 	requestJWT := buildTestRequestJWT(t, "https://wallet.example.org/oid4vp/response")
 	context, err := server.resolveRequestContextWithOptions("req-123", requestJWT, true)
@@ -1636,6 +1638,7 @@ func TestHandleAuthorizeRedirectsToConsentFlow(t *testing.T) {
 	server := &walletHarnessServer{
 		targetHost:    "protocolsoup.com",
 		allowExternal: true,
+		lookupIPs:     lookupPublicUnicastIPs,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/authorize", server.handleAuthorize)
@@ -1696,7 +1699,8 @@ func TestFetchRequestObjectPOSTSendsWalletNonce(t *testing.T) {
 	}))
 	defer requestServer.Close()
 
-	server := &walletHarnessServer{httpClient: requestServer.Client()}
+	host, _ := url.Parse(requestServer.URL)
+	server := &walletHarnessServer{httpClient: requestServer.Client(), targetHost: host.Host}
 	gotJWT, _, err := server.fetchRequestObject(context.Background(), requestServer.URL, "post")
 	if err != nil {
 		t.Fatalf("fetchRequestObject(post): %v", err)
