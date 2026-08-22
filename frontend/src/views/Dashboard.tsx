@@ -6,6 +6,7 @@ import {
 
 import { HomepagePalette } from '@/components/palette/HomepagePalette'
 import { SITE_CONFIG } from '@/config/seo'
+import certification from '@/data/openid-certification.json'
 import { PROTOCOL_ACCENT_CLASSES, PROTOCOL_CATALOG, COMING_SOON_PROTOCOLS, protocolHomepageBlurb } from '@/protocols/presentation/protocol-catalog'
 
 interface SpecLinkItem {
@@ -18,6 +19,9 @@ interface SpecGroupItem {
   label: string
   links: SpecLinkItem[]
 }
+
+const showCertifiedMark =
+  certification.status === 'active' && certification.profiles.length > 0
 
 const SPEC_GROUPS: SpecGroupItem[] = [
   {
@@ -171,6 +175,30 @@ export function Dashboard() {
           ))}
         </div>
       </section>
+
+      {showCertifiedMark ? (
+        <section>
+          <Link
+            href="/trust#conformance"
+            className="flex items-center gap-4 rounded-xl border border-white/10 bg-surface-900/30 p-4 transition-colors hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950"
+          >
+            <span className="shrink-0 rounded-md bg-white p-1.5">
+              <img
+                src="/openid-certified.png"
+                alt=""
+                className="h-10 w-auto"
+              />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-white">OpenID Certified™</span>
+              <span className="mt-0.5 block text-xs text-surface-400 leading-relaxed">
+                {certification.tagline}
+              </span>
+            </span>
+            <ChevronRight className="w-4 h-4 shrink-0 text-surface-600" />
+          </Link>
+        </section>
+      ) : null}
 
       {/* Quick References */}
       <section>

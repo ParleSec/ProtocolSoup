@@ -19,6 +19,13 @@
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
+<p>
+  <a href="https://protocolsoup.com/trust#conformance"><img src="frontend/public/openid-certified.png" alt="OpenID Certified" height="48"></a>
+</p>
+<p>
+  <a href="https://protocolsoup.com/trust#conformance">OpenID Certified™ by ProtocolSoup for the OID4VCI Issuer, OID4VP Verifier and OID4VP Wallet profiles.</a>
+</p>
+
 </div>
 
 <br>
