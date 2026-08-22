@@ -13,7 +13,7 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 - OAuth 2.0 Attestation-Based Client Authentication (draft-ietf-oauth-attestation-based-client-auth)
 - OID4VCI 1.0 Appendix D Key Attestation
 - RFC 9449 OAuth 2.0 Demonstrating Proof of Possession (DPoP), opt-in
-- High Assurance Interoperability Profile (HAIP) 1.0 building blocks (full profile conformance is not claimed)
+- OpenID4VC High Assurance Interoperability Profile (HAIP) 1.0 (final)
 - SD-JWT VC profile (`dc+sd-jwt` credential format)
 - W3C Verifiable Credentials Data Model 1.1 / 2.0 (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` formats)
 - W3C VC Data Integrity 1.0 (`ecdsa-rdfc-2019`, `eddsa-rdfc-2022` cryptosuites for `ldp_vc`)
@@ -134,8 +134,10 @@ from that code so credential (and related) resource endpoints reject it with
 ## HAIP issuance building blocks
 
 The issuer implements the following HAIP-related issuance controls as opt-in,
-trust-anchor-gated (or otherwise explicitly enabled) API features. This is
-not a claim of complete HAIP issuer or wallet profile conformance.
+trust-anchor-gated (or otherwise explicitly enabled) API features. Named
+certified ProtocolSoup versions and OID4VCI profiles are listed on the
+[trust page](https://protocolsoup.com/trust#conformance); this section describes
+the controls in the running demo, not a blanket claim for every deployment.
 
 The hosted wallet reference client drives client attestation, key attestation,
 DPoP, and credential-response encryption together when HAIP attestation

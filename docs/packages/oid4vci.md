@@ -68,7 +68,9 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
 - Replay/freshness denial handling
 
 The attestation, encryption, and DPoP items are HAIP-related API building
-blocks, not a complete HAIP conformance claim. The hosted wallet reference
+blocks in the running demo. Named certified ProtocolSoup versions and OID4VCI
+profiles are listed on the [trust page](https://protocolsoup.com/trust#conformance).
+The hosted wallet reference
 client (`protocolsoup-wallet`) drives client attestation, key attestation,
 DPoP, and credential-response encryption together when its HAIP attestation
 env material is configured. Looking Glass pre-authorized executors create the

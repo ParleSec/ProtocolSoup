@@ -1,9 +1,5 @@
 <div align="center">
 
-<img src="frontend/public/og-image.png" alt="ProtocolSoup - an interactive protocol sandbox. Real flows against real infrastructure." width="100%">
-
-<br>
-
 <p>
   <a href="https://github.com/ParleSec/ProtocolSoup/actions/workflows/ci-cd.yml"><img src="https://github.com/ParleSec/ProtocolSoup/actions/workflows/ci-cd.yml/badge.svg" alt="CI status"></a>
   <a href="https://github.com/ParleSec/ProtocolSoup/releases"><img src="https://img.shields.io/github/v/release/ParleSec/ProtocolSoup?sort=semver" alt="Latest release"></a>
@@ -12,12 +8,26 @@
 </p>
 
 <p>
-  <a href="https://protocolsoup.com"><b>Live Sandbox</b></a> ·
-  <a href="https://docs.protocolsoup.com/">Documentation</a> ·
-  <a href="https://docs.protocolsoup.com/start-here/quickstart/">Quickstart</a> ·
-  <a href="https://wallet.protocolsoup.com">Wallet Harness</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="https://protocolsoup.com"><b>Live Sandbox</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://wallet.protocolsoup.com">Wallet</a>
+  &nbsp;·&nbsp;
+  <a href="https://protocolsoup.com/trust">Trust</a>
 </p>
+<p>
+  <a href="https://docs.protocolsoup.com/">Docs</a>
+  &nbsp;·&nbsp;
+  <a href="https://docs.protocolsoup.com/start-here/quickstart/">Quickstart</a>
+</p>
+
+<p>
+  <a href="https://protocolsoup.com/trust#conformance"><img src="frontend/public/openid-certified.png" alt="OpenID Certified" height="48"></a>
+</p>
+<p>
+  <a href="https://protocolsoup.com/trust#conformance">OpenID Certified™ by ProtocolSoup for the OID4VCI Issuer, OID4VP Verifier and OID4VP Wallet profiles.</a>
+</p>
+
+<img src="frontend/public/og-image.png" alt="ProtocolSoup - an interactive protocol sandbox. Real flows against real infrastructure." width="100%">
 
 </div>
 

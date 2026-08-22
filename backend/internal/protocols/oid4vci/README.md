@@ -119,8 +119,9 @@ The OID4VCI implementation is mounted as plugin ID `oid4vci` in the backend prot
 
 ### HAIP Controls (opt-in, trust-anchor-gated)
 
-These are API-level building blocks covered by backend regression tests, not a
-complete HAIP conformance claim. The current Looking Glass/wallet executors
+These are API-level building blocks covered by backend regression tests.
+Named certified ProtocolSoup versions and OID4VCI profiles are listed on
+https://protocolsoup.com/trust#conformance. The current Looking Glass/wallet executors
 do not drive the client-attestation, key-attestation, DPoP proof, and
 encrypted-credential-request material together in one end-to-end HAIP demo.
 
