@@ -1,4 +1,31 @@
+import certificationJson from '@/data/openid-certification.json'
 import { TRUST_LAST_REVIEWED } from '@/lib/trust'
+
+type CertificationLog = {
+  variant: string
+  url: string
+  signedResultUrl: string
+}
+
+type CertificationProfile = {
+  specShort: string
+  role: string
+  version: string
+  registerUrl: string
+  logs: CertificationLog[]
+}
+
+const certification = certificationJson as {
+  status: string
+  tagline: string
+  scope: string
+  trademarkAttribution: string
+  profiles: CertificationProfile[]
+}
+
+function isCertificationActive(): boolean {
+  return certification.status === 'active' && certification.profiles.length > 0
+}
 
 export type TrustLink = { href: string; label: string }
 
@@ -12,6 +39,8 @@ export type TrustBlock =
   | { type: 'ul'; items: string[] }
   | { type: 'pre'; code: string }
   | { type: 'table'; headers: string[]; rows: string[][] }
+  | { type: 'mark'; src: string; href: string; alt: string }
+  | { type: 'link-table'; headers: string[]; rows: TrustText[][] }
 
 export type TrustSection = {
   id: string
@@ -42,8 +71,6 @@ cd ProtocolSoup/docker
 docker compose up -d --build`
 
 const REPOSITORY = 'https://github.com/ParleSec/ProtocolSoup'
-const OIDF_IMPLEMENTATIONS =
-  'https://openid.net/certification/certified-openid-connect-implementations/'
 
 function callout(title: string, ...parts: TrustText[]): TrustBlock {
   return { type: 'callout', title, parts }
@@ -63,6 +90,44 @@ function pre(code: string): TrustBlock {
 
 function table(headers: string[], rows: string[][]): TrustBlock {
   return { type: 'table', headers, rows }
+}
+
+function conformanceSection(): TrustSection {
+  const logs: TrustText[][] = []
+  for (const profile of certification.profiles) {
+    for (const log of profile.logs) {
+      logs.push([
+        `${profile.specShort} ${profile.role}`,
+        profile.version,
+        log.variant,
+        { href: log.url, label: 'test log' },
+        { href: log.signedResultUrl, label: 'signed result' },
+        { href: profile.registerUrl, label: 'register' },
+      ])
+    }
+  }
+
+  return {
+    id: 'conformance',
+    title: 'Certified surface',
+    summary: 'Named ProtocolSoup versions and OpenID profiles listed by OIDF.',
+    blocks: [
+      {
+        type: 'mark',
+        src: '/openid-certified.png',
+        href: 'https://openid.net/certification/',
+        alt: 'OpenID Certified',
+      },
+      callout('OpenID Certified™', certification.tagline),
+      {
+        type: 'link-table',
+        headers: ['Profile', 'Version', 'Variant', 'Test log', 'Signed result', 'Register'],
+        rows: logs,
+      },
+      p(certification.scope),
+      p(certification.trademarkAttribution),
+    ],
+  }
 }
 
 export const TRUST_SECTIONS: TrustSection[] = [
@@ -264,52 +329,7 @@ export const TRUST_SECTIONS: TrustSection[] = [
       ),
     ],
   },
-  {
-    id: 'conformance',
-    title: 'Certified surface',
-    summary: 'The versioned ProtocolSoup profiles listed by OIDF.',
-    blocks: [
-      callout(
-        'OpenID Certified',
-        'The OpenID Foundation lists 14 named OpenID4VP and OpenID4VCI profiles across two ProtocolSoup releases: two wallet profiles for v4.1.0 and twelve wallet, verifier, and issuer profiles for v4.0.0.',
-      ),
-      table(
-        ['Version', 'Role', 'Certified profiles'],
-        [
-          [
-            'v4.1.0',
-            'OID4VCI Wallet',
-            'sd_jwt_vc issuer_initiated by_reference; mdoc issuer_initiated by_value',
-          ],
-          [
-            'v4.0.0',
-            'OID4VP Wallet',
-            'iso_mdl direct_post.jwt; sd_jwt_vc direct_post.jwt',
-          ],
-          [
-            'v4.0.0',
-            'OID4VP Verifier',
-            'sd_jwt_vc direct_post.jwt; iso_mdl direct_post.jwt',
-          ],
-          [
-            'v4.0.0',
-            'OID4VCI Issuer',
-            'mdoc issuer_initiated; sd_jwt_vc wallet_initiated; mdoc wallet_initiated; sd_jwt_vc issuer_initiated',
-          ],
-          [
-            'v4.0.0',
-            'OID4VCI Wallet',
-            'mdoc issuer_initiated by_reference; sd_jwt_vc issuer_initiated by_value; sd_jwt_vc wallet_initiated by_value; mdoc wallet_initiated by_value',
-          ],
-        ],
-      ),
-      p(
-        'Check the current ',
-        { href: OIDF_IMPLEMENTATIONS, label: 'OpenID Foundation certified implementations register' },
-        ' for the exact version and profile names. Each name above has the OID4VCI-1.0-FINAL+HAIP-1.0-FINAL or OID4VP-1.0-FINAL+HAIP-1.0-FINAL prefix shown in the register. Certification applies to those named version/profile pairs; it is not a blanket certification of every ProtocolSoup feature or hosted deployment setting.',
-      ),
-    ],
-  },
+  ...(isCertificationActive() ? [conformanceSection()] : []),
   {
     id: 'governance',
     title: 'Governance and continuity',
