@@ -162,7 +162,7 @@ published as RFC 8414 metadata.
 
 - PKCE code_challenge and code_verifier alignment
 - Token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `scope`
-- Introspection response: `active`, `token_type`, `scope`
+- Introspection response: `active`, `token_type`, `scope`. Resource servers may authenticate by presenting the same access token as `Authorization: Bearer` (RFC 7662 §2.1).
 - Revocation: subsequent introspection returns `active: false`
 - Device code: polling interval, `authorization_pending` vs `slow_down`
 - private_key_jwt: assertion claims, signature algorithm/key binding, and the
