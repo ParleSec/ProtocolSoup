@@ -26,6 +26,7 @@
 | `WALLET_DEFAULT_SUBJECT` | No | `did:example:wallet:alice` | Default holder DID root; this is wallet key identity, not an issuer user-record ID |
 | `WALLET_SESSION_TTL` | No | `20m` | In-memory wallet material TTL |
 | `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Require request/session scoping key for wallet isolation |
+| `WALLET_ALLOW_EXTERNAL_VERIFIERS` | No | `true` | Allow OID4VP `request_uri` and OID4VCI endpoint fetches outside the configured target/issuer origin. External destinations must be HTTPS; the wallet resolves DNS and refuses private, loopback, link-local, multicast, or shared-address destinations, including redirect hops. Failed `request_uri` fetches report HTTP status without reflecting upstream bodies. |
 | `WALLET_ALLOWED_CORS_ORIGINS` | No | `https://protocolsoup.com,https://www.protocolsoup.com,https://protocolsoup.fly.dev` | CORS allow-list |
 | `WALLET_HTTP_TIMEOUT` | No | `15s` | Upstream request timeout |
 | `WALLET_DEVICE_KEY_PATH` | No | `(empty)` | Persistent `mso_mdoc` holder device key (EC P-256) file path; empty uses an ephemeral key |
@@ -52,11 +53,15 @@
   the wallet device key (batch secondaries bound to ephemeral proof keys are
   stored for protocol visibility but not activated).
   CRL/OCSP revocation remains an external trust-policy responsibility.
-- External issuer offer, metadata, token, nonce, credential, JWKS, and
-  notification endpoints pass through the wallet URL policy. Userinfo,
-  non-HTTPS public origins, and private, loopback, link-local, multicast, or
-  internal literal-address targets are rejected; the configured ProtocolSoup
-  issuer origin remains trusted for local deployments.
+- External issuer offer, metadata, token, nonce, credential, JWKS, notification,
+  and OID4VP `request_uri` endpoints pass through the wallet URL policy. Userinfo,
+  non-HTTPS public origins, and destinations whose hostname or DNS-resolved
+  address is private, loopback, link-local, multicast, shared (`100.64.0.0/10`),
+  or otherwise non-global unicast are rejected. Redirect hops are re-checked
+  against the same policy, and the outbound client dials only an address that
+  passed that check. Failed `request_uri` fetches return the HTTP status without
+  reflecting upstream response bodies. The configured ProtocolSoup issuer and
+  target origins remain trusted for local deployments.
 
 ### Health And Readiness
 
@@ -145,6 +150,7 @@ services:
 
 - Keep `WALLET_STRICT_SESSION_ISOLATION=true` outside debug scenarios.
 - Set a narrow `WALLET_ALLOWED_CORS_ORIGINS` list.
+- Leave `WALLET_ALLOW_EXTERNAL_VERIFIERS=true` only when this wallet should fetch third-party `request_uri` / issuer endpoints; the URL policy still refuses non-public destinations. Advisory [GHSA-q7jr-2q6f-gw44](https://github.com/ParleSec/ProtocolSoup/security/advisories/GHSA-q7jr-2q6f-gw44) covers pre-patch `request_uri` SSRF (`v2.0.0`–`v4.1.0`).
 - Place wallet and VC services on private networks; expose only required ingress.
 - Rotate and monitor upstream credentials and trust boundaries at the VC target.
 - Do not set `WALLET_KEY_ATTESTATION_*` to hardware or ISO 18045 levels unless the deployment truly meets them.

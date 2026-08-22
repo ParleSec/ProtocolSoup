@@ -34,6 +34,7 @@ Use the wallet service to run wallet-side OID4VCI issuance (bootstrap or externa
 | `WALLET_DEFAULT_SIGNING_ALG` | No | `ES256` | Default holder-binding signing algorithm; `ES256` (EC P-256) matches the `mso_mdoc` default |
 | `WALLET_SESSION_TTL` | No | `20m` | Session lifetime for in-memory wallet material |
 | `WALLET_STRICT_SESSION_ISOLATION` | No | `true` | Enforce strict session boundaries between demo runs |
+| `WALLET_ALLOW_EXTERNAL_VERIFIERS` | No | `true` | Allow fetches of OID4VP `request_uri` and OID4VCI endpoints outside the configured target/issuer origin. External URLs must be HTTPS; DNS-resolved and redirect destinations that are private, loopback, link-local, multicast, or shared-address are rejected. |
 | `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` | No | `(empty)` | Comma-separated issuer URLs the wallet trusts for `verifier_attestation` request validation |
 | `WALLET_DEVICE_KEY_PATH` | No | `(empty)` | File path for the persistent `mso_mdoc` holder device key (EC P-256). Empty uses an ephemeral key; set a durable path so the device binding of stored mdoc credentials survives restarts |
 | `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` | No | System roots only | Additional PEM CA roots trusted for `x509_san_dns` / `x509_hash` request objects; roots carried in `x5c` are never self-trusted |
@@ -77,6 +78,7 @@ The wallet's metadata-driven OID4VCI client supports:
 - Hosted ProtocolSoup CI copies the showcase verifier request-signer CA into `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` so Looking Glass `x509_hash` / `x509_san_dns` presentations can validate the live `x5c` chain.
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
+- External `request_uri` and issuer fetches resolve DNS and refuse non-public destinations, including redirect hops. Failed fetches do not reflect upstream response bodies. Pre-patch wallet tags `v2.0.0`–`v4.1.0` are [GHSA-q7jr-2q6f-gw44](/developers/security-advisories/).
 - When the browser-based Looking Glass uses a separately hosted wallet, keep at least one wallet instance warm. Looking Glass calls the wallet through the same-origin `/wallet-harness/*` Next rewrite on `protocolsoup.com` (see frontend `WALLET_BACKEND_ORIGIN`), so a cold-start failure surfaces as a normal HTTP error instead of a CORS-stripped edge 502.
 - Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.
 - Set `WALLET_DEVICE_KEY_PATH` to a durable file for `mso_mdoc` (ISO/IEC 18013-5) credentials: the device key bound at issuance must be reused to sign the `DeviceResponse`, so regenerating it silently breaks every stored mdoc credential's device binding.

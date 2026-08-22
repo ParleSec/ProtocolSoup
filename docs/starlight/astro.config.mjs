@@ -153,6 +153,7 @@ export default defineConfig({
             { slug: 'developers/development-setup' },
             { slug: 'developers/pull-request-workflow' },
             { slug: 'developers/release-process' },
+            { slug: 'developers/security-advisories' },
             {
               label: 'Extending ProtocolSoup',
               items: [
