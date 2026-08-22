@@ -41,6 +41,12 @@ export function SecurityStatePanel({
           <StateItem label="Account Status" value={state.account_enabled ? 'Enabled' : 'Disabled'} status={state.account_enabled ? 'good' : 'bad'} />
           <StateItem label="Tokens" value={state.tokens_valid ? 'Valid' : 'Invalid'} status={state.tokens_valid ? 'good' : 'bad'} />
           <StateItem label="Password Reset" value={state.password_reset_required ? 'Required' : 'Not Required'} status={state.password_reset_required ? 'warn' : 'good'} />
+          <StateItem
+            label="Device"
+            value={state.device_compliance ? `${state.device_compliance}${state.device_id ? ` (${state.device_id})` : ''}` : 'Unknown'}
+            status={state.device_compliance === 'not-compliant' || state.access_restricted ? 'bad' : state.device_compliance === 'compliant' ? 'good' : 'neutral'}
+          />
+          <StateItem label="Access" value={state.access_restricted ? 'Restricted' : 'Allowed'} status={state.access_restricted ? 'bad' : 'good'} />
         </div>
         <div className="px-3 pb-3 text-xs text-surface-400">
           Last modified: {new Date(state.last_modified).toLocaleString()} by {state.modified_by}
