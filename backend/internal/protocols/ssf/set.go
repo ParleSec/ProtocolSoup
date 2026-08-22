@@ -18,6 +18,50 @@ type SETSubject struct {
 	Subject     string `json:"sub,omitempty"`
 	ID          string `json:"id,omitempty"`
 	URI         string `json:"uri,omitempty"`
+	User        *SETSubject `json:"user,omitempty"`
+	Device      *SETSubject `json:"device,omitempty"`
+	Session     *SETSubject `json:"session,omitempty"`
+	Application *SETSubject `json:"application,omitempty"`
+	Tenant      *SETSubject `json:"tenant,omitempty"`
+	OrgUnit     *SETSubject `json:"org_unit,omitempty"`
+	Group       *SETSubject `json:"group,omitempty"`
+}
+
+func (s *SETSubject) EmailAddress() string {
+	if s == nil {
+		return ""
+	}
+	if s.Email != "" {
+		return s.Email
+	}
+	return s.User.EmailAddress()
+}
+
+func (s *SETSubject) DeviceSubject() string {
+	if s == nil {
+		return ""
+	}
+	if s.Device != nil {
+		if s.Device.Subject != "" {
+			return s.Device.Subject
+		}
+		return s.Device.ID
+	}
+	if s.Format == SubjectFormatIssuerSub {
+		return s.Subject
+	}
+	return ""
+}
+
+func setSubjectFromMap(raw map[string]interface{}) *SETSubject {
+	if raw == nil {
+		return nil
+	}
+	claim, ok := asSubjectClaim(raw)
+	if !ok {
+		return nil
+	}
+	return setSubjectFromClaim(claim)
 }
 
 // SETClaims extends jwt.RegisteredClaims with SET-specific fields
@@ -72,23 +116,7 @@ func NewSETEncoder(issuer string, privateKey *rsa.PrivateKey, keyID string) *SET
 func (e *SETEncoder) Encode(event SecurityEvent, audience []string, jti string) (string, error) {
 	now := time.Now()
 
-	// Build subject identifier
-	subject := &SETSubject{
-		Format: event.Subject.Format,
-	}
-	switch event.Subject.Format {
-	case SubjectFormatEmail:
-		subject.Email = event.Subject.Email
-	case SubjectFormatPhone:
-		subject.PhoneNumber = event.Subject.PhoneNumber
-	case SubjectFormatIssuerSub:
-		subject.Issuer = event.Subject.Issuer
-		subject.Subject = event.Subject.Subject
-	case SubjectFormatOpaque:
-		subject.ID = event.Subject.ID
-	case SubjectFormatURI:
-		subject.URI = event.Subject.URI
-	}
+	subject := subjectIdentifierToSET(event.Subject)
 
 	// SSF §3.1: subject lives in top-level sub_id. SSF §3.1.2: event objects
 	// MUST NOT include a nested subject claim. Verification (SSF §8.1.4.1)
