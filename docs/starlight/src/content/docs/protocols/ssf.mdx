@@ -16,7 +16,7 @@ description: "Real-time security event sharing with CAEP and RISC events."
 
 SSF is a durable session in [Looking Glass](/using/looking-glass/): `/looking-glass?protocol=ssf`. Catalog flow IDs are presets into one Looking Glass session (they fill the event/delivery chrome). They do not replace the chrome.
 
-**Fire event** encodes and delivers a CAEP/RISC SET for the selected subject. That is the only Looking Glass control that mutates RP account state. **Verify stream** reads transmitter metadata and POSTs `/verify`; it does not revoke sessions or disable accounts.
+- **Fire event** encodes and delivers a CAEP/RISC SET for the selected subject to every enabled stream that requested that event type (the Looking Glass lab stream and any Stream Management poll/push Receivers). That is the only Looking Glass control that mutates RP account state. **Verify stream** reads transmitter metadata and POSTs `/verify`; it does not revoke sessions or disable accounts.
 
 SSF remains its own image (`protocolsoup-ssf`) behind the gateway, the same way SCIM does. RP security state is stored on the SSF service. After a verified CAEP `session-revoked` SET, the receiver also POSTs to federation over HTTP so Alice/Bob OAuth sessions actually die.
 
@@ -64,7 +64,7 @@ The lab action `sessions-revoked` maps to CAEP `session-revoked` (all sessions).
 | `/ssf/subjects` | GET | Looking Glass demo identities |
 | `/ssf/subjects/add` | POST | Add Subject (`stream_id` + RFC 9493 `subject`; **200** empty) |
 | `/ssf/subjects/remove` | POST | Remove Subject (`stream_id` + RFC 9493 `subject`; **204**) |
-| `/ssf/actions/{action}` | POST | Trigger event action |
+| `/ssf/actions/{action}` | POST | Trigger event action (fan-out to eligible streams) |
 | `/ssf/poll/{stream_id}` | POST | Poll delivery (RFC 8936). URL is Transmitter-supplied on the stream. |
 
 ### Receiver

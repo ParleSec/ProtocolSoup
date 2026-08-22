@@ -145,7 +145,14 @@ When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` w
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/ssf/actions/{action}` | POST | Trigger a security event |
+| `/ssf/actions/{action}` | POST | Trigger a security event for every eligible stream |
+
+A security event is a Transmitter-wide fact. POST `/ssf/actions/{action}`
+delivers a SET to every **enabled** stream that listed the event in
+`events_requested` and has not removed the subject. Looking Glass sessions
+are not mixed: a Fire in session A does not queue SETs on session B's stream.
+OAuth Stream Management Receivers (empty `session_id`), including OIDF poll
+streams, are included.
 
 **Request Body:**
 ```json
