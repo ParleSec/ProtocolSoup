@@ -92,6 +92,65 @@ function Block({ block }: { block: TrustBlock }) {
           <code>{block.code}</code>
         </pre>
       )
+    case 'mark':
+      return (
+        <p className="mt-4">
+          <a
+            href={block.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-block rounded-md bg-white p-2"
+          >
+            {/* Official OIDF mark, unmodified, on a white field so it is not recoloured. */}
+            <img
+              src={block.src}
+              alt={block.alt}
+              className="h-12 w-auto"
+            />
+          </a>
+        </p>
+      )
+    case 'link-table':
+      return (
+        <div className="mt-3 overflow-x-auto rounded-lg border border-white/10">
+          <table className="w-full min-w-[42rem] text-left text-sm text-surface-300 border-collapse">
+            <thead>
+              <tr className="border-b border-white/10 bg-white/[0.03]">
+                {block.headers.map((header) => (
+                  <th
+                    key={header}
+                    scope="col"
+                    className="px-3 py-2.5 font-medium text-white whitespace-nowrap"
+                  >
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={rowIndex} className="border-b border-white/5 align-top">
+                  {row.map((cell, cellIndex) =>
+                    cellIndex === 0 ? (
+                      <th
+                        key={`${rowIndex}-${cellIndex}`}
+                        scope="row"
+                        className="px-3 py-2.5 font-medium text-surface-100"
+                      >
+                        <TextParts parts={[cell]} />
+                      </th>
+                    ) : (
+                      <td key={`${rowIndex}-${cellIndex}`} className="px-3 py-2.5">
+                        <TextParts parts={[cell]} />
+                      </td>
+                    ),
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
     case 'table':
       return (
         <div className="mt-3 overflow-x-auto rounded-lg border border-white/10">

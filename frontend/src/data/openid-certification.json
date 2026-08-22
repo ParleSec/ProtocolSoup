@@ -1,0 +1,110 @@
+{
+  "status": "active",
+  "tagline": "OpenID Certified™ by ProtocolSoup for the OID4VCI Issuer, OID4VP Verifier and OID4VP Wallet profiles.",
+  "scope": "Certification applies to the named ProtocolSoup version and profile pairs published on openid.net. It is not a blanket certification of every ProtocolSoup feature, protocol family, or the moving hosted deployment.",
+  "trademarkAttribution": "OpenID® and OpenID Certified™ are trademarks of the OpenID Foundation.",
+  "profiles": [
+    {
+      "specShort": "OID4VCI",
+      "role": "Issuer",
+      "version": "v4.0.0",
+      "registerUrl": "https://openid.net/certification/certified-oid4vci-haip-final/",
+      "logs": [
+        {
+          "variant": "sd_jwt_vc issuer_initiated",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=njw2nyHX2EZcK",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-njw2nyhx2ezck-oid4vci-1_0-issuer-haip-test-plan-sd_jwt_vc-issuer_initiated-njw2nyhx2ezck-11-aug-2026.zip"
+        },
+        {
+          "variant": "sd_jwt_vc wallet_initiated",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=hNE4jIDgpsnPS",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-hne4jidgpsnps-oid4vci-1_0-issuer-haip-test-plan-sd_jwt_vc-wallet_initiated-hne4jidgpsnps-11-aug-2026.zip"
+        },
+        {
+          "variant": "mdoc issuer_initiated",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=cJF3R8uzD4lXu",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-cjf3r8uzd4lxu-oid4vci-1_0-issuer-haip-test-plan-mdoc-issuer_initiated-cjf3r8uzd4lxu-11-aug-2026.zip"
+        },
+        {
+          "variant": "mdoc wallet_initiated",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=Ht6oLclyMvA6g",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-ht6olclymva6g-oid4vci-1_0-issuer-haip-test-plan-mdoc-wallet_initiated-ht6olclymva6g-11-aug-2026.zip"
+        }
+      ]
+    },
+    {
+      "specShort": "OID4VP",
+      "role": "Verifier",
+      "version": "v4.0.0",
+      "registerUrl": "https://openid.net/certification/certified-oid4vp-haip-final/",
+      "logs": [
+        {
+          "variant": "sd_jwt_vc direct_post.jwt",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=F6h1mtbHmYizJ",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-f6h1mtbhmyizj-oid4vp-1final-verifier-haip-test-plan-sd_jwt_vc-direct_post.jwt-f6h1mtbhmyizj-11-aug-2026.zip"
+        },
+        {
+          "variant": "iso_mdl direct_post.jwt",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=VJ7uA6ZLeNLDy",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-vj7ua6zlenldy-oid4vp-1final-verifier-haip-test-plan-iso_mdl-direct_post.jwt-vj7ua6zlenldy-11-aug-2026.zip"
+        }
+      ]
+    },
+    {
+      "specShort": "OID4VP",
+      "role": "Wallet",
+      "version": "v4.0.0",
+      "registerUrl": "https://openid.net/certification/certified-oid4vp-haip-final/",
+      "logs": [
+        {
+          "variant": "sd_jwt_vc direct_post.jwt",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=cQtN4KwUZ58pS",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-cqtn4kwuz58ps-oid4vp-1final-wallet-haip-test-plan-sd_jwt_vc-direct_post.jwt-cqtn4kwuz58ps-11-aug-2026.zip"
+        },
+        {
+          "variant": "iso_mdl direct_post.jwt",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=1xNb7WwYD0amw",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2022/07/signed-1xnb7wwyd0amw-oid4vp-1final-wallet-haip-test-plan-iso_mdl-direct_post.jwt-1xnb7wwyd0amw-11-aug-2026.zip"
+        }
+      ]
+    },
+    {
+      "specShort": "OID4VCI",
+      "role": "Wallet",
+      "version": "v4.1.0",
+      "registerUrl": "https://openid.net/certification/certified-oid4vci-haip-final/",
+      "logs": [
+        {
+          "variant": "sd_jwt_vc wallet_initiated by_value",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=nAuG3mXqK7Ly7",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-naug3mxqk7ly7-oid4vci-1-0-wallet-haip-test-plan-wallet-initiated-sd-jwt-vc-by-value-naug3mxqk7ly7-15-aug-2026.zip"
+        },
+        {
+          "variant": "sd_jwt_vc issuer_initiated by_value",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=imSZR92ZClSkv",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-imszr92zclskv-oid4vci-1-0-wallet-haip-test-plan-issuer-initiated-sd-jwt-vc-by-value-imszr92zclskv-15-aug-2026.zip"
+        },
+        {
+          "variant": "sd_jwt_vc issuer_initiated by_reference",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=FduZvn1YvAhnm",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-fduzvn1yvahnm-oid4vci-1-0-wallet-haip-test-plan-issuer-initiated-sd-jwt-vc-by-reference-fduzvn1yvahnm-15-aug-2026.zip"
+        },
+        {
+          "variant": "mdoc wallet_initiated by_value",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=mpjCeT3v2Cabh",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-mpjcet3v2cabh-oid4vci-1-0-wallet-haip-test-plan-mdoc-wallet-initiated-by-value-mpjcet3v2cabh-15-aug-2026.zip"
+        },
+        {
+          "variant": "mdoc issuer_initiated by_value",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=lySQpdvkXa9Av",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-lysqpdvkxa9av-oid4vci-1-0-wallet-haip-test-plan-mdoc-issuer-initiated-by-value-lysqpdvkxa9av-15-aug-2026.zip"
+        },
+        {
+          "variant": "mdoc issuer_initiated by_reference",
+          "url": "https://www.certification.openid.net/plan-detail.html?public=true&plan=5Ez6IVaYO1gp3",
+          "signedResultUrl": "https://openid.net/wp-content/uploads/2026/08/signed-5ez6ivayo1gp3-oid4vci-1-0-wallet-haip-test-plan-mdoc-issuer-initiated-by-reference-5ez6ivayo1gp3-15-aug-2026.zip"
+        }
+      ]
+    }
+  ]
+}
