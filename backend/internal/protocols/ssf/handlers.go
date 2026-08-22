@@ -1086,10 +1086,6 @@ func writeSSFError(w http.ResponseWriter, status int, errCode, description strin
 	})
 }
 
-func generateID() string {
-	return randomString(8)
-}
-
 func generateStreamID() string {
 	return strings.ReplaceAll(uuid.New().String(), "-", "")
 }

@@ -250,16 +250,6 @@ func (s SubjectIdentifier) email() string {
 	return ""
 }
 
-func (s SubjectIdentifier) deviceID() string {
-	if s.Device == nil {
-		return ""
-	}
-	if s.Device.Subject != "" {
-		return s.Device.Subject
-	}
-	return s.Device.ID
-}
-
 func setSubjectFromClaim(claim subjectClaim) *SETSubject {
 	if claim == nil {
 		return nil
