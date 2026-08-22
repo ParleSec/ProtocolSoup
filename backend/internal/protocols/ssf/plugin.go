@@ -37,6 +37,8 @@ type Plugin struct {
 	asJWKSURI    string
 	asAudience   string
 	jwksFetch    *crypto.JWKSFetcher
+	revoker      tokenRevoker
+	introspectURL string
 	minVerifyInt int // seconds; SSF §8.1.1 min_verification_interval
 }
 
@@ -95,6 +97,10 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.asAudience = strings.TrimRight(p.baseURL, "/")
 	}
 	p.jwksFetch = crypto.NewJWKSFetcher(5 * time.Minute)
+	if checker, ok := config.MockIdP.(tokenRevoker); ok {
+		p.revoker = checker
+	}
+	p.introspectURL = strings.TrimSpace(os.Getenv("SSF_AS_INTROSPECT_URI"))
 	p.minVerifyInt = 10
 	if strings.EqualFold(config.Environment, "production") && p.asJWKSURI == "" {
 		log.Printf("[SSF] WARNING: SSF_AS_JWKS_URI is unset in production; Stream Management will not require bearer tokens")
@@ -198,6 +204,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// Stream management (SSF §8.1.1)
 	router.Post("/stream", p.handleCreateStream)
 	router.Get("/stream", p.handleGetStream)
+	router.Put("/stream", p.handleReplaceStream)
 	router.Patch("/stream", p.handleUpdateStream)
 	router.Delete("/stream", p.handleDeleteStream)
 
@@ -208,19 +215,16 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// Stream verification (SSF §8.1.4)
 	router.Post("/verify", p.handleVerification)
 
-	// Subject management
+	// Subject management (SSF §8.1.3). GET lists Looking Glass demo identities.
 	router.Get("/subjects", p.handleListSubjects)
-	router.Post("/subjects", p.handleAddSubject)
-	router.Delete("/subjects/{id}", p.handleDeleteSubject)
+	router.Post("/subjects/add", p.handleAddSubject)
+	router.Post("/subjects/remove", p.handleRemoveSubject)
 
 	// Action triggers (interactive sandbox)
 	router.Post("/actions/{action}", p.handleTriggerAction)
 
-	// Event delivery (RFC 8936 poll). Push delivery is HTTP POST to the
-	// Receiver at /ssf/receiver/push (RFC 8935), not an in-process /ssf/push.
-	router.Get("/poll", p.handlePoll)
-	router.Post("/poll", p.handlePoll)
-	router.Post("/ack", p.handleAcknowledge)
+	// Event delivery (RFC 8936). The poll URL is unique per stream (SSF §6.1.2).
+	router.Post("/poll/{streamID}", p.handlePoll)
 
 	// Event history and logs
 	router.Get("/events", p.handleGetEvents)
@@ -428,7 +432,7 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 			Steps: []plugin.DemoStep{
 				{Order: 1, Name: "Switch to Poll", Description: "Change stream delivery method to poll", Endpoint: "/ssf/stream", Method: "PATCH", Auto: false},
 				{Order: 2, Name: "Trigger Event", Description: "Trigger an event and see it queue", Auto: false},
-				{Order: 3, Name: "Manual Poll", Description: "Fetch events manually via poll endpoint", Endpoint: "/ssf/poll", Method: "POST", Auto: false},
+				{Order: 3, Name: "Manual Poll", Description: "Fetch events from the Transmitter poll URL for this stream", Endpoint: "/ssf/poll/{stream_id}", Method: "POST", Auto: false},
 				{Order: 4, Name: "Switch to Push", Description: "Change back to push delivery", Auto: false},
 				{Order: 5, Name: "Trigger Event", Description: "Trigger event and see immediate delivery", Auto: false},
 			},

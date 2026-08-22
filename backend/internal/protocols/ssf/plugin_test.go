@@ -321,7 +321,7 @@ func TestPollSetsAndAcks(t *testing.T) {
 		t.Fatalf("action %d: %s", status, body)
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"maxEvents":         10,
 		"returnImmediately": true,
 	})
@@ -343,7 +343,7 @@ func TestPollSetsAndAcks(t *testing.T) {
 		acks = append(acks, jti)
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"maxEvents":         10,
 		"returnImmediately": true,
 	})
@@ -358,7 +358,7 @@ func TestPollSetsAndAcks(t *testing.T) {
 		t.Fatal("unacknowledged SETs MUST be retransmitted")
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"ack":               acks,
 		"maxEvents":         0,
 		"returnImmediately": true,
@@ -374,7 +374,7 @@ func TestPollSetsAndAcks(t *testing.T) {
 		t.Fatalf("maxEvents 0 must not return SETs, got %d", len(ackOnly.Sets))
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"maxEvents":         10,
 		"returnImmediately": true,
 	})
@@ -411,7 +411,7 @@ func TestPollSetErrsStopsRetransmit(t *testing.T) {
 		t.Fatalf("action %d: %s", status, body)
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"maxEvents":         10,
 		"returnImmediately": true,
 	})
@@ -430,7 +430,7 @@ func TestPollSetErrsStopsRetransmit(t *testing.T) {
 		setErrs[jti] = map[string]string{"err": "invalid_key", "description": "test"}
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"setErrs":           setErrs,
 		"maxEvents":         0,
 		"returnImmediately": true,
@@ -439,7 +439,7 @@ func TestPollSetErrsStopsRetransmit(t *testing.T) {
 		t.Fatalf("setErrs poll %d: %s", status, body)
 	}
 
-	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll", sessionID, map[string]any{
+	status, body = env.doJSON(t, http.MethodPost, "/ssf/poll/"+streamID, sessionID, map[string]any{
 		"maxEvents":         10,
 		"returnImmediately": true,
 	})
@@ -703,6 +703,20 @@ func TestCAEPRISCRequiredMembers(t *testing.T) {
 	payload, _ = events[EventTypeDeviceComplianceChange].(map[string]interface{})
 	if payload["current_status"] != ComplianceStatusNonCompliant {
 		t.Fatalf("current_status %v want not-compliant", payload["current_status"])
+	}
+	if payload["previous_status"] != ComplianceStatusCompliant {
+		t.Fatalf("previous_status %v", payload["previous_status"])
+	}
+	if _, ok := payload["reason_admin"]; !ok {
+		t.Fatal("CAEP Interop Device Compliance: reason_admin MUST be a non-empty object")
+	}
+	subID, _ := claims["sub_id"].(map[string]interface{})
+	if fmt.Sprint(subID["format"]) != SubjectFormatComplex {
+		t.Fatalf("device-compliance sub_id format %v want complex [SSF §3 / CAEP §3.5]", subID["format"])
+	}
+	device, _ := subID["device"].(map[string]interface{})
+	if fmt.Sprint(device["format"]) != SubjectFormatIssuerSub || fmt.Sprint(device["sub"]) == "" {
+		t.Fatalf("device member %#v [CAEP §3.5 example]", device)
 	}
 
 	status, body = env.doJSON(t, http.MethodPost, "/ssf/actions/sessions-revoked", sessionID, map[string]string{

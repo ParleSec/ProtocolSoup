@@ -139,6 +139,14 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 		if !eventRequested {
 			return nil, fmt.Errorf("event type %s not requested by receiver", event.EventType)
 		}
+
+		allowed, allowErr := t.storage.SubjectIsTransmittable(ctx, streamID, subjectToClaim(event.Subject))
+		if allowErr != nil {
+			return nil, allowErr
+		}
+		if !allowed {
+			return nil, ErrSubjectNotInStream
+		}
 	}
 
 	// Generate event ID
@@ -220,9 +228,11 @@ func (t *Transmitter) GenerateEvent(ctx context.Context, streamID string, event 
 
 	// Find subject ID if exists
 	var subjectIDPtr *string
-	subject, err := t.storage.GetSubjectByIdentifier(ctx, streamID, event.Subject.Format, event.Subject.Email)
-	if err == nil && subject != nil {
-		subjectIDPtr = &subject.ID
+	if email := event.Subject.email(); email != "" {
+		subject, err := t.storage.GetSubjectByIdentifier(ctx, streamID, SubjectFormatEmail, email)
+		if err == nil && subject != nil {
+			subjectIDPtr = &subject.ID
+		}
 	}
 
 	// Store event
@@ -595,6 +605,19 @@ func (t *Transmitter) TriggerDeviceComplianceChange(ctx context.Context, streamI
 
 // TriggerDeviceComplianceChangeWithSession triggers a device compliance change event with session context
 func (t *Transmitter) TriggerDeviceComplianceChangeWithSession(ctx context.Context, streamID, sessionID string, subject SubjectIdentifier, currentStatus, previousStatus string) (*StoredEvent, error) {
+	if currentStatus != ComplianceStatusCompliant && currentStatus != ComplianceStatusNonCompliant {
+		return nil, fmt.Errorf("current_status MUST be compliant or not-compliant (CAEP §3.5.1)")
+	}
+	if previousStatus != ComplianceStatusCompliant && previousStatus != ComplianceStatusNonCompliant {
+		return nil, fmt.Errorf("previous_status MUST be compliant or not-compliant (CAEP §3.5.1)")
+	}
+	if subject.Format != SubjectFormatComplex {
+		email := subject.email()
+		if email == "" {
+			email = subject.Email
+		}
+		subject = deviceComplianceSubject(email, t.baseURL)
+	}
 	event := SecurityEvent{
 		EventType:        EventTypeDeviceComplianceChange,
 		Subject:          subject,
@@ -602,7 +625,8 @@ func (t *Transmitter) TriggerDeviceComplianceChangeWithSession(ctx context.Conte
 		EventTimestamp:   time.Now(),
 		CurrentStatus:    currentStatus,
 		PreviousStatus:   previousStatus,
-		InitiatingEntity: InitiatingEntitySystem,
+		InitiatingEntity: InitiatingEntityPolicy,
+		ReasonAdmin:      &ReasonInfo{EN: "Device compliance changed to " + currentStatus},
 	}
 	return t.GenerateEvent(ctx, streamID, event)
 }
