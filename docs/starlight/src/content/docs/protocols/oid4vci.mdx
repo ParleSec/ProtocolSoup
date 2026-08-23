@@ -199,7 +199,9 @@ flow remains unaffected by default.
   JWT (`typ: key-attestation+jwt`) whose `x5c` chain is verified against a
   configured trust anchor, and whose `attested_keys` must include the proof's
   JOSE-header `jwk` holder key and satisfy any required `key_storage` /
-  `user_authentication` attack-potential levels.
+  `user_authentication` attack-potential levels. HAIP batch issuance from the
+  hosted wallet puts every proof key in one Key Attestation JWT (HAIP 1.0
+  Section 4.5.1); each jwt proof repeats that JWT in its `key_attestation` header.
 - **Encrypted credential responses.** A wallet may include a
   `credential_response_encryption` object (`jwk`, `enc`) on the Credential or
   Deferred Credential Request. When present and valid, the response is

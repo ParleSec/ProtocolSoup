@@ -180,7 +180,7 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - Issued credentials are persisted into a shared wallet credential store for downstream OID4VP presentation lineage.
 - `c_nonce` freshness is enforced at runtime (`invalid_nonce` on stale replay/mismatch).
 - Client attestation, when presented, is authenticated by real `x5c` chain validation against `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` and real signature verification of both the attestation and PoP JWTs — never accepted on trust anchor absence.
-- Key attestation, when a credential configuration requires it (`MobileDrivingLicenceMsoMdocHAIP`), is validated the same way against `OID4VCI_KEY_ATTESTATION_TRUST_ANCHOR_PEM`, and the holder's proof key must be among the attestation's `attested_keys`.
+- Key attestation, when a credential configuration requires it (`MobileDrivingLicenceMsoMdocHAIP`), is validated the same way against `OID4VCI_KEY_ATTESTATION_TRUST_ANCHOR_PEM`, and the holder's proof key must be among the attestation's `attested_keys`. HAIP batch requests from the hosted wallet use one Key Attestation JWT covering every proof key (HAIP 1.0 Section 4.5.1).
 - Encrypted credential responses are real JWE (ECDH-ES + A128GCM/A256GCM) encryption via `go-jose`, not a stub — the response body is genuinely undecryptable without the wallet's ephemeral private key.
 - Looking Glass events are emitted from real request handling, including security rejections.
 - Authorization-code and HAIP-related issuance controls are covered by backend
