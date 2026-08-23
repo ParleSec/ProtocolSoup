@@ -22,6 +22,45 @@ export const OID4VP_DEFAULT_DISCLOSURE_HINTS = [
   'department',
 ]
 
+/** Educational university-degree VCT advertised by UniversityDegreeCredential. */
+export const UNIVERSITY_DEGREE_EDUCATIONAL_VCT = 'https://protocolsoup.com/credentials/university_degree'
+
+/** HAIP SD-JWT VC type-metadata path (OID4VCI 1.0 / SD-JWT VC type metadata). */
+export const UNIVERSITY_DEGREE_TYPE_METADATA_PATH = '/oid4vci/credential-types/university-degree'
+
+export function universityDegreeTypeMetadataVCT(issuerOrigin: string): string {
+  const origin = issuerOrigin.replace(/\/$/, '')
+  if (!origin) {
+    return `https://protocolsoup.com${UNIVERSITY_DEGREE_TYPE_METADATA_PATH}`
+  }
+  return `${origin}${UNIVERSITY_DEGREE_TYPE_METADATA_PATH}`
+}
+
+/**
+ * Set dc+sd-jwt vct_values to the HAIP type-metadata VCT that
+ * UniversityDegreeCredentialSDJWTHAIP issues (plugin.go Initialize overwrites
+ * the educational VCT). A HAIP presentation query must ask for that credential.
+ */
+export function withHAIPUniversityDegreeVCT(queryJSON: string, issuerOrigin: string): string {
+  const parsed = JSON.parse(queryJSON) as { credentials?: Array<Record<string, unknown>> }
+  if (!Array.isArray(parsed.credentials)) {
+    return queryJSON
+  }
+  const haipVCT = universityDegreeTypeMetadataVCT(issuerOrigin)
+  for (const credential of parsed.credentials) {
+    if (String(credential.format || '').trim() !== 'dc+sd-jwt') {
+      continue
+    }
+    const meta =
+      credential.meta && typeof credential.meta === 'object' && !Array.isArray(credential.meta)
+        ? { ...(credential.meta as Record<string, unknown>) }
+        : {}
+    meta.vct_values = [haipVCT]
+    credential.meta = meta
+  }
+  return JSON.stringify(parsed, null, 2)
+}
+
 export const OID4VP_DCQL_PRESETS: OID4VPDCQLPreset[] = [
   {
     id: 'mdl-mso-mdoc',

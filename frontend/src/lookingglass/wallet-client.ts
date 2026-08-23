@@ -63,6 +63,9 @@ export type LookingGlassFailureExplanation = {
 export const LOOKING_GLASS_HAIP_ATTESTATION_FAILURE_GUIDANCE =
   'HAIP key-attested configurations require client attestation and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1; OID4VCI 1.0 Appendix D/E). Wallet import returned HTTP 400 because WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON and WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON (each with an x5c chain) are missing. That rejection is the HAIP issuance gate, not a demo failure. Choose general instead of HAIP to issue without attestation, or configure those JWKs on a self-hosted wallet.'
 
+export const LOOKING_GLASS_KEY_STORAGE_FAILURE_GUIDANCE =
+  'The issuer rejected the Key Attestation JWT because key_storage or user_authentication does not meet key_attestations_required (OID4VCI 1.0 Appendix D.2). MobileDrivingLicenceMsoMdocHAIP requires iso_18045_moderate. The wallet includes those claims from WALLET_KEY_ATTESTATION_KEY_STORAGE and WALLET_KEY_ATTESTATION_USER_AUTHENTICATION. Set both to the required levels on this wallet, or choose general to issue a configuration that does not require them. This is the issuer\'s invalid_proof, not missing attestation JWKs.'
+
 export const LOOKING_GLASS_X509_HASH_GUIDANCE =
   'x509_hash is HAIP\'s signed-request Client Identifier Prefix (OpenID4VP 1.0 Section 5.9.3; HAIP 1.0 Section 5). The request object is a signed JWT; the wallet validates the x5c chain against its verifier trust store. Roots carried in x5c are never self-trusted. HAIP presentation also requires DCQL and an encrypted response (direct_post.jwt). Client and key attestation are OID4VCI issuance requirements and are not part of this presentation profile. The hosted Looking Glass wallet already trusts the showcase verifier CA via WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM.'
 
@@ -86,9 +89,20 @@ type LookingGlassFailureMatcher = {
 const LOOKING_GLASS_FAILURE_MATCHERS: LookingGlassFailureMatcher[] = [
   {
     test: (normalized) =>
+      normalized.includes('key_storage') ||
+      normalized.includes('user_authentication does not satisfy'),
+    title: 'Key attestation level is below issuer requirements',
+    guidance: LOOKING_GLASS_KEY_STORAGE_FAILURE_GUIDANCE,
+    specReference: 'OID4VCI 1.0 Appendix D.2; HAIP 1.0 Section 4.5.1',
+  },
+  {
+    test: (normalized) =>
       normalized.includes('requires haip attestation') ||
       normalized.includes('haip attestation material') ||
-      (normalized.includes('key_attestation') && normalized.includes('required')),
+      (normalized.includes('key_attestation') &&
+        normalized.includes('required') &&
+        !normalized.includes('key_storage') &&
+        !normalized.includes('user_authentication')),
     title: 'HAIP issuance needs wallet attestation',
     guidance: LOOKING_GLASS_HAIP_ATTESTATION_FAILURE_GUIDANCE,
     specReference: 'HAIP 1.0 Sections 4.4.1 and 4.5.1; OID4VCI 1.0 Appendix D',

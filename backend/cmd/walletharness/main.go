@@ -680,7 +680,7 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 	}
 	if inferredFormat, inferredConfigID := inferCredentialFormatFromVPRequest(envelope, s.haipIssuanceEnabled()); inferredFormat != "" {
 		resolveResponse["inferred_credential_format"] = inferredFormat
-		resolveResponse["inferred_credential_configuration_id"] = s.presentationIssuanceConfigurationID(inferredConfigID)
+		resolveResponse["inferred_credential_configuration_id"] = inferredConfigID
 	}
 	writeJSON(w, http.StatusOK, resolveResponse)
 }
@@ -3184,10 +3184,11 @@ func validateBrowserRedirectURI(raw string) (string, error) {
 }
 
 // preparePresentationCredentialOptions infers a credential format/config from
-// the VP request when the caller omitted both, then rewrites HAIP issuance
-// configuration IDs to the educational equivalent when this wallet cannot mint
-// HAIP attestations. OID4VCI /api/import is unchanged and still returns HTTP
-// 400 for HAIP configurations without attestation material.
+// the VP request when the caller omitted both. A HAIP configuration ID is kept:
+// HAIP 1.0 Sections 4.4.1 and 4.5.1 apply to that issuance hop. Missing
+// attestation material or key_storage that does not satisfy
+// key_attestations_required is the issuer's HTTP 400, not a rewrite to a
+// general configuration.
 func (s *walletHarnessServer) preparePresentationCredentialOptions(
 	options credentialSelectionOptions,
 	envelope *resolvedRequestEnvelope,
@@ -3204,7 +3205,6 @@ func (s *walletHarnessServer) preparePresentationCredentialOptions(
 			options.CredentialConfigID = inferredConfigID
 		}
 	}
-	options.CredentialConfigID = s.presentationIssuanceConfigurationID(options.CredentialConfigID)
 	return options
 }
 
@@ -4192,42 +4192,37 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 	issuerAudience := s.oid4vciIssuerAudience()
 	proofJWTs := []string{}
 	if haipIssuance {
-		proofJWT, err = s.createHAIPCredentialProofJWT(
+		proofJWTs, _, err = s.createHAIPCredentialProofJWTs(
 			wallet,
 			offerWalletSubject,
 			cNonce,
 			issuerAudience,
 			credentialConfigID,
 			strings.TrimSpace(options.CredentialFormat),
+			walletBatchCredentialProofCount,
 		)
-	} else if strings.EqualFold(strings.TrimSpace(options.CredentialFormat), credentialFormatMsoMdoc) {
-		// mso_mdoc binds the persistent device key (ISO/IEC 18013-5 clause
-		// 9.1.2): the proof carries and is signed by the device key, so the
-		// issuer binds that exact key into the MSO deviceKeyInfo.deviceKey.
-		proofJWT, err = s.createMdocDeviceProofJWT(offerWalletSubject, cNonce, issuerAudience)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		proofJWT, err = s.createCredentialProofJWT(wallet, offerWalletSubject, cNonce, issuerAudience)
-	}
-	if err != nil {
-		return nil, err
-	}
-	proofJWTs = append(proofJWTs, proofJWT)
-	// Issuer advertises batch_credential_issuance; request a second
-	// distinct-key proof (OID4VCI 1.0 §11.2.3: batch_size MUST be >= 2).
-	if ephemeralKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader); keyErr == nil {
-		if haipIssuance {
-			holderJWK := intcrypto.JWKFromECPublicKey(&ephemeralKey.PublicKey, "wallet-batch-1")
-			if batchProof, batchErr := s.createSDJWTHAIPCredentialProofJWTFromKey(
-				ephemeralKey,
-				holderJWK,
-				offerWalletSubject,
-				cNonce,
-				issuerAudience,
-			); batchErr == nil {
+		if strings.EqualFold(strings.TrimSpace(options.CredentialFormat), credentialFormatMsoMdoc) {
+			// mso_mdoc binds the persistent device key (ISO/IEC 18013-5 clause
+			// 9.1.2): the proof carries and is signed by the device key, so the
+			// issuer binds that exact key into the MSO deviceKeyInfo.deviceKey.
+			proofJWT, err = s.createMdocDeviceProofJWT(offerWalletSubject, cNonce, issuerAudience)
+		} else {
+			proofJWT, err = s.createCredentialProofJWT(wallet, offerWalletSubject, cNonce, issuerAudience)
+		}
+		if err != nil {
+			return nil, err
+		}
+		proofJWTs = append(proofJWTs, proofJWT)
+		// Issuer advertises batch_credential_issuance; request a second
+		// distinct-key proof (OID4VCI 1.0 §11.2.3: batch_size MUST be >= 2).
+		if ephemeralKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader); keyErr == nil {
+			if batchProof, _, batchErr := createCredentialProofJWTFromECKey(ephemeralKey, cNonce, issuerAudience); batchErr == nil {
 				proofJWTs = append(proofJWTs, batchProof)
 			}
-		} else if batchProof, _, batchErr := createCredentialProofJWTFromECKey(ephemeralKey, cNonce, issuerAudience); batchErr == nil {
-			proofJWTs = append(proofJWTs, batchProof)
 		}
 	}
 

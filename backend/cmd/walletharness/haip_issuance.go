@@ -185,34 +185,6 @@ func preferHAIPBootstrapConfigurationID(configurationID string, haipEnabled bool
 	}
 }
 
-// educationalCredentialConfigurationID maps a HAIP key-attested issuance
-// configuration to the same-format educational configuration. HAIP 1.0
-// Sections 4.4.1 / 4.5.1 require wallet and key attestation for issuance;
-// HAIP 1.0 Section 5 presentation (x509_hash, DCQL, encrypted response) does
-// not. Presentation bootstrap therefore issues the educational credential of
-// the matching format when attestation material is not configured.
-func educationalCredentialConfigurationID(configurationID string) string {
-	switch strings.TrimSpace(configurationID) {
-	case "MobileDrivingLicenceMsoMdocHAIP":
-		return "MobileDrivingLicenceMsoMdoc"
-	case "UniversityDegreeCredentialSDJWTHAIP":
-		return "UniversityDegreeCredential"
-	default:
-		return strings.TrimSpace(configurationID)
-	}
-}
-
-// presentationIssuanceConfigurationID is the credential configuration used to
-// auto-issue during OID4VP /submit. HAIP issuance IDs are rewritten to the
-// educational equivalent unless this wallet actually has attestation material.
-func (s *walletHarnessServer) presentationIssuanceConfigurationID(configurationID string) string {
-	normalized := strings.TrimSpace(configurationID)
-	if !isHAIPCredentialConfigurationID(normalized) || s.haipIssuanceEnabled() {
-		return normalized
-	}
-	return educationalCredentialConfigurationID(normalized)
-}
-
 func (s *walletHarnessServer) newHAIPIssuanceSession() (*haipIssuanceSession, error) {
 	dpopPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -448,101 +420,123 @@ func cloneURLValues(values url.Values) url.Values {
 	return cloned
 }
 
-func (s *walletHarnessServer) createHAIPCredentialProofJWT(
+type haipProofHolder struct {
+	key *ecdsa.PrivateKey
+	jwk intcrypto.JWK
+}
+
+func haipProofIsMdoc(credentialConfigID string, credentialFormat string) bool {
+	return strings.EqualFold(strings.TrimSpace(credentialFormat), credentialFormatMsoMdoc) ||
+		strings.EqualFold(strings.TrimSpace(credentialConfigID), "MobileDrivingLicenceMsoMdocHAIP")
+}
+
+func (s *walletHarnessServer) haipProofHolders(
+	wallet *walletMaterial,
+	credentialConfigID string,
+	credentialFormat string,
+	proofCount int,
+) ([]haipProofHolder, error) {
+	if proofCount < 1 {
+		proofCount = 1
+	}
+	holders := make([]haipProofHolder, 0, proofCount)
+	if haipProofIsMdoc(credentialConfigID, credentialFormat) {
+		if s.deviceKey == nil {
+			return nil, fmt.Errorf("wallet device key is unavailable")
+		}
+		holders = append(holders, haipProofHolder{
+			key: s.deviceKey,
+			jwk: intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID),
+		})
+	} else {
+		if wallet == nil || wallet.KeySet == nil {
+			return nil, fmt.Errorf("wallet key material is unavailable")
+		}
+		if err := selectWalletSigningAlgorithm(wallet, "ES256"); err != nil {
+			return nil, err
+		}
+		holderJWK, _, err := walletActiveJWK(wallet)
+		if err != nil {
+			return nil, err
+		}
+		holderKey := wallet.KeySet.ECPrivateKey()
+		if holderKey == nil {
+			return nil, fmt.Errorf("wallet has no ES256 holder key")
+		}
+		holders = append(holders, haipProofHolder{key: holderKey, jwk: holderJWK})
+	}
+	for proofIndex := 1; proofIndex < proofCount; proofIndex++ {
+		ephemeralKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, fmt.Errorf("generate batch proof key: %w", err)
+		}
+		holders = append(holders, haipProofHolder{
+			key: ephemeralKey,
+			jwk: intcrypto.JWKFromECPublicKey(&ephemeralKey.PublicKey, fmt.Sprintf("wallet-batch-%d", proofIndex)),
+		})
+	}
+	return holders, nil
+}
+
+// createHAIPCredentialProofJWTs builds proofs.jwt for a HAIP credential
+// request. HAIP 1.0 Section 4.5.1: if batch issuance is used and the issuer
+// requires cryptographic holder binding, all public keys used in the Credential
+// Request SHOULD be attested within a single key attestation. Each jwt proof
+// still carries that same Key Attestation JWT in its key_attestation header
+// (OID4VCI 1.0 Appendix F.1).
+func (s *walletHarnessServer) createHAIPCredentialProofJWTs(
 	wallet *walletMaterial,
 	walletSubject string,
 	cNonce string,
 	audience string,
 	credentialConfigID string,
 	credentialFormat string,
-) (string, error) {
+	proofCount int,
+) (proofJWTs []string, thumbprints []string, err error) {
 	if !s.haipIssuanceEnabled() {
-		return "", fmt.Errorf("haip attestation material is not configured")
+		return nil, nil, fmt.Errorf("haip attestation material is not configured")
 	}
-	if strings.EqualFold(strings.TrimSpace(credentialFormat), credentialFormatMsoMdoc) ||
-		strings.EqualFold(strings.TrimSpace(credentialConfigID), "MobileDrivingLicenceMsoMdocHAIP") {
-		return s.createMdocHAIPCredentialProofJWT(walletSubject, cNonce, audience, credentialConfigID)
+	if s.haipKeyAttestation == nil {
+		return nil, nil, fmt.Errorf("key attestation private key is required")
 	}
-	return s.createSDJWTHAIPCredentialProofJWT(wallet, walletSubject, cNonce, audience)
-}
-
-func (s *walletHarnessServer) createSDJWTHAIPCredentialProofJWT(
-	wallet *walletMaterial,
-	walletSubject string,
-	cNonce string,
-	audience string,
-) (string, error) {
-	if wallet == nil || wallet.KeySet == nil {
-		return "", fmt.Errorf("wallet key material is unavailable")
-	}
-	if err := selectWalletSigningAlgorithm(wallet, "ES256"); err != nil {
-		return "", err
-	}
-	holderJWK, _, err := walletActiveJWK(wallet)
+	holders, err := s.haipProofHolders(wallet, credentialConfigID, credentialFormat, proofCount)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
-	holderKey := wallet.KeySet.ECPrivateKey()
-	if holderKey == nil {
-		return "", fmt.Errorf("wallet has no ES256 holder key")
+	attestedKeys := make([]intcrypto.JWK, 0, len(holders))
+	for _, holder := range holders {
+		attestedKeys = append(attestedKeys, holder.jwk)
 	}
-	return s.createSDJWTHAIPCredentialProofJWTFromKey(holderKey, holderJWK, walletSubject, cNonce, audience)
-}
-
-func (s *walletHarnessServer) createSDJWTHAIPCredentialProofJWTFromKey(
-	holderKey *ecdsa.PrivateKey,
-	holderJWK intcrypto.JWK,
-	walletSubject string,
-	cNonce string,
-	audience string,
-) (string, error) {
-	if holderKey == nil {
-		return "", fmt.Errorf("holder private key is required")
-	}
-	keyAttestationJWT, err := buildKeyAttestationJWT(
-		s.haipKeyAttestation.PrivateKey,
-		s.haipKeyAttestation.X5C,
-		[]intcrypto.JWK{holderJWK},
-		nil,
-		nil,
-		cNonce,
-	)
-	if err != nil {
-		return "", fmt.Errorf("build key attestation jwt: %w", err)
-	}
-	return createCredentialProofJWTWithKeyAttestation(holderKey, holderJWK, cNonce, walletSubject, audience, keyAttestationJWT)
-}
-
-func (s *walletHarnessServer) createMdocHAIPCredentialProofJWT(
-	walletSubject string,
-	cNonce string,
-	audience string,
-	_ string,
-) (string, error) {
-	if s.deviceKey == nil {
-		return "", fmt.Errorf("wallet device key is unavailable")
-	}
-	deviceJWK := intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID)
 	keyStorage, userAuthentication := keyAttestationClaimsFromEnv()
 	keyAttestationJWT, err := buildKeyAttestationJWT(
 		s.haipKeyAttestation.PrivateKey,
 		s.haipKeyAttestation.X5C,
-		[]intcrypto.JWK{deviceJWK},
+		attestedKeys,
 		keyStorage,
 		userAuthentication,
 		cNonce,
 	)
 	if err != nil {
-		return "", fmt.Errorf("build mdoc key attestation jwt: %w", err)
+		return nil, nil, fmt.Errorf("build key attestation jwt: %w", err)
 	}
-	return createCredentialProofJWTWithKeyAttestation(
-		s.deviceKey,
-		deviceJWK,
-		cNonce,
-		walletSubject,
-		audience,
-		keyAttestationJWT,
-	)
+	proofJWTs = make([]string, 0, len(holders))
+	thumbprints = make([]string, 0, len(holders))
+	for _, holder := range holders {
+		proofJWT, proofErr := createCredentialProofJWTWithKeyAttestation(
+			holder.key,
+			holder.jwk,
+			cNonce,
+			walletSubject,
+			audience,
+			keyAttestationJWT,
+		)
+		if proofErr != nil {
+			return nil, nil, proofErr
+		}
+		proofJWTs = append(proofJWTs, proofJWT)
+		thumbprints = append(thumbprints, strings.TrimSpace(holder.jwk.Thumbprint()))
+	}
+	return proofJWTs, thumbprints, nil
 }
 
 func (s *walletHarnessServer) requestHAIPCredential(

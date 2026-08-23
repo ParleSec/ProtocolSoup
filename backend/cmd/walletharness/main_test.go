@@ -1963,27 +1963,75 @@ func TestPreferHAIPBootstrapConfigurationID(t *testing.T) {
 	}
 }
 
-func TestEducationalCredentialConfigurationID(t *testing.T) {
-	if got := educationalCredentialConfigurationID("MobileDrivingLicenceMsoMdocHAIP"); got != "MobileDrivingLicenceMsoMdoc" {
-		t.Fatalf("mdoc HAIP educational id = %q", got)
+func TestHAIPBatchProofsShareSingleKeyAttestation(t *testing.T) {
+	t.Setenv("WALLET_KEY_ATTESTATION_KEY_STORAGE", "iso_18045_moderate")
+	t.Setenv("WALLET_KEY_ATTESTATION_USER_AUTHENTICATION", "iso_18045_moderate")
+	keyAttesterKey, keyAttesterChain := createECDSACertificateChain(t, []string{"key-attestation.example"}, "Key Attester")
+	keySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("create wallet keyset: %v", err)
 	}
-	if got := educationalCredentialConfigurationID("UniversityDegreeCredentialSDJWTHAIP"); got != "UniversityDegreeCredential" {
-		t.Fatalf("sd-jwt HAIP educational id = %q", got)
+	wallet := &walletMaterial{
+		Subject:          "did:example:wallet:alice",
+		KeySet:           keySet,
+		SigningAlgorithm: "ES256",
 	}
-	if got := educationalCredentialConfigurationID("MobileDrivingLicenceMsoMdoc"); got != "MobileDrivingLicenceMsoMdoc" {
-		t.Fatalf("educational mdoc must stay %q, got %q", "MobileDrivingLicenceMsoMdoc", got)
+	s := &walletHarnessServer{
+		haipClientAttestation: &attestationJWKMaterial{},
+		haipKeyAttestation: &attestationJWKMaterial{
+			PrivateKey: keyAttesterKey,
+			X5C:        encodeCertificateChain(keyAttesterChain),
+		},
 	}
-}
+	proofJWTs, thumbprints, err := s.createHAIPCredentialProofJWTs(
+		wallet,
+		"did:example:wallet:alice",
+		"test-c-nonce",
+		"https://issuer.example/oid4vci",
+		"UniversityDegreeCredentialSDJWTHAIP",
+		"dc+sd-jwt",
+		2,
+	)
+	if err != nil {
+		t.Fatalf("createHAIPCredentialProofJWTs: %v", err)
+	}
+	if len(proofJWTs) != 2 {
+		t.Fatalf("proof count = %d, want 2", len(proofJWTs))
+	}
+	if len(thumbprints) != 2 || thumbprints[0] == "" || thumbprints[0] == thumbprints[1] {
+		t.Fatalf("expected two distinct proof thumbprints, got %#v", thumbprints)
+	}
 
-func TestPresentationIssuanceConfigurationIDFallsBackWithoutAttestation(t *testing.T) {
-	s := &walletHarnessServer{}
-	if got := s.presentationIssuanceConfigurationID("MobileDrivingLicenceMsoMdocHAIP"); got != "MobileDrivingLicenceMsoMdoc" {
-		t.Fatalf("without attestation, mdoc HAIP must fall back, got %q", got)
+	var sharedAttestation string
+	for i, proofJWT := range proofJWTs {
+		decodedProof, decodeErr := intcrypto.DecodeTokenWithoutValidation(proofJWT)
+		if decodeErr != nil {
+			t.Fatalf("decode proof jwt %d: %v", i, decodeErr)
+		}
+		keyAttestationJWT := asString(decodedProof.Header["key_attestation"])
+		if keyAttestationJWT == "" {
+			t.Fatalf("proof %d missing key_attestation", i)
+		}
+		if i == 0 {
+			sharedAttestation = keyAttestationJWT
+			continue
+		}
+		if keyAttestationJWT != sharedAttestation {
+			t.Fatal("HAIP 1.0 Section 4.5.1: batch proofs must carry the same key attestation JWT")
+		}
 	}
-	s.haipClientAttestation = &attestationJWKMaterial{}
-	s.haipKeyAttestation = &attestationJWKMaterial{}
-	if got := s.presentationIssuanceConfigurationID("MobileDrivingLicenceMsoMdocHAIP"); got != "MobileDrivingLicenceMsoMdocHAIP" {
-		t.Fatalf("with attestation, mdoc HAIP must be kept, got %q", got)
+
+	decodedAttestation, err := intcrypto.DecodeTokenWithoutValidation(sharedAttestation)
+	if err != nil {
+		t.Fatalf("decode key attestation jwt: %v", err)
+	}
+	keyStorage := stringSliceFromValue(decodedAttestation.Payload["key_storage"])
+	if len(keyStorage) != 1 || keyStorage[0] != "iso_18045_moderate" {
+		t.Fatalf("key_storage = %#v, want [iso_18045_moderate]", keyStorage)
+	}
+	attestedKeys, ok := decodedAttestation.Payload["attested_keys"].([]interface{})
+	if !ok || len(attestedKeys) != 2 {
+		t.Fatalf("attested_keys count = %#v, want 2", decodedAttestation.Payload["attested_keys"])
 	}
 }
 

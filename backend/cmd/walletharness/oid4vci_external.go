@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1164,97 +1161,50 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 		if nonceErr != nil {
 			return nil, nonceErr
 		}
-		for proofIndex := 0; proofIndex < proofCount; proofIndex++ {
-			var proofJWT string
-			var thumbprint string
-			switch {
-			case isMdoc && proofIndex == 0 && haipIssuance:
-				proofJWT, err = s.createHAIPCredentialProofJWT(
-					wallet,
-					wallet.Subject,
-					cNonce,
-					issuerMetadata.CredentialIssuer,
-					selectedConfigurationID,
-					credentialFormatHint,
-				)
-				if s.deviceKey != nil {
-					thumbprint = strings.TrimSpace(intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID).Thumbprint())
-				}
-			case isMdoc && proofIndex == 0:
-				// Non-HAIP mso_mdoc must bind the persistent device key on the
-				// first proof; additional batch proofs use distinct ephemeral keys.
-				proofJWT, err = s.createMdocDeviceProofJWT(wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
-				if s.deviceKey != nil {
-					thumbprint = strings.TrimSpace(intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID).Thumbprint())
-				}
-			case haipIssuance && proofIndex == 0:
-				proofJWT, err = s.createHAIPCredentialProofJWT(
-					wallet,
-					wallet.Subject,
-					cNonce,
-					issuerMetadata.CredentialIssuer,
-					selectedConfigurationID,
-					credentialFormatHint,
-				)
-				if pubJWK, tp, jwkErr := walletActiveJWK(wallet); jwkErr == nil {
-					_ = pubJWK
-					thumbprint = tp
-				}
-			case haipIssuance:
-				ephemeralKey, keyErr := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-				if keyErr != nil {
-					return nil, fmt.Errorf("generate batch proof key: %w", keyErr)
-				}
-				holderJWK := intcrypto.JWKFromECPublicKey(&ephemeralKey.PublicKey, fmt.Sprintf("wallet-batch-%d", proofIndex))
-				if isMdoc {
-					keyStorage, userAuthentication := keyAttestationClaimsFromEnv()
-					keyAttestationJWT, attestErr := buildKeyAttestationJWT(
-						s.haipKeyAttestation.PrivateKey,
-						s.haipKeyAttestation.X5C,
-						[]intcrypto.JWK{holderJWK},
-						keyStorage,
-						userAuthentication,
-						cNonce,
-					)
-					if attestErr != nil {
-						return nil, fmt.Errorf("build batch mdoc key attestation jwt: %w", attestErr)
-					}
-					proofJWT, err = createCredentialProofJWTWithKeyAttestation(
-						ephemeralKey,
-						holderJWK,
-						cNonce,
-						wallet.Subject,
-						issuerMetadata.CredentialIssuer,
-						keyAttestationJWT,
-					)
-				} else {
-					proofJWT, err = s.createSDJWTHAIPCredentialProofJWTFromKey(
-						ephemeralKey,
-						holderJWK,
-						wallet.Subject,
-						cNonce,
-						issuerMetadata.CredentialIssuer,
-					)
-				}
-				thumbprint = strings.TrimSpace(holderJWK.Thumbprint())
-			case proofIndex == 0:
-				proofJWT, err = s.createCredentialProofJWT(wallet, wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
-				if pubJWK, tp, jwkErr := walletActiveJWK(wallet); jwkErr == nil {
-					_ = pubJWK
-					thumbprint = tp
-				}
-			default:
-				proofJWT, thumbprint, err = createDistinctBatchProofJWT(
-					wallet.SigningAlgorithm,
-					cNonce,
-					issuerMetadata.CredentialIssuer,
-				)
-			}
+		if haipIssuance {
+			proofJWTs, proofThumbprints, err = s.createHAIPCredentialProofJWTs(
+				wallet,
+				wallet.Subject,
+				cNonce,
+				issuerMetadata.CredentialIssuer,
+				selectedConfigurationID,
+				credentialFormatHint,
+				proofCount,
+			)
 			if err != nil {
 				return nil, fmt.Errorf("create credential proof jwt: %w", err)
 			}
-			proofJWTs = append(proofJWTs, proofJWT)
-			proofThumbprints = append(proofThumbprints, thumbprint)
+		} else {
+			for proofIndex := 0; proofIndex < proofCount; proofIndex++ {
+				var proofJWT string
+				var thumbprint string
+				switch {
+				case isMdoc && proofIndex == 0:
+					// Non-HAIP mso_mdoc must bind the persistent device key on the
+					// first proof; additional batch proofs use distinct ephemeral keys.
+					proofJWT, err = s.createMdocDeviceProofJWT(wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
+					if s.deviceKey != nil {
+						thumbprint = strings.TrimSpace(intcrypto.JWKFromECPublicKey(&s.deviceKey.PublicKey, s.deviceKeyID).Thumbprint())
+					}
+				case proofIndex == 0:
+					proofJWT, err = s.createCredentialProofJWT(wallet, wallet.Subject, cNonce, issuerMetadata.CredentialIssuer)
+					if pubJWK, tp, jwkErr := walletActiveJWK(wallet); jwkErr == nil {
+						_ = pubJWK
+						thumbprint = tp
+					}
+				default:
+					proofJWT, thumbprint, err = createDistinctBatchProofJWT(
+						wallet.SigningAlgorithm,
+						cNonce,
+						issuerMetadata.CredentialIssuer,
+					)
+				}
+				if err != nil {
+					return nil, fmt.Errorf("create credential proof jwt: %w", err)
+				}
+				proofJWTs = append(proofJWTs, proofJWT)
+				proofThumbprints = append(proofThumbprints, thumbprint)
+			}
 		}
 		if transcript := protocolTranscriptFrom(ctx); transcript != nil {
 			transcript.addEvent("crypto", "Build Credential Proof JWT", map[string]interface{}{

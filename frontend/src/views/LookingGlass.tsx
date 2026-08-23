@@ -46,6 +46,7 @@ import {
   getOID4VPDCQLCredentialFormats,
   parseSDJWTDisclosureClaimNames,
   humanizeOID4VPTrustMode,
+  withHAIPUniversityDegreeVCT,
 } from '../protocols/config/oid4vp'
 import {
   getCatalogFlow,
@@ -96,6 +97,22 @@ function oid4vpDCQLPresetForFormat(format: OID4VCICredentialFormat) {
     }
   })
 }
+
+function oid4vpDCQLQueryForSelection(format: OID4VCICredentialFormat, haip: boolean, issuerOrigin: string): string {
+  const preset = oid4vpDCQLPresetForFormat(format)
+  if (!preset) {
+    return ''
+  }
+  if (!haip || format !== 'dc+sd-jwt') {
+    return preset.query
+  }
+  try {
+    return withHAIPUniversityDegreeVCT(preset.query, issuerOrigin)
+  } catch {
+    return preset.query
+  }
+}
+
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
   completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
   executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
@@ -619,8 +636,9 @@ export function LookingGlass() {
       return
     }
     setOID4VPDCQLPresetID(preset.id)
-    setOID4VPDCQLInput(preset.query)
-  }, [isOID4VPFlow, oid4vciCredentialFormat])
+    const issuerOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://protocolsoup.com'
+    setOID4VPDCQLInput(oid4vpDCQLQueryForSelection(oid4vciCredentialFormat, oid4vciHaip, issuerOrigin))
+  }, [isOID4VPFlow, oid4vciCredentialFormat, oid4vciHaip])
 
   useEffect(() => {
     if (!isOID4VPFlow) {
@@ -1885,7 +1903,7 @@ export function LookingGlass() {
               <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
                 {oid4vciHaip
                   ? isOID4VPFlow
-                    ? `Issues ${selectedOID4VCICredentialProfile.id}, then presents with x509_hash (HAIP 1.0 Section 5).`
+                    ? `Issues ${selectedOID4VCICredentialProfile.id} with client and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1), then presents with x509_hash, DCQL, and encrypted direct_post.jwt (HAIP 1.0 Section 5).`
                     : `Issues ${selectedOID4VCICredentialProfile.id} with client and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1). The hosted wallet supplies that material. Self-hosted import returns HTTP 400 without WALLET_CLIENT_ATTESTATION_* JWKs.`
                   : `Issues ${selectedOID4VCICredentialProfile.id} without HAIP attestation.`}
               </p>
@@ -2031,8 +2049,14 @@ export function LookingGlass() {
                 {oid4vpQueryMode === 'dcql' && (
                   <div className="space-y-2">
                     <p className="text-[10px] sm:text-xs text-cyan-300">
-                      {oid4vpDCQLInput === selectedOID4VPPreset?.query
-                        ? selectedOID4VPPreset?.description
+                      {oid4vpDCQLInput === oid4vpDCQLQueryForSelection(
+                        oid4vciCredentialFormat,
+                        oid4vciHaip,
+                        typeof window !== 'undefined' ? window.location.origin : 'https://protocolsoup.com',
+                      )
+                        ? oid4vciHaip && oid4vciCredentialFormat === 'dc+sd-jwt'
+                          ? 'Requests degree + graduation_year from an SD-JWT VC. HAIP also accepts the type-metadata vct used by UniversityDegreeCredentialSDJWTHAIP.'
+                          : selectedOID4VPPreset?.description
                         : 'Custom DCQL query. Changing format restores the matching preset.'}
                     </p>
                     <textarea
