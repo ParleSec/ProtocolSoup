@@ -4,8 +4,8 @@ go 1.26.6
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/fxamacker/cbor/v2 v2.9.2
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/fxamacker/cbor/v2 v2.9.3
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/cors v1.2.2
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -16,7 +16,7 @@ require (
 	github.com/spiffe/go-spiffe/v2 v2.8.1
 	github.com/veraison/go-cose v1.3.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
