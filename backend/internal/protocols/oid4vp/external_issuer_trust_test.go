@@ -30,7 +30,7 @@ func TestValidateSDJWTCredentialStatusUsesCredentialIssuerKeyWithoutTrustAnchorP
 		_, _ = w.Write([]byte(token))
 	}))
 	defer server.Close()
-	statusURI = server.URL + "/oid4vci/status-lists/haip-sd-jwt-1"
+	statusURI := server.URL + "/oid4vci/status-lists/haip-sd-jwt-1"
 	token = signStatusListToken(t, leafKey, chainDER[:1], statusURI, compressedZeroStatusList(t))
 
 	verifier := &Plugin{baseURL: server.URL}
