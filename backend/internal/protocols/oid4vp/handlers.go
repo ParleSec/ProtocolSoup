@@ -975,11 +975,7 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 
 	credentialEvidenceSet, credentialErr := p.validatePresentedCredentials(claims, walletContext.Subject, session)
 	if credentialErr != nil {
-		if policyErr, ok := asVerifierPolicyError(credentialErr); ok {
-			addPolicyReason(result, policyErr.Code, policyErr.Message)
-		} else {
-			addPolicyReason(result, "credential_validation_failed", credentialErr.Error())
-		}
+		addPresentedCredentialPolicyError(result, credentialErr)
 		result.HolderBindingVerified = false
 	} else {
 		if len(credentialEvidenceSet) > 0 {
@@ -1144,11 +1140,7 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 		session,
 	)
 	if credentialErr != nil {
-		if policyErr, ok := asVerifierPolicyError(credentialErr); ok {
-			addPolicyReason(result, policyErr.Code, policyErr.Message)
-		} else {
-			addPolicyReason(result, "credential_validation_failed", credentialErr.Error())
-		}
+		addPresentedCredentialPolicyError(result, credentialErr)
 	} else if len(validatedEvidence) > 0 {
 		evidence = validatedEvidence[0]
 	}
@@ -1241,11 +1233,7 @@ func (p *Plugin) evaluateJSONLDPresentation(session *requestSession, vpToken str
 	}
 	credentialEvidenceSet, credentialErr := p.validatePresentedCredentialEnvelopes(presentedCredentials, walletContext.Subject, session)
 	if credentialErr != nil {
-		if policyErr, ok := asVerifierPolicyError(credentialErr); ok {
-			addPolicyReason(result, policyErr.Code, policyErr.Message)
-		} else {
-			addPolicyReason(result, "credential_validation_failed", credentialErr.Error())
-		}
+		addPresentedCredentialPolicyError(result, credentialErr)
 		result.HolderBindingVerified = false
 	} else if len(credentialEvidenceSet) > 0 {
 		result.CredentialEvidence = &credentialEvidenceSet[0]
@@ -1671,7 +1659,9 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 				return nil, newVerifierPolicyError("credential_malformed", "presented SD-JWT issuer token could not be decoded", err)
 			}
 			if statusClaim, present := issuerToken.Payload["status"]; present {
-				if err := p.validateSDJWTCredentialStatus(statusClaim); err != nil {
+				// Token Status List §8.3: referenced-token validation (signature
+				// above) MUST precede status-list fetch and evaluation.
+				if err := p.validateSDJWTCredentialStatus(statusClaim, issuerKeys); err != nil {
 					return nil, newVerifierPolicyError("credential_status_invalid", "presented credential status validation failed", err)
 				}
 			}
@@ -2028,6 +2018,14 @@ func asVerifierPolicyError(err error) (*verifierPolicyError, bool) {
 		return policyErr, true
 	}
 	return nil, false
+}
+
+func addPresentedCredentialPolicyError(result *models.OID4VPVerificationResult, err error) {
+	if policyErr, ok := asVerifierPolicyError(err); ok {
+		addPolicyReason(result, policyErr.Code, policyErr.Error())
+		return
+	}
+	addPolicyReason(result, "credential_validation_failed", err.Error())
 }
 
 func addPolicyReason(result *models.OID4VPVerificationResult, code string, message string) {

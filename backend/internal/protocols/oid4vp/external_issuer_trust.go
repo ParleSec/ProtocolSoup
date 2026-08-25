@@ -45,7 +45,7 @@ func (p *Plugin) initSDJWTIssuerTrustAnchors() error {
 	return nil
 }
 
-func (p *Plugin) validateSDJWTCredentialStatus(raw interface{}) error {
+func (p *Plugin) validateSDJWTCredentialStatus(raw interface{}, issuerKeys []crypto.JWK) error {
 	status, ok := raw.(map[string]interface{})
 	if !ok {
 		return fmt.Errorf("status claim must be an object")
@@ -59,21 +59,13 @@ func (p *Plugin) validateSDJWTCredentialStatus(raw interface{}) error {
 		return fmt.Errorf("status list idx must be a non-negative integer")
 	}
 	statusURI, _ := reference["uri"].(string)
-	if err := validateExternalStatusListURI(statusURI); err != nil {
+	issuerPublicKeys, err := publicKeysFromIssuerJWKs(issuerKeys)
+	if err != nil {
 		return err
 	}
-	client := externalStatusListHTTPClient()
-	response, err := client.Get(statusURI)
+	rawToken, err := p.fetchStatusListToken(statusURI)
 	if err != nil {
-		return fmt.Errorf("fetch status list: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("status list returned HTTP %d", response.StatusCode)
-	}
-	rawToken, err := io.ReadAll(io.LimitReader(response.Body, 2*1024*1024))
-	if err != nil {
-		return fmt.Errorf("read status list: %w", err)
+		return err
 	}
 	decoded, err := crypto.DecodeTokenWithoutValidation(strings.TrimSpace(string(rawToken)))
 	if err != nil {
@@ -82,21 +74,28 @@ func (p *Plugin) validateSDJWTCredentialStatus(raw interface{}) error {
 	if decoded.Header["typ"] != "statuslist+jwt" {
 		return fmt.Errorf("status list token typ must be statuslist+jwt")
 	}
-	chain, err := crypto.ParseX5CCertificateChain(decoded.Header["x5c"])
-	if err != nil {
-		return fmt.Errorf("status list x5c: %w", err)
-	}
-	for _, certificate := range chain {
-		if certificate.IsCA && certificate.CheckSignatureFrom(certificate) == nil {
-			return fmt.Errorf("status list x5c must exclude the trust anchor")
+	verifyKey := issuerPublicKeys[0]
+	if _, hasX5C := decoded.Header["x5c"]; hasX5C {
+		chain, err := crypto.ParseX5CCertificateChain(decoded.Header["x5c"])
+		if err != nil {
+			return fmt.Errorf("status list x5c: %w", err)
 		}
-	}
-	leaf, err := crypto.ValidateCertificateChainAgainstRoots(chain, p.sdJWTIssuerTrustAnchors, time.Now().UTC())
-	if err != nil {
-		return fmt.Errorf("status list signer is untrusted: %w", err)
+		for _, certificate := range chain {
+			if certificate.IsCA && certificate.CheckSignatureFrom(certificate) == nil {
+				return fmt.Errorf("status list x5c must exclude the trust anchor")
+			}
+		}
+		// Token Status List §11.3: when the Referenced Token issuer is the
+		// Status Issuer, the Status List Token may use the same key (same x5c)
+		// already verified on the credential. Do not require a separately
+		// configured SD-JWT trust-anchor PEM for that same-issuer case.
+		if !issuerKeyMatches(issuerPublicKeys, chain[0].PublicKey) {
+			return fmt.Errorf("status list signer does not match the credential issuer key")
+		}
+		verifyKey = chain[0].PublicKey
 	}
 	parsed, err := jwt.Parse(strings.TrimSpace(string(rawToken)), func(_ *jwt.Token) (interface{}, error) {
-		return leaf.PublicKey, nil
+		return verifyKey, nil
 	})
 	if err != nil || !parsed.Valid {
 		return fmt.Errorf("status list signature is invalid: %w", err)
@@ -141,6 +140,139 @@ func (p *Plugin) validateSDJWTCredentialStatus(raw interface{}) error {
 		return fmt.Errorf("credential status is not valid (value %d)", value)
 	}
 	return nil
+}
+
+func publicKeysFromIssuerJWKs(keys []crypto.JWK) ([]interface{}, error) {
+	var publicKeys []interface{}
+	for idx := range keys {
+		publicKey, err := keys[idx].ToPublicKey()
+		if err != nil {
+			continue
+		}
+		publicKeys = append(publicKeys, publicKey)
+	}
+	if len(publicKeys) == 0 {
+		return nil, fmt.Errorf("credential issuer key is required to validate status list")
+	}
+	return publicKeys, nil
+}
+
+func issuerKeyMatches(keys []interface{}, candidate interface{}) bool {
+	for _, key := range keys {
+		if publicKeysEqual(key, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func publicKeysEqual(left, right interface{}) bool {
+	switch typed := left.(type) {
+	case *ecdsa.PublicKey:
+		other, ok := right.(*ecdsa.PublicKey)
+		return ok && typed.Equal(other)
+	case *rsa.PublicKey:
+		other, ok := right.(*rsa.PublicKey)
+		return ok && typed.Equal(other)
+	default:
+		return false
+	}
+}
+
+func (p *Plugin) fetchStatusListToken(statusURI string) ([]byte, error) {
+	fetchURL, own, err := p.statusListFetchURL(statusURI)
+	if err != nil {
+		return nil, err
+	}
+	client := externalStatusListHTTPClient()
+	if own {
+		client = ownStatusListHTTPClient(p)
+	}
+	request, err := http.NewRequest(http.MethodGet, fetchURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build status list request: %w", err)
+	}
+	request.Header.Set("Accept", "application/statuslist+jwt")
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("fetch status list: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status list returned HTTP %d", response.StatusCode)
+	}
+	rawToken, err := io.ReadAll(io.LimitReader(response.Body, 2*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read status list: %w", err)
+	}
+	return rawToken, nil
+}
+
+func (p *Plugin) statusListFetchURL(statusURI string) (string, bool, error) {
+	if p.isOwnStatusListURI(statusURI) {
+		parsed, err := url.Parse(strings.TrimSpace(statusURI))
+		if err != nil {
+			return "", true, fmt.Errorf("status list URI must be an absolute URL")
+		}
+		if origin := strings.TrimRight(strings.TrimSpace(os.Getenv("BACKEND_ORIGIN")), "/"); origin != "" {
+			return origin + parsed.EscapedPath(), true, nil
+		}
+		return strings.TrimSpace(statusURI), true, nil
+	}
+	if err := validateExternalStatusListURI(statusURI); err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(statusURI), false, nil
+}
+
+func (p *Plugin) isOwnStatusListURI(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return false
+	}
+	if _, ok := parseStatusListPath(parsed.EscapedPath()); !ok {
+		return false
+	}
+	base, err := url.Parse(strings.TrimSpace(p.baseURL))
+	if err != nil || base.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Hostname(), base.Hostname())
+}
+
+func parseStatusListPath(path string) (string, bool) {
+	const prefix = "/oid4vci/status-lists/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	listID := strings.Trim(path[len(prefix):], "/")
+	if listID == "" || strings.Contains(listID, "/") {
+		return "", false
+	}
+	for _, r := range listID {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '.' && r != '_' && r != '-' {
+			return "", false
+		}
+	}
+	return listID, true
+}
+
+func ownStatusListHTTPClient(plugin *Plugin) *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("status list redirected too many times")
+			}
+			if plugin == nil || !plugin.isOwnStatusListURI(request.URL.String()) {
+				return fmt.Errorf("status list redirect is not this issuer's status list")
+			}
+			return nil
+		},
+	}
 }
 
 func validateExternalStatusListURI(raw string) error {

@@ -196,11 +196,7 @@ func (p *Plugin) evaluateMdocPresentation(session *requestSession, vpToken strin
 
 	evidenceSet, dcqlErr := p.matchMdocAgainstDCQL(session, verified)
 	if dcqlErr != nil {
-		if policyErr, ok := asVerifierPolicyError(dcqlErr); ok {
-			addPolicyReason(result, policyErr.Code, policyErr.Message)
-		} else {
-			addPolicyReason(result, "credential_validation_failed", dcqlErr.Error())
-		}
+		addPresentedCredentialPolicyError(result, dcqlErr)
 		result.HolderBindingVerified = false
 	} else if len(evidenceSet) > 0 {
 		result.CredentialEvidence = &evidenceSet[0]
