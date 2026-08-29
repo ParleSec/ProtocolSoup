@@ -54,6 +54,7 @@ interface CreatePageMetadataInput {
   noIndex?: boolean
   imagePath?: string
   imageAlt?: string
+  absoluteTitle?: boolean
 }
 
 export function createPageMetadata({
@@ -65,6 +66,7 @@ export function createPageMetadata({
   noIndex = false,
   imagePath = '/opengraph-image',
   imageAlt,
+  absoluteTitle = false,
 }: CreatePageMetadataInput): Metadata {
   const canonicalUrl = absoluteUrl(path)
   const openGraphImage = absoluteUrl(imagePath)
@@ -73,7 +75,7 @@ export function createPageMetadata({
     : `${title} | ${SITE_CONFIG.name}`
 
   return {
-    title,
+    title: absoluteTitle ? { absolute: title } : title,
     description,
     keywords,
     alternates: { canonical: canonicalUrl },

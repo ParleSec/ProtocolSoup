@@ -13,6 +13,7 @@ export const metadata = createPageMetadata({
   keywords: seo.keywords,
   path: '/',
   type: 'website',
+  absoluteTitle: seo.absoluteTitle,
 })
 
 export default function HomePage() {

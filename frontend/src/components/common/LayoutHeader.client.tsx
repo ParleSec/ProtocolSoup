@@ -18,7 +18,7 @@ function Github({ className }: { className?: string }) {
 
 const navItems = [
   { path: '/looking-glass', icon: Eye, label: 'Looking Glass' },
-  { path: '/protocols', icon: BookOpen, label: 'Protocols' },
+  { path: '/protocols', icon: BookOpen, label: 'Protocol Reference' },
   { path: SITE_CONFIG.walletUrl, icon: Wallet, label: 'Wallet', external: true },
 ]
 

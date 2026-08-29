@@ -29,7 +29,7 @@ export async function GET() {
     '## Priority URLs',
     `- [Homepage](${SITE_ORIGIN}/)`,
     `- [Looking Glass](${SITE_ORIGIN}/looking-glass)`,
-    `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
+    `- [Protocol Reference](${SITE_ORIGIN}/protocols)`,
     `- [Wallet harness](${WALLET_ORIGIN})`,
     '',
     '## Protocol Guides',

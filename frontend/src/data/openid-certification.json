@@ -1,6 +1,6 @@
 {
   "status": "active",
-  "tagline": "OpenID Certified™ by ProtocolSoup for the OID4VCI Issuer, OID4VP Verifier and OID4VP Wallet profiles.",
+  "tagline": "OpenID Certified™ by ProtocolSoup for the OID4VCI Issuer, OID4VCI Wallet, OID4VP Verifier and OID4VP Wallet profiles.",
   "scope": "Certification applies to the named ProtocolSoup version and profile pairs published on openid.net. It is not a blanket certification of every ProtocolSoup feature, protocol family, or the moving hosted deployment.",
   "trademarkAttribution": "OpenID® and OpenID Certified™ are trademarks of the OpenID Foundation.",
   "profiles": [

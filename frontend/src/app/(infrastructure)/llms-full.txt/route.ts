@@ -27,7 +27,7 @@ export async function GET() {
     '## Platforms',
     `- [Main](${SITE_ORIGIN})`,
     `- [Looking Glass](${SITE_ORIGIN}/looking-glass)`,
-    `- [Protocols hub](${SITE_ORIGIN}/protocols)`,
+    `- [Protocol Reference](${SITE_ORIGIN}/protocols)`,
     `- [Docs](${DOCS_ORIGIN})`,
     `- [Wallet harness](${WALLET_ORIGIN})`,
     `- [Docs llms.txt](${DOCS_ORIGIN}/llms.txt)`,

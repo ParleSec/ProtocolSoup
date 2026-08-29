@@ -19,7 +19,7 @@ export default function ProtocolsPage() {
   const schemas = [
     generateBreadcrumbSchema([
       { name: 'Home', url: SITE_CONFIG.baseUrl },
-      { name: 'Protocols', url: `${SITE_CONFIG.baseUrl}/protocols` },
+      { name: 'Protocol Reference', url: `${SITE_CONFIG.baseUrl}/protocols` },
     ]),
     generateFAQSchema([
       {

@@ -198,7 +198,7 @@ export function FlowDetail({
       <header>
         {/* Mobile breadcrumb - simplified */}
         <nav className="sm:hidden text-xs text-surface-400 mb-3">
-          <Link href="/protocols" className="hover:text-white transition-colors">Protocols</Link>
+          <Link href="/protocols" className="hover:text-white transition-colors">Protocol Reference</Link>
           <span className="mx-1.5">›</span>
           <Link href={`/protocol/${protocolId}`} className="hover:text-white transition-colors">
             {getProtocolName(protocolId)}
@@ -207,7 +207,7 @@ export function FlowDetail({
         
         {/* Desktop breadcrumb - full */}
         <div className="hidden sm:flex items-center gap-2 text-sm text-surface-400 mb-2">
-          <Link href="/protocols" className="hover:text-white transition-colors">Protocols</Link>
+          <Link href="/protocols" className="hover:text-white transition-colors">Protocol Reference</Link>
           <ChevronRight className="w-4 h-4" />
           <Link href={`/protocol/${protocolId}`} className="hover:text-white transition-colors">
             {getProtocolName(protocolId)}

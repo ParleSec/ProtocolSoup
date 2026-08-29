@@ -7,12 +7,13 @@
 
 export const SITE_CONFIG = {
   name: 'ProtocolSoup',
+  shortTagline: 'Real Flows, Real Infrastructure',
   tagline: 'Live OAuth 2.0, OIDC, OpenID4VC, SAML, SPIFFE, SCIM and SSF execution with a hosted wallet harness',
   baseUrl: 'https://protocolsoup.com',
   docsUrl: 'https://docs.protocolsoup.com',
   walletUrl: 'https://wallet.protocolsoup.com',
   defaultImage: 'https://protocolsoup.com/opengraph-image',
-  twitterHandle: '@protocolsoup',
+  twitterHandle: '@ParleSec',
   author: 'Mason Parle',
   locale: 'en_US',
 }
@@ -24,18 +25,21 @@ export interface PageSEO {
   ogType?: 'website' | 'article'
   canonical?: string
   noIndex?: boolean
+  /** When true, the document title is used as-is (homepage already includes the brand). */
+  absoluteTitle?: boolean
 }
 
 /**
  * SEO metadata for each route.
- * Page titles omit the brand; the root layout appends `| ProtocolSoup`.
- * Keywords keep high-volume search phrases (tutorial, playground) even when
- * visible copy leads with execute/inspect.
+ * Tab titles name the page; the root layout appends `| ProtocolSoup`
+ * unless `absoluteTitle` is set. Descriptions and keywords keep
+ * high-volume search phrases (sandbox, tester, playground).
  */
 export const PAGE_SEO: Record<string, PageSEO> = {
   // Homepage - Primary landing page
   '/': {
-    title: 'Live OAuth 2.0, OIDC, and Identity Protocol Execution',
+    title: `${SITE_CONFIG.name} - ${SITE_CONFIG.shortTagline}`,
+    absoluteTitle: true,
     description: 'Execute real OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML, SPIFFE, SCIM and SSF flows against live infrastructure. Inspect every request, decode tokens and assertions, and issue or present credentials with the hosted wallet harness.',
     keywords: [
       'oauth2 playground',
@@ -69,7 +73,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Protocols Hub
   '/protocols': {
-    title: 'Identity Protocol Reference - OAuth 2.0, OIDC, OpenID4VC, SAML, SPIFFE, SCIM, SSF',
+    title: 'IdentityProtocol Reference',
     description: 'Reference for every shipped identity protocol family. Sequence diagrams, parameters, and security considerations for OAuth 2.0, OpenID Connect, OID4VCI, OID4VP, SAML 2.0, SPIFFE/SPIRE, SCIM 2.0, and SSF.',
     keywords: [
       'identity protocol reference',
@@ -87,7 +91,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Looking Glass Tool
   '/looking-glass': {
-    title: 'Looking Glass - Live Protocol Flow Execution and Traffic Inspector',
+    title: 'Looking Glass',
     description: 'Execute identity protocol flows in real time and inspect every HTTP request, response, header, and token. Run OAuth 2.0, OIDC, SAML, SCIM, SPIFFE, SSF, OID4VCI, and OID4VP — including holder-side hops through the hosted wallet harness.',
     keywords: [
       'protocol debugger',
@@ -119,7 +123,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Legacy SSF sandbox URL (redirects to Looking Glass)
   '/ssf-sandbox': {
-    title: 'Shared Signals (SSF) in Looking Glass',
+    title: 'SSF sandbox',
     description: 'Fire CAEP and RISC security events in Looking Glass, decode SET tokens, and inspect Transmitter and Receiver traffic on a durable stream session.',
     keywords: [
       'shared signals framework',
@@ -135,7 +139,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OAuth 2.0 Protocol
   '/protocol/oauth2': {
-    title: 'OAuth 2.0 Reference - Authorization Framework',
+    title: 'OAuth 2.0 Reference',
     description: 'Execute live OAuth 2.0 Authorization Code, PKCE, Client Credentials, Refresh Token, Introspection, and Revocation against a working authorization server. Inspect every request, token, and RFC 9700 check.',
     keywords: [
       'oauth 2.0 tutorial',
@@ -150,7 +154,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OpenID Connect Protocol
   '/protocol/oidc': {
-    title: 'OpenID Connect Reference - Authentication Layer for OAuth 2.0',
+    title: 'OpenID Connect Reference',
     description: 'Run OpenID Connect against a live OpenID Provider. Inspect ID tokens, UserInfo, Discovery, Hybrid, and Implicit flows, and see how OIDC adds authentication to OAuth 2.0.',
     keywords: [
       'openid connect tutorial',
@@ -165,7 +169,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OID4VCI Protocol
   '/protocol/oid4vci': {
-    title: 'OID4VCI Reference - Verifiable Credential Issuance with OpenID',
+    title: 'OID4VCI Reference',
     description: 'Issue verifiable credentials with live OID4VCI. Inspect credential offers, pre-authorized code grants, tx_code challenges, proof binding, c_nonce freshness, and deferred issuance.',
     keywords: [
       'oid4vci tutorial',
@@ -180,7 +184,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // OID4VP Protocol
   '/protocol/oid4vp': {
-    title: 'OID4VP Reference - Verifiable Presentation Requests and Validation',
+    title: 'OID4VP Reference',
     description: 'Run OpenID for Verifiable Presentations against a live verifier. Inspect DCQL queries, request objects, direct_post/direct_post.jwt, holder binding, and policy evaluation.',
     keywords: [
       'oid4vp tutorial',
@@ -195,7 +199,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // SAML 2.0 Protocol
   '/protocol/saml': {
-    title: 'SAML 2.0 Reference - Enterprise SSO and Federation',
+    title: 'SAML 2.0 Reference',
     description: 'Execute live SAML 2.0 SP-Initiated SSO, IdP-Initiated SSO, Single Logout, and metadata exchange. Inspect assertions, AuthnRequests, and XML signatures.',
     keywords: [
       'saml 2.0 tutorial',
@@ -211,7 +215,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // SPIFFE/SPIRE Protocol
   '/protocol/spiffe': {
-    title: 'SPIFFE/SPIRE Reference - Zero Trust Workload Identity',
+    title: 'SPIFFE/SPIRE Reference',
     description: 'Run SPIFFE/SPIRE Workload API flows: X.509-SVID issuance, JWT-SVID issuance, mTLS, and certificate rotation. Inspect SVIDs and trust bundles as they are issued.',
     keywords: [
       'spiffe tutorial',
@@ -227,7 +231,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // SCIM 2.0 Protocol
   '/protocol/scim': {
-    title: 'SCIM 2.0 Reference - Cross-Domain Identity Provisioning',
+    title: 'SCIM 2.0 Reference',
     description: 'Execute live SCIM 2.0 user lifecycle, group management, filter queries, and schema discovery against a working SCIM server. Inspect Users, Groups, PATCH, and filter traffic.',
     keywords: [
       'scim 2.0 tutorial',
@@ -242,7 +246,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Shared Signals Framework
   '/protocol/ssf': {
-    title: 'Shared Signals (SSF) Reference - CAEP, RISC, and SET Delivery',
+    title: 'Shared Signals (SSF) Reference',
     description: 'Execute Shared Signals Framework streams in Looking Glass. Configure Transmitter and Receiver sessions, fire CAEP and RISC events, and inspect Security Event Tokens over push and poll delivery.',
     keywords: [
       'shared signals framework',
@@ -258,7 +262,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Agentic Registration (auth.md)
   '/protocol/agentauth': {
-    title: 'Agentic Registration - Agent Identity and Claim Ceremony',
+    title: 'Agentic Registration Reference',
     description: 'Register an anonymous agent, inspect identity assertions and RFC 7523 JWT bearer grants, and run the claim ceremony that binds an agent to a person.',
     keywords: [
       'agentic registration',
@@ -274,7 +278,7 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 
   // Model Context Protocol
   '/protocol/mcp': {
-    title: 'Model Context Protocol - MCP Server Discovery and Tool Calls',
+    title: 'Model Context Protocol Reference',
     description: 'Explore MCP Streamable HTTP, Server Cards, AI Catalog discovery, and JSON-RPC tool calls against ProtocolSoup\'s remote MCP server.',
     keywords: [
       'model context protocol',
@@ -348,7 +352,7 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
   const keywords = flowKeywords[flowId] || [`${protocolId} ${flowId}`, flowName.toLowerCase()]
 
   return {
-    title: `${flowName} — ${protocolName} Flow`,
+    title: `${flowName} · ${protocolName}`,
     description: `Execute the ${flowName} flow in Looking Glass. Inspect each HTTP hop, token, and validation decision for ${protocolName}.`,
     keywords: [
       ...keywords,
@@ -366,7 +370,7 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
 export function getProtocolSEO(protocolId: string): PageSEO {
   const key = `/protocol/${protocolId}`
   return PAGE_SEO[key] || {
-    title: `${protocolId.toUpperCase()} Protocol`,
+    title: `${protocolId.toUpperCase()} Reference`,
     description: `Execute ${protocolId.toUpperCase()} flows against live infrastructure, with request inspection and spec-linked reference.`,
     keywords: [protocolId, 'authentication', 'identity protocol'],
     ogType: 'article',

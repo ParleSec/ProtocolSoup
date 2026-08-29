@@ -86,7 +86,7 @@ export function Dashboard() {
       <header className="py-2 sm:py-4">
         <div className="flex items-center gap-2 text-amber-400 font-mono text-sm mb-3">
           <Terminal className="w-4 h-4" />
-          <span>live protocol execution</span>
+          <span>{SITE_CONFIG.shortTagline}</span>
         </div>
         <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-3 flex items-center gap-3">
           ProtocolSoup
@@ -112,12 +112,12 @@ export function Dashboard() {
         <ValueCard
           icon={FileSearch}
           title="Full Traffic Inspection"
-          description="See every request, response, header, and parameter exchanged"
+          description="See every request, response, header, and parameter exchanged."
         />
         <ValueCard
           icon={Zap}
           title="Live Artifact Decoding"
-          description="Decode JWTs, SAML assertions, SETs, and issued credentials as they are produced"
+          description="Decode JWTs, SAML assertions, SETs, and issued credentials as they are produced."
         />
       </section>
 
@@ -132,7 +132,7 @@ export function Dashboard() {
             icon={Eye}
             color="cyan"
             title="Looking Glass"
-            description="Execute live protocol flows and inspect every hop, token, and validation decision."
+            description="Run live protocol flows and inspect every hop, token, and validation decision."
             cta="Open Looking Glass"
           />
           <NavCard
@@ -140,8 +140,8 @@ export function Dashboard() {
             icon={Shield}
             color="purple"
             title="Protocol Reference"
-            description="Guides, sequence diagrams, parameters, and security considerations for every shipped protocol family."
-            cta="Browse Protocols"
+            description="Documentation, flow diagrams, and security considerations for each protocol family."
+            cta="Open Protocol Reference"
           />
           <NavCard
             to={SITE_CONFIG.walletUrl}
@@ -153,6 +153,30 @@ export function Dashboard() {
           />
         </div>
       </section>
+
+      {showCertifiedMark ? (
+        <section aria-label="OpenID Certified">
+          <Link
+            href="/trust#conformance"
+            className="flex items-center gap-4 rounded-xl border border-white/10 bg-surface-900/30 p-4 transition-colors hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950"
+          >
+            <span className="shrink-0 rounded-md bg-white p-1.5">
+              <img
+                src="/openid-certified.png"
+                alt=""
+                className="h-10 w-auto"
+              />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-white">OpenID Certified™</span>
+              <span className="mt-0.5 block text-xs text-surface-400 leading-relaxed">
+                {certification.tagline}
+              </span>
+            </span>
+            <ChevronRight className="w-4 h-4 shrink-0 text-surface-600" />
+          </Link>
+        </section>
+      ) : null}
 
       {/* Available Protocols */}
       <section>
@@ -175,30 +199,6 @@ export function Dashboard() {
           ))}
         </div>
       </section>
-
-      {showCertifiedMark ? (
-        <section>
-          <Link
-            href="/trust#conformance"
-            className="flex items-center gap-4 rounded-xl border border-white/10 bg-surface-900/30 p-4 transition-colors hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-950"
-          >
-            <span className="shrink-0 rounded-md bg-white p-1.5">
-              <img
-                src="/openid-certified.png"
-                alt=""
-                className="h-10 w-auto"
-              />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-white">OpenID Certified™</span>
-              <span className="mt-0.5 block text-xs text-surface-400 leading-relaxed">
-                {certification.tagline}
-              </span>
-            </span>
-            <ChevronRight className="w-4 h-4 shrink-0 text-surface-600" />
-          </Link>
-        </section>
-      ) : null}
 
       {/* Quick References */}
       <section>
