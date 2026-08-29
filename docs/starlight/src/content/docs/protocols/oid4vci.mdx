@@ -5,6 +5,8 @@ description: "OpenID4VCI credential issuance with pre-authorized grants, proof b
 
 # OID4VCI
 
+ProtocolSoup's OID4VCI Issuer and Wallet implementations are [OpenID Certified™](https://protocolsoup.com/trust#conformance) through the OpenID Foundation certification programme (HAIP, SD-JWT VC, and mdoc). Certification applies to the named versions and profiles, not every ProtocolSoup feature.
+
 ## Standards
 
 - OpenID for Verifiable Credential Issuance 1.0 (final)
@@ -221,7 +223,9 @@ flow remains unaffected by default.
   `typ: openidvci-issuer-metadata+jwt`, top-level metadata claims, and a
   leaf-only `x5c`. The HAIP SD-JWT configuration uses the same persistent
   certificate-backed signer and assigns each credential a unique OAuth Status
-  List index served as a signed `statuslist+jwt`. The HAIP SD-JWT configuration's
+  List index served as a signed `statuslist+jwt`. The OID4VP verifier fetches
+  that list during presentation and checks it with the same issuer key already
+  accepted for the credential. The HAIP SD-JWT configuration's
   `vct` is an HTTPS URL on the issuer; that URL serves the matching SD-JWT VC
   Type Metadata document, while disclosed claims and `_sd` commitments use the
   SD-JWT VC top-level claim model rather than the legacy `vc` container.

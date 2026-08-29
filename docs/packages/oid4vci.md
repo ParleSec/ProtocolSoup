@@ -64,7 +64,9 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
   `credential_identifiers`, and credential request
 - Access-token-bound, idempotent credential status notifications
 - Signed Credential Issuer Metadata and certificate-backed ES256 HAIP SD-JWT
-  VC issuance with OAuth Status List references
+  VC issuance with OAuth Status List references. The OID4VP verifier fetches
+  that list at presentation time and checks it with the same issuer key
+  already accepted for the credential.
 - Replay/freshness denial handling
 
 The attestation, encryption, and DPoP items are HAIP-related API building

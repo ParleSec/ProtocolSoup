@@ -5,6 +5,8 @@ description: "OpenID4VP verifier flows with DCQL request contracts, direct_post 
 
 # OID4VP
 
+ProtocolSoup's OID4VP Verifier and Wallet implementations are [OpenID Certified™](https://protocolsoup.com/trust#conformance) through the OpenID Foundation certification programme (HAIP, SD-JWT VC, and mdoc). Certification applies to the named versions and profiles, not every ProtocolSoup feature.
+
 ## Standards
 
 - OpenID for Verifiable Presentations 1.0 (final)
@@ -41,8 +43,12 @@ When a `credential_jwt` is pasted manually, the UI allows submission but warns w
 
 For JOSE/W3C credentials, verifier policy also requires issuance lineage in
 ProtocolSoup's credential store; this demo verifier is not a general trust-list
-verifier for arbitrary externally issued credentials. The `mso_mdoc` path uses
-independently configured IACA trust anchors instead.
+verifier for arbitrary externally issued credentials. Independently issued
+certificate-backed SD-JWT VCs can still be accepted when they chain to
+`OID4VP_SD_JWT_TRUST_ANCHOR_PEM`. The `mso_mdoc` path uses independently
+configured IACA trust anchors. HAIP `dc+sd-jwt` credentials include an OAuth
+Token Status List; the verifier fetches it and validates the token with the
+same issuer key already accepted for the credential.
 
 ## Example DCQL Query
 

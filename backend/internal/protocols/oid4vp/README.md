@@ -39,6 +39,7 @@ The OID4VP implementation is mounted as plugin ID `oid4vp` in the backend protoc
 | `haip.go` | HAIP profile enforcement, W3C Digital Credentials API response modes, origin handling/audience, DCQL-keyed SD-JWT unwrap |
 | `mdoc_online.go` | ISO `mso_mdoc` OID4VP online profile: DCQL-keyed `vp_token`, handover reconstruction (redirect + DC API), ECDH-ES + A128GCM/A256GCM JWE encrypt/decrypt |
 | `mdoc_presentation.go` | mdoc `DeviceResponse` detection and verification against the reconstructed `SessionTranscript` and IACA trust anchor |
+| `external_issuer_trust.go` | External SD-JWT VC `x5c` trust anchors and OAuth Token Status List fetch/validation |
 | `trust.go` | DID:web trust resolver and DID document validation |
 | `verifier_identity.go` | Verifier identity signers for `verifier_attestation`, `x509_san_dns`, and `x509_hash` schemes, including ephemeral certificate auto-provisioning |
 | `contracts.go` | OID4VP contract checks (`dcql_query` xor scope, response mode constraints, type headers) |
