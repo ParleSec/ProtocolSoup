@@ -229,6 +229,14 @@ func (l *AnnotationLibrary) OIDCAnnotations() map[string][]Annotation {
 				Reference:   "OpenID Connect Core 1.0 Section 5.4",
 			},
 		},
+		"device_code": {
+			{
+				Type:        AnnotationTypeExplanation,
+				Title:       "Device Authorization Grant",
+				Description: "The device authorization grant is designed for Internet-connected devices that either lack a browser to perform a user-agent-based authorization or are input constrained.",
+				Reference:   "RFC 8628",
+			},
+		},
 	}
 }
 

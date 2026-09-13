@@ -507,6 +507,12 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		p.handleRefreshTokenGrant(w, r, sessionID, dpopResult.JKT)
 	case "client_credentials":
 		p.handleClientCredentialsGrant(w, r, sessionID, dpopResult.JKT)
+	case mockidp.DeviceCodeGrantType:
+		if assertionPresent {
+			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			return
+		}
+		p.handleDeviceCodeGrant(w, r, sessionID, dpopResult.JKT)
 	default:
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported Grant Type", map[string]interface{}{
 			"grant_type": grantType,
@@ -1374,10 +1380,10 @@ func (p *Plugin) handleCAEPRevokeSubject(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"email":                   strings.TrimSpace(body.Email),
-		"sessions_deleted":        sessions,
-		"refresh_tokens_revoked":  refresh,
-		"access_tokens_revoked":   access,
+		"email":                  strings.TrimSpace(body.Email),
+		"sessions_deleted":       sessions,
+		"refresh_tokens_revoked": refresh,
+		"access_tokens_revoked":  access,
 	})
 }
 
@@ -1480,7 +1486,10 @@ var oauth2ErrorURIs = map[string]string{
 	"unsupported_grant_type":    "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"invalid_scope":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"unsupported_response_type": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
-	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
+	"authorization_pending":     "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
+	"slow_down":                 "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
+	"expired_token":             "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
 	"server_error":              "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	"temporarily_unavailable":   "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	dpop.ErrorInvalidDPoPProof:  "https://datatracker.ietf.org/doc/html/rfc9449#section-5",

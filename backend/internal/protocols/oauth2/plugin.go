@@ -55,7 +55,7 @@ func NewPlugin() *Plugin {
 			Version:     "1.0.0",
 			Description: "OAuth 2.0 Authorization Framework implementation with PKCE support",
 			Tags:        []string{"authorization", "tokens", "pkce"},
-			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414", "RFC 9449"},
+			RFCs:        []string{"RFC 6749", "RFC 7523", "RFC 7636", "RFC 7009", "RFC 7662", "RFC 8414", "RFC 8628", "RFC 9449", "RFC 9700"},
 		}),
 		loginRequests:         make(map[string]loginRequestInfo),
 		loginRequestTTL:       10 * time.Minute,
@@ -169,6 +169,11 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Get("/demo/clients", p.handleListClients)
 	router.Post("/demo/clients/machine-client-pkjwt/jwks", p.handleRegisterPrivateKeyJWTClientJWKS)
 	router.Post("/demo/caep/revoke-subject", p.handleCAEPRevokeSubject)
+
+	// RFC 8628 Device Authorization Grant
+	router.Post("/device/authorize", p.handleDeviceAuthorize)
+	router.Get("/device", p.handleDeviceVerification)
+	router.Post("/device", p.handleDeviceVerificationSubmit)
 }
 
 // GetInspectors returns the protocol's inspectors
@@ -534,6 +539,85 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			},
 		},
 		{
+			ID:          "device_code",
+			Name:        "Device Authorization Grant",
+			Description: "RFC 8628 grant for input-constrained devices (TVs, CLI tools, consoles). The device displays a user_code; the person authorizes on a second device with a browser. Still the correct grant for that constraint; native apps with a browser should use authorization code + PKCE (RFC 8252).",
+			Executable:  true,
+			Category:    "authorization",
+			Steps: []plugin.FlowStep{
+				{
+					Order:       1,
+					Name:        "Device Authorization Request",
+					Description: "The device POSTs to the device authorization endpoint with client_id and optional scope. Confidential clients MUST authenticate; public clients identify themselves with client_id.",
+					From:        "Device Client",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"client_id": "Client identifier (REQUIRED for public clients)",
+						"scope":     "Requested scopes (OPTIONAL)",
+					},
+					Security: []string{
+						"TLS is required on every device request (RFC 8628 §3.1)",
+						"Parameters MUST NOT be included more than once",
+						"Do not start this request automatically on app launch (RFC 8628 §3.1 SHOULD)",
+					},
+				},
+				{
+					Order:       2,
+					Name:        "Device Authorization Response",
+					Description: "The authorization server returns device_code, user_code, verification_uri, expires_in, and optional interval / verification_uri_complete.",
+					From:        "Authorization Server",
+					To:          "Device Client",
+					Type:        "response",
+					Parameters: map[string]string{
+						"device_code":               "High-entropy device verification code (REQUIRED)",
+						"user_code":                 "Short end-user code (REQUIRED)",
+						"verification_uri":          "URI the person types on a second device (REQUIRED)",
+						"verification_uri_complete": "Optional URI that already includes user_code",
+						"expires_in":                "Lifetime of both codes in seconds (REQUIRED)",
+						"interval":                  "Minimum seconds between token polls (OPTIONAL, default 5)",
+					},
+					Security: []string{
+						"device_code MUST have high entropy (RFC 8628 §5.2)",
+						"user_code uses an unambiguous alphabet and is rate-limited (RFC 8628 §5.1, §6.1)",
+						"Do not display device_code to the end user (RFC 8628 §3.3)",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "User Interaction",
+					Description: "The person visits verification_uri, authenticates, enters user_code, and approves or denies. Confirm the device is in their possession (RFC 8628 §5.4).",
+					From:        "End User",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"user_code": "Code displayed on the device",
+					},
+					Security: []string{
+						"Authorization servers MUST implement this user-interaction sequence (RFC 8628 §3.3)",
+						"Phishing mitigation: tell the user they are authorizing a device",
+					},
+				},
+				{
+					Order:       4,
+					Name:        "Device Access Token Request",
+					Description: "The device polls POST /token with grant_type=urn:ietf:params:oauth:grant-type:device_code until the user finishes, the code expires, or another error occurs.",
+					From:        "Device Client",
+					To:          "Authorization Server",
+					Type:        "request",
+					Parameters: map[string]string{
+						"grant_type":  "urn:ietf:params:oauth:grant-type:device_code (REQUIRED)",
+						"device_code": "The device_code from step 2 (REQUIRED)",
+						"client_id":   "REQUIRED if the client is not authenticating",
+					},
+					Security: []string{
+						"Wait at least interval seconds between polls; honor slow_down (+5 seconds)",
+						"Stop polling on any error other than authorization_pending and slow_down",
+					},
+				},
+			},
+		},
+		{
 			ID:          "refresh_token",
 			Name:        "Refresh Token Flow",
 			Description: "Obtain new access tokens without user interaction using a refresh token (RFC 6749 §6). Refresh tokens are long-lived credentials that allow the client to maintain access after the access token expires.",
@@ -738,6 +822,16 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 				{Order: 2, Name: "Wait for Expiry", Description: "Simulate token expiration", Auto: true},
 				{Order: 3, Name: "Refresh Token", Description: "Use refresh token to get new access token", Auto: true},
 				{Order: 4, Name: "Verify Rotation", Description: "See that refresh token was rotated", Auto: true},
+			},
+		},
+		{
+			ID:          "device_code_flow",
+			Name:        "Device Authorization Demo",
+			Description: "RFC 8628 grant: device displays a user_code, person authorizes on a second device, device polls for tokens",
+			Steps: []plugin.DemoStep{
+				{Order: 1, Name: "Request Device Codes", Description: "POST /oauth2/device/authorize", Auto: true},
+				{Order: 2, Name: "Authorize on Second Device", Description: "Visit verification_uri and enter user_code", Auto: false},
+				{Order: 3, Name: "Poll Token Endpoint", Description: "Honor authorization_pending and slow_down", Auto: true},
 			},
 		},
 	}
