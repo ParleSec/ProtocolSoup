@@ -57,4 +57,28 @@ func TestOAuth2AuthorizationServerMetadataUsesCanonicalPathIssuerRule(t *testing
 	if metadata["issuer"] != "https://as.example/oauth2" {
 		t.Fatalf("issuer = %#v", metadata["issuer"])
 	}
+	grants, _ := metadata["grant_types_supported"].([]interface{})
+	wantGrants := map[string]bool{
+		"authorization_code": false,
+		"refresh_token":      false,
+		"client_credentials": false,
+		"urn:ietf:params:oauth:grant-type:device_code": false,
+	}
+	for _, grant := range grants {
+		name, _ := grant.(string)
+		if name == "password" {
+			t.Fatalf("grant_types_supported must not advertise password (RFC 9700 Section 2.4): %#v", grants)
+		}
+		if _, ok := wantGrants[name]; ok {
+			wantGrants[name] = true
+		}
+	}
+	for name, found := range wantGrants {
+		if !found {
+			t.Fatalf("grant_types_supported missing %s: %#v", name, grants)
+		}
+	}
+	if metadata["device_authorization_endpoint"] != "https://as.example/oauth2/device/authorize" {
+		t.Fatalf("device_authorization_endpoint = %#v", metadata["device_authorization_endpoint"])
+	}
 }

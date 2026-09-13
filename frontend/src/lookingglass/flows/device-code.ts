@@ -8,7 +8,8 @@
  * 
  * Flow:
  * 1. Device requests device_code and user_code from authorization server
- * 2. User visits verification_uri on another device and enters user_code
+ * 2. Looking Glass opens the verification URI in a Protocol Showcase popup
+ *    (same pattern as authorization code); the person signs in and approves
  * 3. Device polls token endpoint until user completes authorization
  * 4. Token endpoint returns access token once authorized
  */
@@ -29,6 +30,8 @@ export class DeviceCodeExecutor extends FlowExecutorBase {
 
   private flowConfig: DeviceCodeConfig
   private pollTimer: ReturnType<typeof setInterval> | null = null
+  private verificationPopup: Window | null = null
+  private deviceMessageHandler: ((event: MessageEvent) => void) | null = null
 
   constructor(config: DeviceCodeConfig) {
     super(config)
@@ -63,30 +66,20 @@ export class DeviceCodeExecutor extends FlowExecutorBase {
       // Step 1: Request device and user codes
       const deviceAuth = await this.requestDeviceAuthorization()
 
-      this.addEvent({
-        type: 'user_action',
-        title: 'User Action Required',
-        description: `Visit ${deviceAuth.verification_uri} and enter code: ${deviceAuth.user_code}`,
-        rfcReference: 'RFC 8628 Section 3.3',
-        data: {
-          verification_uri: deviceAuth.verification_uri,
-          verification_uri_complete: deviceAuth.verification_uri_complete,
-          user_code: deviceAuth.user_code,
-          expires_in: deviceAuth.expires_in,
-        },
-      })
-
-      // Store device code
       this.updateState({
         status: 'awaiting_user',
-        currentStep: `Enter code ${deviceAuth.user_code} at ${deviceAuth.verification_uri}`,
+        currentStep: `Awaiting user authorization (${deviceAuth.user_code})`,
         securityParams: {
           ...this.state.securityParams,
           deviceCode: deviceAuth.device_code,
+          userCode: deviceAuth.user_code,
+          verificationUri: deviceAuth.verification_uri,
+          verificationUriComplete: deviceAuth.verification_uri_complete,
         },
       })
 
-      // Step 2: Poll for token
+      this.openDeviceVerificationPopup(deviceAuth.user_code)
+
       await this.pollForToken(deviceAuth)
 
       this.updateState({
@@ -117,11 +110,65 @@ export class DeviceCodeExecutor extends FlowExecutorBase {
         description: message,
       })
     } finally {
+      this.closeDeviceVerificationPopup()
       if (this.pollTimer) {
         clearInterval(this.pollTimer)
         this.pollTimer = null
       }
     }
+  }
+
+  private openDeviceVerificationPopup(userCode: string): void {
+    const verificationUrl = this.withCaptureQuery(
+      `${this.config.baseUrl}/device?user_code=${encodeURIComponent(userCode)}`
+    )
+
+    const isMobile = window.innerWidth < 640
+    const width = isMobile ? window.screen.width : 600
+    const height = isMobile ? window.screen.height : 700
+    const left = isMobile ? 0 : window.screenX + (window.outerWidth - width) / 2
+    const top = isMobile ? 0 : window.screenY + (window.outerHeight - height) / 2
+
+    const popup = window.open(
+      verificationUrl,
+      'oauth_device_authorization',
+      `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+    )
+
+    if (!popup) {
+      throw new Error('Popup blocked - please allow popups for this site')
+    }
+
+    this.verificationPopup = popup
+
+    this.addEvent({
+      type: 'user_action',
+      title: 'Authorization Window Opened',
+      description: 'User must authenticate and authorize the device',
+      rfcReference: 'RFC 8628 Section 3.3',
+      data: {
+        url: verificationUrl,
+        user_code: userCode,
+      },
+    })
+
+    this.deviceMessageHandler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type !== 'oauth_device_complete') return
+      this.closeDeviceVerificationPopup()
+    }
+    window.addEventListener('message', this.deviceMessageHandler)
+  }
+
+  private closeDeviceVerificationPopup(): void {
+    if (this.deviceMessageHandler) {
+      window.removeEventListener('message', this.deviceMessageHandler)
+      this.deviceMessageHandler = null
+    }
+    if (this.verificationPopup && !this.verificationPopup.closed) {
+      this.verificationPopup.close()
+    }
+    this.verificationPopup = null
   }
 
   private async requestDeviceAuthorization(): Promise<{
@@ -337,6 +384,7 @@ export class DeviceCodeExecutor extends FlowExecutorBase {
   }
 
   abort(): void {
+    this.closeDeviceVerificationPopup()
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null

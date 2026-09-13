@@ -49,7 +49,6 @@
           - "frontend/src/lookingglass/flows/implicit.ts"
           - "frontend/src/lookingglass/flows/interactive-code.ts"
           - "frontend/src/lookingglass/flows/refresh-token.ts"
-          - "frontend/src/lookingglass/flows/resource-owner.ts"
           - "frontend/src/lookingglass/flows/token-introspection.ts"
           - "frontend/src/lookingglass/flows/token-revocation.ts"
           - "frontend/src/lookingglass/flows/oidc-*.ts"

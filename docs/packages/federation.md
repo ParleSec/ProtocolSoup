@@ -63,6 +63,8 @@
 ### OAuth 2.0
 
 - `GET|POST /oauth2/authorize`
+- `POST /oauth2/device/authorize` (RFC 8628 device authorization)
+- `GET|POST /oauth2/device` (RFC 8628 verification URI)
 - `POST /oauth2/token`
 - `GET /.well-known/oauth-authorization-server/oauth2`
 - `POST /oauth2/introspect` (RFC 7662; confidential client auth, or the access token presented as Bearer when it is the token being introspected)

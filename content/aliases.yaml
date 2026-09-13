@@ -73,6 +73,17 @@ aliases:
   - alias: code challenge
     canonical:
       - artefact: pkce
+  - alias: device code
+    canonical:
+      - artefact: device-code
+      - axis: patterns
+        value: device-grant
+  - alias: device flow
+    canonical:
+      - artefact: device-code
+  - alias: RFC 8628
+    canonical:
+      - artefact: device-code
   - alias: jwt
     canonical:
       - artefact: jwt

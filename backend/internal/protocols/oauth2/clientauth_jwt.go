@@ -22,6 +22,7 @@ import (
 	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
@@ -824,14 +825,20 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"issuer":                                issuer,
-		"authorization_endpoint":                issuer + "/authorize",
-		"token_endpoint":                        issuer + "/token",
-		"jwks_uri":                              strings.TrimRight(p.baseURL, "/") + "/api/.well-known/jwks.json",
-		"scopes_supported":                      []string{"profile", "email", "api:read", "api:write", "ssf.read", "ssf.manage"},
-		"response_types_supported":              []string{"code"},
-		"grant_types_supported":                 []string{"authorization_code", "refresh_token", "client_credentials"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
+		"issuer":                   issuer,
+		"authorization_endpoint":   issuer + "/authorize",
+		"token_endpoint":           issuer + "/token",
+		"jwks_uri":                 strings.TrimRight(p.baseURL, "/") + "/api/.well-known/jwks.json",
+		"scopes_supported":         []string{"profile", "email", "api:read", "api:write", "ssf.read", "ssf.manage"},
+		"response_types_supported": []string{"code"},
+		"grant_types_supported": []string{
+			"authorization_code",
+			"refresh_token",
+			"client_credentials",
+			mockidp.DeviceCodeGrantType,
+		},
+		"device_authorization_endpoint":                    issuer + "/device/authorize",
+		"token_endpoint_auth_methods_supported":            []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "ES256", "EdDSA"},
 		"revocation_endpoint":                              issuer + "/revoke",
 		"introspection_endpoint":                           issuer + "/introspect",

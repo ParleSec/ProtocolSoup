@@ -29,21 +29,23 @@ const SSFStreamClientID = "ssf-stream-client"
 
 // MockIdP provides a mock identity provider for demonstrations
 type MockIdP struct {
-	users            map[string]*models.User
-	clients          map[string]*models.Client
-	authCodes        map[string]*models.AuthorizationCode
-	sessions         map[string]*models.Session
-	refreshTokens    map[string]*models.RefreshToken
-	revokedTokens    map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
-	usedCodes        map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
-	pushedRequests   map[string]*PushedAuthorizationRequest
-	accessJTIsByUser map[string][]string
-	keySet           *crypto.KeySet
-	jwtService       *crypto.JWTService
-	issuer           string
-	defaultUserID    string
-	pairwiseSalt     []byte
-	mu               sync.RWMutex
+	users                map[string]*models.User
+	clients              map[string]*models.Client
+	authCodes            map[string]*models.AuthorizationCode
+	sessions             map[string]*models.Session
+	refreshTokens        map[string]*models.RefreshToken
+	revokedTokens        map[string]time.Time              // RFC 7009: Track revoked access tokens by JTI
+	usedCodes            map[string]*usedAuthorizationCode // RFC 6749 Section 4.1.2: replayed-code detection and token revocation
+	pushedRequests       map[string]*PushedAuthorizationRequest
+	accessJTIsByUser     map[string][]string
+	deviceAuthByCode     map[string]*DeviceAuthorization
+	deviceAuthByUserCode map[string]*DeviceAuthorization
+	keySet               *crypto.KeySet
+	jwtService           *crypto.JWTService
+	issuer               string
+	defaultUserID        string
+	pairwiseSalt         []byte
+	mu                   sync.RWMutex
 }
 
 // usedAuthorizationCode records an authorization code that has already been
@@ -93,18 +95,20 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 		panic("generate pairwise subject salt: " + err.Error())
 	}
 	idp := &MockIdP{
-		users:            make(map[string]*models.User),
-		clients:          make(map[string]*models.Client),
-		authCodes:        make(map[string]*models.AuthorizationCode),
-		sessions:         make(map[string]*models.Session),
-		refreshTokens:    make(map[string]*models.RefreshToken),
-		revokedTokens:    make(map[string]time.Time),              // RFC 7009: Revoked token tracking
-		usedCodes:        make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
-		pushedRequests:   make(map[string]*PushedAuthorizationRequest),
-		accessJTIsByUser: make(map[string][]string),
-		keySet:           keySet,
-		issuer:           "http://localhost:8080",
-		pairwiseSalt:     pairwiseSalt,
+		users:                make(map[string]*models.User),
+		clients:              make(map[string]*models.Client),
+		authCodes:            make(map[string]*models.AuthorizationCode),
+		sessions:             make(map[string]*models.Session),
+		refreshTokens:        make(map[string]*models.RefreshToken),
+		revokedTokens:        make(map[string]time.Time),              // RFC 7009: Revoked token tracking
+		usedCodes:            make(map[string]*usedAuthorizationCode), // RFC 6749 Section 4.1.2: replayed-code detection
+		pushedRequests:       make(map[string]*PushedAuthorizationRequest),
+		accessJTIsByUser:     make(map[string][]string),
+		deviceAuthByCode:     make(map[string]*DeviceAuthorization),
+		deviceAuthByUserCode: make(map[string]*DeviceAuthorization),
+		keySet:               keySet,
+		issuer:               "http://localhost:8080",
+		pairwiseSalt:         pairwiseSalt,
 	}
 
 	idp.jwtService = crypto.NewJWTService(keySet, idp.issuer)
@@ -372,7 +376,7 @@ func (idp *MockIdP) initDemoData() {
 			"https://protocolsoup.fly.dev/callback",
 			"https://wallet.protocolsoup.com/api/oid4vci/callback",
 		},
-		GrantTypes: []string{"authorization_code", "refresh_token"},
+		GrantTypes: []string{"authorization_code", "refresh_token", DeviceCodeGrantType},
 		Scopes:     []string{"openid", "profile", "email"},
 		Public:     true,
 		CreatedAt:  time.Now(),

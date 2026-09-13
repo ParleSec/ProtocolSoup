@@ -16,7 +16,6 @@ import {
 import { ImplicitExecutor } from './implicit'
 import { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 import { DeviceCodeExecutor } from './device-code'
-import { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 import { OIDCHybridExecutor, type HybridResponseType } from './oidc-hybrid'
 import { InteractiveCodeExecutor, type InteractiveCodeConfig } from './interactive-code'
 import { TokenIntrospectionExecutor, type TokenIntrospectionConfig } from './token-introspection'
@@ -119,11 +118,11 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     rfcReference: 'RFC 8628',
     requiresUserInteraction: true, // User interaction on separate device
   },
-  'password': {
-    executorClass: ResourceOwnerExecutor,
-    description: 'Legacy flow - direct username/password (NOT recommended)',
-    rfcReference: 'RFC 6749 Section 4.3',
-    requiresUserInteraction: false, // No browser interaction
+  'device_code': {
+    executorClass: DeviceCodeExecutor,
+    description: 'For devices with limited input capabilities',
+    rfcReference: 'RFC 8628',
+    requiresUserInteraction: true,
   },
   'token-introspection': {
     executorClass: TokenIntrospectionExecutor,
@@ -396,10 +395,6 @@ export interface ExecutorFactoryConfig {
   scopes: string[]
   /** Refresh token (for refresh-token flow) */
   refreshToken?: string
-  /** Username (for password flow) */
-  username?: string
-  /** Password (for password flow) */
-  password?: string
   /** Bearer token (for SCIM flows) */
   bearerToken?: string
   /** Access token (for introspection, revocation, userinfo) */
@@ -487,11 +482,6 @@ export function createFlowExecutor(
   // Add flow-specific config
   if ((flowId === 'refresh-token' || flowId === 'refresh_token' || flowId === 'token_refresh') && config.refreshToken) {
     (fullConfig as RefreshTokenConfig).refreshToken = config.refreshToken
-  }
-
-  if (flowId === 'password' && config.username && config.password) {
-    (fullConfig as ResourceOwnerConfig).username = config.username;
-    (fullConfig as ResourceOwnerConfig).password = config.password
   }
 
   if (flowId === 'client-credentials') {
@@ -668,32 +658,29 @@ export function listSupportedFlows(): string[] {
 export function getFlowRequirements(flowId: string): {
   requiresClientSecret: boolean
   requiresRefreshToken: boolean
-  requiresCredentials: boolean
   requiresSessionInfo?: boolean
   requiresToken?: boolean
   requiresAccessToken?: boolean
 } {
   switch (flowId) {
     case 'client-credentials':
-      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false }
+      return { requiresClientSecret: false, requiresRefreshToken: false }
     case 'refresh-token':
     case 'refresh_token':
     case 'token_refresh':
-      return { requiresClientSecret: false, requiresRefreshToken: true, requiresCredentials: false }
-    case 'password':
-      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: true }
+      return { requiresClientSecret: false, requiresRefreshToken: true }
     case 'saml-logout':
     case 'saml-logout-redirect':
-      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresSessionInfo: true }
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresSessionInfo: true }
     case 'token-introspection':
     case 'token_introspection':
     case 'token-revocation':
     case 'token_revocation':
-      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresToken: true }
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresToken: true }
     case 'oidc-userinfo':
     case 'oidc_userinfo':
-      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false, requiresAccessToken: true }
+      return { requiresClientSecret: false, requiresRefreshToken: false, requiresAccessToken: true }
     default:
-      return { requiresClientSecret: false, requiresRefreshToken: false, requiresCredentials: false }
+      return { requiresClientSecret: false, requiresRefreshToken: false }
   }
 }

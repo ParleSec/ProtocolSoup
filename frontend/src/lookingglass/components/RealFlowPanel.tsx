@@ -8,7 +8,7 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Play, RotateCcw, CheckCircle, XCircle, Clock,
-  Send, ArrowDownLeft, Key, Shield, AlertTriangle,
+  Send, ArrowDownLeft, Key, Shield,
   Lock, Eye, EyeOff, Copy, Check, ChevronDown,
   ChevronRight, Fingerprint, Book, User, Server, FileText,
   Zap
@@ -40,7 +40,6 @@ interface RealFlowPanelProps {
   requirements: {
     requiresClientSecret: boolean
     requiresRefreshToken: boolean
-    requiresCredentials: boolean
   }
   error: string | null
   wireExchanges?: WireCapturedExchange[]
@@ -203,14 +202,6 @@ export function RealFlowPanel({
           <div className="flex items-center gap-2 text-sm text-yellow-400">
             <Key className="w-4 h-4" />
             <span>This flow requires an existing <strong>refresh_token</strong></span>
-          </div>
-        </div>
-      )}
-      {requirements.requiresCredentials && (
-        <div className="p-3 rounded-lg bg-red-500/5 border border-red-500/20">
-          <div className="flex items-center gap-2 text-sm text-red-400">
-            <AlertTriangle className="w-4 h-4" />
-            <span>This flow requires <strong>username/password</strong> (legacy, not recommended)</span>
           </div>
         </div>
       )}
@@ -853,6 +844,12 @@ function SecurityParams({ params }: { params: FlowExecutorState['securityParams'
         )}
         {params.deviceCode && (
           <ParamRow label="device_code" value={params.deviceCode} color="text-green-400" truncate />
+        )}
+        {params.userCode && (
+          <ParamRow label="user_code" value={params.userCode} color="text-cyan-400" />
+        )}
+        {params.verificationUri && (
+          <ParamRow label="verification_uri" value={params.verificationUri} color="text-cyan-300" />
         )}
       </div>
     </div>

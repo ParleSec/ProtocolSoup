@@ -408,7 +408,7 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 			Name:        "Public Application (SPA)",
 			Description: "A single-page application without a client secret (uses PKCE)",
 			Type:        "public",
-			GrantTypes:  []string{"authorization_code", "refresh_token"},
+			GrantTypes:  []string{"authorization_code", "refresh_token", DeviceCodeGrantType},
 			Scopes:      []string{"openid", "profile", "email"},
 		},
 		{

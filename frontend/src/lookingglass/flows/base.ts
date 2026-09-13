@@ -67,6 +67,9 @@ export interface FlowExecutorState {
     codeVerifier?: string
     codeChallenge?: string
     deviceCode?: string
+    userCode?: string
+    verificationUri?: string
+    verificationUriComplete?: string
     transactionId?: string
     deferredAccessToken?: string
     /** Opaque poll target for issuer-observed async lifecycles (e.g. OID4VCI issuer-initiated status_uri). */

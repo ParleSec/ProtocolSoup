@@ -425,10 +425,11 @@ The following events are emitted for real-time visualization:
 | `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
 | `client_credentials` | Client Credentials | Machine-to-machine authentication; client auth (`client_secret_basic`/`private_key_jwt`) and access-token protection (Bearer/RFC 9449 DPoP) are independent selectors |
 | `refresh_token` | Refresh Token | Token renewal |
+| `device_code` | Device Authorization Grant | RFC 8628; person authorizes on a second device |
 | `token_introspection` | Token Introspection | Validate active tokens |
 | `token_revocation` | Token Revocation | Invalidate tokens |
 
-The authorization server advertises `response_types_supported: ["code"]` and `grant_types_supported: ["authorization_code", "refresh_token", "client_credentials"]`. Device Code, Implicit, and Resource Owner Password are not implemented.
+The authorization server advertises `response_types_supported: ["code"]` and `grant_types_supported: ["authorization_code", "refresh_token", "client_credentials", "urn:ietf:params:oauth:grant-type:device_code"]`, plus `device_authorization_endpoint`. OAuth implicit (`response_type=token`) and Resource Owner Password (`grant_type=password`) are not implemented; RFC 9700 §2.4 says the password grant MUST NOT be used. OIDC implicit remains a separate protocol flow.
 
 ## Configuration
 
@@ -448,7 +449,7 @@ The authorization server advertises `response_types_supported: ["code"]` and `gr
 
 | client_id | Type | Grant Types | Secret |
 |-----------|------|-------------|--------|
-| `public-app` | Public | authorization_code, refresh_token | - |
+| `public-app` | Public | authorization_code, refresh_token, device_code | - |
 | `demo-app` | Confidential | authorization_code, refresh_token | (env or auto) |
 | `machine-client` | Confidential | client_credentials | (env or auto) |
 | `ssf-stream-client` | Confidential | client_credentials (`ssf.read`, `ssf.manage`) | (env or auto) |
@@ -519,11 +520,12 @@ curl -X POST http://localhost:8080/oauth2/revoke \
 - ✅ `private_key_jwt` client authentication (RFC 7523 §2.2 / OIDC Core §9)
 - ✅ Client assertion replay protection (`jti`)
 - ✅ Refresh token rotation
+- ✅ Device Authorization Grant (RFC 8628)
 
 ### Not Implemented
 
-- ❌ Resource Owner Password Credentials (deprecated)
-- ❌ Device Authorization Grant (RFC 8628)
+- ❌ OAuth implicit grant (`response_type=token`)
+- ❌ Resource Owner Password Credentials (`grant_type=password`; RFC 9700 §2.4 MUST NOT)
 - ❌ JWT Bearer Grant / assertion as authorization grant (RFC 7523 §2.1)
 - ❌ SAML 2.0 Bearer Grant (RFC 7522)
 

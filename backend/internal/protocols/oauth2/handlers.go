@@ -507,6 +507,12 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		p.handleRefreshTokenGrant(w, r, sessionID, dpopResult.JKT)
 	case "client_credentials":
 		p.handleClientCredentialsGrant(w, r, sessionID, dpopResult.JKT)
+	case mockidp.DeviceCodeGrantType:
+		if assertionPresent {
+			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			return
+		}
+		p.handleDeviceCodeGrant(w, r, sessionID, dpopResult.JKT)
 	default:
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported Grant Type", map[string]interface{}{
 			"grant_type": grantType,
@@ -1374,10 +1380,10 @@ func (p *Plugin) handleCAEPRevokeSubject(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"email":                   strings.TrimSpace(body.Email),
-		"sessions_deleted":        sessions,
-		"refresh_tokens_revoked":  refresh,
-		"access_tokens_revoked":   access,
+		"email":                  strings.TrimSpace(body.Email),
+		"sessions_deleted":       sessions,
+		"refresh_tokens_revoked": refresh,
+		"access_tokens_revoked":  access,
 	})
 }
 
@@ -1480,7 +1486,10 @@ var oauth2ErrorURIs = map[string]string{
 	"unsupported_grant_type":    "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"invalid_scope":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"unsupported_response_type": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
-	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
+	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
+	"authorization_pending":     "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
+	"slow_down":                 "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
+	"expired_token":             "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
 	"server_error":              "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	"temporarily_unavailable":   "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	dpop.ErrorInvalidDPoPProof:  "https://datatracker.ietf.org/doc/html/rfc9449#section-5",
@@ -1533,28 +1542,7 @@ func writeOAuth2ErrorStatus(w http.ResponseWriter, status int, errorCode, descri
 	writeJSON(w, status, response)
 }
 
-func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
-	if clientName == "" {
-		if client, exists := p.mockIdP.GetClient(clientID); exists {
-			clientName = client.Name
-		} else {
-			clientName = clientID
-		}
-	}
-	formAction := "/oauth2/authorize"
-	if sessionID != "" {
-		formAction += "?lg_session=" + url.QueryEscape(sessionID)
-	}
-
-	demoUsersHTML := buildDemoUsersHTML(p.mockIdP.GetDemoUserPresets())
-
-	return `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Login - Protocol Showcase</title>
-    <style>
+const oauth2ShowcasePageCSS = `
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Segoe UI', system-ui, sans-serif;
@@ -1619,7 +1607,7 @@ func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, login
             margin-bottom: 8px;
             color: #d4d4d8;
         }
-        input[type="email"], input[type="password"] {
+        input[type="email"], input[type="password"], input[type="text"] {
             width: 100%;
             padding: 12px 16px;
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1702,6 +1690,31 @@ func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, login
             border-radius: 4px;
             margin: 2px;
         }
+`
+
+func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
+	if clientName == "" {
+		if client, exists := p.mockIdP.GetClient(clientID); exists {
+			clientName = client.Name
+		} else {
+			clientName = clientID
+		}
+	}
+	formAction := "/oauth2/authorize"
+	if sessionID != "" {
+		formAction += "?lg_session=" + url.QueryEscape(sessionID)
+	}
+
+	demoUsersHTML := buildDemoUsersHTML(p.mockIdP.GetDemoUserPresets())
+
+	return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Login - Protocol Showcase</title>
+    <style>
+` + oauth2ShowcasePageCSS + `
     </style>
 </head>
 <body>

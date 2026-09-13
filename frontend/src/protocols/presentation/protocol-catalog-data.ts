@@ -81,6 +81,17 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         ],
       },
       {
+        id: 'device-code',
+        backendId: 'device_code',
+        name: 'Device Authorization',
+        rfc: 'RFC 8628',
+        references: [
+          { category: 'core', label: 'RFC 8628 — Device Authorization Grant', href: 'https://datatracker.ietf.org/doc/html/rfc8628' },
+          { category: 'security', label: 'RFC 8628 §5 — Security Considerations', href: 'https://datatracker.ietf.org/doc/html/rfc8628#section-5' },
+          { category: 'companion', label: 'RFC 8252 — OAuth 2.0 for Native Apps', href: 'https://datatracker.ietf.org/doc/html/rfc8252', note: 'Native apps with a browser should use authorization code + PKCE, not the device grant.' },
+        ],
+      },
+      {
         id: 'token-introspection',
         backendId: 'token_introspection',
         name: 'Token Introspection',
@@ -110,6 +121,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
       { category: 'companion', label: 'RFC 7662 — Token Introspection', href: 'https://datatracker.ietf.org/doc/html/rfc7662' },
       { category: 'companion', label: 'RFC 7009 — Token Revocation', href: 'https://datatracker.ietf.org/doc/html/rfc7009' },
       { category: 'companion', label: 'RFC 8414 — Authorization Server Metadata', href: 'https://datatracker.ietf.org/doc/html/rfc8414' },
+      { category: 'companion', label: 'RFC 8628 — Device Authorization Grant', href: 'https://datatracker.ietf.org/doc/html/rfc8628' },
       { category: 'companion', label: 'RFC 8693 — Token Exchange', href: 'https://datatracker.ietf.org/doc/html/rfc8693' },
       { category: 'companion', label: 'RFC 8707 — Resource Indicators', href: 'https://datatracker.ietf.org/doc/html/rfc8707' },
       { category: 'companion', label: 'RFC 9207 — Authorization Server Issuer Identification', href: 'https://datatracker.ietf.org/doc/html/rfc9207', note: 'AS Mix-Up defence.' },

@@ -35,7 +35,7 @@ Comment on the issue to let maintainers know you're working on it. If you don't 
 | Tool | Version | Purpose |
 |------|---------|---------|
 | Go | 1.25+ | Backend development |
-| Node.js | 22.13+ | Frontend and docs development |
+| Node.js | 22.19+ | Frontend and docs development |
 | Docker | Latest | Container orchestration |
 | Git | Latest | Version control |
 

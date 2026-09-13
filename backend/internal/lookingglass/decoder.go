@@ -319,9 +319,6 @@ func (d *Decoder) DecodeTokenRequest(body string) (*DecodedTokenRequest, error) 
 	case "client_credentials":
 		decoded.SecurityNotes = append(decoded.SecurityNotes,
 			"Client credentials grant - used for machine-to-machine authentication")
-	case "password":
-		decoded.SecurityNotes = append(decoded.SecurityNotes,
-			"WARNING: Resource Owner Password grant is deprecated and should be avoided")
 	}
 
 	return decoded, nil

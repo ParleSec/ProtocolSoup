@@ -12,7 +12,7 @@ permissions:
 
 env:
   GO_VERSION: '1.26.6'
-  NODE_VERSION: '22.13.0'
+  NODE_VERSION: '22.23.2'
 
 jobs:
   # Job 1: Frontend Security Scanning
