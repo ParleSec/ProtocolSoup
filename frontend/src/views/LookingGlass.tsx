@@ -171,12 +171,6 @@ function displayDeviceUserCode(value?: string): string {
   return (value || '').replace(/[^BCDFGHJKLMNPQRSTVWXZ-]/gi, '').toUpperCase()
 }
 
-function deviceVerificationHref(userCode?: string): string | undefined {
-  const code = displayDeviceUserCode(userCode)
-  if (!code) return undefined
-  return `/oauth2/device?user_code=${encodeURIComponent(code)}`
-}
-
 export function LookingGlass() {
   const router = useRouter()
   const pathname = usePathname()
@@ -1762,11 +1756,11 @@ export function LookingGlass() {
               <span className="text-xs sm:text-sm font-medium text-surface-300">Device Authorization (RFC 8628)</span>
             </div>
             <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-              Execute to receive a <code className="text-cyan-300">user_code</code>. Open the verification URI on this browser (or another device), sign in as a demo user, and approve. The device client polls until tokens arrive. Native apps that have a browser should still use authorization code + PKCE (RFC 8252).
+              Execute opens a Protocol Showcase sign-in window (same pattern as authorization code). Confirm the <code className="text-cyan-300">user_code</code>, sign in as a demo user, and approve. The device client polls until tokens arrive. Native apps that have a browser should still use authorization code + PKCE (RFC 8252).
             </p>
             {status === 'awaiting_user' && displayDeviceUserCode(mergedExecutorState?.securityParams?.userCode) && (
               <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 space-y-2">
-                <p className="text-[10px] sm:text-xs text-cyan-200">Enter this code at the verification URI:</p>
+                <p className="text-[10px] sm:text-xs text-cyan-200">A sign-in window opened. Confirm this user_code matches the device:</p>
                 <p className="font-mono text-lg sm:text-2xl tracking-[0.35em] text-white">
                   {displayDeviceUserCode(mergedExecutorState?.securityParams?.userCode)}
                 </p>
@@ -1774,17 +1768,6 @@ export function LookingGlass() {
                   <p className="font-mono text-[10px] sm:text-xs text-cyan-300/80 break-all">
                     {mergedExecutorState.securityParams.verificationUri}
                   </p>
-                )}
-                {deviceVerificationHref(mergedExecutorState?.securityParams?.userCode) && (
-                  <a
-                    href={deviceVerificationHref(mergedExecutorState?.securityParams?.userCode)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[10px] sm:text-xs text-cyan-300 hover:text-cyan-200"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Open verification page
-                  </a>
                 )}
               </div>
             )}
