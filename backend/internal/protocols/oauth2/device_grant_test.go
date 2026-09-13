@@ -136,20 +136,10 @@ func TestDeviceVerificationPageMatchesAuthorizeChrome(t *testing.T) {
 	server := newOAuthAssertionTestServer(t)
 	issued := postDeviceAuthorize(t, server.server.URL, url.Values{"client_id": {"public-app"}})
 	userCode := issued["user_code"].(string)
-
-	resp, err := http.Get(server.server.URL + "/oauth2/device?user_code=" + url.QueryEscape(userCode))
-	if err != nil {
-		t.Fatal(err)
+	status, html := getDeviceVerification(t, server.server.URL, userCode)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d body = %s", status, html)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d body = %s", resp.StatusCode, raw)
-	}
-	html := string(raw)
 	for _, want := range []string{
 		"Login - Protocol Showcase",
 		"OAuth 2.0 Device Authorization",
@@ -215,6 +205,25 @@ func postDeviceAuthorizeStatus(t *testing.T, serverURL string, form url.Values) 
 		t.Fatal(err)
 	}
 	return resp.StatusCode, body
+}
+
+func getDeviceVerification(t *testing.T, serverURL, userCode string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, serverURL+"/oauth2/device", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.URL.RawQuery = url.Values{"user_code": {userCode}}.Encode()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(raw)
 }
 
 func approveDevice(t *testing.T, serverURL, userCode, email, password, decision string) string {
