@@ -114,15 +114,120 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /oauth2/device/authorize:
+    post:
+      tags: [OAuth2]
+      summary: RFC 8628 device authorization endpoint
+      description: >-
+        Issues a device_code and user_code (RFC 8628 Section 3.1–3.2).
+        Public clients identify themselves with client_id. Confidential
+        clients MUST authenticate as at the token endpoint.
+      operationId: oauth2DeviceAuthorize
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                client_id:
+                  type: string
+                scope:
+                  type: string
+      responses:
+        "200":
+          description: Device authorization response.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_code, user_code, verification_uri, expires_in]
+                properties:
+                  device_code:
+                    type: string
+                  user_code:
+                    type: string
+                  verification_uri:
+                    type: string
+                    format: uri
+                  verification_uri_complete:
+                    type: string
+                    format: uri
+                  expires_in:
+                    type: integer
+                  interval:
+                    type: integer
+        "400":
+          description: OAuth error (RFC 6749 Section 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /oauth2/device:
+    get:
+      tags: [OAuth2]
+      summary: RFC 8628 verification URI
+      description: End-user page for entering user_code and approving or denying the device (RFC 8628 Section 3.3).
+      operationId: oauth2DeviceVerificationGet
+      parameters:
+        - in: query
+          name: user_code
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML verification page.
+          content:
+            text/html:
+              schema:
+                type: string
+    post:
+      tags: [OAuth2]
+      summary: RFC 8628 verification form
+      operationId: oauth2DeviceVerificationPost
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [user_code, email, password, decision]
+              properties:
+                user_code:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                  format: password
+                decision:
+                  type: string
+                  enum: [approve, deny]
+      responses:
+        "200":
+          description: HTML result page.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Invalid form submission.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /oauth2/token:
     post:
       tags: [OAuth2]
       summary: OAuth2 token endpoint
       description: >-
-        Issues tokens for the supported OAuth grants. The client_credentials
+        Issues tokens for the supported OAuth grants: authorization_code,
+        refresh_token, client_credentials, and
+        urn:ietf:params:oauth:grant-type:device_code (RFC 8628). The client_credentials
         grant accepts client_secret_basic, client_secret_post, or
         private_key_jwt (RFC 7523 Section 2.2). private_key_jwt is deliberately
-        not enabled for authorization_code or refresh_token in this profile.
+        not enabled for authorization_code, refresh_token, or
+        device_code in this profile.
         A request may optionally carry a DPoP proof header (RFC 9449
         Section 4.3, htm=POST against this endpoint's URL); when present and
         valid, the issued access token (and, for authorization_code issued
@@ -166,6 +271,9 @@ paths:
                   type: string
                 client_secret:
                   type: string
+                device_code:
+                  type: string
+                  description: Device verification code for grant_type=urn:ietf:params:oauth:grant-type:device_code (RFC 8628 Section 3.4).
                 client_assertion_type:
                   type: string
                   enum:
