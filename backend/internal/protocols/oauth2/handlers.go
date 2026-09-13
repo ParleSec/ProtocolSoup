@@ -1542,28 +1542,7 @@ func writeOAuth2ErrorStatus(w http.ResponseWriter, status int, errorCode, descri
 	writeJSON(w, status, response)
 }
 
-func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
-	if clientName == "" {
-		if client, exists := p.mockIdP.GetClient(clientID); exists {
-			clientName = client.Name
-		} else {
-			clientName = clientID
-		}
-	}
-	formAction := "/oauth2/authorize"
-	if sessionID != "" {
-		formAction += "?lg_session=" + url.QueryEscape(sessionID)
-	}
-
-	demoUsersHTML := buildDemoUsersHTML(p.mockIdP.GetDemoUserPresets())
-
-	return `<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Login - Protocol Showcase</title>
-    <style>
+const oauth2ShowcasePageCSS = `
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Segoe UI', system-ui, sans-serif;
@@ -1628,7 +1607,7 @@ func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, login
             margin-bottom: 8px;
             color: #d4d4d8;
         }
-        input[type="email"], input[type="password"] {
+        input[type="email"], input[type="password"], input[type="text"] {
             width: 100%;
             padding: 12px 16px;
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1711,6 +1690,31 @@ func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, login
             border-radius: 4px;
             margin: 2px;
         }
+`
+
+func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
+	if clientName == "" {
+		if client, exists := p.mockIdP.GetClient(clientID); exists {
+			clientName = client.Name
+		} else {
+			clientName = clientID
+		}
+	}
+	formAction := "/oauth2/authorize"
+	if sessionID != "" {
+		formAction += "?lg_session=" + url.QueryEscape(sessionID)
+	}
+
+	demoUsersHTML := buildDemoUsersHTML(p.mockIdP.GetDemoUserPresets())
+
+	return `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Login - Protocol Showcase</title>
+    <style>
+` + oauth2ShowcasePageCSS + `
     </style>
 </head>
 <body>

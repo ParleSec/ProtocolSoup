@@ -132,6 +132,63 @@ func TestDeviceAuthorizePublicClientAndMetadata(t *testing.T) {
 	}
 }
 
+func TestDeviceVerificationPageMatchesAuthorizeChrome(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	issued := postDeviceAuthorize(t, server.server.URL, url.Values{"client_id": {"public-app"}})
+	userCode := issued["user_code"].(string)
+
+	resp, err := http.Get(server.server.URL + "/oauth2/device?user_code=" + url.QueryEscape(userCode))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d body = %s", resp.StatusCode, raw)
+	}
+	html := string(raw)
+	for _, want := range []string{
+		"Login - Protocol Showcase",
+		"OAuth 2.0 Device Authorization",
+		"Public Application (SPA)",
+		">Sign In<",
+		"Demo Users (click to autofill)",
+		"to authorize a device",
+		userCode,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("verification HTML missing %q", want)
+		}
+	}
+	if strings.Contains(html, "Authorize a device") {
+		t.Fatalf("old device chrome still present")
+	}
+	peek := server.idp.PeekDeviceAuthorizationByUserCode(userCode)
+	if peek == nil || peek.FailedAttempts != 0 {
+		t.Fatalf("GET must not count a user_code failure: %#v", peek)
+	}
+}
+
+func TestDeviceVerificationResultNotifiesOpener(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	issued := postDeviceAuthorize(t, server.server.URL, url.Values{"client_id": {"public-app"}})
+	alice := server.idp.GetDemoUserPresets()[0]
+	html := approveDevice(t, server.server.URL, issued["user_code"].(string), alice.Credentials.Email, alice.Credentials.Password, "approve")
+	for _, want := range []string{
+		`data-approved="true"`,
+		"oauth_device_complete",
+		"Protocol Showcase",
+		"window.location.origin",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("result HTML missing %q", want)
+		}
+	}
+}
+
 func postDeviceAuthorize(t *testing.T, serverURL string, form url.Values) map[string]interface{} {
 	t.Helper()
 	status, body := postDeviceAuthorizeStatus(t, serverURL, form)
@@ -160,7 +217,7 @@ func postDeviceAuthorizeStatus(t *testing.T, serverURL string, form url.Values) 
 	return resp.StatusCode, body
 }
 
-func approveDevice(t *testing.T, serverURL, userCode, email, password, decision string) {
+func approveDevice(t *testing.T, serverURL, userCode, email, password, decision string) string {
 	t.Helper()
 	form := url.Values{
 		"user_code": {userCode},
@@ -178,8 +235,12 @@ func approveDevice(t *testing.T, serverURL, userCode, email, password, decision 
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(resp.Body)
 		t.Fatalf("device verify status = %d body = %s", resp.StatusCode, raw)
 	}
+	return string(raw)
 }

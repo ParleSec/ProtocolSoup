@@ -328,16 +328,32 @@ func (p *Plugin) writeDeviceVerificationPage(w http.ResponseWriter, userCode, se
 			Password: preset.Credentials.Password,
 		})
 	}
+
+	clientName := "this application"
+	var scopes []string
+	if peek := p.mockIdP.PeekDeviceAuthorizationByUserCode(userCode); peek != nil {
+		if client, exists := p.mockIdP.GetClient(peek.ClientID); exists && client.Name != "" {
+			clientName = client.Name
+		}
+		scopes = strings.Fields(peek.Scope)
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = deviceVerificationTmpl.Execute(w, struct {
+		CSS        template.CSS
 		UserCode   string
 		FormAction string
 		Error      string
+		ClientName string
+		Scopes     []string
 		Users      []demoUser
 	}{
+		CSS:        template.CSS(oauth2ShowcasePageCSS),
 		UserCode:   userCode,
 		FormAction: formAction,
 		Error:      errMsg,
+		ClientName: clientName,
+		Scopes:     scopes,
 		Users:      users,
 	})
 }
@@ -351,13 +367,17 @@ func writeDeviceVerificationResultPage(w http.ResponseWriter, approved bool, use
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = deviceVerificationResultTmpl.Execute(w, struct {
+		CSS      template.CSS
 		Title    string
 		Body     string
 		UserCode string
+		Approved bool
 	}{
+		CSS:      template.CSS(oauth2ShowcasePageCSS),
 		Title:    title,
 		Body:     body,
 		UserCode: userCode,
+		Approved: approved,
 	})
 }
 
@@ -365,48 +385,72 @@ var deviceVerificationTmpl = template.Must(template.New("device-verify").Parse(`
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Authorize Device - ProtocolSoup</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Login - Protocol Showcase</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #e4e4e7; padding: 16px; }
-        .container { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 28px; width: 100%; max-width: 420px; }
-        h1 { font-size: 22px; margin-bottom: 8px; }
-        p { color: #a1a1aa; font-size: 14px; margin-bottom: 16px; line-height: 1.5; }
-        .warn { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 8px; padding: 12px; color: #fbbf24; font-size: 13px; margin-bottom: 16px; }
-        label { display: block; font-size: 12px; color: #a1a1aa; margin-bottom: 6px; }
-        input { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); background: #0f172a; color: #fff; margin-bottom: 12px; font-size: 14px; }
-        .code { font-family: ui-monospace, monospace; letter-spacing: 0.2em; text-transform: uppercase; }
-        .actions { display: flex; gap: 8px; margin-top: 8px; }
-        button { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.12); cursor: pointer; font-weight: 600; }
-        .approve { background: rgba(16, 185, 129, 0.2); color: #34d399; }
-        .deny { background: rgba(239, 68, 68, 0.15); color: #f87171; }
-        .error { background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 10px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; }
-        .demo-users { margin-top: 16px; }
-        .demo-users h3 { font-size: 12px; color: #a1a1aa; margin-bottom: 8px; }
-        .demo-user { padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08); margin-bottom: 6px; cursor: pointer; }
-        .demo-user .name { font-size: 13px; color: #fff; }
-        .demo-user .email { font-size: 11px; color: #a1a1aa; }
+{{.CSS}}
+        .warn {
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            color: #fbbf24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        input.user-code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+        }
+        button.secondary {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #d4d4d8;
+            box-shadow: none;
+            margin-top: 8px;
+        }
+        button.secondary:hover {
+            transform: none;
+            background: rgba(239, 68, 68, 0.12);
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: none;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Authorize a device</h1>
-        <p>You are authorizing a device that cannot complete a browser login itself. Confirm the device is in your possession, then approve or deny.</p>
-        <div class="warn">RFC 8628 §5.4: confirm this device is yours before approving. Do not enter a user_code from email or a stranger.</div>
+        <div class="logo">
+            <h1>Protocol Showcase</h1>
+            <p>OAuth 2.0 Device Authorization</p>
+        </div>
+
+        <div class="client-info">
+            <span>Signing in to <strong>{{.ClientName}}</strong> to authorize a device</span>
+        </div>
+
+        <div class="warn">RFC 8628 §5.4: you are authorizing a device. Confirm it is in your possession before signing in. Do not enter a user_code from email or a stranger.</div>
+
         {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
         <form method="POST" action="{{.FormAction}}">
-            <label for="user_code">User code</label>
-            <input id="user_code" name="user_code" class="code" value="{{.UserCode}}" autocomplete="off" required>
-            <label for="email">Email</label>
-            <input id="email" name="email" type="email" required>
-            <label for="password">Password</label>
-            <input id="password" name="password" type="password" required>
-            <div class="actions">
-                <button class="approve" type="submit" name="decision" value="approve">Approve</button>
-                <button class="deny" type="submit" name="decision" value="deny">Deny</button>
+            <div class="form-group">
+                <label for="user_code">User code</label>
+                <input type="text" id="user_code" name="user_code" class="user-code" value="{{.UserCode}}" autocomplete="off" required>
             </div>
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" placeholder="alice@example.com" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" placeholder="password" required>
+            </div>
+            <button type="submit" name="decision" value="approve">Sign In</button>
+            <button type="submit" name="decision" value="deny" class="secondary">Deny</button>
         </form>
+
         {{if .Users}}
         <div class="demo-users">
             <h3>Demo Users (click to autofill)</h3>
@@ -416,6 +460,12 @@ var deviceVerificationTmpl = template.Must(template.New("device-verify").Parse(`
                 <div class="email">{{.Email}}</div>
             </div>
             {{end}}
+        </div>
+        {{end}}
+
+        {{if .Scopes}}
+        <div class="scopes">
+            Requested scopes: {{range .Scopes}}<span>{{.}}</span>{{end}}
         </div>
         {{end}}
     </div>
@@ -429,23 +479,53 @@ var deviceVerificationTmpl = template.Must(template.New("device-verify").Parse(`
 </html>`))
 
 var deviceVerificationResultTmpl = template.Must(template.New("device-result").Parse(`<!DOCTYPE html>
-<html>
+<html data-approved="{{.Approved}}">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{.Title}}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{.Title}} - Protocol Showcase</title>
     <style>
-        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e4e4e7; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .card { max-width: 420px; padding: 28px; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; }
-        code { font-family: ui-monospace, monospace; letter-spacing: 0.15em; }
+{{.CSS}}
+        .result-body {
+            color: #a1a1aa;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+        }
+        .result-code {
+            color: #71717a;
+            font-size: 12px;
+        }
+        .result-code code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            letter-spacing: 0.15em;
+        }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h1>{{.Title}}</h1>
-        <p>{{.Body}}</p>
-        <p>User code: <code>{{.UserCode}}</code></p>
+    <div class="container">
+        <div class="logo">
+            <h1>Protocol Showcase</h1>
+            <p>OAuth 2.0 Device Authorization</p>
+        </div>
+        <div class="client-info">
+            <span>{{.Title}}</span>
+        </div>
+        <p class="result-body">{{.Body}}</p>
+        <p class="result-code">User code: <code>{{.UserCode}}</code></p>
     </div>
+    <script>
+        (function () {
+            var approved = document.documentElement.getAttribute('data-approved') === 'true';
+            if (window.opener && window.opener !== window) {
+                window.opener.postMessage(
+                    { type: 'oauth_device_complete', approved: approved },
+                    window.location.origin
+                );
+                window.setTimeout(function () { window.close(); }, 400);
+            }
+        })();
+    </script>
 </body>
 </html>`))
 

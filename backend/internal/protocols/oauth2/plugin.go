@@ -830,7 +830,7 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 			Description: "RFC 8628 grant: device displays a user_code, person authorizes on a second device, device polls for tokens",
 			Steps: []plugin.DemoStep{
 				{Order: 1, Name: "Request Device Codes", Description: "POST /oauth2/device/authorize", Auto: true},
-				{Order: 2, Name: "Authorize on Second Device", Description: "Visit verification_uri and enter user_code", Auto: false},
+				{Order: 2, Name: "Authorize on Second Device", Description: "Sign in at the verification URI (Protocol Showcase window) and enter user_code", Auto: false},
 				{Order: 3, Name: "Poll Token Endpoint", Description: "Honor authorization_pending and slow_down", Auto: true},
 			},
 		},
