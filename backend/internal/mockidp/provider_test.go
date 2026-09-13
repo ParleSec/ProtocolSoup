@@ -162,3 +162,27 @@ func TestValidateAuthorizationCodeRejectsExpiredCode(t *testing.T) {
 		t.Fatalf("ValidateAuthorizationCode = %v, want authorization code expired", err)
 	}
 }
+
+func TestPeekDeviceAuthorizationByUserCodeDoesNotCountFailure(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	now := time.Now()
+	auth, err := idp.CreateDeviceAuthorization("public-app", "profile email", "sess", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peek := idp.PeekDeviceAuthorizationByUserCode(auth.UserCode)
+	if peek == nil || peek.UserCode != auth.UserCode || peek.FailedAttempts != 0 {
+		t.Fatalf("peek pending = %#v", peek)
+	}
+	if idp.PeekDeviceAuthorizationByUserCode("ZZZZ-ZZZZ") != nil {
+		t.Fatal("unknown user_code must not peek")
+	}
+	if _, found := idp.LookupDeviceAuthorizationByUserCode(auth.UserCode, now); !found {
+		t.Fatal("pending user_code should still look up after peek")
+	}
+}

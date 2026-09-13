@@ -130,6 +130,19 @@ func (idp *MockIdP) LookupDeviceAuthorizationByUserCode(userCode string, now tim
 	return auth, true
 }
 
+// PeekDeviceAuthorizationByUserCode returns a copy of the pending device authorization
+func (idp *MockIdP) PeekDeviceAuthorizationByUserCode(userCode string) *DeviceAuthorization {
+	normalized := normalizeUserCode(userCode)
+	idp.mu.RLock()
+	defer idp.mu.RUnlock()
+	auth, exists := idp.deviceAuthByUserCode[normalized]
+	if !exists || auth == nil {
+		return nil
+	}
+	copy := *auth
+	return &copy
+}
+
 // RecordUserCodeFailure records an unsuccessful user_code interaction
 // (RFC 8628 Section 5.1).
 func (idp *MockIdP) RecordUserCodeFailure(userCode string) int {
