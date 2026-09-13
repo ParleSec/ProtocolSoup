@@ -215,7 +215,7 @@ ProtocolSoup/
 
 ## Development
 
-Requires Go 1.26+, Node.js 22.13+, and Docker.
+Requires Go 1.26+, Node.js 22.19+, and Docker.
 
 ```bash
 # Terminal 1 - monolith, all protocols in one process
