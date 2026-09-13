@@ -26,6 +26,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 ### OAuth 2.0
 
 - `GET|POST /oauth2/authorize`, `POST /oauth2/token`
+- `POST /oauth2/device/authorize` (RFC 8628), `GET|POST /oauth2/device`
 - `POST /oauth2/introspect` (RFC 7662; confidential client, or Bearer of the token being introspected), `POST /oauth2/revoke`
 - `GET /oauth2/demo/users`, `GET /oauth2/demo/clients`
 - `POST /oauth2/demo/clients/machine-client-pkjwt/jwks` (owned, active-session, one-shot public-key registration)

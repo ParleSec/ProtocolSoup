@@ -9,6 +9,7 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 
 - RFC 6749 -- OAuth 2.0 Authorization Framework
 - RFC 7636 -- Proof Key for Code Exchange (PKCE)
+- RFC 8628 -- Device Authorization Grant
 - RFC 7662 -- Token Introspection
 - RFC 7009 -- Token Revocation
 - RFC 7523 §2.2 -- JWT Profile for OAuth 2.0 Client Authentication
@@ -25,8 +26,11 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 | `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
 | `client_credentials` | Client Credentials | Machine-to-machine issuance with independent selectors for `client_secret_basic` or `private_key_jwt` authentication and Bearer or DPoP access-token protection |
 | `refresh_token` | Refresh Token | Token renewal without re-authorization |
+| `device_code` | Device Authorization | RFC 8628 grant for TVs, CLIs, and other input-constrained devices; person authorizes on a second device |
 | `token_introspection` | Token Introspection | Validate and inspect active tokens (RFC 7662) |
 | `token_revocation` | Token Revocation | Invalidate tokens (RFC 7009) |
+
+Resource Owner Password Credentials (`grant_type=password`) is not implemented. RFC 9700 §2.4: "The resource owner password credentials grant MUST NOT be used." Use authorization code + PKCE instead.
 
 ## Demo Scenarios
 
@@ -34,12 +38,15 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 - **PKCE Flow Demo** -- PKCE challenge/verifier exchange
 - **Client Credentials Demo** -- Independently select shared-secret or browser-held `private_key_jwt` authentication and Bearer or DPoP token protection
 - **Token Refresh Demo** -- Refresh grant with token rotation
+- **Device Authorization Demo** -- Device displays a user_code; approve at `/oauth2/device`
 
 ## Endpoints
 
 | Path | Methods | Purpose |
 |------|---------|---------|
 | `/oauth2/authorize` | GET, POST | Authorization endpoint |
+| `/oauth2/device/authorize` | POST | RFC 8628 device authorization endpoint |
+| `/oauth2/device` | GET, POST | RFC 8628 verification URI (user enters `user_code`) |
 | `/oauth2/token` | POST | Token endpoint |
 | `/oauth2/introspect` | POST | Token introspection |
 | `/oauth2/revoke` | POST | Token revocation |
