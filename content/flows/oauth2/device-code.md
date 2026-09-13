@@ -43,4 +43,6 @@ approves on another device. Polling honors `authorization_pending` and
 This grant is still the correct tool for that constraint. Native apps that
 already have a browser should use authorization code + PKCE instead
 (RFC 8252). ProtocolSoup wires the real grant so the contrast with modern
-redirect-based flows is visible, not simulated.
+redirect-based flows is visible, not simulated. In Looking Glass, Execute
+opens the verification URI in the same Protocol Showcase sign-in popup used
+by authorization code, while the device client keeps polling.
