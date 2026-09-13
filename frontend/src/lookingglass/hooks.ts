@@ -486,10 +486,6 @@ export interface UseRealFlowExecutorOptions {
   scopes: string[]
   /** Refresh token (for refresh-token flow) */
   refreshToken?: string
-  /** Username (for password flow) */
-  username?: string
-  /** Password (for password flow) */
-  password?: string
   /** Bearer token (for SCIM flows) */
   bearerToken?: string
   /** Token to introspect or revoke */
@@ -542,7 +538,6 @@ export interface RealFlowExecutorResult {
   requirements: {
     requiresClientSecret: boolean
     requiresRefreshToken: boolean
-    requiresCredentials: boolean
   }
   /** Error message if flow not supported */
   error: string | null
@@ -699,13 +694,10 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
     case 'refresh':
       return 'refresh-token'
     case 'device-code':
+    case 'device_code':
     case 'device':
     case 'device-authorization':
       return 'device-code'
-    case 'password':
-    case 'resource-owner':
-    case 'ropc':
-      return 'password'
     default:
       console.log('[FlowMapping] No mapping found for:', normalizedId)
       return normalizedId
@@ -750,7 +742,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     executorFlowId ? getFlowRequirements(executorFlowId) : {
       requiresClientSecret: false,
       requiresRefreshToken: false,
-      requiresCredentials: false,
     },
     [executorFlowId]
   )
@@ -789,8 +780,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       redirectUri: options.redirectUri,
       scopes: options.scopes,
       refreshToken: options.refreshToken,
-      username: options.username,
-      password: options.password,
       bearerToken: options.bearerToken,
       token: options.token,
       accessToken: options.accessToken,
@@ -844,8 +833,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(options.scopes),
     options.refreshToken,
-    options.username,
-    options.password,
     options.bearerToken,
     options.flowId,
     options.token,

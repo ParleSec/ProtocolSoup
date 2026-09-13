@@ -167,6 +167,16 @@ function pickSSFLabFlow(protocol: LookingGlassProtocol): LookingGlassFlow | unde
   return flows.find((flow) => flow.id === 'ssf-stream-lab') || flows[0]
 }
 
+function displayDeviceUserCode(value?: string): string {
+  return (value || '').replace(/[^BCDFGHJKLMNPQRSTVWXZ-]/gi, '').toUpperCase()
+}
+
+function deviceVerificationHref(userCode?: string): string | undefined {
+  const code = displayDeviceUserCode(userCode)
+  if (!code) return undefined
+  return `/oauth2/device?user_code=${encodeURIComponent(code)}`
+}
+
 export function LookingGlass() {
   const router = useRouter()
   const pathname = usePathname()
@@ -308,6 +318,7 @@ export function LookingGlass() {
 
   const isRefreshTokenFlow = flowId === 'refresh-token'
   const isClientCredentialsFlow = flowId === 'client-credentials'
+  const isDeviceCodeFlow = flowId === 'device-code'
   const isTokenIntrospectionFlow = flowId === 'token-introspection'
   const isTokenRevocationFlow = flowId === 'token-revocation'
   const isUserInfoFlow = flowId === 'oidc-userinfo'
@@ -319,7 +330,7 @@ export function LookingGlass() {
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
   const surface = useMemo(() => getLookingGlassSurface(selectedProtocol?.id), [selectedProtocol?.id])
   const SurfaceChrome = surface?.chrome
-  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow || Boolean(SurfaceChrome)
+  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isDeviceCodeFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow || Boolean(SurfaceChrome)
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
   const wasOID4VCIIssuerInitiatedFlowRef = useRef(false)
 
@@ -339,10 +350,14 @@ export function LookingGlass() {
   const [machineTokenEndpoint, setMachineTokenEndpoint] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!isClientCredentialsFlow || clientCredentialsAuthMethod !== 'client_secret_basic') {
+    if (!isClientCredentialsFlow) {
       setMachineClientSecret(null)
       setMachineTokenEndpoint(null)
       return
+    }
+    if (isClientCredentialsFlow && clientCredentialsAuthMethod !== 'client_secret_basic') {
+      setMachineClientSecret(null)
+      setMachineTokenEndpoint(null)
     }
 
     let cancelled = false
@@ -357,12 +372,14 @@ export function LookingGlass() {
         if (cancelled) return
         const clients = Array.isArray(data?.clients) ? data.clients : []
         const machineClient = clients.find((client: { id?: string }) => client?.id === 'machine-client')
-        setMachineClientSecret(machineClient?.secret || null)
-        setMachineTokenEndpoint(
-          typeof data?.token_endpoint === 'string' && data.token_endpoint.length > 0
-            ? data.token_endpoint
-            : null,
-        )
+        if (isClientCredentialsFlow && clientCredentialsAuthMethod === 'client_secret_basic') {
+          setMachineClientSecret(machineClient?.secret || null)
+          setMachineTokenEndpoint(
+            typeof data?.token_endpoint === 'string' && data.token_endpoint.length > 0
+              ? data.token_endpoint
+              : null,
+          )
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -383,8 +400,7 @@ export function LookingGlass() {
       }
       return { clientId: 'machine-client', clientSecret: machineClientSecret || undefined }
     }
-    // All other flows (including refresh-token) use public-app
-    // The refresh token must be used with the same client that obtained it
+    // Device authorization and other user-delegated flows use public-app
     return { clientId: 'public-app', clientSecret: undefined }
   }, [isClientCredentialsFlow, clientCredentialsAuthMethod, machineClientSecret])
 
@@ -1730,6 +1746,47 @@ export function LookingGlass() {
               <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
                 ⚠️ No token available. Run Auth Code flow first.
               </p>
+            )}
+          </motion.div>
+        )}
+
+        {isDeviceCodeFlow && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+              <QrCode className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
+              <span className="text-xs sm:text-sm font-medium text-surface-300">Device Authorization (RFC 8628)</span>
+            </div>
+            <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
+              Execute to receive a <code className="text-cyan-300">user_code</code>. Open the verification URI on this browser (or another device), sign in as a demo user, and approve. The device client polls until tokens arrive. Native apps that have a browser should still use authorization code + PKCE (RFC 8252).
+            </p>
+            {status === 'awaiting_user' && displayDeviceUserCode(mergedExecutorState?.securityParams?.userCode) && (
+              <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 space-y-2">
+                <p className="text-[10px] sm:text-xs text-cyan-200">Enter this code at the verification URI:</p>
+                <p className="font-mono text-lg sm:text-2xl tracking-[0.35em] text-white">
+                  {displayDeviceUserCode(mergedExecutorState?.securityParams?.userCode)}
+                </p>
+                {mergedExecutorState?.securityParams?.verificationUri && (
+                  <p className="font-mono text-[10px] sm:text-xs text-cyan-300/80 break-all">
+                    {mergedExecutorState.securityParams.verificationUri}
+                  </p>
+                )}
+                {deviceVerificationHref(mergedExecutorState?.securityParams?.userCode) && (
+                  <a
+                    href={deviceVerificationHref(mergedExecutorState?.securityParams?.userCode)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[10px] sm:text-xs text-cyan-300 hover:text-cyan-200"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Open verification page
+                  </a>
+                )}
+              </div>
             )}
           </motion.div>
         )}

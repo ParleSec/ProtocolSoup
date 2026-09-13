@@ -48,7 +48,6 @@ export {
   RefreshTokenExecutor,
   DeviceCodeExecutor,
   OIDCHybridExecutor,
-  ResourceOwnerExecutor,
 } from './flows'
 
 

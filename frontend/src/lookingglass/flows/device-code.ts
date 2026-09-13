@@ -83,6 +83,9 @@ export class DeviceCodeExecutor extends FlowExecutorBase {
         securityParams: {
           ...this.state.securityParams,
           deviceCode: deviceAuth.device_code,
+          userCode: deviceAuth.user_code,
+          verificationUri: deviceAuth.verification_uri,
+          verificationUriComplete: deviceAuth.verification_uri_complete,
         },
       })
 

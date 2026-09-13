@@ -33,7 +33,6 @@ export { ImplicitExecutor, type ImplicitConfig } from './implicit'
 export { RefreshTokenExecutor, type RefreshTokenConfig } from './refresh-token'
 export { DeviceCodeExecutor, type DeviceCodeConfig } from './device-code'
 export { OIDCHybridExecutor, type OIDCHybridConfig, type HybridResponseType } from './oidc-hybrid'
-export { ResourceOwnerExecutor, type ResourceOwnerConfig } from './resource-owner'
 export { InteractiveCodeExecutor, type InteractiveCodeConfig } from './interactive-code'
 
 // Token management executors
