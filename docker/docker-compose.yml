@@ -38,8 +38,8 @@ services:
         SERVICE_CMD: ./cmd/gateway
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-gateway:latest
-    image: protocol-lens-gateway:latest
-    container_name: protocol-lens-gateway
+    image: protocolsoup-gateway:latest
+    container_name: protocolsoup-gateway
     ports:
       - "8080:8080"
     environment:
@@ -80,8 +80,8 @@ services:
         SERVICE_CMD: ./cmd/server-federation
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-federation:latest
-    image: protocol-lens-federation:latest
-    container_name: protocol-lens-federation
+    image: protocolsoup-federation:latest
+    container_name: protocolsoup-federation
     environment:
       - SHOWCASE_ENV=demo
       - SHOWCASE_LISTEN_ADDR=:8080
@@ -105,7 +105,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    container_name: protocol-lens-redis
+    container_name: protocolsoup-redis
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     networks:
       - showcase-network
@@ -128,8 +128,8 @@ services:
         SERVICE_CMD: ./cmd/server-scim
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-scim:latest
-    image: protocol-lens-scim:latest
-    container_name: protocol-lens-scim
+    image: protocolsoup-scim:latest
+    container_name: protocolsoup-scim
     environment:
       - SHOWCASE_ENV=demo
       - SHOWCASE_LISTEN_ADDR=:8080
@@ -164,8 +164,8 @@ services:
         SERVICE_CMD: ./cmd/server-ssf
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-ssf:latest
-    image: protocol-lens-ssf:latest
-    container_name: protocol-lens-ssf
+    image: protocolsoup-ssf:latest
+    container_name: protocolsoup-ssf
     environment:
       - SHOWCASE_ENV=demo
       - SHOWCASE_LISTEN_ADDR=:8080
@@ -208,8 +208,8 @@ services:
         NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8080
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-frontend:latest
-    image: protocol-lens-frontend:latest
-    container_name: protocol-showcase-frontend
+    image: protocolsoup-frontend:latest
+    container_name: protocolsoup-frontend
     ports:
       - "3000:3000"
     environment:

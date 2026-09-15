@@ -67,7 +67,7 @@ func (p *Plugin) buildServerCard() serverCard {
 		Repository: &repository{
 			URL:       "https://github.com/ParleSec/ProtocolSoup",
 			Source:    "github",
-			Subfolder: "ProtocolLens/backend/internal/protocols/mcp",
+			Subfolder: "backend/internal/protocols/mcp",
 		},
 		Remotes: []remote{
 			{

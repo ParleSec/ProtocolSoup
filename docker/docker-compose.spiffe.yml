@@ -110,8 +110,8 @@ services:
         SERVICE_CMD: ./cmd/server-spiffe
     # For using published GHCR images, comment 'build:' above and uncomment:
     # image: ghcr.io/parlesec/protocolsoup-spiffe:latest
-    image: protocol-lens-spiffe:latest
-    container_name: protocol-lens-spiffe
+    image: protocolsoup-spiffe:latest
+    container_name: protocolsoup-spiffe
     labels:
       - "app=protocol-spiffe"
       - "spiffe.io/spiffe-id=spiffe://protocolsoup.com/workload/backend"

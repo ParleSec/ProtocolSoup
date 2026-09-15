@@ -4,7 +4,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-    container_name: protocol-showcase-backend-dev
+    container_name: protocolsoup-backend-dev
     ports:
       - "8080:8080"
     environment:
@@ -30,7 +30,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    container_name: protocol-showcase-redis-dev
+    container_name: protocolsoup-redis-dev
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

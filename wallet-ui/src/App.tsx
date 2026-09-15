@@ -1047,7 +1047,7 @@ export default function WalletApp() {
   const credentialEntries = useMemo(() => {
     if (!Array.isArray(session?.credentials)) return []
     return session.credentials
-  }, [session?.credentials])
+  }, [session])
 
   const activeCredentialEntry = useMemo(() => {
     const normalizedSelectedID = selectedCredentialID.trim()
@@ -1062,7 +1062,7 @@ export default function WalletApp() {
     const flaggedActive = credentialEntries.find((entry) => Boolean(entry.is_active))
     if (flaggedActive) return flaggedActive
     return credentialEntries[0] || null
-  }, [credentialEntries, selectedCredentialID, session?.credential_id])
+  }, [credentialEntries, selectedCredentialID, session])
 
   const activeCredentialSummary = useMemo(
     () => activeCredentialEntry?.credential_summary || session?.credential_summary || null,
@@ -1220,7 +1220,7 @@ export default function WalletApp() {
   }, [apiRequest, setBanner])
 
   const continueIssuerAuthorization = useCallback(() => {
-    let target = ''
+    let target: string
     try {
       target = requireSafeBrowserNavigationURL(pendingAuthorizationURL, 'https-or-local-http')
     } catch (error) {

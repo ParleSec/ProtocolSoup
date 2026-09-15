@@ -25,7 +25,7 @@ The wallet harness fetched caller-supplied OID4VP `request_uri` values (and othe
 
 **Workaround (self-hosted, if you cannot upgrade yet):** set `WALLET_ALLOW_EXTERNAL_VERIFIERS=false` so only the configured target/issuer origin is fetched. That disables third-party `request_uri` and external OID4VCI import. It is not sufficient for the hosted wallet at `wallet.protocolsoup.com`, which must run a patched image.
 
-**Fix:** upgrade `protocolsoup-wallet` to the patched tag named in the GHSA (planned `v4.1.1` once cut). The wallet URL policy resolves DNS, requires HTTPS for untrusted hosts, re-validates redirects, dials only allowed addresses, and does not reflect upstream error bodies. See the [wallet service](/deploy/services/wallet/) runtime contract.
+**Fix:** upgrade `protocolsoup-wallet` to `v4.1.1` or later (the patched tag named in the GHSA). The wallet URL policy resolves DNS, requires HTTPS for untrusted hosts, re-validates redirects, dials only allowed addresses, and does not reflect upstream error bodies. See the [wallet service](/deploy/services/wallet/) runtime contract.
 
 Credit: [EQSTLab](https://github.com/EQSTLab).
 
