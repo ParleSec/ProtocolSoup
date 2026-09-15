@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['.next'] },
+  { ignores: ['.next', 'out'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -17,7 +17,7 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      // Keep current project lint behavior after upgrading to ESLint 10 and the newer hooks plugin.
+      // Mirror frontend/eslint.config.js so both apps lint under the same policy.
       'react-hooks/immutability': 'off',
       'react-hooks/purity': 'off',
       'react-hooks/set-state-in-effect': 'off',
@@ -26,4 +26,3 @@ export default tseslint.config(
     },
   },
 )
-

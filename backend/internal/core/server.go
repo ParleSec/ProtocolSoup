@@ -343,7 +343,7 @@ func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, APIIndexResponse{
-		Service:   "protocol-lens",
+		Service:   "protocolsoup",
 		Version:   "1.0.0",
 		Protocols: protocols,
 		Endpoints: endpoints,

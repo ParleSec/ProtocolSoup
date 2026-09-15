@@ -10,7 +10,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-    container_name: protocol-showcase-backend
+    container_name: protocolsoup-backend
     ports:
       - "8080:8080"
     environment:
@@ -36,7 +36,7 @@ services:
 
   redis:
     image: redis:8-alpine
-    container_name: protocol-showcase-redis
+    container_name: protocolsoup-redis
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     networks:
       - showcase-network
@@ -51,7 +51,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
-    container_name: protocol-showcase-frontend
+    container_name: protocolsoup-frontend
     ports:
       - "3000:3000"
     depends_on:

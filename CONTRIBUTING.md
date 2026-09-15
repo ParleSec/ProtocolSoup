@@ -34,7 +34,7 @@ Comment on the issue to let maintainers know you're working on it. If you don't 
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Go | 1.25+ | Backend development |
+| Go | 1.26+ | Backend development |
 | Node.js | 22.19+ | Frontend and docs development |
 | Docker | Latest | Container orchestration |
 | Git | Latest | Version control |
@@ -225,7 +225,7 @@ When Snyk or other security scans are skipped for forked PRs because repository 
 
 ```bash
 # Install linter
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
 # Run linter
 golangci-lint run ./...

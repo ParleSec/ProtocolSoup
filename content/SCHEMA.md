@@ -19,11 +19,15 @@ content/
       {flow-id}.md
   concepts/              # one file per cross-cutting concept page
     {concept-id}.md
-  walkthroughs/          # one file per long-form walkthrough
+  walkthroughs/          # one file per long-form walkthrough (not yet populated)
     {walkthrough-id}.md
-  assertions/            # one file per spec assertion (auto-generated later)
+  assertions/            # one file per spec assertion (auto-generated later; not yet populated)
     {assertion-id}.md
 ```
+
+The `walkthroughs/` and `assertions/` directories are recognised by the
+validator and indexer but do not exist in the repository yet. Create them when
+the first artefact of that type is authored.
 
 The validator discovers artefacts by walking `content/**/*.md`. The directory
 relative to `content/` determines the artefact `type`:
@@ -148,7 +152,7 @@ The validator fails the build on any of:
 Run locally with:
 
 ```sh
-cd ProtocolLens/backend
+cd ProtocolSoup/backend
 go run ./cmd/content-validate -content ../content
 ```
 

@@ -17,6 +17,8 @@ tags:
     description: Protocol and API discovery endpoints.
   - name: LookingGlass
     description: Looking Glass orchestration and decode endpoints.
+  - name: Palette
+    description: Content palette search over the prebuilt SQLite index.
 paths:
   /health:
     get:
@@ -335,6 +337,67 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Missing or invalid session owner capability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/palette/query:
+    post:
+      tags: [Palette]
+      summary: Query the content palette index
+      description: >-
+        Backs the homepage search bar and the global cmd+K palette. Runs a
+        ranked retrieval over the prebuilt `palette.db` content index
+        (protocols, flows, concepts, spec assertions) and returns results
+        with match reasons, axis chips, and refinement chips. Every result
+        carries its full markdown body so the selected row can render inline
+        without a second round-trip; the backend never ships HTML. The route
+        is only mounted when a palette index is configured.
+      operationId: queryGatewayPalette
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaletteQueryRequest"
+            examples:
+              free_text:
+                value:
+                  q: "refresh token rotation"
+                  limit: 10
+              scoped:
+                value:
+                  q: "device"
+                  scope: flow
+                  filters:
+                    - axis: protocol
+                      value: oauth2
+      responses:
+        "200":
+          description: Ranked palette results.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaletteQueryResponse"
+        "400":
+          description: Request body is not valid JSON.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Method other than POST.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Query execution failed.
           content:
             application/json:
               schema:
@@ -693,3 +756,184 @@ components:
             "verified" or "ok".
         digest_consistency_detail:
           type: string
+    PaletteQueryRequest:
+      type: object
+      required: [q]
+      properties:
+        q:
+          type: string
+          description: Free-text query. Axis values and aliases inside the text are resolved server-side.
+        scope:
+          type: string
+          enum: [flow, protocol, spec, concept]
+          description: Restrict results to one artefact type. Omit for no scope filter.
+        filters:
+          type: array
+          description: Additional (axis, value) constraints; AND-ed together.
+          items:
+            $ref: "#/components/schemas/PaletteAxisValue"
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+          description: Values outside 1..50 fall back to the default of 20.
+    PaletteAxisValue:
+      type: object
+      required: [axis, value]
+      properties:
+        axis:
+          type: string
+        value:
+          type: string
+    PaletteQueryResponse:
+      type: object
+      required: [query, results, refinement_chips, resolved_aliases, total_candidates, elapsed_micros]
+      properties:
+        query:
+          type: string
+          description: The original query text as received.
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaletteResult"
+        refinement_chips:
+          type: array
+          description: Suggested axis filters shown when intent is ambiguous along an axis.
+          items:
+            $ref: "#/components/schemas/PaletteRefinementChip"
+        resolved_aliases:
+          type: array
+          description: Query tokens that matched a known alias and how they were resolved.
+          items:
+            $ref: "#/components/schemas/PaletteResolvedAlias"
+        total_candidates:
+          type: integer
+          minimum: 0
+          description: Number of candidates considered before ranking and truncation.
+        elapsed_micros:
+          type: integer
+          minimum: 0
+    PaletteResult:
+      type: object
+      required: [id, type, name, axis_chips, match_reasons, runnable, href, score]
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [protocol, flow, concept, walkthrough, spec-assertion]
+        name:
+          type: string
+        summary:
+          type: string
+          description: Frontmatter `summary`, written as a navigation label.
+        protocol:
+          type: string
+        axis_chips:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaletteAxisValue"
+        match_reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaletteMatchReason"
+        runnable:
+          type: boolean
+        href:
+          type: string
+          description: Canonical page for protocol and flow artefacts. Empty for inline-only types (concept, walkthrough, spec-assertion).
+        run_url:
+          type: string
+          description: Looking Glass deep-link for runnable flows.
+        score:
+          type: number
+        status:
+          type: string
+        body_preview:
+          type: string
+          description: Plain-text first-paragraph excerpt of the body.
+        body:
+          type: string
+          description: Full markdown body of the artefact. Never contains HTML.
+        snippet:
+          type: string
+          description: Query-aware excerpt of `body` with matching tokens wrapped in `<mark>` spans. Empty when no free token hit the body.
+        normative_anchors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaletteNormativeAnchor"
+        related_concepts:
+          type: array
+          description: Artefact ids of related concepts.
+          items:
+            type: string
+        spec_assertion:
+          $ref: "#/components/schemas/PaletteSpecAssertion"
+    PaletteMatchReason:
+      type: object
+      required: [kind, weight]
+      properties:
+        kind:
+          type: string
+          enum: [axis, alias, fts, edge, runnable, protocol-name]
+        axis:
+          type: string
+        value:
+          type: string
+        artefact:
+          type: string
+        matched_token:
+          type: string
+        matched_phrase:
+          type: string
+        edge_kind:
+          type: string
+        weight:
+          type: number
+    PaletteRefinementChip:
+      type: object
+      required: [axis, value, count]
+      properties:
+        axis:
+          type: string
+        value:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+    PaletteResolvedAlias:
+      type: object
+      required: [matched_token]
+      properties:
+        matched_token:
+          type: string
+        axis:
+          type: string
+        value:
+          type: string
+        artefact:
+          type: string
+    PaletteNormativeAnchor:
+      type: object
+      required: [rfc, sections]
+      properties:
+        rfc:
+          type: string
+        sections:
+          type: array
+          items:
+            type: string
+    PaletteSpecAssertion:
+      type: object
+      required: [normative_level, assertion_text, anchors]
+      properties:
+        normative_level:
+          type: string
+          enum: [MUST, SHOULD, MAY, MUST NOT, SHOULD NOT]
+        assertion_text:
+          type: string
+        anchors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaletteNormativeAnchor"

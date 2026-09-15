@@ -65,7 +65,7 @@ func (g *Gateway) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	g.writeJSON(w, http.StatusOK, apiIndexResponse{
-		Service:   "protocol-lens-gateway",
+		Service:   "protocolsoup-gateway",
 		Version:   "1.0.0",
 		Ready:     g.isReady(),
 		Protocols: protocols,

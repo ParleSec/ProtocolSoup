@@ -281,6 +281,18 @@ jobs:
         working-directory: frontend
         run: npm run verify-dpop
 
+      - name: Install wallet-ui dependencies
+        working-directory: wallet-ui
+        run: npm ci
+
+      - name: Run wallet-ui TypeScript type check
+        working-directory: wallet-ui
+        run: npm run typecheck
+
+      - name: Run wallet-ui ESLint
+        working-directory: wallet-ui
+        run: npm run lint
+
   # Job 5: Backend Linting and Vet
   backend-lint:
     name: Backend Lint & Vet
@@ -378,17 +390,9 @@ jobs:
         working-directory: wallet-ui
         run: |
           npm ci
-          npx tsc --noEmit
           npm run build
         env:
           CI: true
-      
-      - name: Upload frontend build artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: frontend-dist
-          path: frontend/dist/
-          retention-days: 7
 
   # Job 8: Build Backend
   build-backend:
@@ -756,7 +760,6 @@ jobs:
         uses: geekyeggo/delete-artifact@v6
         with:
           name: |
-            frontend-dist
             backend-binary
             backend-coverage
 

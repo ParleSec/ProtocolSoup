@@ -104,7 +104,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.backend-spiffe
     image: docker-backend-spiffe:latest
-    container_name: protocol-showcase-backend
+    container_name: protocolsoup-backend
     ports:
       - "8080:8080"
     labels:
@@ -139,7 +139,7 @@ services:
 
   replay-redis:
     image: redis:8-alpine
-    container_name: protocol-showcase-replay-redis
+    container_name: protocolsoup-replay-redis
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     networks:
       - showcase-network
