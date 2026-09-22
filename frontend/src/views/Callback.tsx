@@ -48,7 +48,7 @@ export function Callback() {
 
     // Send to parent window if this is a popup
     if (window.opener) {
-      sendToParent(data)
+      sendToParent(data, { fragmentError: Boolean(fragmentParams.error) && !queryParams.error })
       
       if (data.error) {
         setStatus('error')
@@ -247,7 +247,10 @@ function extractCallbackData(
 function lookingGlassPathForCallback(data: CallbackData): string {
   switch (data.type) {
     case 'implicit':
-      return buildLookingGlassPath({ protocolId: 'oidc', flowId: 'oidc_implicit' })
+      if (data.id_token) {
+        return buildLookingGlassPath({ protocolId: 'oidc', flowId: 'oidc_implicit' })
+      }
+      return buildLookingGlassPath({ protocolId: 'oauth2', flowId: 'implicit' })
     case 'hybrid':
       return buildLookingGlassPath({ protocolId: 'oidc', flowId: 'oidc_hybrid' })
     case 'authorization_code':
@@ -260,13 +263,13 @@ function lookingGlassPathForCallback(data: CallbackData): string {
 /**
  * Send callback data to parent window
  */
-function sendToParent(data: CallbackData): void {
+function sendToParent(data: CallbackData, options?: { fragmentError?: boolean }): void {
   if (!window.opener) return
 
   // Determine message type based on callback type
   let messageType = 'oauth_callback'
   
-  if (data.type === 'implicit') {
+  if (data.type === 'implicit' || (data.type === 'error' && options?.fragmentError)) {
     messageType = 'oauth_implicit_callback'
   } else if (data.type === 'hybrid') {
     messageType = 'oidc_hybrid_callback'

@@ -48,6 +48,11 @@ export const FLOW_PRESENTATION_META: Record<string, FlowPresentationMeta> = {
     color: 'from-green-500 to-emerald-600',
     features: ['Token Rotation', 'Long Sessions', 'Silent Refresh'],
   },
+  implicit: {
+    icon: AlertTriangle,
+    color: 'from-amber-500 to-orange-600',
+    features: ['Legacy Flow', 'Fragment Token', 'No Refresh Token'],
+  },
   oidc_authorization_code: {
     icon: Fingerprint,
     color: 'from-purple-500 to-pink-600',
