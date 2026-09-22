@@ -5,8 +5,10 @@ import { getProtocolSEO, SITE_CONFIG } from '@/config/seo'
 import { createPageMetadata } from '@/lib/seo'
 import { generateProtocolPageSchema } from '@/utils/schema'
 import { getProtocolPageData, isBackendNotFoundError } from '@/lib/protocols.server'
+import { getSpecSummariesFor } from '@/lib/conformance.server'
 import {
   getAllowedBackendFlowIds,
+  getCatalogProtocol,
   PROTOCOL_IDS,
 } from '@/protocols/presentation/protocol-catalog-data'
 
@@ -47,6 +49,7 @@ export default async function ProtocolPage({ params }: ProtocolPageProps) {
   const { protocol, flows } = protocolPageData
   const allowedBackendFlowIds = getAllowedBackendFlowIds(protocolId)
   const catalogFlows = flows.filter((flow) => allowedBackendFlowIds.has(flow.id))
+  const normativeSpecs = await getSpecSummariesFor(getCatalogProtocol(protocolId)?.specs ?? [])
 
   const schema = generateProtocolPageSchema(
     protocol.name,
@@ -68,6 +71,7 @@ export default async function ProtocolPage({ params }: ProtocolPageProps) {
         protocolId={protocolId}
         protocol={protocol}
         flows={catalogFlows}
+        normativeSpecs={normativeSpecs}
       />
     </>
   )

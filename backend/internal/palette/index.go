@@ -31,8 +31,8 @@ const IndexVersion = "1"
 //     atomically rename it into place.
 //
 // On any error the temporary file is removed.
-func BuildIndex(contentRoot, outPath string) error {
-	artefacts, taxonomy, aliasesFile, issues, err := ValidateContent(contentRoot)
+func BuildIndex(contentRoot, outPath string, requirements RequirementIndex) error {
+	artefacts, taxonomy, aliasesFile, issues, err := ValidateContent(contentRoot, requirements)
 	if err != nil {
 		return fmt.Errorf("validate content: %w", err)
 	}
@@ -344,6 +344,7 @@ type ArtefactPayload struct {
 	NormativeAnchors []NormativeAnchor `json:"normative_anchors,omitempty"`
 	NormativeLevel   string            `json:"normative_level,omitempty"`
 	AssertionText    string            `json:"assertion_text,omitempty"`
+	Spec             string            `json:"spec,omitempty"`
 	Runnable         bool              `json:"runnable"`
 	Status           string            `json:"status"`
 	Href             string            `json:"href"`
@@ -379,6 +380,7 @@ func buildPayload(a Artefact) (string, error) {
 		NormativeAnchors: a.NormativeAnchors,
 		NormativeLevel:   a.NormativeLevel,
 		AssertionText:    a.AssertionText,
+		Spec:             a.Spec,
 		Runnable:         a.IsRunnable(),
 		Status:           a.EffectiveStatus(),
 		Href:             a.DefaultHref(),

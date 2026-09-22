@@ -218,11 +218,12 @@ export function Palette({ variant, onClose, autoFocus }: PaletteProps) {
         onClose?.()
         return
       }
-      // Inline-only artefact types (concept, walkthrough, spec-assertion)
-      // have no canonical page; the backend marks them by leaving `href`
-      // empty (see palette.Artefact.DefaultHref). Activating them just
-      // confirms inline expansion — never `router.push('')`, which would
-      // silently send the user back to the homepage.
+      // Inline-only artefact types (concept, walkthrough) have no canonical
+      // page; the backend marks them by leaving `href` empty (see
+      // palette.Artefact.DefaultHref). Spec-assertions link to their
+      // /spec/{spec}/{id} page. Activating an inline-only row just confirms
+      // inline expansion — never `router.push('')`, which would silently
+      // send the user back to the homepage.
       if (!result.href) {
         return
       }

@@ -18,7 +18,7 @@ import (
 func queryServiceForTest(t *testing.T, contentRoot string) *Service {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "palette.db")
-	if err := BuildIndex(contentRoot, out); err != nil {
+	if err := BuildIndex(contentRoot, out, nil); err != nil {
 		t.Fatalf("BuildIndex: %v", err)
 	}
 	svc, err := NewService(out)
@@ -364,7 +364,7 @@ OAuth 2.0 authorization framework.
 func TestServiceClose(t *testing.T) {
 	dir := seedContent(t)
 	out := filepath.Join(t.TempDir(), "palette.db")
-	if err := BuildIndex(dir, out); err != nil {
+	if err := BuildIndex(dir, out, nil); err != nil {
 		t.Fatalf("BuildIndex: %v", err)
 	}
 	svc, err := NewService(out)

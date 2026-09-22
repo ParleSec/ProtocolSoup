@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
@@ -246,6 +247,20 @@ func (s *Service) SetWeights(w Weights) {
 	s.mu.Lock()
 	s.weights = w
 	s.mu.Unlock()
+}
+
+// Explainer returns the markdown body of the spec-assertion artefact whose
+// ID matches the lowercase requirement ID, satisfying
+// conformance.ExplainerSource. Only spec-assertions qualify: a concept or
+// flow that happens to share an ID is not an explainer for a requirement.
+func (s *Service) Explainer(id string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	payload, ok := s.catalog.artefacts[strings.ToLower(id)]
+	if !ok || payload.Type != ArtefactSpecAssertion || strings.TrimSpace(payload.Body) == "" {
+		return "", false
+	}
+	return payload.Body, true
 }
 
 // Close releases the underlying database handle.

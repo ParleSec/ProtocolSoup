@@ -1,6 +1,29 @@
 import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import { PAGE_SEO } from '@/config/seo'
 import { SITE_ORIGIN, SITEMAP_LASTMOD, absoluteUrl } from '@/lib/seo'
+import { getConformanceSitemap, type ConformanceSitemapEntry } from '@/lib/conformance.server'
+
+// Requirement pages become indexable as explainers land and reports change,
+// so the sitemap is regenerated rather than frozen at build time.
+export const revalidate = 300
+
+/**
+ * Indexable /spec pages come from the backend, which derives indexability
+ * from the conformance report and explainer corpus. A backend failure must
+ * not take the static sitemap down with it.
+ */
+async function conformanceEntries(): Promise<ConformanceSitemapEntry[]> {
+  try {
+    return await getConformanceSitemap()
+  } catch {
+    return []
+  }
+}
+
+/** Requirement paths have three segments (/spec/{spec}/{id}); spec indexes have two. */
+function isRequirementPath(path: string): boolean {
+  return path.split('/').filter(Boolean).length === 3
+}
 
 function escapeXml(value: string): string {
   return value
@@ -90,6 +113,19 @@ export async function GET() {
         }),
       )
     }
+  }
+
+  for (const entry of await conformanceEntries()) {
+    entries.push(
+      [
+        '<url>',
+        `  <loc>${escapeXml(`${siteUrl}${entry.path}`)}</loc>`,
+        `  <lastmod>${escapeXml(entry.lastmod)}</lastmod>`,
+        '  <changefreq>weekly</changefreq>',
+        `  <priority>${(isRequirementPath(entry.path) ? 0.5 : 0.6).toFixed(1)}</priority>`,
+        '</url>',
+      ].join('\n'),
+    )
   }
 
   const agentDocuments = [

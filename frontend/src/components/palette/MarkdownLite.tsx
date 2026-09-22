@@ -20,14 +20,22 @@ interface MarkdownLiteProps {
    *  literal `<mark>...</mark>` spans from the backend. */
   allowMark?: boolean
   className?: string
+  /**
+   * When set, `#` headings render as real heading elements starting at this
+   * level (a `##` in the source becomes `<h{headingLevel + 1}>`). Palette rows
+   * leave it unset and render headings as styled paragraphs so a result never
+   * injects headings into the page outline; full pages set it so the document
+   * outline and the markdown representation keep the author's structure.
+   */
+  headingLevel?: 1 | 2 | 3 | 4 | 5
 }
 
-export function MarkdownLite({ source, allowMark, className }: MarkdownLiteProps) {
+export function MarkdownLite({ source, allowMark, className, headingLevel }: MarkdownLiteProps) {
   if (!source) return null
   const blocks = splitBlocks(source)
   return (
     <div className={className ?? 'space-y-2 text-[13px] leading-relaxed text-surface-200'}>
-      {blocks.map((block, i) => renderBlock(block, i, !!allowMark))}
+      {blocks.map((block, i) => renderBlock(block, i, !!allowMark, headingLevel))}
     </div>
   )
 }
@@ -96,7 +104,7 @@ function splitBlocks(source: string): Block[] {
   return blocks
 }
 
-function renderBlock(block: Block, key: number, allowMark: boolean) {
+function renderBlock(block: Block, key: number, allowMark: boolean, headingLevel?: number) {
   switch (block.kind) {
     case 'paragraph':
       return (
@@ -107,10 +115,19 @@ function renderBlock(block: Block, key: number, allowMark: boolean) {
     case 'heading': {
       const sizes = ['text-base', 'text-base', 'text-sm', 'text-sm', 'text-xs', 'text-xs']
       const size = sizes[Math.min(block.level - 1, sizes.length - 1)]
+      const className = `font-semibold text-white ${size} mt-1`
+      if (headingLevel === undefined) {
+        return (
+          <p key={key} className={className}>
+            {renderInline(block.text, allowMark)}
+          </p>
+        )
+      }
+      const Tag = `h${Math.min(headingLevel + block.level - 1, 6)}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
       return (
-        <p key={key} className={`font-semibold text-white ${size} mt-1`}>
+        <Tag key={key} className={className}>
           {renderInline(block.text, allowMark)}
-        </p>
+        </Tag>
       )
     }
     case 'ul':

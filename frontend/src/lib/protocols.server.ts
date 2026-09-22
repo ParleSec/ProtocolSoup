@@ -53,7 +53,7 @@ function catalogFallback(protocolId: string): { protocol: Protocol; flows: FlowD
   }
 }
 
-async function fetchBackendJSON<T>(
+export async function fetchBackendJSON<T>(
   pathname: string,
   revalidateSeconds: number,
 ) {

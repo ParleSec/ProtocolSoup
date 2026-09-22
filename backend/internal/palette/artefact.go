@@ -140,6 +140,10 @@ type Artefact struct {
 	Path            string `yaml:"-"`
 	ProtocolFromDir string `yaml:"-"`
 	Body            string `yaml:"-"`
+	// Spec is the registry specification ID a spec-assertion belongs to,
+	// resolved by the validator from the conformance registry. Empty for
+	// every other type and for assertions whose ID the registry does not know.
+	Spec string `yaml:"-"`
 }
 
 // allowedFrontmatterFields is the closed set of frontmatter keys. Unknown keys
@@ -188,22 +192,32 @@ func (a Artefact) EffectiveStatus() string {
 // DefaultHref returns the canonical site URL for an artefact, or the empty
 // string for artefact types that are inline-only.
 //
-// Concepts, walkthroughs, and spec-assertions are inline-only by design:
-// their canonical surface is the palette's expanded row (full markdown body,
-// normative anchors, related-concept chips). No /concept/{id},
-// /walkthrough/{id}, or /assertion/{id} route exists in the Next.js app, so
-// returning an empty href is the explicit signal to the frontend to skip
-// router.push and hide "Open page" affordances for those types.
+// Concepts and walkthroughs are inline-only by design: their canonical
+// surface is the palette's expanded row (full markdown body, related-concept
+// chips). No /concept/{id} or /walkthrough/{id} route exists in the Next.js
+// app, so returning an empty href is the explicit signal to the frontend to
+// skip router.push and hide "Open page" affordances for those types.
 //
 // An empty href is returned for these types even when the frontmatter sets
 // `href` explicitly — earlier content baked `/concept/{id}` into the
 // frontmatter, and we never want to ship a link that 404s. If/when a
 // canonical concept page route is added, this rule moves and the explicit
 // `href` field starts to be honoured again.
+//
+// Spec-assertions are explainers for registry requirements and have a page
+// at /spec/{spec}/{id}. The path is derived, never taken from frontmatter,
+// so it cannot disagree with the route the frontend serves. An assertion the
+// registry does not know has no page and gets an empty href; the validator
+// rejects that case before it can reach an index.
 func (a Artefact) DefaultHref() string {
 	switch a.Type {
-	case ArtefactConcept, ArtefactWalkthrough, ArtefactSpecAssertion:
+	case ArtefactConcept, ArtefactWalkthrough:
 		return ""
+	case ArtefactSpecAssertion:
+		if a.Spec == "" {
+			return ""
+		}
+		return "/spec/" + a.Spec + "/" + strings.ToLower(a.ID)
 	}
 	if a.Href != "" {
 		return a.Href

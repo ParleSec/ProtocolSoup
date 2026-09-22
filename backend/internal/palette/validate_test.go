@@ -120,7 +120,7 @@ Proof Key for Code Exchange. Binds an authorization request to a per-request cod
 
 func TestValidateContentClean(t *testing.T) {
 	dir := seedContent(t)
-	artefacts, _, _, issues, err := ValidateContent(dir)
+	artefacts, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -145,7 +145,7 @@ problem_domains:
   - authorization
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -161,7 +161,7 @@ id: missing
 name: Missing fields
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestValidateContentDuplicateAlias(t *testing.T) {
       - axis: actors
         value: public-client
 `)
-	_, _, _, _, err := ValidateContent(dir)
+	_, _, _, _, err := ValidateContent(dir, nil)
 	if err == nil {
 		t.Fatalf("expected duplicate alias error")
 	}
@@ -209,7 +209,7 @@ related_concepts:
   - does-not-exist
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -231,7 +231,7 @@ problem_domains:
   - authorization
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -254,7 +254,7 @@ problem_domains:
 mystery: 42
 ---
 `)
-	_, _, _, _, err := ValidateContent(dir)
+	_, _, _, _, err := ValidateContent(dir, nil)
 	if err == nil {
 		t.Fatalf("expected unknown-field error")
 	}
@@ -277,7 +277,7 @@ problem_domains:
   - authorization
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -305,7 +305,7 @@ run_defaults:
   token_mode: dpop
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -333,7 +333,7 @@ run_defaults:
   token_mode: mac
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -362,7 +362,7 @@ run_defaults:
   token_mode: dpop
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
@@ -386,12 +386,193 @@ run_defaults:
   token_mode: dpop
 ---
 `)
-	_, _, _, issues, err := ValidateContent(dir)
+	_, _, _, issues, err := ValidateContent(dir, nil)
 	if err != nil {
 		t.Fatalf("ValidateContent error: %v", err)
 	}
 	if !containsIssue(issues, "concepts/run-default-on-concept.md", "run_defaults is only valid on flow artefacts") {
 		t.Fatalf("expected flow-only issue, got: %v", issues)
+	}
+}
+
+// seedRequirements is the registry slice the explainer tests resolve against.
+var seedRequirements = RequirementIndex{
+	"vp-001": {ID: "VP-001", Spec: "oid4vp"},
+}
+
+const explainerFrontmatter = `---
+id: vp-001
+name: Client identifier prefix
+protocols:
+  - oauth2
+use_cases:
+  - user-login-via-own-idp
+actors:
+  - authorization-server
+problem_domains:
+  - authentication
+normative_level: MUST
+normative_anchors:
+  - rfc: OpenID4VP
+    sections: ["5.9.1"]
+assertion_text: The Verifier MUST use a Client Identifier Prefix.
+---
+`
+
+const explainerBody = `## What this requires
+
+The client_id carries a prefix that names how the wallet should authenticate the verifier.
+
+## Why it exists
+
+Without a prefix a wallet cannot tell a redirect_uri identifier from an x509_san_dns one.
+
+## What non-compliance looks like
+
+A bare hostname as client_id, accepted by a wallet that guesses the scheme.
+
+## How ProtocolSoup tests it
+
+The verifier rejects request objects whose client_id has no recognised prefix.
+`
+
+// TestLoadRequirementIndex checks both loaders against the real registry:
+// the embedded copy and the on-disk file must agree, and IDs resolve
+// case-insensitively to their specification.
+func TestLoadRequirementIndex(t *testing.T) {
+	embedded, err := LoadRequirementIndex("")
+	if err != nil {
+		t.Fatalf("embedded registry: %v", err)
+	}
+	fromDisk, err := LoadRequirementIndex(filepath.Join("..", "conformance", "vc-requirements.yaml"))
+	if err != nil {
+		t.Fatalf("on-disk registry: %v", err)
+	}
+	if len(embedded) == 0 || len(embedded) != len(fromDisk) {
+		t.Fatalf("embedded has %d requirements, disk has %d", len(embedded), len(fromDisk))
+	}
+	ref, ok := embedded["vp-001"]
+	if !ok || ref.ID != "VP-001" || ref.Spec != "oid4vp" {
+		t.Fatalf("vp-001 resolved to %+v (ok=%t); want VP-001 in oid4vp", ref, ok)
+	}
+	if _, err := LoadRequirementIndex(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
+		t.Fatalf("expected an error for a missing registry path")
+	}
+}
+
+func TestValidateExplainerClean(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "assertions/vp-001.md", explainerFrontmatter+explainerBody)
+	artefacts, _, _, issues, err := ValidateContent(dir, seedRequirements)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected clean validation, got: %v", issues)
+	}
+	var found bool
+	for _, a := range artefacts {
+		if a.ID != "vp-001" {
+			continue
+		}
+		found = true
+		if a.Spec != "oid4vp" {
+			t.Errorf("Spec = %q; want oid4vp (resolved from registry)", a.Spec)
+		}
+		if got := a.DefaultHref(); got != "/spec/oid4vp/vp-001" {
+			t.Errorf("DefaultHref = %q; want /spec/oid4vp/vp-001", got)
+		}
+	}
+	if !found {
+		t.Fatalf("explainer artefact not returned")
+	}
+}
+
+func TestValidateExplainerRejectsUnknownRequirement(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "assertions/vp-999.md", strings.Replace(explainerFrontmatter, "id: vp-001", "id: vp-999", 1)+explainerBody)
+	_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "assertions/vp-999.md", `spec-assertion id "vp-999" is not a requirement in the conformance registry`) {
+		t.Fatalf("expected unknown-requirement issue, got: %v", issues)
+	}
+}
+
+func TestValidateExplainerRejectsUppercaseID(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "assertions/VP-001.md", strings.Replace(explainerFrontmatter, "id: vp-001", "id: VP-001", 1)+explainerBody)
+	_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "assertions/VP-001.md", "must be the lowercase registry requirement id") {
+		t.Fatalf("expected lowercase issue, got: %v", issues)
+	}
+}
+
+func TestValidateExplainerRequiresRegistry(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "assertions/vp-001.md", explainerFrontmatter+explainerBody)
+	_, _, _, issues, err := ValidateContent(dir, nil)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "assertions/vp-001.md", "no requirement registry loaded") {
+		t.Fatalf("expected missing-registry issue, got: %v", issues)
+	}
+}
+
+func TestValidateExplainerRejectsHeadingMismatch(t *testing.T) {
+	cases := map[string]string{
+		"missing heading": strings.Replace(explainerBody, "## Why it exists\n\n", "", 1),
+		"wrong order":     strings.Replace(strings.Replace(explainerBody, "## Why it exists", "## TEMP", 1), "## What this requires", "## Why it exists", 1),
+		"extra heading":   explainerBody + "\n## Further reading\n\nMore.\n",
+		"renamed heading": strings.Replace(explainerBody, "## How ProtocolSoup tests it", "## How we test it", 1),
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := seedContent(t)
+			writeFile(t, dir, "assertions/vp-001.md", explainerFrontmatter+body)
+			_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+			if err != nil {
+				t.Fatalf("ValidateContent error: %v", err)
+			}
+			if !containsIssue(issues, "assertions/vp-001.md", "must contain exactly these ## headings in order") {
+				t.Fatalf("expected heading issue, got: %v", issues)
+			}
+		})
+	}
+}
+
+func TestValidateExplainerRejectsFencesAndHTML(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "assertions/vp-001.md", explainerFrontmatter+
+		strings.Replace(explainerBody, "A bare hostname as client_id, accepted by a wallet that guesses the scheme.",
+			"```json\n{\"client_id\": \"verifier.example\"}\n```\n\n<details>A bare hostname.</details>", 1))
+	_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if !containsIssue(issues, "assertions/vp-001.md", "must not contain fenced code blocks") {
+		t.Fatalf("expected fence issue, got: %v", issues)
+	}
+	if !containsIssue(issues, "assertions/vp-001.md", "must not contain raw HTML") {
+		t.Fatalf("expected HTML issue, got: %v", issues)
+	}
+}
+
+func TestValidateExplainerAllowsInlineCodeAndComparisons(t *testing.T) {
+	dir := seedContent(t)
+	writeFile(t, dir, "assertions/vp-001.md", explainerFrontmatter+
+		strings.Replace(explainerBody, "The client_id carries a prefix", "The `client_id` carries a prefix (and 1 < 2 is still prose)", 1))
+	_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+	if err != nil {
+		t.Fatalf("ValidateContent error: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("inline code and a bare '<' must not be flagged, got: %v", issues)
 	}
 }
 

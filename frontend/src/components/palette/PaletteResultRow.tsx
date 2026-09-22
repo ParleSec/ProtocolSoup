@@ -234,10 +234,10 @@ function ResultSummaryLine({
  * ExpandedBody renders the full markdown body of the selected row plus
  * structured metadata — normative anchors and related-concept chips.
  *
- * For artefact types with a canonical page (protocol, flow), an "Open
- * page" link appears under the body. For inline-only types (concept,
- * walkthrough, spec-assertion) the panel itself *is* the canonical
- * surface, so no link is shown.
+ * For artefact types with a canonical page (protocol, flow, spec-assertion
+ * at /spec/{spec}/{id}), an "Open page" link appears under the body. For
+ * inline-only types (concept, walkthrough) the panel itself *is* the
+ * canonical surface, so no link is shown.
  *
  * Related-concept chips dispatch through onRelatedConceptClick so they
  * navigate within the palette (re-querying with the concept's ID) rather

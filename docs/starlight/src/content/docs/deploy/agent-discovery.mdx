@@ -29,6 +29,7 @@ by the application and needs no operator action.
 | Content signals | `/robots.txt` | Frontend | [Content Signals](https://contentsignals.org/) |
 | Link headers | every page response | Frontend + backend edge | [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) |
 | Markdown representation | every page, via `Accept` | Frontend | Markdown for Agents |
+| Normative requirement pages | `/spec/{spec}`, `/spec/{spec}/{requirement}` | Frontend, from backend `/api/conformance/*` | [Normative requirements](#normative-requirement-pages) |
 | Wallet `llms.txt` | `https://wallet.protocolsoup.com/llms.txt` | Wallet harness | [llms.txt](https://llmstxt.org/) |
 | Wallet API catalog | `https://wallet.protocolsoup.com/.well-known/api-catalog` | Wallet harness | RFC 9727 |
 | Wallet agent skill | `https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md` | Wallet harness | Agent Skills Discovery RFC v0.2.0 |
@@ -108,6 +109,37 @@ already converted.
 `x-markdown-tokens` is not emitted. A token count is only meaningful if it is
 produced by a real tokenizer, and shipping one purely for this header is not
 worth the dependency weight.
+
+### Normative requirement pages
+
+Each requirement in the conformance registry
+(`backend/internal/conformance/vc-requirements.yaml`) has a server-rendered
+page at `/spec/{spec}/{requirement}` (for example `/spec/oid4vp/vp-001`), and
+each specification has an index at `/spec/{spec}`. A page carries the
+requirement statement, the specification section it comes from with a link to
+that section, the BCP 14 level and roles, and ProtocolSoup's self-test verdict
+for the build serving the page, with links to the exact test functions and
+implementation files at that commit on GitHub.
+
+The verdict is only shown when the loaded report was generated from the same
+commit the server is running (`CONFORMANCE_REPORT`, see
+[Environment Variables](/deploy/environment-variables/)). Otherwise the page
+says *Not evaluated for this build*. The wording is fixed: it is a self-test,
+not an OpenID Foundation certification.
+
+Pages are added to `/sitemap.xml` and spec indexes to `/llms.txt` only when
+they are indexable, which requires a valid report, no MUST-family `FAIL`
+verdicts anywhere in the registry, and a written explainer for the requirement.
+Until then they are served with `noindex` so a crawler is never sent to a page
+that only restates its registry row. The same pages answer
+`Accept: text/markdown` like every other page. The JSON behind them is
+documented under the `Conformance` tag of the gateway contract in the
+[API reference](/api/reference/).
+
+```bash
+curl -s https://protocolsoup.com/api/conformance/specs | jq '.specs[] | {id, requirement_count, indexable}'
+curl -H 'Accept: text/markdown' https://protocolsoup.com/spec/oid4vp/vp-001
+```
 
 ### Content signals
 

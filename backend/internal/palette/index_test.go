@@ -17,10 +17,10 @@ func TestBuildIndexIdempotent(t *testing.T) {
 	out1 := filepath.Join(t.TempDir(), "palette.db")
 	out2 := filepath.Join(t.TempDir(), "palette.db")
 
-	if err := BuildIndex(contentDir, out1); err != nil {
+	if err := BuildIndex(contentDir, out1, nil); err != nil {
 		t.Fatalf("BuildIndex #1: %v", err)
 	}
-	if err := BuildIndex(contentDir, out2); err != nil {
+	if err := BuildIndex(contentDir, out2, nil); err != nil {
 		t.Fatalf("BuildIndex #2: %v", err)
 	}
 
@@ -43,7 +43,7 @@ func TestBuildIndexIdempotent(t *testing.T) {
 func TestBuildIndexContent(t *testing.T) {
 	contentDir := seedContent(t)
 	out := filepath.Join(t.TempDir(), "palette.db")
-	if err := BuildIndex(contentDir, out); err != nil {
+	if err := BuildIndex(contentDir, out, nil); err != nil {
 		t.Fatalf("BuildIndex: %v", err)
 	}
 
@@ -101,12 +101,76 @@ func TestBuildIndexContent(t *testing.T) {
 	}
 }
 
+// TestBuildIndexExplainerHrefAndService covers the explainer path end to
+// end: the indexer stores the registry-derived href and spec, and the query
+// service exposes the body through Explainer for the conformance catalogue.
+func TestBuildIndexExplainerHrefAndService(t *testing.T) {
+	contentDir := seedContent(t)
+	writeFile(t, contentDir, "assertions/vp-001.md", explainerFrontmatter+explainerBody)
+	out := filepath.Join(t.TempDir(), "palette.db")
+	if err := BuildIndex(contentDir, out, seedRequirements); err != nil {
+		t.Fatalf("BuildIndex: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(out)+"?mode=ro")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	var href string
+	if err := db.QueryRow(`SELECT href FROM artefacts WHERE id = 'vp-001'`).Scan(&href); err != nil {
+		t.Fatalf("select href: %v", err)
+	}
+	if href != "/spec/oid4vp/vp-001" {
+		t.Errorf("href = %q; want /spec/oid4vp/vp-001", href)
+	}
+
+	svc, err := NewService(out)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	defer svc.Close()
+
+	if got := svc.catalog.artefacts["vp-001"].Spec; got != "oid4vp" {
+		t.Errorf("payload spec = %q; want oid4vp", got)
+	}
+	body, ok := svc.Explainer("VP-001")
+	if !ok {
+		t.Fatalf("Explainer(VP-001) not found; lookup must be case-insensitive on the requirement id")
+	}
+	if !bytes.Contains([]byte(body), []byte("## How ProtocolSoup tests it")) {
+		t.Errorf("Explainer body missing headings: %q", body)
+	}
+	if _, ok := svc.Explainer("pkce"); ok {
+		t.Errorf("Explainer(pkce) returned a concept body; only spec-assertions qualify")
+	}
+	if _, ok := svc.Explainer("vp-404"); ok {
+		t.Errorf("Explainer(vp-404) found for an unknown id")
+	}
+}
+
+// TestBuildIndexRefusesInvalidExplainer pins that a broken explainer never
+// reaches palette.db: the indexer stops on validation issues.
+func TestBuildIndexRefusesInvalidExplainer(t *testing.T) {
+	contentDir := seedContent(t)
+	writeFile(t, contentDir, "assertions/vp-001.md", explainerFrontmatter+"## What this requires\n\nOnly one heading.\n")
+	out := filepath.Join(t.TempDir(), "palette.db")
+	err := BuildIndex(contentDir, out, seedRequirements)
+	if err == nil {
+		t.Fatalf("expected BuildIndex to fail on a malformed explainer")
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Fatalf("palette.db written despite validation failure")
+	}
+}
+
 func TestBuildIndexAliasComposite(t *testing.T) {
 	// aliases.yaml in seed has the "pkce" alias mapping to both an axis value
 	// and an artefact. Both rows must be present.
 	contentDir := seedContent(t)
 	out := filepath.Join(t.TempDir(), "palette.db")
-	if err := BuildIndex(contentDir, out); err != nil {
+	if err := BuildIndex(contentDir, out, nil); err != nil {
 		t.Fatalf("BuildIndex: %v", err)
 	}
 

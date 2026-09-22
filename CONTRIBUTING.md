@@ -285,7 +285,7 @@ The homepage search input and global cmd+K palette retrieve from a deterministic
 
 ### Authoring rules
 
-- **Source of truth is frontmatter** in markdown files under `content/protocols/`, `content/flows/<protocol>/`, `content/concepts/`, and (when produced) `content/spec-assertions/<protocol>/`.
+- **Source of truth is frontmatter** in markdown files under `content/protocols/`, `content/flows/<protocol>/`, `content/concepts/`, and `content/assertions/` (human-authored explainers for requirements in `backend/internal/conformance/vc-requirements.yaml`; filename and `id` are the lowercase requirement ID).
 - **Schema**: see [`content/SCHEMA.md`](content/SCHEMA.md) for the full frontmatter contract (required, recommended, and optional fields). That document is canonical; do not duplicate the rules elsewhere.
 - **Controlled vocabulary**: only values declared in [`content/taxonomy.yaml`](content/taxonomy.yaml) are valid for the `use_cases`, `actors`, `patterns`, and `problem_domains` axes. New values require a taxonomy PR with a one-line semantic note.
 - **Synonyms**: add user-language synonyms to [`content/aliases.yaml`](content/aliases.yaml). Ambiguous aliases keep all mappings; the palette surfaces refinement chips when intent is genuinely ambiguous.
@@ -301,7 +301,7 @@ go run ./cmd/content-validate -content ../content
 go test ./internal/palette/...
 ```
 
-The validator fails on unknown axis values, missing required fields, duplicate alias keys, dangling edge references, filename/id mismatches, and unknown top-level fields. CI enforces the same set; see `.github/workflows/palette-content.yml`.
+The validator fails on unknown axis values, missing required fields, duplicate alias keys, dangling edge references, filename/id mismatches, and unknown top-level fields. Explainers under `content/assertions/` must also name a registry requirement and follow the fixed heading structure in `content/SCHEMA.md`; both CLIs take `-registry` (default `internal/conformance/vc-requirements.yaml`, relative to `backend/`). CI enforces the same set; see `.github/workflows/palette-content.yml`.
 
 ### Indexer
 

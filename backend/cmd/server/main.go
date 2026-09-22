@@ -9,7 +9,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 	"github.com/ParleSec/ProtocolSoup/internal/core"
+	"github.com/ParleSec/ProtocolSoup/internal/palette"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/agentauth"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/mcp"
@@ -114,7 +116,8 @@ func main() {
 
 	// Create and configure server
 	server := core.NewServer(bootstrap.Config, registry, bootstrap.LookingGlass, bootstrap.KeySet).
-		WithPalette(bootstrap.Palette)
+		WithPalette(bootstrap.Palette).
+		WithConformance(loadConformanceCatalogue(bootstrap.Config, bootstrap.Palette))
 	httpServer := &http.Server{
 		Addr:         bootstrap.Config.ListenAddr,
 		Handler:      server.Router(),
@@ -156,4 +159,42 @@ func main() {
 	}
 
 	log.Println("Server exited gracefully")
+}
+
+// loadConformanceCatalogue builds the requirement catalogue from the embedded
+// registry and, when configured and readable, the build's conformance
+// report. A missing or unusable report is logged once and never blocks
+// boot: pages then render "Not evaluated for this build".
+//
+// The palette service supplies requirement explainers (spec-assertion
+// artefacts). When the palette is disabled no requirement has an explainer,
+// so none is indexable.
+func loadConformanceCatalogue(cfg *core.Config, explainers *palette.Service) *conformance.Catalogue {
+	registry, err := conformance.Embedded()
+	if err != nil {
+		log.Printf("Conformance catalogue disabled: embedded registry invalid: %v", err)
+		return nil
+	}
+
+	var report *conformance.Report
+	if cfg.ConformanceReportPath == "" {
+		log.Println("Conformance report not configured (CONFORMANCE_REPORT); requirement pages will show no verdicts")
+	} else if loaded, err := conformance.LoadReport(cfg.ConformanceReportPath); err != nil {
+		log.Printf("Conformance report unavailable at %s: %v; requirement pages will show no verdicts", cfg.ConformanceReportPath, err)
+	} else {
+		report = loaded
+	}
+
+	// A nil *palette.Service must become a nil interface, not an interface
+	// holding a nil pointer, or the catalogue would call through it.
+	var source conformance.ExplainerSource
+	if explainers != nil {
+		source = explainers
+	}
+	catalogue := conformance.NewCatalogue(registry, report, cfg.BuildCommit, source)
+	if report != nil && !catalogue.ReportValid() {
+		log.Printf("Conformance report at %s does not match this build (report commit %q, dirty=%t, BUILD_COMMIT %q); requirement pages will show no verdicts",
+			cfg.ConformanceReportPath, report.Commit, report.Dirty, cfg.BuildCommit)
+	}
+	return catalogue
 }

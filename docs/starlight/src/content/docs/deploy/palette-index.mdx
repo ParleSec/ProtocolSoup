@@ -22,11 +22,13 @@ cd backend
 go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db
 ```
 
+The indexer resolves `spec-assertion` artefacts (requirement explainers under `content/assertions/`) against the conformance registry. `-registry` defaults to `internal/conformance/vc-requirements.yaml` relative to `backend/`; pass it explicitly when running from elsewhere. An explainer whose ID is not in the registry fails the build.
+
 ## Baked into the image (recommended)
 
-`docker/Dockerfile.backend` and `docker/Dockerfile.fly` compile `palette-indexer`, run it against `/content` at **image build time**, copy `/app/palette.db` into the runtime layer, and set `SHOWCASE_PALETTE_DB=/app/palette.db`.
+`docker/Dockerfile.backend` and `docker/Dockerfile.fly` compile `palette-indexer`, run it against `/content` with `-registry /app/internal/conformance/vc-requirements.yaml` at **image build time**, copy `/app/palette.db` into the runtime layer, and set `SHOWCASE_PALETTE_DB=/app/palette.db`.
 
-**Implication:** changing `content/` requires rebuilding the backend (or monolith) image even when no Go source changed.
+**Implication:** changing `content/` or the registry requires rebuilding the backend (or monolith) image even when no Go source changed.
 
 Verify after deploy:
 

@@ -8,30 +8,42 @@ suite:
 specifications:
   - id: oid4vp
     title: OpenID for Verifiable Presentations
+    short_title: OID4VP 1.0
     version: 1.0 Final
     url: https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html
+    section_anchor: "#section-{section}"
   - id: oid4vci
     title: OpenID for Verifiable Credential Issuance
+    short_title: OID4VCI 1.0
     version: 1.0 Final
     url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html
+    section_anchor: "#section-{section}"
   - id: haip
     title: OpenID4VC High Assurance Interoperability Profile
+    short_title: HAIP 1.0
     version: 1.0 Final
     url: https://openid.net/specs/openid4vc-high-assurance-interoperability-profile-1_0-final.html
+    section_anchor: "#section-{section}"
   - id: rfc9449
     title: OAuth 2.0 Demonstrating Proof of Possession
+    short_title: RFC 9449
     version: RFC 9449
     url: https://www.rfc-editor.org/rfc/rfc9449.html
+    section_anchor: "#section-{section}"
   - id: rfc9901
     title: Selective Disclosure for JSON Web Tokens
+    short_title: RFC 9901
     version: RFC 9901
     url: https://www.rfc-editor.org/rfc/rfc9901.html
+    section_anchor: "#section-{section}"
   - id: iso18013-5
     title: Personal identification — ISO-compliant driving licence — Part 5
+    short_title: ISO/IEC 18013-5
     version: ISO/IEC 18013-5
     url: https://www.iso.org/standard/69084.html
   - id: iso18013-7
     title: Personal identification — ISO-compliant driving licence — Part 7
+    short_title: ISO/IEC 18013-7
     version: ISO/IEC 18013-7
     url: https://www.iso.org/standard/82772.html
 
@@ -40,6 +52,7 @@ requirements:
     specification: oid4vp
     section: "5.9.1"
     level: MUST
+    title: Client identifier prefix detection by colon
     statement: >-
       Wallets MUST use the presence of a ":" (colon) character and the content
       preceding it to determine whether a Client Identifier Prefix is used.
@@ -60,6 +73,7 @@ requirements:
     specification: oid4vp
     section: "5.9.2"
     level: MAY
+    title: Handling of an unrecognized client identifier prefix
     statement: >-
       If a ":" character is present in the Client Identifier but the value
       preceding it is not a recognized and supported Client Identifier Prefix
@@ -78,6 +92,7 @@ requirements:
     specification: oid4vp
     section: "5"
     level: MUST
+    title: Wallet ignores unrecognized parameters except transaction_data
     statement: >-
       The Wallet MUST ignore any unrecognized parameters, other than the
       transaction_data parameter.
@@ -95,6 +110,7 @@ requirements:
     specification: oid4vp
     section: "5.10"
     level: MUST
+    title: GET request_uri returns the compact signed authorization request
     statement: >-
       GET request_uri retrieval returns the compact signed Authorization
       Request directly with media type application/oauth-authz-req+jwt.
@@ -115,6 +131,7 @@ requirements:
     specification: oid4vp
     section: "8.3"
     level: MUST
+    title: Exact state correlation for redirect response modes
     statement: >-
       Redirect response modes require exact correlation to the state issued in
       the Authorization Request; a private request_id cannot bypass it. An
@@ -136,6 +153,7 @@ requirements:
     specification: oid4vp
     section: "11.1"
     level: MUST
+    title: Verifier metadata per-format fields and numeric COSE identifiers
     statement: >-
       Verifier metadata uses the Final per-format fields and numeric COSE
       algorithm identifiers for mso_mdoc.
@@ -152,6 +170,7 @@ requirements:
     specification: oid4vp
     section: "5.10.2"
     level: MUST
+    title: request_uri_method=post binds wallet_nonce into the request object
     statement: >-
       A request_uri_method=post endpoint binds wallet_nonce into the signed
       request object, permits exact repeated retrieval, and rejects a changed
@@ -169,6 +188,7 @@ requirements:
     specification: haip
     section: "5"
     level: MUST
+    title: x5c request-object chain excludes the root trust anchor
     statement: >-
       The x5c request-object certificate chain excludes the root trust anchor.
     roles: [verifier, wallet]
@@ -184,6 +204,7 @@ requirements:
     specification: haip
     section: "6.1.1"
     level: MUST
+    title: Independently issued SD-JWT VCs validate to a configured trust anchor
     statement: >-
       Independently issued SD-JWT VCs are accepted only after their issuer
       signature and leaf-only x5c chain validate to an explicitly configured
@@ -202,6 +223,7 @@ requirements:
     specification: oid4vp
     section: "8.4"
     level: MUST
+    title: Error on transaction_data when the wallet does not support it
     statement: >-
       If the Wallet does not support transaction_data parameter, it MUST return
       an error upon receiving a request that includes it.
@@ -218,6 +240,7 @@ requirements:
     specification: oid4vci
     section: "8.2"
     level: OPTIONAL
+    title: Single proof type with a non-empty array in proofs
     statement: >-
       The proofs parameter contains exactly one parameter named as the proof
       type in Appendix F, the value set for this parameter is a non-empty array
@@ -236,6 +259,7 @@ requirements:
     specification: oid4vci
     section: "7"
     level: MUST
+    title: Nonce endpoint offered when c_nonce is required in proofs
     statement: >-
       A Credential Issuer that requires c_nonce values to be incorporated into
       proofs in the Credential Request MUST offer a Nonce Endpoint.
@@ -253,6 +277,7 @@ requirements:
     specification: oid4vci
     section: "8.2"
     level: MUST
+    title: Credential issuer ignores unrecognized parameters
     statement: The Credential Issuer MUST ignore any unrecognized parameters.
     roles: [issuer]
     applicability: applicable
@@ -270,6 +295,7 @@ requirements:
     specification: oid4vci
     section: "6.3 and 8.2"
     level: MUST
+    title: Credential identifiers bound to authorization_details
     statement: >-
       When authorization_details are used, the Authorization Server returns
       credential_identifiers for the authorized Credential Configurations and
@@ -293,6 +319,7 @@ requirements:
     specification: oid4vci
     section: "11"
     level: MUST
+    title: Notification validation, idempotent retry and access token binding
     statement: >-
       The Credential Issuer validates the notification_id and event, accepts
       an exact retry idempotently, and binds the notification to the access
@@ -316,6 +343,7 @@ requirements:
     specification: oid4vci
     section: "8.3"
     level: MUST
+    title: Immediate credential response carries a non-empty credentials array
     statement: >-
       An immediate Credential Response contains a non-empty credentials array
       whose entries contain the issued Credential.
@@ -333,6 +361,7 @@ requirements:
     specification: oid4vci
     section: "11"
     level: SHOULD
+    title: Wallet reports credential storage outcome via notification_id
     statement: >-
       When a Credential Response contains a notification_id and the issuer
       advertises a Notification Endpoint, the Wallet reports the outcome of
@@ -351,6 +380,7 @@ requirements:
     specification: oid4vci
     section: "7"
     level: MUST
+    title: Nonce endpoint issues a fresh c_nonce without authorization
     statement: >-
       The Nonce Endpoint MUST issue a fresh c_nonce without requiring an access
       token or other authorization.
@@ -367,6 +397,7 @@ requirements:
     specification: oid4vci
     section: "Appendix F.1"
     level: MUST
+    title: JWT proof carries exactly one of kid, jwk or x5c
     statement: >-
       A JWT proof carries exactly one of kid, jwk, or x5c in its JOSE header;
       anonymous pre-authorized clients omit iss and do not use payload cnf for
@@ -398,6 +429,7 @@ requirements:
     specification: oid4vci
     section: "6.1"
     level: MUST
+    title: Pre-authorized code single use and tx_code error mapping
     statement: >-
       A pre-authorized code is accepted at most once under concurrent exchange,
       a required missing tx_code is invalid_request, an unexpected tx_code is
@@ -421,6 +453,7 @@ requirements:
     specification: oid4vci
     section: "7 and 8.2"
     level: MUST
+    title: Credential proof nonce is short-lived and single-use
     statement: >-
       A credential proof nonce is short-lived and single-use, including when
       two Credential Requests attempt to consume it concurrently.
@@ -437,6 +470,7 @@ requirements:
     specification: oid4vci
     section: "6.2 and 9"
     level: MUST
+    title: Authorization codes and deferred transaction identifiers accepted once
     statement: >-
       Authorization codes and deferred transaction identifiers are accepted at
       most once, including concurrent redemption attempts.
@@ -456,6 +490,7 @@ requirements:
     specification: oid4vci
     section: "8.2"
     level: MUST
+    title: Batch credential issuance bound to distinct proof keys
     statement: >-
       When batch_credential_issuance is advertised, the Credential Issuer
       accepts multiple JWT proofs up to batch_size, binds each issued
@@ -488,6 +523,7 @@ requirements:
     specification: oid4vci
     section: "12.2.4"
     level: MUST
+    title: mso_mdoc signing algorithms as numeric COSE algorithm identifiers
     statement: >-
       mso_mdoc Credential Configurations advertise credential signing
       algorithms as numeric COSE algorithm identifiers.
@@ -504,6 +540,7 @@ requirements:
     specification: oid4vci
     section: "RFC 9126 Sections 2 and 4"
     level: MUST
+    title: Pushed authorization request with client attestation and PKCE
     statement: >-
       A pushed authorization request is client-attestation authenticated,
       PKCE-bound, and represented by a short-lived request_uri bound to the
@@ -529,6 +566,7 @@ requirements:
     specification: oid4vci
     section: "11.2 and HAIP 6"
     level: MUST
+    title: HAIP SD-JWT VC certificate-backed signer and status list references
     statement: >-
       HAIP SD-JWT VC metadata and credentials use an asymmetric
       certificate-backed signer, and issued credentials carry unique OAuth
@@ -558,6 +596,7 @@ requirements:
     specification: oid4vci
     section: "8.3"
     level: MUST
+    title: Credential request encryption with advertised algorithms
     statement: >-
       Advertised Credential Request Encryption is implemented with the
       advertised algorithms and decrypts to the same validated Credential
@@ -576,6 +615,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: Not more than one DPoP HTTP request header field
     statement: There is not more than one DPoP HTTP request header field.
     roles: [authorization_server, resource_server]
     applicability: applicable
@@ -590,6 +630,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: All required claims per Section 4.2 contained in the JWT
     statement: All required claims per Section 4.2 are contained in the JWT.
     roles: [authorization_server, resource_server]
     applicability: applicable
@@ -604,6 +645,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: typ JOSE header parameter has the value dpop+jwt
     statement: The typ JOSE Header Parameter has the value dpop+jwt.
     roles: [authorization_server, resource_server]
     applicability: applicable
@@ -618,6 +660,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: alg is a registered asymmetric signature algorithm and not none
     statement: >-
       The alg JOSE Header Parameter indicates a registered asymmetric digital
       signature algorithm, is not none, is supported by the application, and
@@ -638,6 +681,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: JWT signature verifies with the jwk JOSE header public key
     statement: >-
       The JWT signature verifies with the public key contained in the jwk JOSE
       Header Parameter.
@@ -654,6 +698,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: jwk JOSE header parameter does not contain a private key
     statement: The jwk JOSE Header Parameter does not contain a private key.
     roles: [authorization_server, resource_server]
     applicability: applicable
@@ -668,6 +713,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: htm claim matches the HTTP method of the current request
     statement: The htm claim matches the HTTP method of the current request.
     roles: [authorization_server, resource_server]
     applicability: applicable
@@ -682,6 +728,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: htu claim matches the request URI ignoring query and fragment
     statement: >-
       The htu claim matches the HTTP URI value for the HTTP request in which
       the JWT was received, ignoring any query and fragment parts.
@@ -701,6 +748,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: nonce claim matches the server-provided nonce value
     statement: >-
       If the server provided a nonce value to the client, the nonce claim
       matches the server-provided nonce value.
@@ -718,6 +766,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: JWT creation time within an acceptable window
     statement: >-
       The creation time of the JWT, as determined by either the iat claim or a
       server managed timestamp via the nonce claim, is within an acceptable
@@ -738,6 +787,7 @@ requirements:
     specification: rfc9449
     section: "4.3"
     level: MUST
+    title: ath claim equals the hash of the access token
     statement: >-
       Ensure that the value of the ath claim equals the hash of that access
       token.
@@ -755,6 +805,7 @@ requirements:
     specification: rfc9449
     section: "8"
     level: MUST
+    title: DPoP nonces expire and entropy-generation failure is an error
     statement: >-
       Server-provided DPoP nonces expire after the configured lifetime and
       entropy-generation failure is handled as an error rather than emitting a
@@ -775,6 +826,7 @@ requirements:
     specification: iso18013-5
     section: "9.1.2"
     level: MUST
+    title: COSE_Key rejects private key material and unsupported curves
     statement: >-
       Public COSE_Key processing rejects private key material and unsupported
       curves.
@@ -791,6 +843,7 @@ requirements:
     specification: iso18013-5
     section: "9.1.2.4"
     level: MUST
+    title: IssuerAuth requires tagged MobileSecurityObjectBytes and a valid MSO
     statement: >-
       IssuerAuth verification requires tagged MobileSecurityObjectBytes and a
       valid MSO version, digest algorithm, document type, device key,
@@ -812,6 +865,7 @@ requirements:
     specification: iso18013-5
     section: "9.1.2.3"
     level: MUST
+    title: Duplicate element identifiers rejected and value digests verified
     statement: >-
       IssuerSigned namespaces reject duplicate element identifiers and verify
       every value digest.
@@ -832,6 +886,7 @@ requirements:
     specification: iso18013-5
     section: "8.3.2.1"
     level: MUST
+    title: DeviceResponse version is exactly 1.0
     statement: DeviceResponse version is exactly 1.0.
     roles: [wallet, verifier]
     applicability: applicable
@@ -847,6 +902,7 @@ requirements:
     specification: iso18013-5
     section: "B.1"
     level: MUST
+    title: Document-signer certificates chain to an IACA root per Annex B
     statement: >-
       Document-signer certificates satisfy the Annex B profile, chain to an
       independently configured IACA root, and their signing key is bound by
@@ -879,6 +935,7 @@ requirements:
     specification: iso18013-5
     section: "7.2.1"
     level: MUST
+    title: Issued mDL credentials contain every mandatory data element
     statement: >-
       Issued mDL credentials contain every mandatory org.iso.18013.5.1 data
       element, including a portrait carried as real JPEG bytes.
@@ -896,6 +953,7 @@ requirements:
     specification: rfc9901
     section: "4.1"
     level: "MUST NOT"
+    title: Same digest value not appearing more than once in the SD-JWT
     statement: The same digest value MUST NOT appear more than once in the SD-JWT.
     roles: [issuer, holder, verifier]
     applicability: applicable
@@ -910,6 +968,7 @@ requirements:
     specification: rfc9901
     section: "3"
     level: "MUST NOT"
+    title: Trailing tilde not omitted when there is no Key Binding JWT
     statement: >-
       When there is no Key Binding JWT, the last element MUST be an empty
       string and the last separating tilde character MUST NOT be omitted.
@@ -926,6 +985,7 @@ requirements:
     specification: rfc9901
     section: "4.1.1"
     level: MUST
+    title: Default _sd_alg of sha-256 when not present at the top level
     statement: >-
       If the _sd_alg claim is not present at the top level, a default value of
       sha-256 MUST be used.
@@ -945,6 +1005,7 @@ requirements:
     specification: rfc9901
     section: "7.2"
     level: MUST
+    title: Claim names _sd and ... cause SD-JWT rejection
     statement: >-
       If the claim name is _sd or ..., the SD-JWT MUST be rejected.
     roles: [issuer, holder, verifier]
@@ -960,6 +1021,7 @@ requirements:
     specification: rfc9901
     section: "7.2"
     level: MUST
+    title: SD-JWT rejected when a disclosure is not referenced by digest
     statement: >-
       If any Disclosure was not referenced by digest value in the
       Issuer-signed JWT, the SD-JWT MUST be rejected.
@@ -980,6 +1042,7 @@ requirements:
     specification: rfc9901
     section: "7.2 and 7.3"
     level: MUST
+    title: Recursive disclosure processing at committed positions
     statement: >-
       Disclosures are processed recursively at their committed object or array
       positions, while nested _sd_alg and permanent-claim collisions are
@@ -1008,6 +1071,7 @@ requirements:
     specification: oid4vci
     section: "4.1"
     level: MUST NOT
+    title: credential_offer not present when credential_offer_uri is present
     statement: >-
       credential_offer MUST NOT be present when credential_offer_uri is present
       (and vice versa).
@@ -1025,6 +1089,7 @@ requirements:
     specification: oid4vci
     section: "4.1.1 and 6.1"
     level: MUST
+    title: tx_code sent in the Token Request when offered
     statement: >-
       If the Wallet decides to use the Pre-Authorized Code Flow and a tx_code
       object was present in the Credential Offer (including if empty), the
@@ -1043,6 +1108,7 @@ requirements:
     specification: oid4vci
     section: "13.5"
     level: MUST
+    title: Credential Offer parameter values treated as not trustworthy
     statement: >-
       The Wallet MUST treat Credential Offer parameter values as not
       trustworthy and MUST perform the same Issuer validation as for a
@@ -1060,6 +1126,7 @@ requirements:
     specification: oid4vci
     section: "12.2.2"
     level: MUST
+    title: Issuer metadata retrieved from /.well-known/openid-credential-issuer
     statement: >-
       To retrieve Credential Issuer Metadata, the Wallet MUST send an HTTP GET
       request to the Credential Issuer Identifier with path
@@ -1084,6 +1151,7 @@ requirements:
     specification: oid4vci
     section: "12.2.4"
     level: MUST NOT
+    title: Metadata not used when credential_issuer mismatches the identifier
     statement: >-
       If the credential_issuer value in metadata does not match the Credential
       Issuer Identifier used to retrieve it (simple string comparison, no
@@ -1102,6 +1170,7 @@ requirements:
     specification: oid4vci
     section: "6.2"
     level: MUST
+    title: Wallet uses returned credential_identifiers in credential requests
     statement: >-
       When the Token Response includes authorization_details with
       credential_identifiers, the Wallet MUST use those identifiers with the
@@ -1119,6 +1188,7 @@ requirements:
     specification: oid4vci
     section: "Appendix F.1"
     level: MUST
+    title: JWT proof typ, alg, aud, iat, nonce and single key reference
     statement: >-
       A JWT proof has typ openid4vci-proof+jwt, alg that is neither none nor a
       MAC algorithm, aud equal to the Credential Issuer Identifier, required
@@ -1138,6 +1208,7 @@ requirements:
     specification: oid4vci
     section: "8.2"
     level: MUST
+    title: credential_identifier or credential_configuration_id, not both
     statement: >-
       credential_identifier is REQUIRED when the Token Response returned
       openid_credential authorization_details with credential_identifiers and
@@ -1157,6 +1228,7 @@ requirements:
     specification: oid4vci
     section: "8.2 and 10"
     level: MUST
+    title: Credential Response encryption and decryption as JWTs
     statement: >-
       When credential_response_encryption.encryption_required is true, or when
       the Wallet includes credential_response_encryption, the Wallet encrypts
@@ -1174,6 +1246,7 @@ requirements:
     specification: oid4vci
     section: "8.3 and 9"
     level: SHOULD
+    title: Deferred Credential Request waits interval seconds with a valid token
     statement: >-
       If a transaction_id is present, the Wallet SHOULD wait at least interval
       seconds before sending a Deferred Credential Request and MUST present an
@@ -1192,6 +1265,7 @@ requirements:
     specification: oid4vci
     section: "15.3"
     level: SHOULD
+    title: Credentials stored only in encrypted form and no longer than needed
     statement: >-
       Wallets SHOULD store Credentials only in encrypted form, and, wherever
       possible, use hardware-backed encryption. Wallets SHOULD not store
@@ -1217,6 +1291,7 @@ requirements:
     specification: haip
     section: "4"
     level: MUST
+    title: FAPI 2.0 compliance including PKCE S256, PAR and iss
     statement: >-
       When implementing OpenID for Verifiable Credential Issuance, both the
       Wallet and the Credential Issuer MUST comply with the provisions of the
@@ -1242,6 +1317,7 @@ requirements:
     specification: haip
     section: "4"
     level: MUST
+    title: Wallet supports DPoP and handles DPoP-Nonce from issuer endpoints
     statement: >-
       Wallets MUST support DPoP and MUST be prepared to handle DPoP-Nonce from
       the Nonce Endpoint and other Credential Issuer and Authorization Server
@@ -1263,6 +1339,7 @@ requirements:
     specification: haip
     section: "4.3"
     level: MUST
+    title: PAR endpoint authentication matches Token Endpoint rules
     statement: >-
       Wallets MUST authenticate at the PAR endpoint using the same client
       authentication rules as at the Token Endpoint.
@@ -1285,6 +1362,7 @@ requirements:
     specification: haip
     section: "4.4.1"
     level: MUST
+    title: Wallet Attestation x5c, no reuse across Issuers, client_id equals sub
     statement: >-
       When using OID4VCI Appendix E Wallet Attestations, the validating
       certificate and chain excluding the trust anchor are included in the
@@ -1314,6 +1392,7 @@ requirements:
     specification: haip
     section: "4.5.1"
     level: MUST
+    title: Key attestations supported; no unproven hardware or ISO 18045 claims
     statement: >-
       Wallets MUST support key attestations. Software wallets MUST NOT claim
       hardware or ISO 18045 assurance properties they cannot prove.
@@ -1334,6 +1413,7 @@ requirements:
     specification: haip
     section: "7"
     level: MUST
+    title: ES256 with P-256 and SHA-256 supported for validation
     statement: >-
       Wallets MUST, at minimum, support ECDSA with P-256 and SHA-256 (ES256 /
       COSE -7) for validating Wallet Attestations including PoP, Key
@@ -1355,6 +1435,7 @@ requirements:
     specification: oid4vci
     section: "14.5"
     level: MUST
+    title: Fresh Access Token via Refresh Token to refresh Credentials
     statement: >-
       When a Refresh Token is issued, the Wallet obtains a fresh Access Token
       per RFC 6749 Section 6 to refresh Credentials without End-User
