@@ -49,7 +49,7 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	}
 
-	report, testErr := conformance.GenerateReport(ctx, registry, backendDir)
+	report, testErr := conformance.GenerateReport(ctx, registry, repoRoot, backendDir)
 	encoded, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		return err
