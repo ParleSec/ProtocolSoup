@@ -830,9 +830,10 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"token_endpoint":           issuer + "/token",
 		"jwks_uri":                 strings.TrimRight(p.baseURL, "/") + "/api/.well-known/jwks.json",
 		"scopes_supported":         []string{"profile", "email", "api:read", "api:write", "ssf.read", "ssf.manage"},
-		"response_types_supported": []string{"code"},
+		"response_types_supported": []string{"code", "token"},
 		"grant_types_supported": []string{
 			"authorization_code",
+			"implicit",
 			"refresh_token",
 			"client_credentials",
 			mockidp.DeviceCodeGrantType,

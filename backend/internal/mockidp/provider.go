@@ -376,7 +376,7 @@ func (idp *MockIdP) initDemoData() {
 			"https://protocolsoup.fly.dev/callback",
 			"https://wallet.protocolsoup.com/api/oid4vci/callback",
 		},
-		GrantTypes: []string{"authorization_code", "refresh_token", DeviceCodeGrantType},
+		GrantTypes: []string{"authorization_code", "implicit", "refresh_token", DeviceCodeGrantType},
 		Scopes:     []string{"openid", "profile", "email"},
 		Public:     true,
 		CreatedAt:  time.Now(),

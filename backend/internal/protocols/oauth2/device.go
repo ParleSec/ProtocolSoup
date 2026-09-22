@@ -616,12 +616,10 @@ func (p *Plugin) authenticateDeviceClient(
 	return client, clientAuthMethod, true
 }
 
-func (p *Plugin) grantedScopeOrError(
-	w http.ResponseWriter,
-	sessionID string,
-	client *models.Client,
-	scope string,
-) (string, bool) {
+func intersectClientScopes(client *models.Client, scope string) (string, bool) {
+	if client == nil {
+		return "", false
+	}
 	requestedScopes := strings.Fields(scope)
 	if len(requestedScopes) == 0 {
 		return strings.Join(client.Scopes, " "), true
@@ -637,12 +635,29 @@ func (p *Plugin) grantedScopeOrError(
 		}
 	}
 	if len(granted) == 0 {
+		return "", false
+	}
+	return strings.Join(granted, " "), true
+}
+
+func (p *Plugin) grantedScopeOrError(
+	w http.ResponseWriter,
+	sessionID string,
+	client *models.Client,
+	scope string,
+) (string, bool) {
+	granted, ok := intersectClientScopes(client, scope)
+	if !ok {
+		allowed := []string{}
+		if client != nil {
+			allowed = client.Scopes
+		}
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Scope", map[string]interface{}{
-			"requested_scopes": requestedScopes,
-			"allowed_scopes":   client.Scopes,
+			"requested_scopes": strings.Fields(scope),
+			"allowed_scopes":   allowed,
 		})
 		writeOAuth2Error(w, "invalid_scope", "None of the requested scopes are permitted for this client", "")
 		return "", false
 	}
-	return strings.Join(granted, " "), true
+	return granted, true
 }
