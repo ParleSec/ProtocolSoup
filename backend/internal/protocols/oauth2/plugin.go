@@ -539,6 +539,70 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			},
 		},
 		{
+			ID:          "implicit",
+			Name:        "Implicit Grant (Legacy)",
+			Description: "RFC 6749 §4.2 returns an access token in the redirect fragment for a public client. No refresh token is issued. RFC 9700 §2.1.2 says clients SHOULD NOT use this grant; prefer authorization code + PKCE. Kept so the contrast is visible.",
+			Executable:  true,
+			Category:    "authorization",
+			Steps: []plugin.FlowStep{
+				{
+					Order:       1,
+					Name:        "Authorization Request",
+					Description: "The client redirects the browser to /oauth2/authorize with response_type=token (RFC 6749 §4.2.1). Public clients with more than one registered redirect URI must send redirect_uri.",
+					From:        "Client",
+					To:          "Authorization Server",
+					Type:        "redirect",
+					Parameters: map[string]string{
+						"response_type": "token (REQUIRED)",
+						"client_id":     "Public client identifier (REQUIRED)",
+						"redirect_uri":  "Exact registered redirect URI (REQUIRED when several are registered)",
+						"scope":         "Space-delimited requested scopes (OPTIONAL)",
+						"state":         "Opaque CSRF value (RECOMMENDED)",
+					},
+					Security: []string{
+						"RFC 9700 §2.1.2: clients SHOULD NOT use the implicit grant",
+						"The access token will be exposed to the browser, history, and possibly the referrer",
+						"There is no authorization code and PKCE does not apply",
+					},
+				},
+				{
+					Order:       2,
+					Name:        "User Authentication",
+					Description: "The authorization server authenticates the resource owner. The client never sees the password.",
+					From:        "User",
+					To:          "Authorization Server",
+					Type:        "internal",
+					Parameters: map[string]string{
+						"credentials": "Collected by the authorization server",
+					},
+					Security: []string{
+						"Confidential clients receive unauthorized_client",
+						"A missing or invalid client_id or redirect_uri is not redirected",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "Fragment Token Response",
+					Description: "The authorization server redirects to the client with access_token and token_type in the URI fragment (RFC 6749 §4.2.2). expires_in and scope are included. state is echoed when the request sent it. iss is included when the server advertises RFC 9207.",
+					From:        "Authorization Server",
+					To:          "Client",
+					Type:        "redirect",
+					Parameters: map[string]string{
+						"access_token": "Bearer access token (REQUIRED, fragment)",
+						"token_type":   "Bearer (REQUIRED)",
+						"expires_in":   "Lifetime in seconds (RECOMMENDED)",
+						"scope":        "Granted scope",
+						"state":        "Echoed when present on the request",
+					},
+					Security: []string{
+						"The authorization server MUST NOT issue a refresh token",
+						"The token is not placed in the query string",
+						"Errors other than an invalid client or redirect URI are also returned in the fragment",
+					},
+				},
+			},
+		},
+		{
 			ID:          "device_code",
 			Name:        "Device Authorization Grant",
 			Description: "RFC 8628 grant for input-constrained devices (TVs, CLI tools, consoles). The device displays a user_code; the person authorizes on a second device with a browser. Still the correct grant for that constraint; native apps with a browser should use authorization code + PKCE (RFC 8252).",
@@ -822,6 +886,16 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 				{Order: 2, Name: "Wait for Expiry", Description: "Simulate token expiration", Auto: true},
 				{Order: 3, Name: "Refresh Token", Description: "Use refresh token to get new access token", Auto: true},
 				{Order: 4, Name: "Verify Rotation", Description: "See that refresh token was rotated", Auto: true},
+			},
+		},
+		{
+			ID:          "implicit_flow",
+			Name:        "Implicit Grant Demo",
+			Description: "RFC 6749 §4.2 educational contrast: public client receives an access token in the fragment and no refresh token. RFC 9700 §2.1.2 says clients SHOULD NOT use this grant.",
+			Steps: []plugin.DemoStep{
+				{Order: 1, Name: "Start Authorization", Description: "Redirect with response_type=token", Auto: true},
+				{Order: 2, Name: "Authenticate User", Description: "Sign in as a demo user", Auto: false},
+				{Order: 3, Name: "Read Fragment", Description: "Access token arrives in the redirect fragment; no token-endpoint exchange", Auto: true},
 			},
 		},
 		{

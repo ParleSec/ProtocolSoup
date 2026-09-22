@@ -62,7 +62,7 @@
 
 ### OAuth 2.0
 
-- `GET|POST /oauth2/authorize`
+- `GET|POST /oauth2/authorize` (`response_type=code`, or `token` for the implicit grant; fragment access token, no refresh token)
 - `POST /oauth2/device/authorize` (RFC 8628 device authorization)
 - `GET|POST /oauth2/device` (RFC 8628 verification URI)
 - `POST /oauth2/token`

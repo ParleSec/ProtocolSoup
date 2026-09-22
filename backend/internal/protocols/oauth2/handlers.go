@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -78,20 +79,24 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		"code_challenge":         codeChallenge,
 		"code_challenge_present": codeChallenge != "",
 		"code_challenge_method":  codeChallengeMethod,
-	}, lookingglass.Annotation{
-		Type:        lookingglass.AnnotationTypeExplanation,
-		Title:       "OAuth 2.0 Authorization Request",
-		Description: "The client redirects the user to the authorization server with required parameters",
-		Reference:   "RFC 6749 Section 4.1.1",
-	})
+	}, authorizeRequestAnnotation(responseType))
 
-	// Validate required parameters
-	if responseType != "code" {
+	// RFC 6749 §4.1.1 / §4.2.1: response_type is required. Anything other than
+	// "code" or "token" is unsupported. A valid client and redirect URI receive
+	// the error in the fragment (§4.2.2.1). A missing or invalid client_id or
+	// redirect_uri MUST NOT be redirected (§4.1.2.1 / §4.2.2.1).
+	if responseType != "code" && responseType != "token" {
+		errorCode := "unsupported_response_type"
+		description := "Only 'code' and 'token' response types are supported"
+		if responseType == "" {
+			errorCode = "invalid_request"
+			description = "response_type is required"
+		}
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Response Type", map[string]interface{}{
-			"error":         "unsupported_response_type",
+			"error":         errorCode,
 			"response_type": responseType,
 		})
-		writeOAuth2Error(w, "unsupported_response_type", "Only 'code' response type is supported", "")
+		p.finishAuthorizeClientError(w, r, clientID, redirectURI, state, errorCode, description)
 		return
 	}
 
@@ -132,11 +137,17 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	redirectURI = normalizedRedirectURI
 
+	if responseType == "token" {
+		p.beginImplicitAuthorization(w, r, sessionID, client, redirectURI, scope, state)
+		return
+	}
+
 	loginRequestID := p.storeLoginRequest(loginRequestInfo{
 		ClientID:            clientID,
 		RedirectURI:         redirectURI,
 		Scope:               scope,
 		State:               state,
+		ResponseType:        "code",
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
 	})
@@ -183,7 +194,7 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// For demo purposes, return a login page
-	loginPage := p.generateLoginPage(clientID, scope, sessionID, client.Name, loginRequestID)
+	loginPage := p.generateLoginPage(clientID, scope, sessionID, client.Name, loginRequestID, "")
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(loginPage))
 }
@@ -240,7 +251,11 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 			"reason": "Invalid credentials",
 		})
 		// Return to login page with error
-		loginPage := p.generateLoginPage(clientID, scope, sessionID, "", loginRequestID)
+		pageSubtitle := ""
+		if requestInfo.ResponseType == "token" {
+			pageSubtitle = implicitLoginSubtitle
+		}
+		loginPage := p.generateLoginPage(clientID, scope, sessionID, "", loginRequestID, pageSubtitle)
 		loginPage = strings.Replace(loginPage, "<!-- ERROR -->", `<div class="error">Invalid email or password</div>`, 1)
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte(loginPage))
@@ -263,9 +278,14 @@ func (p *Plugin) handleAuthorizeSubmit(w http.ResponseWriter, r *http.Request) {
 	}, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "User Authentication Complete",
-		Description: "The user has successfully authenticated. An authorization code will now be issued.",
-		Reference:   "RFC 6749 Section 3.1",
+		Description: authorizeSuccessDescription(requestInfo.ResponseType),
+		Reference:   authorizeSuccessReference(requestInfo.ResponseType),
 	})
+
+	if requestInfo.ResponseType == "token" {
+		p.completeImplicitGrant(w, r, sessionID, user, requestInfo)
+		return
+	}
 
 	// Create authorization code (auth_time is now: the user just authenticated).
 	// OAuth 2.0 has no OIDC claims request parameter, so claims is empty.
@@ -1387,6 +1407,270 @@ func (p *Plugin) handleCAEPRevokeSubject(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+const implicitLoginSubtitle = "OAuth 2.0 Implicit Grant"
+
+func authorizeRequestAnnotation(responseType string) lookingglass.Annotation {
+	if responseType == "token" {
+		return lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeExplanation,
+			Title:       "OAuth 2.0 Implicit Authorization Request",
+			Description: "The client requests an access token in the authorization response. The token is returned in the fragment, not the query string.",
+			Reference:   "RFC 6749 Section 4.2.1",
+		}
+	}
+	return lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "OAuth 2.0 Authorization Request",
+		Description: "The client redirects the user to the authorization server with required parameters",
+		Reference:   "RFC 6749 Section 4.1.1",
+	}
+}
+
+func authorizeSuccessDescription(responseType string) string {
+	if responseType == "token" {
+		return "The user has successfully authenticated. An access token will be returned in the redirect fragment. No refresh token is issued."
+	}
+	return "The user has successfully authenticated. An authorization code will now be issued."
+}
+
+func authorizeSuccessReference(responseType string) string {
+	if responseType == "token" {
+		return "RFC 6749 Section 4.2.2"
+	}
+	return "RFC 6749 Section 3.1"
+}
+
+// beginImplicitAuthorization starts RFC 6749 §4.2 for a public client that
+// registered the implicit grant. Confidential clients and clients without the
+// grant receive unauthorized_client in the fragment. PKCE is ignored: there
+// is no authorization code to bind.
+func (p *Plugin) beginImplicitAuthorization(
+	w http.ResponseWriter,
+	r *http.Request,
+	sessionID string,
+	client *models.Client,
+	redirectURI, scope, state string,
+) {
+	if client == nil || !client.Public || !clientHasGrant(client, "implicit") {
+		clientID := ""
+		if client != nil {
+			clientID = client.ID
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Implicit Grant Not Allowed", map[string]interface{}{
+			"error":     "unauthorized_client",
+			"client_id": clientID,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Implicit Grant Is For Public Clients",
+			Description: "The implicit grant returns the access token to the browser. Confidential clients must use a back-channel grant.",
+			Severity:    "warning",
+			Reference:   "RFC 6749 Section 4.2",
+		})
+		p.redirectAuthorizeFragmentError(w, r, redirectURI, state, "unauthorized_client", "The client is not authorized to use the implicit grant")
+		return
+	}
+
+	granted, ok := intersectClientScopes(client, scope)
+	if !ok {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Invalid Scope", map[string]interface{}{
+			"requested_scopes": strings.Fields(scope),
+			"allowed_scopes":   client.Scopes,
+		})
+		p.redirectAuthorizeFragmentError(w, r, redirectURI, state, "invalid_scope", "None of the requested scopes are permitted for this client")
+		return
+	}
+
+	p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Implicit Grant", map[string]interface{}{
+		"response_type": "token",
+		"client_id":     client.ID,
+		"scope":         granted,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeSecurityHint,
+		Title:       "Implicit Grant Is Not Recommended",
+		Description: "RFC 9700 Section 2.1.2: clients SHOULD NOT use the implicit grant. The access token is exposed to the browser. Prefer authorization code with PKCE.",
+		Severity:    "warning",
+		Reference:   "RFC 9700 Section 2.1.2",
+	})
+
+	loginRequestID := p.storeLoginRequest(loginRequestInfo{
+		ClientID:     client.ID,
+		RedirectURI:  redirectURI,
+		Scope:        granted,
+		State:        state,
+		ResponseType: "token",
+	})
+
+	p.emitEvent(sessionID, lookingglass.EventTypeFlowStep, "User Authentication Required", map[string]interface{}{
+		"step":          2,
+		"from":          "User",
+		"to":            "Authorization Server",
+		"client_id":     client.ID,
+		"client_name":   client.Name,
+		"redirect_uri":  redirectURI,
+		"response_type": "token",
+		"scope":         granted,
+		"scopes":        strings.Fields(granted),
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "Authorization Endpoint User Authentication",
+		Description: "The authorization server authenticates the user before returning an access token in the fragment",
+		Reference:   "RFC 6749 Section 4.2.2",
+	})
+
+	loginPage := p.generateLoginPage(client.ID, granted, sessionID, client.Name, loginRequestID, implicitLoginSubtitle)
+	w.Header().Set("Content-Type", "text/html")
+	_, _ = w.Write([]byte(loginPage))
+}
+
+// completeImplicitGrant issues a bearer access token and redirects to the
+// fragment. RFC 6749 §4.2.2: the authorization server MUST NOT issue a refresh
+// token. DPoP does not apply: there is no token-endpoint proof to bind.
+func (p *Plugin) completeImplicitGrant(
+	w http.ResponseWriter,
+	r *http.Request,
+	sessionID string,
+	user *models.User,
+	info loginRequestInfo,
+) {
+	client, exists := p.mockIdP.GetClient(info.ClientID)
+	if !exists || !client.Public || !clientHasGrant(client, "implicit") {
+		p.redirectAuthorizeFragmentError(w, r, info.RedirectURI, info.State, "unauthorized_client", "The client is not authorized to use the implicit grant")
+		return
+	}
+
+	tokenResponse, err := p.issueImplicitAccessToken(user.ID, info.ClientID, info.Scope)
+	if err != nil {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Implicit Access Token Failed", map[string]interface{}{
+			"error":     err.Error(),
+			"client_id": info.ClientID,
+		})
+		p.redirectAuthorizeFragmentError(w, r, info.RedirectURI, info.State, "server_error", "Failed to issue access token")
+		return
+	}
+
+	params := url.Values{}
+	params.Set("access_token", tokenResponse.AccessToken)
+	params.Set("token_type", tokenResponse.TokenType)
+	params.Set("expires_in", strconv.Itoa(tokenResponse.ExpiresIn))
+	if info.Scope != "" {
+		params.Set("scope", info.Scope)
+	}
+	if info.State != "" {
+		params.Set("state", info.State)
+	}
+
+	p.emitEvent(sessionID, lookingglass.EventTypeResponseReceived, "Redirecting to Client", map[string]interface{}{
+		"redirect_uri":  info.RedirectURI,
+		"response_type": "token",
+		"response_mode": "fragment",
+		"access_token":  tokenResponse.AccessToken,
+		"token_type":    tokenResponse.TokenType,
+		"expires_in":    tokenResponse.ExpiresIn,
+		"scope":         info.Scope,
+		"state":         info.State,
+		"has_state":     info.State != "",
+		"refresh_token": false,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeExplanation,
+		Title:       "Implicit Access Token Response",
+		Description: "The access token is delivered in the URI fragment. The authorization server does not issue a refresh token.",
+		Reference:   "RFC 6749 Section 4.2.2",
+	})
+
+	p.redirectAuthorizationFragment(w, r, info.RedirectURI, params)
+}
+
+// issueImplicitAccessToken creates a real bearer access token and does not
+// create or store a refresh token (RFC 6749 §4.2.2).
+func (p *Plugin) issueImplicitAccessToken(userID, clientID, scope string) (*models.TokenResponse, error) {
+	jwtService := p.mockIdP.JWTService()
+	userClaims := p.mockIdP.UserClaims(userID, strings.Fields(scope))
+	accessToken, err := jwtService.CreateAccessToken(userID, clientID, scope, time.Hour, userClaims)
+	if err != nil {
+		return nil, err
+	}
+	p.mockIdP.TrackAccessToken(userID, accessToken)
+	return &models.TokenResponse{
+		AccessToken: accessToken,
+		TokenType:   dpop.TokenType(""),
+		ExpiresIn:   int(time.Hour / time.Second),
+		Scope:       scope,
+	}, nil
+}
+
+// finishAuthorizeClientError reports an authorization-endpoint error. When the
+// client_id and redirect_uri are registered, the error is placed in the
+// fragment. Otherwise the response is JSON and is not a redirect.
+func (p *Plugin) finishAuthorizeClientError(
+	w http.ResponseWriter,
+	r *http.Request,
+	clientID, redirectURI, state, errorCode, description string,
+) {
+	if redirect, ok := p.registeredAuthorizeRedirect(clientID, redirectURI); ok {
+		p.redirectAuthorizeFragmentError(w, r, redirect, state, errorCode, description)
+		return
+	}
+	writeOAuth2Error(w, errorCode, description, "")
+}
+
+func (p *Plugin) registeredAuthorizeRedirect(clientID, redirectURI string) (string, bool) {
+	if strings.TrimSpace(clientID) == "" || strings.TrimSpace(redirectURI) == "" {
+		return "", false
+	}
+	if _, exists := p.mockIdP.GetClient(clientID); !exists {
+		return "", false
+	}
+	normalized, err := p.mockIdP.NormalizeRedirectURI(clientID, redirectURI)
+	if err != nil {
+		return "", false
+	}
+	return normalized, true
+}
+
+func (p *Plugin) redirectAuthorizeFragmentError(
+	w http.ResponseWriter,
+	r *http.Request,
+	redirectURI, state, errorCode, description string,
+) {
+	params := url.Values{}
+	params.Set("error", errorCode)
+	if description != "" {
+		params.Set("error_description", description)
+	}
+	if state != "" {
+		params.Set("state", state)
+	}
+	p.redirectAuthorizationFragment(w, r, redirectURI, params)
+}
+
+// redirectAuthorizationFragment sends an OAuth authorization response in the
+// fragment (RFC 6749 §4.2.2). iss is included when the authorization server
+// metadata issuer is valid (RFC 9207). Cache-Control and Pragma match the
+// token-response practice in RFC 6749 §5.1.
+func (p *Plugin) redirectAuthorizationFragment(w http.ResponseWriter, r *http.Request, redirectURI string, params url.Values) {
+	values := url.Values{}
+	for key, items := range params {
+		for _, item := range items {
+			values.Add(key, item)
+		}
+	}
+	if issuer, err := authorizationServerMetadataIssuer(p.baseURL); err == nil {
+		values.Set("iss", issuer)
+	}
+	location := redirectURI
+	if hash := strings.Index(location, "#"); hash >= 0 {
+		location = location[:hash]
+	}
+	location += "#" + values.Encode()
+
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Location", location)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusFound)
+	_, _ = w.Write([]byte(`<a href="` + html.EscapeString(location) + `">Found</a>.` + "\n"))
+}
+
 // issueTokens creates access token and refresh token. dpopJKT, when
 // non-empty, binds the access token to that DPoP key (RFC 9449 Sections 4.1
 // and 5): it carries a cnf.jkt claim and the response's token_type is DPoP.
@@ -1692,13 +1976,16 @@ const oauth2ShowcasePageCSS = `
         }
 `
 
-func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID string) string {
+func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, loginRequestID, pageSubtitle string) string {
 	if clientName == "" {
 		if client, exists := p.mockIdP.GetClient(clientID); exists {
 			clientName = client.Name
 		} else {
 			clientName = clientID
 		}
+	}
+	if pageSubtitle == "" {
+		pageSubtitle = "OAuth 2.0 Authorization"
 	}
 	formAction := "/oauth2/authorize"
 	if sessionID != "" {
@@ -1721,7 +2008,7 @@ func (p *Plugin) generateLoginPage(clientID, scope, sessionID, clientName, login
     <div class="container">
         <div class="logo">
             <h1>Protocol Showcase</h1>
-            <p>OAuth 2.0 Authorization</p>
+            <p>` + pageSubtitle + `</p>
         </div>
         
         <div class="client-info">
@@ -1798,6 +2085,7 @@ type loginRequestInfo struct {
 	RedirectURI         string
 	Scope               string
 	State               string
+	ResponseType        string
 	CodeChallenge       string
 	CodeChallengeMethod string
 	CreatedAt           time.Time

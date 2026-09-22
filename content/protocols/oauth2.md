@@ -57,4 +57,5 @@ owner without exposing credentials. Modern deployments follow RFC 9700, the
 OAuth 2.0 Security Best Current Practice (BCP 240). Access tokens (and,
 for public clients, refresh tokens) can optionally be sender-constrained
 to a client-held key via DPoP (RFC 9449) instead of presented as a plain
-bearer token.
+bearer token. The implicit grant (`response_type=token`) is still implemented
+for educational contrast; RFC 9700 §2.1.2 says clients SHOULD NOT use it.

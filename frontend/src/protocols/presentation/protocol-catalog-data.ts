@@ -81,6 +81,17 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         ],
       },
       {
+        id: 'implicit',
+        backendId: 'implicit',
+        name: 'Implicit Grant (Legacy)',
+        rfc: 'RFC 6749 §4.2',
+        references: [
+          { category: 'core', label: 'RFC 6749 §4.2 — Implicit Grant', href: 'https://datatracker.ietf.org/doc/html/rfc6749#section-4.2' },
+          { category: 'security', label: 'RFC 9700 §2.1.2 — Implicit Grant SHOULD NOT Be Used', href: 'https://datatracker.ietf.org/doc/html/rfc9700#section-2.1.2', note: 'Educational contrast. Prefer authorization code + PKCE.' },
+          { category: 'companion', label: 'RFC 9207 — Authorization Server Issuer Identification', href: 'https://datatracker.ietf.org/doc/html/rfc9207' },
+        ],
+      },
+      {
         id: 'device-code',
         backendId: 'device_code',
         name: 'Device Authorization',

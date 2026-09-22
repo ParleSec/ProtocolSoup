@@ -69,8 +69,8 @@ export class ImplicitExecutor extends FlowExecutorBase {
     this.addEvent({
       type: 'security',
       title: '⚠️ Security Warning: Implicit Flow Legacy',
-      description: 'This flow is NOT recommended. Use Authorization Code + PKCE instead.',
-      rfcReference: 'OAuth 2.0 Security BCP',
+      description: 'RFC 9700 §2.1.2: clients SHOULD NOT use the implicit grant. Use Authorization Code + PKCE instead.',
+      rfcReference: 'RFC 9700 Section 2.1.2',
       data: {
         risks: [
           'Access token exposed in URL fragment',
@@ -241,7 +241,7 @@ export class ImplicitExecutor extends FlowExecutorBase {
       )
 
       if (!popup) {
-        reject(new Error('Popup blocked'))
+        reject(new Error('Popup blocked - please allow popups for this site'))
         return
       }
 

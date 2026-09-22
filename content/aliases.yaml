@@ -84,6 +84,15 @@ aliases:
   - alias: RFC 8628
     canonical:
       - artefact: device-code
+  - alias: implicit grant
+    canonical:
+      - artefact: implicit
+  - alias: oauth implicit
+    canonical:
+      - artefact: implicit
+  - alias: response_type=token
+    canonical:
+      - artefact: implicit
   - alias: jwt
     canonical:
       - artefact: jwt

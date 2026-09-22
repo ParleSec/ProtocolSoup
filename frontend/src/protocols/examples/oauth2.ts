@@ -218,6 +218,41 @@ if (introspection.active) {
   },
 
   /* ------------------------------------------------------------------ */
+  implicit: {
+    language: 'javascript',
+    label: 'JavaScript (Browser — Legacy)',
+    code: `// OAuth 2.0 Implicit Grant (RFC 6749 §4.2)
+// RFC 9700 §2.1.2: clients SHOULD NOT use this grant.
+// Prefer authorization code + PKCE. There is no token-endpoint exchange
+// and the authorization server MUST NOT issue a refresh token.
+
+const state = crypto.randomUUID();
+sessionStorage.setItem('oauth_state', state);
+
+const authUrl = new URL('/oauth2/authorize', window.location.origin);
+authUrl.searchParams.set('response_type', 'token');
+authUrl.searchParams.set('client_id', CLIENT_ID);          // public client
+authUrl.searchParams.set('redirect_uri', REDIRECT_URI);
+authUrl.searchParams.set('scope', 'profile email');
+authUrl.searchParams.set('state', state);
+window.location.href = authUrl.toString();
+
+// Callback: tokens are in the fragment, never the query string (§4.2.2)
+const hash = new URLSearchParams(window.location.hash.slice(1));
+if (hash.get('state') !== sessionStorage.getItem('oauth_state')) {
+  throw new Error('State mismatch — possible CSRF attack');
+}
+if (hash.get('error')) {
+  throw new Error(hash.get('error_description') || hash.get('error'));
+}
+
+const accessToken = hash.get('access_token'); // real JWT from the AS
+const tokenType = hash.get('token_type');     // Bearer
+// hash.get('refresh_token') is absent
+history.replaceState(null, '', window.location.pathname);`,
+  },
+
+  /* ------------------------------------------------------------------ */
   token_revocation: {
     language: 'javascript',
     label: 'JavaScript (Client)',

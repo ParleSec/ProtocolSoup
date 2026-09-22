@@ -60,9 +60,20 @@ func TestOAuth2AuthorizationServerMetadataUsesCanonicalPathIssuerRule(t *testing
 	grants, _ := metadata["grant_types_supported"].([]interface{})
 	wantGrants := map[string]bool{
 		"authorization_code": false,
+		"implicit":           false,
 		"refresh_token":      false,
 		"client_credentials": false,
 		"urn:ietf:params:oauth:grant-type:device_code": false,
+	}
+	responseTypes, _ := metadata["response_types_supported"].([]interface{})
+	sawToken := false
+	for _, responseType := range responseTypes {
+		if responseType == "token" {
+			sawToken = true
+		}
+	}
+	if !sawToken {
+		t.Fatalf("response_types_supported missing token: %#v", responseTypes)
 	}
 	for _, grant := range grants {
 		name, _ := grant.(string)
