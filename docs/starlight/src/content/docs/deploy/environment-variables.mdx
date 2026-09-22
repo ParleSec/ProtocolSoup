@@ -19,6 +19,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `SHOWCASE_MOCK_IDP` | `true` | Enable built-in mock identity provider with demo users and clients. |
 | `SHOWCASE_DEBUG` | `false` | Enable debug logging. |
 | `SHOWCASE_PALETTE_DB` | *(empty — palette disabled)* | Path to the prebuilt palette SQLite index. Required in `SHOWCASE_ENV=production` when palette search is enabled. Docker images built from `Dockerfile.backend` and `Dockerfile.fly` default to `/app/palette.db`. See [Palette content index](/deploy/palette-index/). |
+| `CONFORMANCE_REPORT` | *(empty — verdicts hidden)* | Path to the JSON produced by `go run ./cmd/conformance-report` for this build. The gateway serves it through `/api/conformance/*`, which backs the `/spec/{spec}` and `/spec/{spec}/{requirement}` pages. A report is only used when its `commit` equals `BUILD_COMMIT` and its `dirty` flag is false; otherwise the pages render every requirement as *Not evaluated for this build* with `noindex`. CI generates the report before the Docker build and `Dockerfile.fly` sets this to `/app/artifacts/vc-conformance/report.json`. |
 
 ## OAuth 2.0 Federation Service
 
