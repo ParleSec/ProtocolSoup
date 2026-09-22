@@ -5,7 +5,7 @@ import { motion } from 'framer-motion'
 import { 
   ArrowLeft, ArrowRight, Shield, Key,
   Fingerprint, Zap, Eye, Radio,
-  Users, KeyRound, Bot, Cpu
+  Users, KeyRound, Bot, Cpu, ClipboardCheck
 } from 'lucide-react'
 import type { FlowDefinition, Protocol } from '../protocols/registry'
 import { protocolMeta } from '../protocols/registry'
@@ -21,16 +21,27 @@ const NEUTRAL_PROTOCOL_META = {
   features: [] as string[],
 }
 
+/** Subset of the backend /api/conformance/specs summary needed for the link list. */
+export interface NormativeSpecLink {
+  id: string
+  short_title: string
+  title: string
+  version: string
+  requirement_count: number
+}
+
 interface ProtocolDemoProps {
   protocolId: string
   protocol: Protocol
   flows: FlowDefinition[]
+  normativeSpecs?: NormativeSpecLink[]
 }
 
 export function ProtocolDemo({
   protocolId,
   protocol,
   flows,
+  normativeSpecs = [],
 }: ProtocolDemoProps) {
 
   const meta = protocolMeta[protocolId] || NEUTRAL_PROTOCOL_META
@@ -180,6 +191,45 @@ export function ProtocolDemo({
           description={`Authoritative reading list for ${protocol.name} — core specs, security considerations, and companion standards.`}
           references={catalogEntry.references}
         />
+      )}
+
+      {/* Normative requirements: per-requirement pages backed by the conformance registry */}
+      {normativeSpecs.length > 0 && (
+        <section className="rounded-xl border border-white/10 bg-surface-900/40 overflow-hidden">
+          <header className="px-4 sm:px-5 py-3 sm:py-4 border-b border-white/5 flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+              <ClipboardCheck className="w-4 h-4 text-emerald-300" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-semibold text-white">Normative requirements</h2>
+              <p className="text-xs sm:text-sm text-surface-400 mt-0.5">
+                Every MUST, SHOULD and MAY {protocol.name} exercises, with the section it comes from and ProtocolSoup&apos;s self-test verdict for this build.
+              </p>
+            </div>
+          </header>
+          <ul className="divide-y divide-white/5">
+            {normativeSpecs.map((spec) => (
+              <li key={spec.id}>
+                <Link
+                  href={`/spec/${spec.id}`}
+                  className="group flex items-center justify-between gap-3 px-4 sm:px-5 py-3 hover:bg-white/[0.03] transition-colors"
+                >
+                  <div className="min-w-0">
+                    <span className="text-sm text-surface-200 group-hover:text-white transition-colors">
+                      {spec.short_title}
+                    </span>
+                    <p className="text-xs text-surface-500 mt-0.5 truncate">
+                      {spec.title} · {spec.version}
+                    </p>
+                  </div>
+                  <span className="text-xs text-surface-400 whitespace-nowrap">
+                    {spec.requirement_count} requirement{spec.requirement_count === 1 ? '' : 's'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {/* Protocol Features - from modular meta */}

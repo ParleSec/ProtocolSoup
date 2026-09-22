@@ -1,10 +1,26 @@
 import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import { DOCS_ORIGIN, SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
+import { getConformanceSpecs, specPath } from '@/lib/conformance.server'
+
+export const revalidate = 300
+
+/** Indexable specification index pages, or nothing when none qualify or the backend is unavailable. */
+async function requirementLines(): Promise<string[]> {
+  try {
+    const response = await getConformanceSpecs()
+    return response.specs
+      .filter((spec) => spec.indexable)
+      .map((spec) => `- [${spec.short_title} normative requirements](${SITE_ORIGIN}${specPath(spec.id)})`)
+  } catch {
+    return []
+  }
+}
 
 export async function GET() {
   const protocolLines = sortedProtocolCatalogData().map(
     (protocol) => `- [${protocol.name}](${SITE_ORIGIN}/protocol/${protocol.id})`,
   )
+  const specLines = await requirementLines()
 
   const body = [
     '# ProtocolSoup',
@@ -35,6 +51,14 @@ export async function GET() {
     '## Protocol Guides',
     ...protocolLines,
     '',
+    ...(specLines.length > 0
+      ? [
+          '## Normative requirements',
+          'Per-requirement pages with the registry statement, the specification section, and ProtocolSoup\'s self-test verdict for the serving build.',
+          ...specLines,
+          '',
+        ]
+      : []),
     '## Sitemap Feeds',
     `- [Sitemap index](${SITE_ORIGIN}/sitemap-index.xml)`,
     `- [Sitemap](${SITE_ORIGIN}/sitemap.xml)`,

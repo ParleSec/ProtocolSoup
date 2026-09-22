@@ -150,7 +150,9 @@ export function generateTechArticleSchema(params: TechArticleParams) {
     headline: params.title,
     description: params.description,
     url: params.url,
-    datePublished: params.datePublished || '2024-01-01',
+    // Omitted when not supplied: a fabricated publication date is worse than
+    // none. JSON.stringify drops undefined properties.
+    datePublished: params.datePublished,
     dateModified: params.dateModified || new Date().toISOString().split('T')[0],
     author: {
       '@type': 'Person',
@@ -328,6 +330,7 @@ export function generateProtocolPageSchema(
     title: `${protocolName} Reference`,
     description,
     url,
+    datePublished: '2024-01-01',
     keywords: [protocolName.toLowerCase(), 'authentication', 'identity', 'reference'],
   })
 
@@ -375,6 +378,7 @@ export function generateFlowPageSchema(
     title: `${flowName} — ${protocolName} Flow`,
     description,
     url,
+    datePublished: '2024-01-01',
     keywords: [flowName.toLowerCase(), protocolName.toLowerCase(), 'tutorial', 'implementation'],
   })
 

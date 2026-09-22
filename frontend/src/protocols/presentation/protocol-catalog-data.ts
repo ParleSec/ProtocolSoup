@@ -25,6 +25,12 @@ export interface ProtocolCatalogDataItem {
   specUrl: string
   flows: ProtocolFlowCatalogData[]
   references: ProtocolReference[]
+  /**
+   * Registry specification IDs (backend/internal/conformance/vc-requirements.yaml)
+   * whose normative requirement pages relate to this protocol. Order matters:
+   * the first protocol listing a spec owns the reverse link from that spec.
+   */
+  specs?: string[]
 }
 
 // Build-safe route and sitemap source: no UI component imports.
@@ -236,6 +242,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
     description: 'OpenID for Verifiable Credential Issuance. Demonstrates credential offers, pre-authorized code token exchange, nonce-bound proof validation, and multi-format VC issuance (mso_mdoc by default, plus dc+sd-jwt, jwt_vc_json, jwt_vc_json-ld, ldp_vc).',
     spec: 'OpenID4VCI 1.0',
     specUrl: 'https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html',
+    specs: ['oid4vci', 'haip', 'rfc9449', 'rfc9901', 'iso18013-5'],
     flows: [
       {
         id: 'oid4vci-pre-authorized',
@@ -286,6 +293,7 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
     description: 'OpenID for Verifiable Presentations. Shows DCQL request contracts, request object validation, direct_post/direct_post.jwt responses, and verifier policy decisions.',
     spec: 'OpenID4VP 1.0',
     specUrl: 'https://openid.net/specs/openid-4-verifiable-presentations-1_0-final.html',
+    specs: ['oid4vp', 'haip', 'rfc9901', 'iso18013-5'],
     flows: [
       {
         id: 'oid4vp-direct-post',
@@ -740,6 +748,11 @@ export function getFlowRouteId(
   }
 
   return backendFlowId.replace(/_/g, '-')
+}
+
+/** The protocol page that owns the reverse link from a requirement page. */
+export function getProtocolForSpec(specId: string): ProtocolCatalogDataItem | undefined {
+  return sortedProtocolCatalogData().find((protocol) => protocol.specs?.includes(specId))
 }
 
 export function getAllowedBackendFlowIds(protocolId: string): Set<string> {
