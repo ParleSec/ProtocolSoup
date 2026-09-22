@@ -26,9 +26,12 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 | `authorization_code_pkce` | Authorization Code + PKCE | Authorization code with code verifier/challenge |
 | `client_credentials` | Client Credentials | Machine-to-machine issuance with independent selectors for `client_secret_basic` or `private_key_jwt` authentication and Bearer or DPoP access-token protection |
 | `refresh_token` | Refresh Token | Token renewal without re-authorization |
+| `implicit` | Implicit Grant (Legacy) | RFC 6749 §4.2: access token in the redirect fragment, no refresh token. RFC 9700 §2.1.2 says clients SHOULD NOT use it |
 | `device_code` | Device Authorization | RFC 8628 grant for TVs, CLIs, and other input-constrained devices; person authorizes on a second device |
 | `token_introspection` | Token Introspection | Validate and inspect active tokens (RFC 7662) |
 | `token_revocation` | Token Revocation | Invalidate tokens (RFC 7009) |
+
+The implicit grant is implemented for the public `public-app` client so the fragment response can be compared with authorization code + PKCE. RFC 9700 §2.1.2: "Clients SHOULD NOT use the implicit grant." The authorization server returns `access_token` and `token_type` in the redirect fragment and does not issue a refresh token. Confidential clients receive `unauthorized_client`. `grant_type=implicit` is not accepted at the token endpoint.
 
 Resource Owner Password Credentials (`grant_type=password`) is not implemented. RFC 9700 §2.4: "The resource owner password credentials grant MUST NOT be used." Use authorization code + PKCE instead.
 
@@ -38,13 +41,14 @@ Resource Owner Password Credentials (`grant_type=password`) is not implemented. 
 - **PKCE Flow Demo** -- PKCE challenge/verifier exchange
 - **Client Credentials Demo** -- Independently select shared-secret or browser-held `private_key_jwt` authentication and Bearer or DPoP token protection
 - **Token Refresh Demo** -- Refresh grant with token rotation
+- **Implicit Grant Demo** -- Public client receives an access token in the redirect fragment; no refresh token
 - **Device Authorization Demo** -- Device displays a user_code; Looking Glass opens the Protocol Showcase sign-in window at `/oauth2/device`
 
 ## Endpoints
 
 | Path | Methods | Purpose |
 |------|---------|---------|
-| `/oauth2/authorize` | GET, POST | Authorization endpoint |
+| `/oauth2/authorize` | GET, POST | Authorization endpoint (`response_type=code` or `token`) |
 | `/oauth2/device/authorize` | POST | RFC 8628 device authorization endpoint |
 | `/oauth2/device` | GET, POST | RFC 8628 verification URI (user enters `user_code`) |
 | `/oauth2/token` | POST | Token endpoint |

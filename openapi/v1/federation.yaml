@@ -62,6 +62,7 @@ paths:
       parameters:
         - in: query
           name: response_type
+          description: code (RFC 6749 section 4.1) or token (RFC 6749 section 4.2 implicit grant). Implicit returns the access token in the redirect fragment and does not issue a refresh token. RFC 9700 section 2.1.2 says clients SHOULD NOT use it.
           schema:
             type: string
           required: true
@@ -107,7 +108,7 @@ paths:
                   type: string
       responses:
         "302":
-          description: Redirect to client callback with authorization result.
+          description: Redirect to client callback. Authorization code uses the query string. Implicit (response_type=token) uses the fragment and omits refresh_token.
         "400":
           description: Invalid form submission.
           content:
