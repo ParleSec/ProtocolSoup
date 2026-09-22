@@ -55,6 +55,11 @@ type Config struct {
 	// disables the palette query service (and the /api/palette/query route).
 	PaletteDBPath string
 
+	// ConformanceReportPath points at the report.json written by
+	// cmd/conformance-report for this build. Empty or unreadable means
+	// requirement pages render "Not evaluated for this build".
+	ConformanceReportPath string
+
 	// KeyStorePath is the directory that persists OP signing keys and retired
 	// public keys across restarts. Empty means ephemeral in-memory keys
 	// (development only). A certified deployment MUST set this to a durable
@@ -77,18 +82,19 @@ type Config struct {
 // LoadConfig loads configuration from environment variables with sensible defaults
 func LoadConfig() *Config {
 	cfg := &Config{
-		Environment:          getEnv("SHOWCASE_ENV", "development"),
-		BuildCommit:          getEnv("BUILD_COMMIT", ""),
-		ListenAddr:           getEnv("SHOWCASE_LISTEN_ADDR", ":8080"),
-		BaseURL:              getEnv("SHOWCASE_BASE_URL", "http://localhost:8080"),
-		MockIdPEnabled:       getEnvBool("SHOWCASE_MOCK_IDP", true),
-		CORSOrigins:          getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
-		Debug:                getEnvBool("SHOWCASE_DEBUG", false),
-		FrontendOrigin:       getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
-		DataDir:              getEnv("SHOWCASE_DATA_DIR", ""),
-		OAuth2ReplayRedisURL: getEnv("OAUTH2_REPLAY_REDIS_URL", ""),
-		PaletteDBPath:        getEnv("SHOWCASE_PALETTE_DB", ""),
-		KeyStorePath:         getEnv("SHOWCASE_KEY_STORE_PATH", ""),
+		Environment:           getEnv("SHOWCASE_ENV", "development"),
+		BuildCommit:           getEnv("BUILD_COMMIT", ""),
+		ListenAddr:            getEnv("SHOWCASE_LISTEN_ADDR", ":8080"),
+		BaseURL:               getEnv("SHOWCASE_BASE_URL", "http://localhost:8080"),
+		MockIdPEnabled:        getEnvBool("SHOWCASE_MOCK_IDP", true),
+		CORSOrigins:           getEnvList("SHOWCASE_CORS_ORIGINS", []string{"http://localhost:3000", "http://localhost:5173"}),
+		Debug:                 getEnvBool("SHOWCASE_DEBUG", false),
+		FrontendOrigin:        getEnv("SHOWCASE_FRONTEND_ORIGIN", ""),
+		DataDir:               getEnv("SHOWCASE_DATA_DIR", ""),
+		OAuth2ReplayRedisURL:  getEnv("OAUTH2_REPLAY_REDIS_URL", ""),
+		PaletteDBPath:         getEnv("SHOWCASE_PALETTE_DB", ""),
+		ConformanceReportPath: getEnv("CONFORMANCE_REPORT", ""),
+		KeyStorePath:          getEnv("SHOWCASE_KEY_STORE_PATH", ""),
 
 		DPoPNonceRequired:         getEnvBool("SHOWCASE_DPOP_NONCE_REQUIRED", false),
 		DPoPResourceNonceRequired: getEnvBool("SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED", false),

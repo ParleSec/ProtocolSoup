@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/palette"
@@ -26,6 +27,7 @@ type Server struct {
 	lookingGlass *lookingglass.Engine
 	keySet       *crypto.KeySet
 	palette      *palette.Service
+	conformance  *conformance.Catalogue
 	router       chi.Router
 }
 
@@ -49,6 +51,17 @@ func (s *Server) WithPalette(paletteSvc *palette.Service) *Server {
 		return s
 	}
 	s.palette = paletteSvc
+	s.setupRouter()
+	return s
+}
+
+// WithConformance mounts the requirement catalogue under /api/conformance.
+// A nil catalogue is a no-op.
+func (s *Server) WithConformance(catalogue *conformance.Catalogue) *Server {
+	if catalogue == nil {
+		return s
+	}
+	s.conformance = catalogue
 	s.setupRouter()
 	return s
 }
@@ -116,6 +129,13 @@ func (s *Server) setupRouter() {
 		// detect availability via /api.
 		if s.palette != nil {
 			r.Post("/palette/query", s.palette.Handler())
+		}
+
+		// Normative requirement catalogue (optional). Read-only JSON backing
+		// the /spec pages; verdicts are only exposed when the loaded report
+		// matches this build.
+		if s.conformance != nil {
+			r.Mount("/conformance", s.conformance.Routes())
 		}
 	})
 
@@ -340,6 +360,9 @@ func (s *Server) handleAPIIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.palette != nil {
 		endpoints["palette"] = "/api/palette/query"
+	}
+	if s.conformance != nil {
+		endpoints["conformance"] = "/api/conformance/specs"
 	}
 
 	writeJSON(w, http.StatusOK, APIIndexResponse{

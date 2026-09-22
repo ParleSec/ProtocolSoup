@@ -19,6 +19,12 @@ tags:
     description: Looking Glass orchestration and decode endpoints.
   - name: Palette
     description: Content palette search over the prebuilt SQLite index.
+  - name: Conformance
+    description: >-
+      Normative requirement catalogue backing the `/spec` pages. Verdicts are
+      ProtocolSoup's self-test results against its own implementation and are
+      only exposed when the loaded report was generated from a clean tree at
+      the exact commit the server is running.
 paths:
   /health:
     get:
@@ -402,6 +408,125 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/conformance/specs:
+    get:
+      tags: [Conformance]
+      summary: List specifications with requirements
+      description: >-
+        Lists every specification in the requirement registry that has at
+        least one requirement, with its requirement count and, when the
+        report is valid for this build, a verdict summary. `commit` and
+        `generated_at` are omitted unless `report_valid` is true.
+      operationId: listConformanceSpecs
+      responses:
+        "200":
+          description: Specification summaries.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConformanceSpecsResponse"
+  /api/conformance/specs/{specId}:
+    get:
+      tags: [Conformance]
+      summary: Get a specification and its requirements
+      description: >-
+        Returns the specification and its requirements ordered by natural
+        section order, then by ID. The lookup is case-insensitive and the
+        response uses the registry's canonical ID. Specifications with zero
+        requirements return 404.
+      operationId: getConformanceSpec
+      parameters:
+        - in: path
+          name: specId
+          required: true
+          schema:
+            type: string
+          example: oid4vp
+      responses:
+        "200":
+          description: Specification with requirement rows.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConformanceSpecResponse"
+        "404":
+          description: Unknown specification, or one with no requirements.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/conformance/requirements/{id}:
+    get:
+      tags: [Conformance]
+      summary: Get a requirement with its evidence
+      description: >-
+        Returns the requirement as recorded in the registry, the link to its
+        specification section, its tests and implementation files, and the
+        self-test verdict for this build. `verdict`, `commit`,
+        `generated_at`, `source_base_url` and per-test `verdict`/`line` are
+        omitted when the loaded report does not match the running build.
+        Test output is never included. The lookup is case-insensitive.
+      operationId: getConformanceRequirement
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: VP-001
+      responses:
+        "200":
+          description: Requirement detail.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConformanceRequirementResponse"
+        "404":
+          description: Unknown requirement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/conformance/sitemap:
+    get:
+      tags: [Conformance]
+      summary: List indexable specification and requirement pages
+      description: >-
+        Returns the `/spec` paths that may be indexed: the launch gate is
+        open (valid report, no MUST-family FAIL, MISSING_TEST or CHECK), the
+        requirement's verdict is PASS, DEVIATION or N/A, and a human-authored
+        explainer exists. `lastmod` is the report's `generated_at`. The
+        array is empty when nothing is indexable.
+      operationId: getConformanceSitemap
+      responses:
+        "200":
+          description: Indexable pages.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConformanceSitemapEntry"
   /ws/lookingglass/{session}:
     get:
       tags: [LookingGlass]
@@ -937,3 +1062,241 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PaletteNormativeAnchor"
+    ConformanceVerdict:
+      type: string
+      description: >-
+        Requirement verdict from cmd/conformance-report. FAIL, MISSING_TEST
+        and CHECK on a MUST-family requirement close the launch gate.
+      enum: [PASS, FAIL, CHECK, MISSING_TEST, N/A, DEVIATION]
+    ConformanceVerdictSummary:
+      type: object
+      description: Count of requirements per verdict.
+      additionalProperties:
+        type: integer
+        minimum: 0
+    ConformanceSpecSummary:
+      type: object
+      required: [id, short_title, title, version, url, requirement_count, indexable]
+      properties:
+        id:
+          type: string
+          example: oid4vp
+        short_title:
+          type: string
+          example: OID4VP 1.0
+        title:
+          type: string
+          example: OpenID for Verifiable Presentations
+        version:
+          type: string
+          example: 1.0 Final
+        url:
+          type: string
+          format: uri
+        requirement_count:
+          type: integer
+          minimum: 1
+        verdicts:
+          $ref: "#/components/schemas/ConformanceVerdictSummary"
+        indexable:
+          type: boolean
+    ConformanceSpecsResponse:
+      type: object
+      required: [report_valid, launch_gate_open, specs]
+      properties:
+        report_valid:
+          type: boolean
+          description: >-
+            True when a report loaded, was generated from a clean tree, and
+            its commit equals the server's BUILD_COMMIT.
+        launch_gate_open:
+          type: boolean
+          description: >-
+            True when report_valid and no MUST-family requirement has a
+            verdict of FAIL, MISSING_TEST or CHECK.
+        commit:
+          type: string
+          description: Report commit; present only when report_valid.
+        generated_at:
+          type: string
+          format: date-time
+          description: Report generation time; present only when report_valid.
+        specs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConformanceSpecSummary"
+    ConformanceRequirementRow:
+      type: object
+      required: [id, title, section, level, roles, indexable]
+      properties:
+        id:
+          type: string
+          example: VP-001
+        title:
+          type: string
+          example: Client identifier prefix detection by colon
+        section:
+          type: string
+          example: "5.9.1"
+        level:
+          type: string
+          example: MUST
+        roles:
+          type: array
+          items:
+            type: string
+        verdict:
+          $ref: "#/components/schemas/ConformanceVerdict"
+        indexable:
+          type: boolean
+    ConformanceSpecResponse:
+      allOf:
+        - $ref: "#/components/schemas/ConformanceSpecSummary"
+        - type: object
+          required: [report_valid, launch_gate_open, requirements]
+          properties:
+            report_valid:
+              type: boolean
+            launch_gate_open:
+              type: boolean
+            commit:
+              type: string
+            generated_at:
+              type: string
+              format: date-time
+            requirements:
+              type: array
+              items:
+                $ref: "#/components/schemas/ConformanceRequirementRow"
+    ConformanceRequirementLink:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+    ConformanceTestEvidence:
+      type: object
+      required: [package, name, file]
+      properties:
+        package:
+          type: string
+          example: ./internal/protocols/oid4vp
+        name:
+          type: string
+          example: TestParseClientIDSchemeUsesFinalPrefixFallback
+        file:
+          type: string
+          description: Repository-relative test file.
+          example: backend/internal/protocols/oid4vp/plugin_test.go
+        line:
+          type: integer
+          minimum: 1
+          description: >-
+            1-based line of the test function declaration. Omitted when the
+            report is not valid for this build or the declaration was not
+            found.
+        verdict:
+          $ref: "#/components/schemas/ConformanceVerdict"
+    ConformanceRequirementResponse:
+      type: object
+      required:
+        - id
+        - specification
+        - section
+        - section_url
+        - level
+        - title
+        - statement
+        - roles
+        - applicability
+        - tests
+        - implementation
+        - indexable
+        - siblings
+      properties:
+        id:
+          type: string
+          example: VP-001
+        specification:
+          $ref: "#/components/schemas/ConformanceSpecSummary"
+        section:
+          type: string
+          example: "5.9.1"
+        section_url:
+          type: string
+          format: uri
+          description: >-
+            Specification URL with the section anchor filled in when the
+            specification declares one and the section is a single dotted
+            number; otherwise the bare specification URL.
+        level:
+          type: string
+          example: MUST
+        title:
+          type: string
+        statement:
+          type: string
+          description: >-
+            The requirement as recorded in the ProtocolSoup registry. It is
+            not a quotation of the specification.
+        roles:
+          type: array
+          items:
+            type: string
+        applicability:
+          type: string
+          enum: [applicable, not_applicable, deviation]
+        verdict:
+          $ref: "#/components/schemas/ConformanceVerdict"
+        commit:
+          type: string
+          description: Report commit; present only when the report is valid for this build.
+        generated_at:
+          type: string
+          format: date-time
+        source_base_url:
+          type: string
+          format: uri
+          description: >-
+            GitHub blob URL prefix pinned to the report commit, for example
+            `https://github.com/ParleSec/ProtocolSoup/blob/{commit}/`.
+            Present only when the report is valid for this build.
+        tests:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConformanceTestEvidence"
+        implementation:
+          type: array
+          items:
+            type: string
+        adr:
+          type: string
+          description: Repository-relative decision record for DEVIATION or N/A requirements.
+        notes:
+          type: string
+        explainer_markdown:
+          type: string
+          description: Human-authored explainer from content/assertions, when one exists.
+        indexable:
+          type: boolean
+        siblings:
+          type: array
+          description: Other requirements in the same specification section.
+          items:
+            $ref: "#/components/schemas/ConformanceRequirementLink"
+        previous:
+          $ref: "#/components/schemas/ConformanceRequirementLink"
+        next:
+          $ref: "#/components/schemas/ConformanceRequirementLink"
+    ConformanceSitemapEntry:
+      type: object
+      required: [path, lastmod]
+      properties:
+        path:
+          type: string
+          example: /spec/oid4vp/vp-001
+        lastmod:
+          type: string
+          format: date-time
