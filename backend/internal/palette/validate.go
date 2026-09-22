@@ -3,9 +3,72 @@ package palette
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 )
+
+// ExplainerHeadings are the `##` headings every spec-assertion body must
+// contain, in this order and with no others. The fixed shape is what lets a
+// requirement page render the explainer under predictable sections and lets
+// the validator catch a half-written file before it reaches the index.
+var ExplainerHeadings = []string{
+	"What this requires",
+	"Why it exists",
+	"What non-compliance looks like",
+	"How ProtocolSoup tests it",
+}
+
+var (
+	h2Pattern    = regexp.MustCompile(`(?m)^##[ \t]+(.+?)[ \t]*$`)
+	fencePattern = regexp.MustCompile("(?m)^[ \t]*(```|~~~)")
+	// A tag opener followed by a letter, "/" or "!" (comments, doctypes).
+	// Bare "<" in prose, such as "a < b", does not match.
+	htmlPattern = regexp.MustCompile(`<[A-Za-z/!]`)
+)
+
+// RequirementRef is the registry row a spec-assertion explains. Spec is the
+// registry specification ID, which becomes the first path segment of the
+// artefact's href.
+type RequirementRef struct {
+	ID   string
+	Spec string
+}
+
+// RequirementIndex maps lowercase registry requirement IDs to their
+// registry row. A nil index means no registry was loaded, in which case
+// every spec-assertion is a validation issue: an explainer that cannot be
+// tied to a requirement has no page to live on.
+type RequirementIndex map[string]RequirementRef
+
+// LoadRequirementIndex reads the conformance registry at path. An empty
+// path uses the registry compiled into the binary.
+func LoadRequirementIndex(path string) (RequirementIndex, error) {
+	var (
+		registry conformance.Registry
+		err      error
+	)
+	if path == "" {
+		registry, err = conformance.Embedded()
+	} else {
+		registry, err = conformance.Load(path)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load requirement registry: %w", err)
+	}
+	return NewRequirementIndex(registry), nil
+}
+
+// NewRequirementIndex builds the lookup from a decoded registry.
+func NewRequirementIndex(registry conformance.Registry) RequirementIndex {
+	index := make(RequirementIndex, len(registry.Requirements))
+	for _, req := range registry.Requirements {
+		index[strings.ToLower(req.ID)] = RequirementRef{ID: req.ID, Spec: req.Specification}
+	}
+	return index
+}
 
 // Issue is a single validation finding. Path is the artefact-relative path
 // (or "taxonomy.yaml"/"aliases.yaml" for catalog-level findings). Message is
@@ -28,7 +91,11 @@ func (i Issue) Format() string {
 // means the tree is clean. The function never returns a partial result: all
 // checks are run even when earlier checks fail, so a single CI run lists
 // every authoring problem at once.
-func ValidateContent(contentRoot string) ([]Artefact, Taxonomy, AliasesFile, []Issue, error) {
+//
+// requirements resolves spec-assertion IDs against the conformance registry
+// and fills Artefact.Spec on the returned artefacts. It may be nil when the
+// tree contains no spec-assertions.
+func ValidateContent(contentRoot string, requirements RequirementIndex) ([]Artefact, Taxonomy, AliasesFile, []Issue, error) {
 	taxonomy, err := LoadTaxonomy(contentRoot)
 	if err != nil {
 		return nil, Taxonomy{}, AliasesFile{}, nil, err
@@ -45,6 +112,15 @@ func ValidateContent(contentRoot string) ([]Artefact, Taxonomy, AliasesFile, []I
 
 	var issues []Issue
 
+	for i := range artefacts {
+		if artefacts[i].Type != ArtefactSpecAssertion {
+			continue
+		}
+		if ref, ok := requirements[strings.ToLower(artefacts[i].ID)]; ok {
+			artefacts[i].Spec = ref.Spec
+		}
+	}
+
 	known := make(map[string]Artefact, len(artefacts))
 	for i, a := range artefacts {
 		if existing, dup := known[a.ID]; dup {
@@ -59,6 +135,9 @@ func ValidateContent(contentRoot string) ([]Artefact, Taxonomy, AliasesFile, []I
 
 	for _, a := range artefacts {
 		issues = append(issues, validateArtefact(a, taxonomy, known)...)
+		if a.Type == ArtefactSpecAssertion {
+			issues = append(issues, validateExplainer(a, requirements)...)
+		}
 	}
 
 	issues = append(issues, validateAliasesAgainstCatalog(aliases, taxonomy, known)...)
@@ -227,6 +306,66 @@ func validateArtefact(a Artefact, t Taxonomy, known map[string]Artefact) []Issue
 	}
 
 	return issues
+}
+
+// validateExplainer applies the rules specific to spec-assertion bodies: the
+// ID must name a registry requirement, the body must carry exactly the
+// ExplainerHeadings in order, and the body must be plain markdown with no
+// fenced code or raw HTML (the requirement page renders it with MarkdownLite,
+// which refuses both).
+func validateExplainer(a Artefact, requirements RequirementIndex) []Issue {
+	var issues []Issue
+	add := func(format string, args ...any) {
+		issues = append(issues, Issue{Path: a.Path, Message: fmt.Sprintf(format, args...)})
+	}
+
+	if a.ID != "" {
+		if a.ID != strings.ToLower(a.ID) {
+			add("spec-assertion id %q must be the lowercase registry requirement id", a.ID)
+		}
+		if requirements == nil {
+			add("spec-assertion %q cannot be checked: no requirement registry loaded (pass -registry)", a.ID)
+		} else if _, ok := requirements[strings.ToLower(a.ID)]; !ok {
+			add("spec-assertion id %q is not a requirement in the conformance registry", a.ID)
+		}
+	}
+
+	var headings []string
+	for _, m := range h2Pattern.FindAllStringSubmatch(a.Body, -1) {
+		headings = append(headings, m[1])
+	}
+	if !equalStrings(headings, ExplainerHeadings) {
+		add("spec-assertion body must contain exactly these ## headings in order: %s (found: %s)",
+			strings.Join(ExplainerHeadings, "; "), joinOrNone(headings))
+	}
+
+	if fencePattern.MatchString(a.Body) {
+		add("spec-assertion body must not contain fenced code blocks")
+	}
+	if htmlPattern.MatchString(a.Body) {
+		add("spec-assertion body must not contain raw HTML")
+	}
+
+	return issues
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func joinOrNone(values []string) string {
+	if len(values) == 0 {
+		return "none"
+	}
+	return strings.Join(values, "; ")
 }
 
 // validateAliasesAgainstCatalog ensures every alias canonical target resolves

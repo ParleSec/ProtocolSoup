@@ -20,12 +20,23 @@ import (
 	"github.com/ParleSec/ProtocolSoup/internal/palette"
 )
 
+// defaultRegistry is backend/internal/conformance/vc-requirements.yaml
+// relative to backend/, the directory every documented invocation runs from.
+const defaultRegistry = "internal/conformance/vc-requirements.yaml"
+
 func main() {
 	contentDir := flag.String("content", "content", "path to content directory")
 	outPath := flag.String("out", "dist/palette.db", "output sqlite path")
+	registryPath := flag.String("registry", defaultRegistry, "path to the conformance requirement registry used to resolve spec-assertion ids")
 	flag.Parse()
 
-	if err := palette.BuildIndex(*contentDir, *outPath); err != nil {
+	requirements, err := palette.LoadRequirementIndex(*registryPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "palette-indexer:", err)
+		os.Exit(1)
+	}
+
+	if err := palette.BuildIndex(*contentDir, *outPath, requirements); err != nil {
 		fmt.Fprintln(os.Stderr, "palette-indexer:", err)
 		os.Exit(1)
 	}

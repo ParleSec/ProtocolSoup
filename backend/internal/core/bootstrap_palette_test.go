@@ -47,7 +47,7 @@ func TestBootstrap_paletteLoadsFromFile(t *testing.T) {
 		t.Skipf("content tree not available: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "palette.db")
-	if err := palette.BuildIndex(contentDir, out); err != nil {
+	if err := palette.BuildIndex(contentDir, out, nil); err != nil {
 		t.Fatalf("build index: %v", err)
 	}
 

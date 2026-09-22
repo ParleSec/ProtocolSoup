@@ -2,21 +2,59 @@ package palette
 
 import "testing"
 
-// TestDefaultHref_InlineOnlyTypesReturnEmpty locks the rule that
-// concept, walkthrough, and spec-assertion artefacts are inline-only:
-// their canonical surface is the palette's expanded row, not a dedicated
-// page route. Without this rule the frontend would emit /concept/{id} and
-// similar links that 404 because no matching Next.js route exists.
+// TestDefaultHref_InlineOnlyTypesReturnEmpty locks the rule that concept
+// and walkthrough artefacts are inline-only: their canonical surface is the
+// palette's expanded row, not a dedicated page route. Without this rule the
+// frontend would emit /concept/{id} and similar links that 404 because no
+// matching Next.js route exists.
 func TestDefaultHref_InlineOnlyTypesReturnEmpty(t *testing.T) {
 	cases := []Artefact{
 		{ID: "pkce", Type: ArtefactConcept},
 		{ID: "oauth2-tour", Type: ArtefactWalkthrough},
-		{ID: "must-use-pkce", Type: ArtefactSpecAssertion},
 	}
 	for _, a := range cases {
 		t.Run(a.Type, func(t *testing.T) {
 			if got := a.DefaultHref(); got != "" {
 				t.Errorf("DefaultHref for %s = %q; want empty (inline-only types)", a.Type, got)
+			}
+		})
+	}
+}
+
+// TestDefaultHref_SpecAssertion pins the requirement page route. The spec
+// segment comes from the registry via Artefact.Spec, never from frontmatter,
+// and an assertion the registry does not know has no page.
+func TestDefaultHref_SpecAssertion(t *testing.T) {
+	cases := []struct {
+		name string
+		a    Artefact
+		want string
+	}{
+		{
+			name: "resolved against registry",
+			a:    Artefact{ID: "vp-001", Type: ArtefactSpecAssertion, Spec: "oid4vp"},
+			want: "/spec/oid4vp/vp-001",
+		},
+		{
+			name: "id lowercased in path",
+			a:    Artefact{ID: "VP-001", Type: ArtefactSpecAssertion, Spec: "oid4vp"},
+			want: "/spec/oid4vp/vp-001",
+		},
+		{
+			name: "explicit href ignored",
+			a:    Artefact{ID: "vp-001", Type: ArtefactSpecAssertion, Spec: "oid4vp", Href: "/assertion/vp-001"},
+			want: "/spec/oid4vp/vp-001",
+		},
+		{
+			name: "unknown to registry has no page",
+			a:    Artefact{ID: "vp-999", Type: ArtefactSpecAssertion},
+			want: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.a.DefaultHref(); got != tc.want {
+				t.Errorf("DefaultHref = %q; want %q", got, tc.want)
 			}
 		})
 	}

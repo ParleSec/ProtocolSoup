@@ -21,8 +21,8 @@ content/
     {concept-id}.md
   walkthroughs/          # one file per long-form walkthrough (not yet populated)
     {walkthrough-id}.md
-  assertions/            # one file per spec assertion (auto-generated later; not yet populated)
-    {assertion-id}.md
+  assertions/            # one human-authored explainer per registry requirement (not yet populated)
+    {requirement-id}.md  # lowercase registry ID, e.g. vp-001.md
 ```
 
 The `walkthroughs/` and `assertions/` directories are recognised by the
@@ -72,7 +72,7 @@ fail validation; this prevents drift over time.
 | `normative_anchors` | list[object]   | List of `{rfc: string, sections: list[string]}` references. |
 | `runnable`          | bool           | `true` for executable flows. Default `false`. |
 | `status`            | string         | `live` (default), `planned`, or `deprecated`. |
-| `href`              | string         | Canonical site URL. Defaults computed from `type` + `id`. **Ignored for inline-only types** (`concept`, `walkthrough`, `spec-assertion`); see "Inline-only artefacts" below. |
+| `href`              | string         | Canonical site URL. Defaults computed from `type` + `id`. **Ignored for inline-only types** (`concept`, `walkthrough`) and for `spec-assertion`, whose page path is derived from the registry; see "Inline-only artefacts" below. |
 | `summary`           | string         | One-line summary surfaced as a result subtitle. Keep declarative. |
 | `aliases`           | list[string]   | Free-form synonyms specific to this artefact, indexed in the FTS5 aliases column. |
 | `backend_id`        | string         | Flow id used by the backend `/api/protocols/.../demo/...` endpoint. Required for runnable flows whose backend id differs from `id`. |
@@ -108,18 +108,86 @@ fail validation; this prevents drift over time.
 
 ### `spec-assertion`
 
-- File path: `content/assertions/{id}.md`
+A spec-assertion is a human-authored explainer for one requirement in the
+conformance registry (`backend/internal/conformance/vc-requirements.yaml`).
+The registry holds the statement, section, BCP 14 level and test evidence;
+the explainer adds the prose a requirement page needs before it is worth
+indexing. Nothing here is generated.
+
+- File path: `content/assertions/{id}.md`, where `{id}` is the **lowercase**
+  registry requirement ID (`VP-001` becomes `vp-001.md` with `id: vp-001`).
+  The validator rejects an ID that is not in the registry.
 - `normative_anchors` is required and must contain at least one entry.
-- Additional field `normative_level` (one of `MUST`, `SHOULD`, `MAY`,
-  `MUST NOT`, `SHOULD NOT`) is required.
+- `normative_level` (one of `MUST`, `SHOULD`, `MAY`, `MUST NOT`,
+  `SHOULD NOT`) is required.
+- `assertion_text` is required; use the registry statement verbatim.
+- The body must contain exactly these `##` headings, in this order, and no
+  other `##` headings:
+  1. `## What this requires`
+  2. `## Why it exists`
+  3. `## What non-compliance looks like`
+  4. `## How ProtocolSoup tests it`
+- Fenced code blocks (```` ``` ```` or `~~~`) and raw HTML are not allowed.
+  Inline code in backticks is fine. The requirement page renders the body
+  with the same restricted markdown renderer as the palette.
+- `href` is ignored. The page path is always `/spec/{specification}/{id}`,
+  with the specification taken from the registry row, so the link cannot
+  disagree with the route the site serves.
+
+The validator and indexer resolve IDs against the registry passed with
+`-registry` (default `internal/conformance/vc-requirements.yaml`, relative to
+`backend/`). Without a registry every spec-assertion is a validation issue.
+
+Copy this template to start a new explainer:
+
+```markdown
+---
+id: vp-001
+name: Client identifier prefix
+protocols:
+  - oid4vp
+use_cases:
+  - credential-presentation
+actors:
+  - verifier
+  - wallet
+problem_domains:
+  - verifiable-credentials
+normative_level: MUST
+normative_anchors:
+  - rfc: OpenID4VP
+    sections: ["5.9.1"]
+assertion_text: <registry statement, verbatim>
+---
+## What this requires
+
+<One or two paragraphs. What an implementer has to do, in plain terms.>
+
+## Why it exists
+
+<The failure or ambiguity the working group was closing.>
+
+## What non-compliance looks like
+
+<Concrete symptoms: the request shape, the wallet behaviour, the error.>
+
+## How ProtocolSoup tests it
+
+<Which behaviour the linked tests exercise and what they assert.>
+```
+
+Every axis value must exist in `taxonomy.yaml`; the values above do.
 
 ## Inline-only artefacts
 
-`concept`, `walkthrough`, and `spec-assertion` artefacts are **inline-only**:
-their canonical surface is the palette's expanded result row (full markdown
-body, normative anchors, related-concept chips) rather than a dedicated page
-route. The Next.js app intentionally does not serve `/concept/{id}`,
-`/walkthrough/{id}`, or `/assertion/{id}`.
+`concept` and `walkthrough` artefacts are **inline-only**: their canonical
+surface is the palette's expanded result row (full markdown body,
+related-concept chips) rather than a dedicated page route. The Next.js app
+intentionally does not serve `/concept/{id}` or `/walkthrough/{id}`.
+
+`spec-assertion` artefacts are not inline-only: each has a page at
+`/spec/{specification}/{id}` served from the conformance registry, and the
+palette row links to it.
 
 Consequences for content authors:
 
@@ -148,12 +216,17 @@ The validator fails the build on any of:
 - `flow` artefact whose `protocol` does not match the parent directory.
 - Unknown top-level frontmatter field.
 - Markdown file outside the recognised directories listed in **File layout**.
+- `spec-assertion` whose `id` is not a registry requirement, is not lowercase,
+  whose `##` headings differ from the four required ones, or whose body
+  contains a fenced code block or raw HTML.
 
 Run locally with:
 
 ```sh
 cd ProtocolSoup/backend
 go run ./cmd/content-validate -content ../content
+# Explicit registry path (the default is the file below, relative to backend/):
+go run ./cmd/content-validate -content ../content -registry internal/conformance/vc-requirements.yaml
 ```
 
 CI runs the same command on every PR that touches `content/**`.

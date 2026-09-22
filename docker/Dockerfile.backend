@@ -15,7 +15,7 @@ COPY content/ /content/
 
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}
 RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o palette-indexer ./cmd/palette-indexer
-RUN ./palette-indexer -content /content -out /app/palette.db && \
+RUN ./palette-indexer -content /content -registry /app/internal/conformance/vc-requirements.yaml -out /app/palette.db && \
     test -s /app/palette.db && \
     file /app/palette.db | grep -q SQLite
 
