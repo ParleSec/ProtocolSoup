@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react'
+import { SoupMark } from './Brand'
 
 interface Props {
   children: ReactNode
@@ -58,9 +59,9 @@ export class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4">
+        <div className="min-h-screen bg-canvas flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-[#0f172a] border border-white/10 rounded-xl p-6 text-center">
-            <div className="text-4xl mb-4">🍜</div>
+            <SoupMark className="w-12 h-12 mx-auto mb-4" />
             <h1 className="text-xl font-semibold text-white mb-2">
               Something went wrong
             </h1>

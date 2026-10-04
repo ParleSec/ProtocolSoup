@@ -4,6 +4,7 @@ import {
   ChevronRight, Code, FileSearch, Zap
 } from 'lucide-react'
 
+import { Wordmark } from '@/components/common/Brand'
 import { HomepagePalette } from '@/components/palette/HomepagePalette'
 import { SITE_CONFIG } from '@/config/seo'
 import certification from '@/data/openid-certification.json'
@@ -88,9 +89,8 @@ export function Dashboard() {
           <Terminal className="w-4 h-4" />
           <span>{SITE_CONFIG.shortTagline}</span>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-semibold text-white mb-3 flex items-center gap-3">
-          ProtocolSoup
-          <span className="text-2xl sm:text-3xl" aria-hidden="true">🍜</span>
+        <h1 className="mb-3">
+          <Wordmark live className="text-3xl sm:text-4xl" />
         </h1>
         <p className="text-surface-300 text-base sm:text-lg max-w-2xl">
           Run real identity protocol flows against live infrastructure. Inspect every request, token, and validation decision.

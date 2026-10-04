@@ -2,6 +2,7 @@ import { ReactNode } from 'react'
 import Link from 'next/link'
 import { BookOpen, Eye, FileText, Shield, Wallet } from 'lucide-react'
 import { LayoutHeader } from './LayoutHeader.client'
+import { Wordmark } from './Brand'
 import { SITE_CONFIG } from '@/config/seo'
 
 function Github({ className }: { className?: string }) {
@@ -18,7 +19,7 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   return (
-    <div className="min-h-screen bg-surface-950 overflow-x-hidden">
+    <div className="min-h-screen bg-canvas overflow-x-hidden">
       <div className="fixed inset-0 opacity-30 pointer-events-none">
         <svg className="absolute inset-0 w-full h-full">
           <defs>
@@ -42,20 +43,19 @@ export function Layout({ children }: LayoutProps) {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/50 to-transparent" />
         <div className="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
           <div className="flex flex-col items-center sm:items-start gap-2">
-            <Link href="/" className="inline-flex items-center gap-2 group">
-              <span className="text-lg" aria-hidden="true">🍜</span>
-              <span className="text-sm font-semibold text-white group-hover:text-amber-100 transition-colors">ProtocolSoup</span>
+            <Link href="/" aria-label="ProtocolSoup home" className="inline-flex items-center">
+              <Wordmark className="text-base" />
             </Link>
             <p className="font-mono text-[11px] tracking-wide text-amber-400/80">
               real hops · real tokens · no mocks
             </p>
-            <p className="text-xs text-surface-600">
+            <p className="text-xs text-surface-400">
               Built by{' '}
               <a
                 href="https://www.linkedin.com/in/mason-parle/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-surface-400 hover:text-amber-400 transition-colors"
+                className="text-surface-200 hover:text-amber-400 transition-colors"
               >
                 Mason Parle
               </a>

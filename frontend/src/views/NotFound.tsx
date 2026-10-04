@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { Home, Eye, Wallet, BookOpen, AlertCircle } from 'lucide-react'
 import { motion } from 'framer-motion'
+import { SoupMark } from '@/components/common/Brand'
 import { SITE_CONFIG } from '@/config/seo'
 
 export function NotFound() {
@@ -38,9 +39,9 @@ export function NotFound() {
               repeat: Infinity,
               ease: 'easeInOut'
             }}
-            className="absolute -top-8 -left-8 text-6xl opacity-20"
+            className="absolute -top-8 -left-8 opacity-20"
           >
-            🍜
+            <SoupMark className="w-16 h-16" />
           </motion.div>
           
           <motion.div

@@ -7,6 +7,7 @@ import { Eye, ExternalLink, BookOpen, Menu, X, FileText, Search, Wallet } from '
 
 import { usePlatformShortcutLabel } from '@/components/palette/usePaletteQuery'
 import { SITE_CONFIG } from '@/config/seo'
+import { Wordmark } from './Brand'
 
 function Github({ className }: { className?: string }) {
   return (
@@ -58,9 +59,8 @@ export function LayoutHeader() {
         <div className="max-w-5xl mx-auto px-3 sm:px-6 py-2.5 sm:py-3">
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center">
-              <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group flex-shrink-0">
-                <span className="text-lg sm:text-xl flex-shrink-0">🍜</span>
-                <span className="font-semibold text-white group-hover:text-amber-100 transition-colors text-sm sm:text-base whitespace-nowrap">ProtocolSoup</span>
+              <Link href="/" aria-label="ProtocolSoup home" className="flex items-center flex-shrink-0">
+                <Wordmark className="text-base sm:text-lg" />
               </Link>
             </div>
 
