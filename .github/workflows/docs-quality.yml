@@ -5,11 +5,13 @@ on:
     paths:
       - "docs/starlight/**"
       - "openapi/**"
+      - "design/**"
   pull_request:
     branches: [ master, develop ]
     paths:
       - "docs/starlight/**"
       - "openapi/**"
+      - "design/**"
 
 permissions:
   contents: read
@@ -48,6 +50,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Verify GEL design token copies are in sync
+        run: node design/sync-tokens.mjs --check
+
       - name: Install dependencies
         run: npm ci
         working-directory: docs/starlight
@@ -76,6 +81,7 @@ jobs:
             "docs/starlight/src/content/docs/developers/development-setup.mdx",
             "docs/starlight/src/content/docs/developers/pull-request-workflow.mdx",
             "docs/starlight/src/content/docs/developers/extending/add-a-protocol.mdx",
+            "docs/starlight/src/content/docs/developers/design-system.mdx",
             "docs/starlight/src/content/docs/deploy/overview.mdx",
             "docs/starlight/src/content/docs/protocols/oauth2.mdx",
             "docs/starlight/src/content/docs/protocols/oidc.mdx",
