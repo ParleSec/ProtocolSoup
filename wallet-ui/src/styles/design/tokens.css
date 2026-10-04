@@ -1,9 +1,9 @@
-/* GENERATED from ProtocolLens/design/tokens.css by design/sync-tokens.mjs. Do not edit. */
+/* GENERATED from ProtocolSoup/design/tokens.css by design/sync-tokens.mjs. Do not edit. */
 /*
  * ProtocolSoup GEL (Global Expression Language) design tokens.
  *
  * Canonical source. Edit this file, then run `node design/sync-tokens.mjs`
- * from ProtocolLens/ to refresh the committed copies in frontend, wallet-ui
+ * from ProtocolSoup/ to refresh the committed copies in frontend, wallet-ui
  * and docs. CI runs `--check` and fails on drift.
  *
  * Guidelines: https://docs.protocolsoup.com/developers/design-system/
@@ -85,7 +85,8 @@
   --ps-fg-muted: var(--ps-ink-2);
   --ps-fg-subtle: var(--ps-ink-3);
 
-  /* Brand: wordmark, hero, docs navigation, theme-color. Not for buttons. */
+  /* Brand: wordmark, hero, docs navigation, wallet and docs theme-color (the
+     app's theme-color is warm orange). Not for buttons. */
   --ps-brand: var(--ps-hue-purple);
   --ps-brand-strong: var(--ps-hue-purple-mist);
   --ps-brand-soft: var(--ps-hue-purple-night);

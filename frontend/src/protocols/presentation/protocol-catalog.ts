@@ -12,7 +12,7 @@ export interface ProtocolFlowSummary {
  * Protocol identity hue (GEL: identity, never state). 
  * Homepage grid is 2 * columns; adjacent families share a hue region. 
  * Pick new hues from the * reserved list at /developers/design-system/
- * add the matching `--ps-protocol-{id}` token in ProtocolLens/design/tokens.css.
+ * add the matching `--ps-protocol-{id}` token in ProtocolSoup/design/tokens.css.
  */
 export type ProtocolAccent = 'blue' | 'sky' | 'orange' | 'amber' | 'green' | 'teal' | 'cyan' | 'indigo'
 

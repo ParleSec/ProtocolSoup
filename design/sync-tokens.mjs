@@ -23,9 +23,9 @@ const TARGETS = [
 const check = process.argv.includes('--check')
 
 const BANNERS = {
-  '.css': (file) => `/* GENERATED from ProtocolLens/design/${file} by design/sync-tokens.mjs. Do not edit. */\n`,
-  '.ts': (file) => `// GENERATED from ProtocolLens/design/${file} by design/sync-tokens.mjs. Do not edit.\n`,
-  '.svg': (file) => `<!-- GENERATED from ProtocolLens/design/${file} by design/sync-tokens.mjs. Do not edit. -->\n`,
+  '.css': (file) => `/* GENERATED from ProtocolSoup/design/${file} by design/sync-tokens.mjs. Do not edit. */\n`,
+  '.ts': (file) => `// GENERATED from ProtocolSoup/design/${file} by design/sync-tokens.mjs. Do not edit.\n`,
+  '.svg': (file) => `<!-- GENERATED from ProtocolSoup/design/${file} by design/sync-tokens.mjs. Do not edit. -->\n`,
 }
 
 const stale = []
@@ -47,7 +47,7 @@ for (const { file, to } of TARGETS) {
 
 if (check) {
   if (stale.length > 0) {
-    console.error('GEL copies are out of date. Run `node design/sync-tokens.mjs` from ProtocolLens/:')
+    console.error('GEL copies are out of date. Run `node design/sync-tokens.mjs` from ProtocolSoup/:')
     for (const path of stale) console.error(`  ${path}`)
     process.exit(1)
   }

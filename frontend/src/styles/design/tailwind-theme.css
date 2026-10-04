@@ -1,9 +1,9 @@
-/* GENERATED from ProtocolLens/design/tailwind-theme.css by design/sync-tokens.mjs. Do not edit. */
+/* GENERATED from ProtocolSoup/design/tailwind-theme.css by design/sync-tokens.mjs. Do not edit. */
 /*
  * ProtocolSoup GEL: Tailwind v4 theme, shared base layer and shared utilities.
  *
  * Canonical source. Import after `@import "tailwindcss"` and `tokens.css`.
- * Edit here, then run `node design/sync-tokens.mjs` from ProtocolLens/.
+ * Edit here, then run `node design/sync-tokens.mjs` from ProtocolSoup/.
  *
  * `@theme inline` maps utilities straight onto the --ps-* custom properties so
  * a token change (or a [data-theme] override) reaches every utility without a

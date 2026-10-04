@@ -1,9 +1,9 @@
-/* GENERATED from ProtocolLens/design/tokens.css by design/sync-tokens.mjs. Do not edit. */
+/* GENERATED from ProtocolSoup/design/tokens.css by design/sync-tokens.mjs. Do not edit. */
 /*
  * ProtocolSoup GEL (Global Expression Language) design tokens.
  *
  * Canonical source. Edit this file, then run `node design/sync-tokens.mjs`
- * from ProtocolLens/ to refresh the committed copies in frontend, wallet-ui
+ * from ProtocolSoup/ to refresh the committed copies in frontend, wallet-ui
  * and docs. CI runs `--check` and fails on drift.
  *
  * Guidelines: https://docs.protocolsoup.com/developers/design-system/
@@ -16,7 +16,10 @@
 :root {
   /* ── Tier 1: primitives ─────────────────────────────────── */
 
-  /* Lab blacks */
+  /* Lab blacks: an indigo black (OKLCH hue ~270) at chroma ~0.019, so it reads
+     as black first and blue second. +0.035 lightness per step. Panels
+     (--ps-indigo-*) share the hue and lift by lightness. Brand purple text
+     holds 4.5:1 on lab-0 to lab-2. The canvas is never lit. */
   --ps-lab-0: #05070f; /* oklch(0.130 0.019 270) */
   --ps-lab-1: #0b0e18; /* oklch(0.166 0.022 271) */
   --ps-lab-2: #13161f; /* oklch(0.201 0.019 270) */
@@ -40,7 +43,10 @@
   --ps-slate-900: #0f172a;
   --ps-slate-950: #020617;
 
-  /* Indigo panels */
+  /* Indigo panels: slate 700-950 lightness at the canvas hue (OKLCH ~272,
+     chroma ~0.026), so header, panels and canvas share one neutral family and
+     panels lift by lightness alone. Dark surface-* and Tailwind slate-* 700-950
+     resolve here. */
   --ps-indigo-700: #3b3f4e; /* oklch(0.370 0.026 273) */
   --ps-indigo-800: #232735; /* oklch(0.275 0.027 272) */
   --ps-indigo-900: #131724; /* oklch(0.207 0.027 271) */
@@ -79,7 +85,8 @@
   --ps-fg-muted: var(--ps-ink-2);
   --ps-fg-subtle: var(--ps-ink-3);
 
-  /* Brand: wordmark, hero, docs navigation, theme-color. Not for buttons. */
+  /* Brand: wordmark, hero, docs navigation, wallet and docs theme-color (the
+     app's theme-color is warm orange). Not for buttons. */
   --ps-brand: var(--ps-hue-purple);
   --ps-brand-strong: var(--ps-hue-purple-mist);
   --ps-brand-soft: var(--ps-hue-purple-night);

@@ -6,7 +6,7 @@
 // or not a web font has loaded, and the indexable name is always the plain
 // string "ProtocolSoup" supplied next to it (alt text or visually hidden text).
 //
-//   cd ProtocolLens/design && npm install && npm run build:brand
+//   cd ProtocolSoup/design && npm install && npm run build:brand
 //
 // Outputs (committed, then copied into apps by sync-tokens.mjs):
 //   brand/wordmark.generated.ts   geometry for the React/Satori renderer

@@ -1,4 +1,6 @@
-// GENERATED from ProtocolLens/design/brand/wordmark.generated.ts by design/sync-tokens.mjs. Do not edit.
+// GENERATED from ProtocolSoup/design/brand/wordmark.generated.ts by design/sync-tokens.mjs. Do not edit.
+// Geometry for the ProtocolSoup wordmark.
+// Rendered by Wordmark in Brand.tsx
 export const WORDMARK = {
   "viewBox": "0 -82 690 108",
   "liveViewBox": "0 -82 756 108",
