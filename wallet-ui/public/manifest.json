@@ -4,8 +4,8 @@
   "description": "Hosted OID4VCI and OID4VP wallet for ProtocolSoup",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0a0a0f",
+  "background_color": "#05070f",
+  "theme_color": "#a855f7",
   "orientation": "portrait-primary",
   "scope": "/",
   "icons": [
