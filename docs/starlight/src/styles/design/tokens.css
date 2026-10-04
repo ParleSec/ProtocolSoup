@@ -1,0 +1,173 @@
+/* GENERATED from ProtocolLens/design/tokens.css by design/sync-tokens.mjs. Do not edit. */
+/*
+ * ProtocolSoup GEL (Global Expression Language) design tokens.
+ *
+ * Canonical source. Edit this file, then run `node design/sync-tokens.mjs`
+ * from ProtocolLens/ to refresh the committed copies in frontend, wallet-ui
+ * and docs. CI runs `--check` and fails on drift.
+ *
+ * Guidelines: https://docs.protocolsoup.com/developers/design-system/
+ *
+ * Plain CSS custom properties only (no Tailwind, no Starlight syntax) so every
+ * surface can consume the same file. Tier 1 primitives are raw values and must
+ * not be referenced from components; use the tier 2 semantic roles.
+ */
+
+:root {
+  /* ── Tier 1: primitives ─────────────────────────────────── */
+
+  /* Lab blacks */
+  --ps-lab-0: #05070f; /* oklch(0.130 0.019 270) */
+  --ps-lab-1: #0b0e18; /* oklch(0.166 0.022 271) */
+  --ps-lab-2: #13161f; /* oklch(0.201 0.019 270) */
+  --ps-lab-3: #1b1e26; /* oklch(0.236 0.016 269) */
+
+  /* Ink: text on lab blacks */
+  --ps-ink-1: #e4e4e7;
+  --ps-ink-2: #a1a1aa;
+  --ps-ink-3: #71717a;
+
+  /* Slate: structural neutrals (Tailwind `surface-*`) */
+  --ps-slate-50: #f8fafc;
+  --ps-slate-100: #f1f5f9;
+  --ps-slate-200: #e2e8f0;
+  --ps-slate-300: #cbd5e1;
+  --ps-slate-400: #94a3b8;
+  --ps-slate-500: #64748b;
+  --ps-slate-600: #475569;
+  --ps-slate-700: #334155;
+  --ps-slate-800: #1e293b;
+  --ps-slate-900: #0f172a;
+  --ps-slate-950: #020617;
+
+  /* Indigo panels */
+  --ps-indigo-700: #3b3f4e; /* oklch(0.370 0.026 273) */
+  --ps-indigo-800: #232735; /* oklch(0.275 0.027 272) */
+  --ps-indigo-900: #131724; /* oklch(0.207 0.027 271) */
+  --ps-indigo-950: #04050b; /* oklch(0.117 0.016 274) */
+
+  /* Brand trio and status hues */
+  --ps-hue-orange: #f97316;
+  --ps-hue-purple: #a855f7;
+  --ps-hue-purple-deep: #7c3aed;
+  --ps-hue-purple-ink: #4c1d95;
+  --ps-hue-purple-mist: #e9d5ff;
+  --ps-hue-purple-night: #1a0a2e;
+  --ps-hue-purple-dawn: #faf5ff;
+  --ps-hue-cyan: #06b6d4;
+  --ps-hue-cyan-deep: #0e7490;
+  --ps-hue-green: #10b981;
+  --ps-hue-red: #ef4444;
+  --ps-hue-amber: #f59e0b;
+
+  /* ── Tier 2: semantic roles (dark, default) ─────────────── */
+
+  /* Surfaces: base page, raised panel, overlay (menus, modals), elevated (hover, scrollbar) */
+  --ps-bg-base: var(--ps-lab-0);
+  --ps-bg-raised: var(--ps-lab-1);
+  --ps-bg-overlay: var(--ps-lab-2);
+  --ps-bg-elevated: var(--ps-lab-3);
+
+  /* Borders do the work shadows would do elsewhere */
+  --ps-border-subtle: rgb(255 255 255 / 0.05);
+  --ps-border-default: rgb(255 255 255 / 0.1);
+  --ps-border-strong: rgb(255 255 255 / 0.2);
+  --ps-glass: rgb(255 255 255 / 0.03);
+
+  /* fg-subtle is 4.1:1 on bg-base: large text, icons and placeholders only */
+  --ps-fg: var(--ps-ink-1);
+  --ps-fg-muted: var(--ps-ink-2);
+  --ps-fg-subtle: var(--ps-ink-3);
+
+  /* Brand: wordmark, hero, docs navigation, theme-color. Not for buttons. */
+  --ps-brand: var(--ps-hue-purple);
+  --ps-brand-strong: var(--ps-hue-purple-mist);
+  --ps-brand-soft: var(--ps-hue-purple-night);
+  --ps-brand-gradient: linear-gradient(135deg, var(--ps-hue-orange) 0%, var(--ps-hue-purple) 50%, var(--ps-hue-cyan) 100%);
+
+  /* Interactive: primary actions, in-app links, focus ring */
+  --ps-interactive: var(--ps-hue-cyan);
+  --ps-focus-ring: var(--ps-hue-cyan);
+
+  /* Status: fixed meaning on every surface; always paired with an icon and label */
+  --ps-status-success: var(--ps-hue-green);
+  --ps-status-danger: var(--ps-hue-red);
+  --ps-status-warning: var(--ps-hue-amber);
+  --ps-status-info: var(--ps-hue-cyan);
+  --ps-status-deviation: var(--ps-hue-purple);
+  --ps-status-pending: var(--ps-ink-2);
+
+  /* Protocol identity hues: identity only, never state */
+  --ps-protocol-oauth2: #3b82f6;
+  --ps-protocol-oidc: #0ea5e9;
+  --ps-protocol-saml: #f97316;
+  --ps-protocol-scim: #f59e0b;
+  --ps-protocol-spiffe: #22c55e;
+  --ps-protocol-ssf: #14b8a6;
+  --ps-protocol-oid4vci: #06b6d4;
+  --ps-protocol-oid4vp: #6366f1;
+
+  /* Wire-data syntax colours (JSON keys, strings, numbers, literals) */
+  --ps-syntax-key: var(--ps-hue-orange);
+  --ps-syntax-string: var(--ps-hue-green);
+  --ps-syntax-number: var(--ps-hue-cyan);
+  --ps-syntax-literal: var(--ps-hue-purple);
+  --ps-syntax-null: var(--ps-ink-3);
+
+  /* ── Typography ──────────────────────────────────────────── */
+
+  /* Mono: the only voice in the app and wallet (Inter is not loaded there).
+     Sans: body prose on the docs site, whose headings and chrome stay mono. */
+  --ps-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --ps-font-sans: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --ps-text-display: clamp(2rem, 5vw, 3.5rem);
+  --ps-text-heading: 1.5rem;
+  --ps-text-body: 0.875rem;
+  --ps-text-caption: 0.75rem;
+  --ps-text-data: 0.75rem;
+  --ps-tracking-display: -0.03em;
+  --ps-tracking-heading: -0.02em;
+
+  /* ── Shape ───────────────────────────────────────────────── */
+
+  --ps-radius-inline: 4px;
+  --ps-radius-control: 8px;
+  --ps-radius-panel: 12px;
+  --ps-radius-pill: 9999px;
+
+  /* Glow is reserved for brand moments and the active flow node */
+  --ps-glow-brand: 0 0 20px rgb(168 85 247 / 0.3);
+  --ps-glow-interactive: 0 0 20px rgb(6 182 212 / 0.3);
+
+  /* ── Motion ──────────────────────────────────────────────── */
+
+  --ps-duration-hover: 150ms;
+  --ps-duration-enter: 300ms;
+  --ps-duration-loop: 2s;
+  --ps-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Light theme (docs today; apps are dark-only) ─────────────── */
+:root[data-theme='light'] {
+  --ps-bg-base: #ffffff;
+  --ps-bg-raised: var(--ps-slate-50);
+  --ps-bg-overlay: var(--ps-slate-100);
+  --ps-bg-elevated: var(--ps-slate-200);
+
+  --ps-border-subtle: rgb(15 23 42 / 0.06);
+  --ps-border-default: rgb(15 23 42 / 0.12);
+  --ps-border-strong: rgb(15 23 42 / 0.24);
+  --ps-glass: rgb(15 23 42 / 0.03);
+
+  --ps-fg: var(--ps-slate-950);
+  --ps-fg-muted: var(--ps-slate-600);
+  --ps-fg-subtle: var(--ps-slate-500);
+
+  --ps-brand: var(--ps-hue-purple-deep);
+  --ps-brand-strong: var(--ps-hue-purple-ink);
+  --ps-brand-soft: var(--ps-hue-purple-dawn);
+
+  --ps-interactive: var(--ps-hue-cyan-deep);
+  --ps-focus-ring: var(--ps-hue-cyan-deep);
+}
