@@ -107,7 +107,7 @@ export function RequirementPage({ requirement, relatedProtocol }: RequirementPag
       </nav>
 
       <header className="space-y-2">
-        <h1 className="font-display text-2xl sm:text-3xl font-bold text-white">{requirement.title}</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-white">{requirement.title}</h1>
         {/* Visible separators keep the markdown rendering readable: turndown
             collapses adjacent inline spans without whitespace. */}
         <p className="text-sm sm:text-base text-surface-400 flex flex-wrap items-center gap-x-2 gap-y-1">

@@ -84,7 +84,7 @@ export function ProtocolDemo({
           <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
         </Link>
         <div className="flex-1 min-w-0">
-          <h1 className="font-display text-xl sm:text-3xl font-bold text-white flex items-center gap-2 sm:gap-3">
+          <h1 className="text-xl sm:text-3xl font-bold text-white flex items-center gap-2 sm:gap-3">
             <ProtocolIcon className="w-6 h-6 sm:w-8 sm:h-8 text-accent-orange flex-shrink-0" />
             <span className="truncate">{protocol.name}</span>
           </h1>
@@ -117,7 +117,7 @@ export function ProtocolDemo({
 
       {/* Flows Grid - Data from modular plugins */}
       <div>
-        <h2 className="font-display text-lg sm:text-xl font-semibold text-white mb-3 sm:mb-4">
+        <h2 className="text-lg sm:text-xl font-semibold text-white mb-3 sm:mb-4">
           Available Flows
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
@@ -149,7 +149,7 @@ export function ProtocolDemo({
                       <FlowIcon className="w-5 h-5 sm:w-7 sm:h-7 text-white" />
                     </div>
                     <div className="flex-1 min-w-0 pr-6 sm:pr-8">
-                      <h3 className="font-display text-base sm:text-lg font-semibold text-white group-hover:text-white transition-colors">
+                      <h3 className="text-base sm:text-lg font-semibold text-white group-hover:text-white transition-colors">
                         {flow.name}
                       </h3>
                       <p className="text-surface-400 text-xs sm:text-sm mt-1 line-clamp-2">
@@ -235,7 +235,7 @@ export function ProtocolDemo({
       {/* Protocol Features - from modular meta */}
       {meta.features.length > 0 && (
         <div className="glass rounded-xl p-4 sm:p-6">
-          <h2 className="font-display text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
+          <h2 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">
             {protocol.name} Features
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">

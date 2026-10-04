@@ -1,4 +1,5 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
+import '@fontsource-variable/jetbrains-mono'
 import { WebMcpTools } from '@/components/agent/WebMcpTools.client'
 import { Layout } from '@/components/common/Layout'
 import { CmdKPalette } from '@/components/palette/CmdKPalette'
@@ -75,6 +76,10 @@ export const metadata: Metadata = {
   verification: {
     google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || undefined,
   },
+}
+
+export const viewport: Viewport = {
+  themeColor: '#f97316',
 }
 
 const baseSchemas = [generateWebsiteSchema(), generateOrganizationSchema()]

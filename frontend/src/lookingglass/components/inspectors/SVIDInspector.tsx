@@ -796,7 +796,7 @@ function FieldRow({
         <p className={`text-xs font-medium ${isHighlighted ? 'text-yellow-400' : 'text-surface-400'}`}>
           {label}
         </p>
-        <p className="text-sm text-white break-all mt-0.5">{value}</p>
+        <p className="text-sm font-mono text-white break-all mt-0.5">{value}</p>
         {description && <p className="text-xs text-surface-400 mt-1">{description}</p>}
       </div>
       {onCopy && (

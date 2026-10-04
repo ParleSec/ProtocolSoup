@@ -42,7 +42,7 @@ export function SpecIndexPage({ spec, relatedProtocol }: SpecIndexPageProps) {
       </nav>
 
       <header className="space-y-2">
-        <h1 className="font-display text-2xl sm:text-3xl font-bold text-white">
+        <h1 className="text-2xl sm:text-3xl font-bold text-white">
           {spec.title}: normative requirements
         </h1>
         {/* Visible separators keep the markdown rendering readable: turndown
