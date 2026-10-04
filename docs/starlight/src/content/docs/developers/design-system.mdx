@@ -1,0 +1,296 @@
+---
+title: Design System (GEL)
+description: The ProtocolSoup Global Expression Language - brand, colour, typography, tokens, and component recipes shared by the app, the wallet harness, and these docs.
+---
+
+import wordmarkDark from '../../../assets/wordmark-dark.svg';
+import wordmarkLight from '../../../assets/wordmark-light.svg';
+
+The Global Expression Language (GEL) is how ProtocolSoup looks and reads on every surface: the main app (`protocolsoup.com`), the wallet harness (`wallet.protocolsoup.com`), and these docs. It exists so a new protocol, panel, or page looks like it belongs without anyone having to guess.
+
+One directory defines it: [`ProtocolSoup/design/`](https://github.com/ParleSec/ProtocolSoup/tree/master/design), which holds `tokens.css` (the values), `tailwind-theme.css` (how the apps consume them) and `brand/` (the wordmark). Everything below is either a token in those files or a rule for using one. Where the codebase does not yet follow a rule, the [known gaps](#known-gaps) say so.
+
+## Identity
+
+ProtocolSoup is a lab, not a marketing site. The UI is a dark terminal-style instrument for watching real protocol traffic: real payloads front and centre. The terminal voice is the brand. Everything else (colour roles, tints, spacing) exists to keep it legible.
+
+- **Product name:** ProtocolSoup, one word, capital P and S. "Protocol Soup" is only an alternate name in structured data.
+- **Repository:** `ProtocolSoup/` is the repo directory. It never appears in UI copy.
+- **Tagline:** "Real Flows, Real Infrastructure". Footer microcopy: "real hops · real tokens · no mocks".
+- **Voice:** precise and plain. Name the RFC or spec section, say what the protocol actually returned, never soften or paraphrase an error into something friendlier than the wire response.
+
+### Logo and mark
+
+<img src="/favicon.svg" alt="" width="40" height="40" style={{ display: 'inline-block', verticalAlign: 'middle' }} />
+
+The **mark** is the soup bowl in `frontend/public/favicon.svg` (the docs carry an identical copy): three steam wisps in the brand trio (orange, purple, cyan), a slate bowl, and five ingredients (the trio plus a green and a yellow) on a `#0f172a` tile. It is the app icon, favicon, and stand-alone avatar. In React, `SoupMark` draws the same bowl without the tile.
+
+<img src={wordmarkDark.src} alt="ProtocolSoup" class="light:sl-hidden" style={{ height: '3rem', width: 'auto' }} />
+<img src={wordmarkLight.src} alt="ProtocolSoup" class="dark:sl-hidden" style={{ height: '3rem', width: 'auto' }} />
+
+The **wordmark** is artwork, not typed text. It is built once from JetBrains Mono Bold outlines by `design/brand/build-wordmark.mjs` and every surface renders the same paths:
+
+- "Protocol" in `--ps-fg`, "Soup" in `--ps-brand`.
+- The "o" of Soup is the bowl, steaming in the brand trio, drawn one monospace cell wide from the baseline to cap height.
+- The cursor is the "live" moment: a flat underscore one cell wide in `--ps-interactive`, blinking after the word. It appears only in the homepage hero (`live`). Every other surface (headers, footers, docs, share cards) uses the bare wordmark, so navigation chrome stays quiet.
+- The art is 1.08em tall for a given font size, so it sits at the same cap height as bold mono text beside it (for example the "Wallet" suffix in the wallet harness).
+
+Because it is vector artwork, it looks identical before and after web fonts load, and it never leaks letters into the page text. The indexable and accessible name is always the plain string `ProtocolSoup`, supplied next to the art:
+
+- **Apps:** `Wordmark` from `frontend/src/components/common/Brand.tsx` renders the SVG `aria-hidden` with the real text `ProtocolSoup` laid over it in transparent mono bold on the same cell grid, so the `textContent` of the header link or the hero `h1` is exactly `ProtocolSoup`, and drag-selecting or copying the wordmark yields that string. Size it with a font-size utility (`text-base sm:text-lg` in the header, `text-base` in the footer, `text-3xl sm:text-4xl` in the hero). `WordmarkArt` is the hook-free drawing used by the `next/og` cards in `frontend/src/lib/og.tsx`. Use `SoupMark` from the same file where only the icon fits (404, error boundary).
+- **Static images:** `design/brand/wordmark-dark.svg` and `wordmark-light.svg` carry `role="img"`, `<title>ProtocolSoup</title>`, and must be placed with `alt="ProtocolSoup"`. The sync script copies both to `frontend/public/brand/` and `docs/starlight/src/assets/` (Starlight header, API reference topbar, this page) and the dark one to `wallet-ui/public/brand/` (wallet footer). The sharp-rendered share cards in `frontend/scripts/generate-og-image.mjs` and `wallet-ui/scripts/generate-seo-assets.mjs` read the dark SVG from `public/brand/`.
+- Never type "ProtocolSoup" as a logo, never use the 🍜 emoji (it renders differently on every OS and cannot carry the brand colours), and never show the mark next to the wordmark: the bowl is already in the word. Do not recolour the bowl or the cursor, swap the font, or set the wordmark in title case without the bowl.
+
+To change the wordmark, edit the generator, then from `ProtocolSoup/design/` run `npm install` and `npm run build:brand` (which also runs the sync).
+
+## Colour
+
+Colour is split into roles that never overlap. If you are reaching for a colour, first decide which role you are in.
+
+| Role | Token | Used for | Never used for |
+|------|-------|----------|----------------|
+| Brand | `--ps-brand` (purple) | Wordmark, hero, docs navigation, wallet and docs `theme-color` | Buttons, status |
+| Brand gradient | `--ps-brand-gradient` | Wordmark-scale moments: hero text, 404, OG images | Body text, borders, backgrounds |
+| Interactive | `--ps-interactive` (cyan) | Primary actions, in-app links, focus ring | Status meaning |
+| Status | `--ps-status-*` | Outcome of a step, check, or request | Decoration, protocol identity |
+| Protocol identity | `--ps-protocol-{id}` | Cards, icons, and tags for that protocol | Success or failure |
+
+### Surfaces and text
+
+<div class="gel-swatches not-content">
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-bg-base)' }} /><div class="gel-swatch-label">--ps-bg-base</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-bg-raised)' }} /><div class="gel-swatch-label">--ps-bg-raised</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-bg-overlay)' }} /><div class="gel-swatch-label">--ps-bg-overlay</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-bg-elevated)' }} /><div class="gel-swatch-label">--ps-bg-elevated</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-fg)' }} /><div class="gel-swatch-label">--ps-fg</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-fg-muted)' }} /><div class="gel-swatch-label">--ps-fg-muted</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-fg-subtle)' }} /><div class="gel-swatch-label">--ps-fg-subtle</div></div>
+</div>
+
+These swatches read the live tokens, so toggling the docs theme shows the light values.
+
+**The canvas is indigo black.** Every surface (app, wallet, docs, share cards, PWA splash) paints `--ps-bg-base`, `#05070f`. In components and CSS it is always `bg-canvas` or the token; never a literal. In OKLCH:
+
+- **Black first, blue second.** `lab-0` is `#05070f`: lightness 0.130, chroma 0.019, hue 270. It reads as black with a cool blue undertone, which reads as calm and trustworthy, without competing with the accents (chroma 0.13 to 0.23). Rejected alternatives: near-neutral `#0a0a0f` (lifeless), aubergine at hue 305 (`#120a19` too purple, `#09060d` still warmer than wanted), saturated navy ink (reads as a generic dark website), and ambient brand light pooled behind the hero (reads as a marketing gradient).
+- **Steps stay in the same hue.** `lab-1` to `lab-3` (`raised`, `overlay`, `elevated`) step up 0.035 in lightness at hue ~270.
+- **Panels share the hue.** The header, inputs and Looking Glass panels paint with `surface-700` to `surface-950` (and Tailwind's `slate-700` to `slate-950`), which resolve to `--ps-indigo-700` to `--ps-indigo-950`: slate's lightness steps at the canvas hue. Panels lift off the canvas by lightness, so there is one neutral family on screen. Stock slate panels (hue ~257, chroma up to 0.04) on a different-hue canvas read as two palettes and were rejected.
+- **Glow is for content, not the canvas.** The hero cards' corner blooms and `--ps-glow-brand` on the active flow node are the only soft light on a page. Do not add page-level gradients or radial glows behind the header or hero.
+
+**Literal copies of the canvas.** A few places cannot read CSS variables and carry the hex values by hand. When `--ps-lab-0` to `--ps-lab-3` change, update all of them in the same commit, then regenerate the rasterised assets:
+
+| File | Carries | Then run |
+|------|---------|----------|
+| `frontend/public/manifest.json`, `wallet-ui/public/manifest.json` | `background_color` (PWA splash) = `lab-0` | nothing |
+| `frontend/src/lib/og.tsx` | `next/og` card gradient `lab-0` to `lab-1`; `WORDMARK_DARK` in `Brand.tsx` carries the fixed brand colours for the same cards | nothing (rendered at request time) |
+| `frontend/scripts/generate-og-image.mjs` | gradient stops `lab-0`, `lab-1`, `lab-3`; card fill `lab-0` | `node scripts/generate-og-image.mjs` from `frontend/` |
+| `wallet-ui/scripts/generate-seo-assets.mjs` | same stops and fill | `node scripts/generate-seo-assets.mjs` from `wallet-ui/` |
+
+`rg -n "05070f|0b0e18|13161f|1b1e26" --glob "!**/node_modules/**"` from `ProtocolSoup/` should list exactly these files, the token copies and this page.
+
+- Elevation comes from borders, not shadows: `--ps-border-subtle` (white 5%), `--ps-border-default` (white 10%), `--ps-border-strong` (white 20%).
+- The app's structural neutrals are the `surface-50` to `surface-950` scale in Tailwind: true slate from 50 to 600 (text and light-theme colours), indigo from 700 to 950 (dark panels and borders).
+- **Contrast floor:** body text must reach 4.5:1. On `--ps-bg-base`, `--ps-fg` is 15.9:1, `--ps-fg-muted` / `surface-400` are 7.9:1, and brand purple is 5.1:1 (4.9:1 on `raised`, 4.6:1 on `overlay`, 4.5:1 on `surface-900`, below 4.5:1 on `elevated`, so keep purple text off elevated surfaces). `--ps-fg-subtle` and `surface-500` are about 4.0:1, so use them only for large text, icons, and placeholders. `surface-600` and darker (2.6:1 or less) are never text colours.
+
+### Brand trio
+
+<div class="gel-swatches not-content">
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-hue-orange)' }} /><div class="gel-swatch-label">orange #f97316</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-hue-purple)' }} /><div class="gel-swatch-label">purple #a855f7</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-hue-cyan)' }} /><div class="gel-swatch-label">cyan #06b6d4</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-brand-gradient)' }} /><div class="gel-swatch-label">--ps-brand-gradient</div></div>
+</div>
+
+Purple is the brand (wordmark accent, docs). Cyan is the action colour (primary buttons, in-app links, focus ring). Orange and amber are the warm chrome accent: the `>_` hero prompt, the footer (hairline, microcopy, link and nav hovers), the app's `theme-color`, the gradient and the mark, and JSON keys in payload views. All three appear on every page; a page with no warm accent has lost part of the identity. Warm chrome is decoration, not status, so keep it away from anything that could be read as a warning badge.
+
+### Status
+
+The rule: status has one meaning on every surface, and every status is shown as **icon + label + colour**, never colour alone.
+
+| Status | Token | Tailwind | Icon (lucide) | Meaning |
+|--------|-------|----------|---------------|---------|
+| Success | `--ps-status-success` | `emerald` | `CheckCircle2` | Step completed, check passed, `PASS` |
+| Danger | `--ps-status-danger` | `red` | `XCircle` | Error, `FAIL`, `MUST` / `MUST NOT` violated |
+| Warning | `--ps-status-warning` | `amber` | `AlertTriangle`, `Hand` (user action) | Needs attention or user action, `CHECK`, `SHOULD` |
+| Info | `--ps-status-info` | `cyan` | `Info`, `Loader2` (spinning) | In progress, explanatory notice |
+| Deviation | `--ps-status-deviation` | `purple` | `GitBranch` | Documented spec deviation with an ADR |
+| Pending | `--ps-status-pending` | neutral `surface` | `Circle` with `animate-pulse-slow` | Not started, not evaluated |
+
+Waiting states use motion (spinner or pulse), not a new hue, so they never collide with a protocol colour.
+
+Where it is implemented today:
+
+- **Flow status:** `STATUS_BADGE_VARIANTS` in `frontend/src/views/LookingGlass.tsx` rendered by `StatusBadge` covers Success, Info (executing), Warning (awaiting input) and Danger, and is the reference for the pattern.
+- **Notices:** `ProtocolNotice` covers Danger, Warning and Info with the raw protocol error kept verbatim.
+- **Deviation and Pending** have no shared component yet. Until one exists, build them with `StatusBadge` and the icons above; do not invent a different icon or hue per screen.
+
+Older inspectors (`SVIDInspector`, `RealFlowPanel` and others) still use `green-*` and `yellow-*` for status; see [known gaps](#known-gaps). New code uses the table.
+
+### Protocol identity hues
+
+Each protocol family owns one hue. The hue says *which protocol*, never *whether it worked*.
+
+<div class="gel-swatches not-content">
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-oauth2)' }} /><div class="gel-swatch-label">oauth2 · blue</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-oidc)' }} /><div class="gel-swatch-label">oidc · sky</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-saml)' }} /><div class="gel-swatch-label">saml · orange</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-scim)' }} /><div class="gel-swatch-label">scim · amber</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-spiffe)' }} /><div class="gel-swatch-label">spiffe · green</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-ssf)' }} /><div class="gel-swatch-label">ssf · teal</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-oid4vci)' }} /><div class="gel-swatch-label">oid4vci · cyan</div></div>
+  <div class="gel-swatch"><div class="gel-swatch-chip" style={{ '--gel-swatch': 'var(--ps-protocol-oid4vp)' }} /><div class="gel-swatch-label">oid4vp · indigo</div></div>
+</div>
+
+The canonical mapping is `COLOR_BY_PROTOCOL` in `frontend/src/protocols/presentation/protocol-catalog.ts`, which drives the homepage grid and the catalog. The grid is two columns, so neighbouring families share a hue region.
+
+Two older maps still exist and do not agree with it: `protocolMeta` in `frontend/src/protocols/registry.ts` (the protocol detail page header and card gradients) and `PROTOCOL_COLORS` in `frontend/src/lookingglass/registry.ts` (the Looking Glass protocol selector). Six of the eight families change hue between the homepage and their own page as a result, and OID4VCI uses `emerald` there, which this guide reserves for success. Until they are collapsed into the catalog (a [known gap](#known-gaps)), a new protocol has to be added to all three, with the same hue.
+
+**Reserved for new protocols:** `violet`, `rose`, `lime`, `fuchsia`. Never use `red` (danger) or `emerald` (success) as a protocol hue.
+
+### The tint recipe
+
+Coloured chips, cards, notices, and buttons all use one recipe on the dark canvas, with the hue swapped in:
+
+| Part | Quiet | Default | Emphasis |
+|------|-------|---------|----------|
+| Fill | `bg-X-500/5` | `bg-X-500/10` | `bg-X-500/20` |
+| Border | `border-X-500/20` | `border-X-500/30` | `border-X-500/40` |
+| Text | `text-X-300` or `text-X-400` | | |
+
+Text on a tint is always the 300 or 400 step; 500 and darker drop below 4.5:1 for small text. `PROTOCOL_ACCENT_CLASSES`, `ProtocolNotice`, `SegmentedChoice`, and the wallet `btn-*` utilities all follow this recipe. Keep the class strings literal (`'bg-blue-500/10'`, not `` `bg-${hue}-500/10` ``) so Tailwind can detect them.
+
+## Typography
+
+One voice per surface. Fonts are self-hosted with `@fontsource-variable/*`; no surface loads fonts from a CDN.
+
+| Surface | Family | Token / utility | Notes |
+|---------|--------|-----------------|-------|
+| App and wallet | JetBrains Mono, everything | `--ps-font-mono` / `font-mono` (default on `body`) | Wordmark, headings, nav, prose, labels, buttons, chips, status text, wire data. Inter is not loaded in the apps. |
+| Docs | Inter for body prose, JetBrains Mono for headings and chrome | `--ps-font-sans` for `--sl-font`; mono on headings, header, sidebars, pagination (`custom.css`) | The docs are a reading surface; everything that frames the reading keeps the lab voice. |
+
+### The app is mono, all of it
+
+The lab reads as one instrument. The moment a paragraph switches to a sans-serif, the page reads as a product site with a code theme, and the character goes. So:
+
+- **Never add `font-sans` in `frontend/` or `wallet-ui/`.** The utility exists in the Tailwind theme for the token mapping, but Inter is not shipped to the apps, so it would fall back to the system sans. Long prose is still mono: give it `leading-relaxed`, a `max-w-*`, and `text-surface-300` or lighter.
+- **Looking Glass is the reference.** It is the signature screen and reads as a protocol trace; every other screen should feel like the same instrument.
+- Wire data is marked by more than the font: payloads sit in `<pre>` panels with syntax colours (`--ps-syntax-*`), and parameter names use the label/value pattern (`FieldRow`), so they stay distinct inside mono chrome.
+
+### Scale
+
+| Step | Token | Typical utility |
+|------|-------|-----------------|
+| Display | `--ps-text-display` (clamp 2rem to 3.5rem), tracking `-0.03em` | Hero only |
+| Heading | `--ps-text-heading`, tracking `-0.02em` | `text-xl sm:text-2xl font-semibold` (mono by default) |
+| Body | `--ps-text-body` | `text-sm` (14px) |
+| Caption | `--ps-text-caption` | `text-xs` (12px) |
+| Data | `--ps-text-data` | `text-xs`; `text-[10px]` / `text-[11px]` only in dense inspectors. `font-mono` is now a no-op in the apps and can be dropped when touching a file |
+
+## Shape, space, and elevation
+
+| Token | Value | Tailwind | Use for |
+|-------|-------|----------|---------|
+| `--ps-radius-inline` | 4px | `rounded` | Inline spec tags, kbd, scrollbar thumb |
+| `--ps-radius-control` | 8px | `rounded-lg` | Buttons, inputs, notices, code blocks |
+| `--ps-radius-panel` | 12px | `rounded-xl` | Cards, panels, modals |
+| `--ps-radius-pill` | 9999px | `rounded-full` | Status badges, protocol tags |
+
+- Spacing uses the default Tailwind scale. Pages sit in `max-w-5xl mx-auto px-4 sm:px-6`; panels use `p-3 sm:p-4` (dense) or `p-4 sm:p-6`.
+- The canvas carries a faint 60px grid (`Layout.tsx`); do not add competing background textures.
+- Glow (`--ps-glow-brand`, `--ps-glow-interactive`) is reserved for brand moments and the active node in a flow diagram.
+
+## Motion and accessibility
+
+- Hover and colour transitions: `--ps-duration-hover` (150ms). Enter transitions: `--ps-duration-enter` (300ms). Flow loops: about 2s.
+- `prefers-reduced-motion: reduce` collapses CSS animation and transition durations globally (`design/tailwind-theme.css`). For `framer-motion`, keep animations decorative so the UI is complete without them.
+- Every interactive element shows a visible focus ring (`:focus-visible`, 2px `--ps-focus-ring`, 2px offset). Do not remove it with `outline-none` unless you replace it with a `focus:ring-*` of equal visibility.
+- Touch targets are at least 44px on screens under 640px (set globally).
+- Icons are `lucide-react` only. Decorative icons get `aria-hidden`; icon-only buttons get an `aria-label`.
+
+## Component recipes
+
+These are the shared building blocks. Reuse them before writing new markup.
+
+| Need | Use | Location |
+|------|-----|----------|
+| Panel | `glass` utility, or `rounded-xl border border-white/10 bg-surface-900/50` | `design/tailwind-theme.css` |
+| Status chip | `StatusBadge` with variants that include an `icon` | `frontend/src/lookingglass/components/shared/StatusBadge.tsx` |
+| Callout or protocol error | `ProtocolNotice` (`error`, `warning`, `info`); keeps the raw protocol error verbatim | `.../shared/ProtocolNotice.tsx` |
+| Option picker | `SegmentedChoice` | `.../shared/SegmentedChoice.tsx` |
+| Label and value | `FieldRow` (set `mono` for wire values) | `.../shared/FieldRow.tsx` |
+| Copy control | `CopyButton` | `.../shared/CopyButton.tsx` |
+| Collapsible detail | `ExpandableSection` | `.../shared/ExpandableSection.tsx` |
+| Wallet buttons and inputs | `btn-primary`, `btn-secondary`, `btn-danger`, `btn-success`, `glass-input` | `wallet-ui/src/index.css` |
+| Payload view | `<pre>` on `bg-surface-950`, `rounded-lg`, `text-xs`, horizontal scroll; never truncate | Inspectors under `lookingglass/components/inspectors/` |
+
+Payload views must show the real bytes. Do not elide, reformat, or "prettify" wire data in ways that change it; pretty-printing JSON is fine, re-ordering claims or shortening a token in the main view is not.
+
+## Tokens and how they flow
+
+```text
+ProtocolSoup/design/tokens.css          --ps-* custom properties (dark default, [data-theme='light'] overrides)
+ProtocolSoup/design/tailwind-theme.css  Tailwind v4 @theme inline mapping, base layer, shared utilities
+ProtocolSoup/design/brand/              wordmark.generated.ts + wordmark-{dark,light}.svg (from build-wordmark.mjs)
+        │  node design/sync-tokens.mjs
+        ├─ frontend/src/styles/design/      → frontend/src/index.css
+        ├─ frontend/src/components/common/wordmark.generated.ts, frontend/public/brand/
+        ├─ wallet-ui/src/styles/design/     → wallet-ui/src/index.css
+        ├─ wallet-ui/public/brand/
+        ├─ docs/starlight/src/styles/design/tokens.css → custom.css maps --sl-* onto --ps-*
+        └─ docs/starlight/src/assets/wordmark-*.svg
+```
+
+The copies are committed because each Docker build context only contains its own app directory. To change a token:
+
+1. Edit `ProtocolSoup/design/tokens.css` or `tailwind-theme.css` (or regenerate the brand assets, see above).
+2. Run `node design/sync-tokens.mjs` from `ProtocolSoup/`.
+3. Commit the source and the generated copies together. CI runs `node design/sync-tokens.mjs --check` and fails if a copy is stale.
+
+Tailwind utilities available from the theme:
+
+- Semantic: `bg-canvas`, `bg-raised`, `bg-overlay`, `bg-elevated`, `border-line-subtle`, `border-line`, `border-line-strong`, `text-fg`, `text-fg-muted`, `text-fg-subtle`, `text-brand`, `text-interactive`, and `success`, `danger`, `warning`, `info`, `deviation`, `pending` with any colour utility.
+- Protocol: `text-protocol-oauth2`, `bg-protocol-saml/10`, and so on.
+- Existing scales: `surface-*` and `accent-{orange,purple,cyan,green,red}`.
+- Breakpoint `xs` (475px), animations `animate-fade-in`, `animate-pulse-slow`, `animate-flow`, `animate-caret` (wordmark cursor), and utilities `glass`, `gradient-text`, `scrollbar-hide`.
+
+New code should prefer the semantic utilities. Most existing code predates them and uses `surface-*` plus Tailwind palette colours in a GEL role; that is fine to leave, and fine to migrate when you are already editing the file. There is no `tailwind.config.js`; the theme is CSS-only.
+
+### Surface differences
+
+The three surfaces share every token. Two differences are deliberate:
+
+- **Accent in docs:** Starlight exposes one accent variable, so docs links and navigation use brand purple. In the apps, links and actions are interactive cyan.
+- **Light mode:** only the docs offer it today. The light values already exist in `tokens.css`, so the apps can add a theme switch later without restructuring.
+
+## Adding a protocol
+
+1. Pick a hue from the reserved list and add it to `ProtocolAccent`, `PROTOCOL_ACCENT_CLASSES` (following the tint recipe), and `COLOR_BY_PROTOCOL` in `frontend/src/protocols/presentation/protocol-catalog.ts`.
+2. Use the same hue in `protocolMeta` (`frontend/src/protocols/registry.ts`, `color` and `gradient`) and `PROTOCOL_COLORS` (`frontend/src/lookingglass/registry.ts`) until those maps are retired.
+3. Add `--ps-protocol-{id}` to `design/tokens.css`, map `--color-protocol-{id}` in `design/tailwind-theme.css`, and run the sync script.
+4. Pick a `lucide-react` icon for `ICON_BY_PROTOCOL` that is not already used by another family, and use the same one in the `getProtocolIcon` switch in `frontend/src/views/ProtocolDemo.tsx`.
+5. Flow card gradients in `flow-meta.ts` should start from the protocol hue.
+
+The full wiring checklist is in [Add A Protocol](/developers/extending/add-a-protocol/).
+
+## Review checklist
+
+Before opening a PR that touches UI:
+
+- [ ] The app and wallet are entirely mono; `font-sans` appears nowhere under `frontend/` or `wallet-ui/`.
+- [ ] The brand is the `Wordmark` or `SoupMark` component (or a `wordmark-*.svg` with `alt="ProtocolSoup"`), never typed text or the 🍜 emoji, and the surrounding text content still reads exactly `ProtocolSoup`.
+- [ ] No new hardcoded hex or `rgba()` in components or CSS; colours come from tokens or the Tailwind palette in a GEL role. The only sanctioned literals are the [canvas copies](#surfaces-and-text) and `WORDMARK_DARK`, which exist for surfaces that cannot read CSS variables.
+- [ ] Status shows icon + label + colour from the fixed status set.
+- [ ] Protocol hues are used only for protocol identity.
+- [ ] Coloured surfaces follow the tint recipe and text is the 300 or 400 step.
+- [ ] Focus is visible, and the change works with reduced motion.
+- [ ] Token changes were made in `ProtocolSoup/design/` and synced.
+- [ ] Real payloads are shown in full, with the spec reference beside them.
+
+## Known gaps
+
+These are tracked follow-ups, not exceptions to follow:
+
+- **Protocol hue maps disagree.** `protocolMeta` and `PROTOCOL_COLORS` (see [protocol identity hues](#protocol-identity-hues)) should be derived from `COLOR_BY_PROTOCOL` so a family has one hue everywhere; the `getProtocolIcon` switch in `ProtocolDemo.tsx` should read `ICON_BY_PROTOCOL` for the same reason.
+- **Status drift.** About 17 components still use `green-*` / `yellow-*` for status (`SVIDInspector`, `RealFlowPanel`, …) instead of `emerald` / `amber`, and Deviation and Pending have no shared component.
+- **Legacy literals.** `FlowDiagram.tsx` holds its node colours as hex; `ErrorBoundary.tsx` paints its card `bg-[#0f172a]` (old slate-900, which no longer matches the indigo panels; should be `bg-surface-900`); the favicon tile is `#0f172a` while the PWA splash is the `#05070f` canvas.
+- The wallet harness header shows its session-provided app title with a wallet icon; the wordmark appears in its footer.
+- The apps are dark-only, and there is no visual regression suite or Tailwind class linting yet.

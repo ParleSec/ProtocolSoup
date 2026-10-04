@@ -48,16 +48,23 @@ function encodeIco(images) {
 }
 
 function cardSvg({
-  title,
+  suffix,
   tagline,
   subtitle,
   footer,
   host,
   chips,
-  faviconDataUrl,
+  wordmarkDataUrl,
   fontFaces,
   accentStops,
 }) {
+  // Wordmark artwork (690x108, baseline at 82/108) with the product suffix typed after it.
+  const TEXT_LEFT = 132
+  const WORDMARK_H = 76
+  const WORDMARK_W = Math.round((WORDMARK_H * 690) / 108)
+  const WORDMARK_Y = 156
+  const BASELINE_Y = Math.round(WORDMARK_Y + (WORDMARK_H * 82) / 108)
+  const SUFFIX_SIZE = Math.round(WORDMARK_H / 1.08)
   const CHIP_H = 40
   const CHIP_GAP = 10
   const CHIP_SIDE_PAD = 16
@@ -65,10 +72,9 @@ function cardSvg({
   const CHIP_DOT_X = CHIP_SIDE_PAD
   const CHIP_TEXT_X = CHIP_DOT_X + CHIP_DOT_R + 10
   const CHIP_TEXT_SIZE = 17
-  const CHAR_W = 8.6
+  const CHAR_W = 10.2
   const CHIP_TEXT_BASELINE_Y = Math.round(CHIP_H / 2 + CHIP_TEXT_SIZE * 0.36)
   const chipWidth = (label) => Math.ceil(CHIP_TEXT_X + label.length * CHAR_W + CHIP_SIDE_PAD)
-  const TEXT_LEFT = 244
   const CONTENT_W = OG_WIDTH - TEXT_LEFT - 72
   const rows = []
   let current = []
@@ -100,7 +106,7 @@ function cardSvg({
             <g transform="translate(${Math.round(x)} ${Math.round(y)})">
               <rect x="0" y="0" width="${w}" height="${CHIP_H}" rx="${Math.floor(CHIP_H / 2)}" fill="#111827" stroke="#334155" stroke-width="2"/>
               <circle cx="${CHIP_DOT_X}" cy="${CHIP_H / 2}" r="${CHIP_DOT_R}" fill="url(#accent)"/>
-              <text x="${CHIP_TEXT_X}" y="${CHIP_TEXT_BASELINE_Y}" fill="#e2e8f0" font-size="${CHIP_TEXT_SIZE}" font-weight="600" font-family="PSpaceGrotesk, system-ui, sans-serif">${escapeXml(label)}</text>
+              <text x="${CHIP_TEXT_X}" y="${CHIP_TEXT_BASELINE_Y}" fill="#e2e8f0" font-size="${CHIP_TEXT_SIZE}" font-weight="600" font-family="PSMono, JetBrains Mono, ui-monospace, Consolas, monospace">${escapeXml(label)}</text>
             </g>
           `
           x += w + CHIP_GAP
@@ -117,9 +123,9 @@ function cardSvg({
       ${fontFaces}
     ]]></style>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#020617"/>
-      <stop offset="55%" stop-color="#0b1228"/>
-      <stop offset="100%" stop-color="#1f2937"/>
+      <stop offset="0%" stop-color="#05070f"/>
+      <stop offset="55%" stop-color="#0b0e18"/>
+      <stop offset="100%" stop-color="#1b1e26"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="${accentStops[0]}"/>
@@ -136,19 +142,16 @@ function cardSvg({
     ${Array.from({ length: 10 }, (_, i) => `<line x1="0" y1="${i * 70}" x2="${OG_WIDTH}" y2="${i * 70}" stroke="#94a3b8" stroke-width="1"/>`).join('')}
   </g>
   <g filter="url(#softShadow)">
-    <rect x="72" y="88" width="${OG_WIDTH - 144}" height="${OG_HEIGHT - 176}" rx="28" fill="#0b1220" opacity="0.92" stroke="#1f2937" stroke-width="2"/>
+    <rect x="72" y="88" width="${OG_WIDTH - 144}" height="${OG_HEIGHT - 176}" rx="28" fill="#05070f" opacity="0.92" stroke="#1f2937" stroke-width="2"/>
     <rect x="72" y="88" width="${OG_WIDTH - 144}" height="10" rx="28" fill="url(#accent)"/>
   </g>
-  <g transform="translate(132 170)">
-    <rect x="0" y="0" width="84" height="84" rx="20" fill="#0f172a" stroke="#334155" stroke-width="2"/>
-    <image href="${faviconDataUrl}" x="8" y="8" width="68" height="68"/>
-  </g>
-  <text x="244" y="222" fill="#ffffff" font-size="64" font-weight="700" font-family="PSpaceGrotesk, system-ui, sans-serif">${escapeXml(title)}</text>
-  <text x="244" y="274" fill="#cbd5e1" font-size="28" font-weight="600" font-family="PSpaceGrotesk, system-ui, sans-serif">${escapeXml(tagline)}</text>
-  <text x="244" y="314" fill="#94a3b8" font-size="22" font-weight="500" font-family="PSpaceGrotesk, system-ui, sans-serif">${escapeXml(subtitle)}</text>
+  <image href="${wordmarkDataUrl}" x="${TEXT_LEFT}" y="${WORDMARK_Y}" width="${WORDMARK_W}" height="${WORDMARK_H}"/>
+  <text x="${TEXT_LEFT + WORDMARK_W + 18}" y="${BASELINE_Y}" fill="#e4e4e7" font-size="${SUFFIX_SIZE}" font-weight="700" letter-spacing="-0.025em" font-family="PSMono, JetBrains Mono, ui-monospace, Consolas, monospace">${escapeXml(suffix)}</text>
+  <text x="${TEXT_LEFT}" y="274" fill="#cbd5e1" font-size="28" font-weight="600" font-family="PSMono, JetBrains Mono, ui-monospace, Consolas, monospace">${escapeXml(tagline)}</text>
+  <text x="${TEXT_LEFT}" y="314" fill="#94a3b8" font-size="22" font-weight="500" font-family="PSMono, JetBrains Mono, ui-monospace, Consolas, monospace">${escapeXml(subtitle)}</text>
   <g transform="translate(${TEXT_LEFT} 360)">${chipsSvg}</g>
-  <text x="244" y="${OG_HEIGHT - 150}" fill="#94a3b8" font-size="22" font-weight="500" font-family="PSpaceGrotesk, system-ui, sans-serif">${escapeXml(footer)}</text>
-  <text x="244" y="${OG_HEIGHT - 112}" fill="#64748b" font-size="20" font-weight="500" font-family="PSpaceGrotesk, system-ui, sans-serif">${escapeXml(host)}</text>
+  <text x="${TEXT_LEFT}" y="${OG_HEIGHT - 150}" fill="#94a3b8" font-size="22" font-weight="500" font-family="PSMono, JetBrains Mono, ui-monospace, Consolas, monospace">${escapeXml(footer)}</text>
+  <text x="${TEXT_LEFT}" y="${OG_HEIGHT - 112}" fill="#64748b" font-size="20" font-weight="500" font-family="PSMono, JetBrains Mono, ui-monospace, Consolas, monospace">${escapeXml(host)}</text>
 </svg>`
 }
 
@@ -162,33 +165,19 @@ async function rasterizeSvg(svg, size) {
 async function main() {
   const faviconSvg = await readFile(path.join(publicDir, 'favicon.svg'))
   const maskableSvg = await readFile(path.join(publicDir, 'icons', 'icon-maskable-512.svg'))
-  const fontDir = path.join(rootDir, 'node_modules', '@fontsource', 'space-grotesk', 'files')
-  const [font500, font600, font700] = await Promise.all([
-    readFile(path.join(fontDir, 'space-grotesk-latin-500-normal.woff2')),
-    readFile(path.join(fontDir, 'space-grotesk-latin-600-normal.woff2')),
-    readFile(path.join(fontDir, 'space-grotesk-latin-700-normal.woff2')),
-  ])
+  const monoFont = await readFile(
+    path.join(rootDir, 'node_modules', '@fontsource-variable', 'jetbrains-mono', 'files', 'jetbrains-mono-latin-wght-normal.woff2'),
+  )
   const fontFaces = `
     @font-face {
-      font-family: "PSpaceGrotesk";
-      src: url("data:font/woff2;base64,${font500.toString('base64')}") format("woff2");
-      font-weight: 500;
-      font-style: normal;
-    }
-    @font-face {
-      font-family: "PSpaceGrotesk";
-      src: url("data:font/woff2;base64,${font600.toString('base64')}") format("woff2");
-      font-weight: 600;
-      font-style: normal;
-    }
-    @font-face {
-      font-family: "PSpaceGrotesk";
-      src: url("data:font/woff2;base64,${font700.toString('base64')}") format("woff2");
-      font-weight: 700;
+      font-family: "PSMono";
+      src: url("data:font/woff2;base64,${monoFont.toString('base64')}") format("woff2");
+      font-weight: 100 800;
       font-style: normal;
     }
   `
-  const faviconDataUrl = `data:image/svg+xml;base64,${faviconSvg.toString('base64')}`
+  const wordmarkSvg = await readFile(path.join(publicDir, 'brand', 'wordmark-dark.svg'))
+  const wordmarkDataUrl = `data:image/svg+xml;base64,${wordmarkSvg.toString('base64')}`
 
   const icoImages = await Promise.all(
     [16, 32, 48].map(async (size) => ({
@@ -205,9 +194,9 @@ async function main() {
     .toFile(path.join(publicDir, 'apple-touch-icon.png'))
 
   const sharedCopy = {
-    title: 'ProtocolSoup Wallet',
+    suffix: 'Wallet',
     chips: ['OID4VCI', 'OID4VP', 'mdoc', 'SD-JWT VC', 'HAIP'],
-    faviconDataUrl,
+    wordmarkDataUrl,
     fontFaces,
     host: 'wallet.protocolsoup.com',
   }

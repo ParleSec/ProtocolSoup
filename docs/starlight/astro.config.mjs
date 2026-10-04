@@ -8,15 +8,19 @@ export default defineConfig({
       title: 'ProtocolSoup',
       description: 'Interactive security protocol demonstrations with real implementations.',
       logo: {
-        dark: './src/assets/logo-dark.svg',
-        light: './src/assets/logo-light.svg',
+        dark: './src/assets/wordmark-dark.svg',
+        light: './src/assets/wordmark-light.svg',
         replacesTitle: true,
       },
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/ParleSec/ProtocolSoup' },
       ],
       favicon: '/favicon.svg',
-      customCss: ['./src/styles/custom.css'],
+      customCss: [
+        '@fontsource-variable/inter',
+        '@fontsource-variable/jetbrains-mono',
+        './src/styles/custom.css',
+      ],
       head: [
         { tag: 'meta', attrs: { name: 'theme-color', content: '#a855f7' } },
         {
@@ -154,6 +158,7 @@ export default defineConfig({
             { slug: 'developers/pull-request-workflow' },
             { slug: 'developers/release-process' },
             { slug: 'developers/security-advisories' },
+            { slug: 'developers/design-system' },
             {
               label: 'Extending ProtocolSoup',
               items: [

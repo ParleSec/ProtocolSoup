@@ -110,7 +110,7 @@ export function OID4VPWalletModal({
         <div className="p-4 sm:p-5 space-y-4 max-h-[75vh] overflow-y-auto">
           <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 space-y-2">
             <div className="text-xs text-cyan-300 font-medium">Request Context</div>
-            <div className="grid gap-1 text-[11px] sm:text-xs text-surface-300">
+            <div className="grid gap-1 text-[11px] sm:text-xs font-mono text-surface-300">
               <div><span className="text-surface-400">request_id:</span> <code>{requestID || 'missing'}</code></div>
               <div><span className="text-surface-400">response_mode:</span> <code>{responseMode || 'direct_post'}</code></div>
               {trustMode && (

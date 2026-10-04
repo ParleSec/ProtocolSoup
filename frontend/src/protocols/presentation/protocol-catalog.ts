@@ -8,7 +8,12 @@ export interface ProtocolFlowSummary {
   rfc: string
 }
 
-/** Homepage grid is 2 columns; adjacent families share a hue region. */
+/**
+ * Protocol identity hue (GEL: identity, never state). 
+ * Homepage grid is 2 * columns; adjacent families share a hue region. 
+ * Pick new hues from the * reserved list at /developers/design-system/
+ * add the matching `--ps-protocol-{id}` token in ProtocolSoup/design/tokens.css.
+ */
 export type ProtocolAccent = 'blue' | 'sky' | 'orange' | 'amber' | 'green' | 'teal' | 'cyan' | 'indigo'
 
 export interface ProtocolCatalogItem {
@@ -28,6 +33,10 @@ export interface ComingSoonProtocol {
   description: string
 }
 
+/**
+ * GEL tint recipe per hue: border /20 (hover /40), fill /10, solid accent /50,
+ * text 400, tag text 300. Literal so Tailwind can detect them.
+ */
 export const PROTOCOL_ACCENT_CLASSES: Record<ProtocolAccent, {
   border: string
   borderHover: string

@@ -39,7 +39,7 @@ The local `gh` token in this workspace returned **403** on `PATCH` (`Resource no
 7. **Update security advisory**. Re-read the preview: no `curl` exploit, no Dockerfile, no `poc.py`.
 8. Only then **Request CVE**.
 
-**API** (from `ProtocolLens/`):
+**API** (from `ProtocolSoup/`):
 
 ```bash
 gh api --method PATCH \

@@ -237,6 +237,7 @@ golangci-lint run ./...
 - Use TypeScript strict mode
 - Prefer functional components with hooks
 - Use Tailwind CSS for styling (no separate CSS files)
+- Follow the [Design System (GEL)](https://docs.protocolsoup.com/developers/design-system/): tokens come from `design/tokens.css` (run `node design/sync-tokens.mjs` after editing), the app and wallet are entirely mono (no `font-sans`), the brand is the `Wordmark` component, and status is icon + label + colour
 - Keep components focused and composable
 
 ```bash

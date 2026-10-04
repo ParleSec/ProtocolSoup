@@ -4,7 +4,7 @@
   "description": "Live execution platform for authentication and identity protocols",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
+  "background_color": "#05070f",
   "theme_color": "#f97316",
   "orientation": "portrait-primary",
   "scope": "/",

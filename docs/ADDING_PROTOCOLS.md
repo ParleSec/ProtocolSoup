@@ -170,7 +170,7 @@ If you create a new service, update docker compose and gateway routing as needed
 
 ## 6. Frontend wiring (minimum to appear in UI)
 
-Add the new protocol metadata (inside the object literal):
+Add the new protocol metadata (inside the object literal). Pick the protocol hue from the reserved list in the [Design System (GEL)](https://docs.protocolsoup.com/developers/design-system/#protocol-identity-hues) (`violet`, `rose`, `lime`, `fuchsia`), register it in `frontend/src/protocols/presentation/protocol-catalog.ts`, and add the matching `--ps-protocol-{id}` token in `design/tokens.css`. Never reuse another family's hue or a status hue (`red`, `emerald`).
 
 1) `frontend/src/protocols/registry.ts`:
 
@@ -179,8 +179,8 @@ export const protocolMeta = {
   // ...
   newprotocol: {
     icon: 'Shield',
-    color: 'orange',
-    gradient: 'from-orange-500 to-amber-500',
+    color: 'violet',
+    gradient: 'from-violet-500 to-fuchsia-500',
     features: ['Key feature 1', 'Key feature 2', 'Key feature 3'],
   },
 }
@@ -191,7 +191,7 @@ export const protocolMeta = {
 ```ts
 const PROTOCOL_COLORS = {
   // ...
-  newprotocol: 'orange',
+  newprotocol: 'violet',
 }
 
 const PROTOCOL_ICONS = {
@@ -207,7 +207,7 @@ const flowMeta = {
   // ...
   'flow_id': {
     icon: Shield,
-    color: 'from-orange-500 to-amber-600',
+    color: 'from-violet-500 to-purple-600',
     features: ['Feature A', 'Feature B'],
     recommended: true,
   },

@@ -1,66 +1,65 @@
 /*
- * ProtocolSoup docs theme
- * Hero color: purple (#a855f7). Backgrounds and text from the app palette.
- * Space Grotesk headings, JetBrains Mono code.
+ * ProtocolSoup docs theme. Maps Starlight variables onto the GEL tokens in
+ * ./design/tokens.css (generated from ProtocolSoup/design/tokens.css).
+ * Guidelines: /developers/design-system/
  */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600&display=swap');
+@import './design/tokens.css';
 
-/* ── Dark theme (default) ─────────────────────────────────── */
-:root {
-  --sl-color-accent-low: #1a0a2e;
-  --sl-color-accent: #a855f7;
-  --sl-color-accent-high: #e9d5ff;
-
-  --sl-color-white: #e4e4e7;
-  --sl-color-gray-1: #e4e4e7;
-  --sl-color-gray-2: #a1a1aa;
-  --sl-color-gray-3: #71717a;
-  --sl-color-gray-4: #2a2a34;
-  --sl-color-gray-5: #1a1a24;
-  --sl-color-gray-6: #12121a;
-  --sl-color-black: #0a0a0f;
-
-  --sl-font: 'Inter', system-ui, -apple-system, sans-serif;
-  --sl-font-system: 'Inter', system-ui, -apple-system, sans-serif;
-  --sl-text-code: 'JetBrains Mono', 'Fira Code', monospace;
-}
-
-/* ── Light theme ──────────────────────────────────────────── */
+/*
+ * Starlight's scale runs white (strongest text) to black (page background) in
+ * both themes; the GEL semantic roles already switch on [data-theme='light'].
+ */
+:root,
 :root[data-theme='light'] {
-  --sl-color-accent-low: #faf5ff;
-  --sl-color-accent: #7c3aed;
-  --sl-color-accent-high: #4c1d95;
+  --sl-color-accent-low: var(--ps-brand-soft);
+  --sl-color-accent: var(--ps-brand);
+  --sl-color-accent-high: var(--ps-brand-strong);
 
-  --sl-color-white: #ffffff;
-  --sl-color-gray-1: #f8fafc;
-  --sl-color-gray-2: #e2e8f0;
-  --sl-color-gray-3: #94a3b8;
-  --sl-color-gray-4: #64748b;
-  --sl-color-gray-5: #334155;
-  --sl-color-gray-6: #1e293b;
-  --sl-color-black: #020617;
+  --sl-color-white: var(--ps-fg);
+  --sl-color-gray-1: var(--ps-fg);
+  --sl-color-gray-2: var(--ps-fg-muted);
+  --sl-color-gray-3: var(--ps-fg-subtle);
+  --sl-color-gray-4: var(--ps-bg-elevated);
+  --sl-color-gray-5: var(--ps-bg-overlay);
+  --sl-color-gray-6: var(--ps-bg-raised);
+  --sl-color-gray-7: var(--ps-bg-raised);
+  --sl-color-black: var(--ps-bg-base);
+
+  --sl-font: var(--ps-font-sans);
+  --sl-font-system: var(--ps-font-sans);
+  --sl-font-mono: var(--ps-font-mono);
+  --sl-text-code: var(--ps-font-mono);
 }
 
-/* ── Headings: Space Grotesk ──────────────────────────────── */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* Docs are a reading surface, so prose stays Inter; headings and chrome keep the mono voice */
+:is(h1, h2, h3, h4, h5, h6),
+.header,
+.sidebar-pane,
+.right-sidebar-panel,
+.pagination-links {
+  font-family: var(--ps-font-mono);
+}
+
 :is(h1, h2, h3, h4, h5, h6) {
-  font-family: 'Space Grotesk', system-ui, sans-serif;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--ps-tracking-heading);
 }
 
-/* ── Sidebar active link glow ─────────────────────────────── */
 [data-current="true"] > a {
-  background: rgba(168, 85, 247, 0.08) !important;
+  background: color-mix(in srgb, var(--ps-brand) 8%, transparent) !important;
 }
 
-/* ── Protocol badge styling ───────────────────────────────── */
 .protocol-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
   padding: 0.125rem 0.625rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  border-radius: var(--ps-radius-pill);
+  font-size: var(--ps-text-caption);
   font-weight: 600;
   letter-spacing: 0.025em;
   text-transform: uppercase;
@@ -71,17 +70,15 @@
   color: var(--sl-color-accent-high);
 }
 
-/* ── Hero overrides for landing page ──────────────────────── */
 .hero-home h1 {
-  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-size: var(--ps-text-display);
   font-weight: 800;
   line-height: 1.1;
-  letter-spacing: -0.03em;
+  letter-spacing: var(--ps-tracking-display);
 }
 
-/* ── Card hover accent ────────────────────────────────────── */
 .sl-link-card {
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--ps-duration-hover) ease, box-shadow var(--ps-duration-hover) ease;
 }
 
 .sl-link-card:hover {
@@ -89,14 +86,37 @@
   box-shadow: 0 0 0 1px var(--sl-color-accent);
 }
 
-/* ── Spec reference callouts ──────────────────────────────── */
 .spec-ref {
-  font-family: var(--sl-text-code);
+  font-family: var(--ps-font-mono);
   font-size: 0.8125rem;
   color: var(--sl-color-gray-3);
 }
 
-/* ── Code block styling ───────────────────────────────────── */
 .expressive-code .frame {
   border-color: var(--sl-color-gray-5) !important;
+}
+
+/* Swatches on /developers/design-system/ render the live token, not a copy of it */
+.gel-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+}
+
+.gel-swatch {
+  border: 1px solid var(--ps-border-default);
+  border-radius: var(--ps-radius-control);
+  overflow: hidden;
+  font-size: var(--ps-text-caption);
+}
+
+.gel-swatch-chip {
+  height: 3rem;
+  background: var(--gel-swatch);
+}
+
+.gel-swatch-label {
+  padding: 0.375rem 0.5rem;
+  font-family: var(--ps-font-mono);
+  line-height: 1.4;
 }

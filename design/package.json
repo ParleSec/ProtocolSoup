@@ -1,0 +1,15 @@
+{
+  "name": "protocolsoup-design",
+  "private": true,
+  "type": "module",
+  "description": "Tooling for the ProtocolSoup GEL: token sync and brand asset generation. Outputs are committed; apps never depend on this package.",
+  "scripts": {
+    "sync": "node sync-tokens.mjs",
+    "sync:check": "node sync-tokens.mjs --check",
+    "build:brand": "node brand/build-wordmark.mjs && node sync-tokens.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "opentype.js": "^1.3.4"
+  }
+}
