@@ -51,9 +51,13 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
+      args:
+        BACKEND_ORIGIN: http://backend:8080
     container_name: protocolsoup-frontend
     ports:
       - "3000:3000"
+    environment:
+      - BACKEND_ORIGIN=http://backend:8080
     depends_on:
       backend:
         condition: service_healthy
