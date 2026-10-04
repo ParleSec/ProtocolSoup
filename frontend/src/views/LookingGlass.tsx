@@ -14,7 +14,7 @@ import {
   Eye, Play, RotateCcw, Key, Square,
   Fingerprint, Shield, Lock, Sparkles,
   RefreshCw, FileKey, KeyRound, Workflow, Search, Trash2, User, QrCode, Copy, Check, ExternalLink,
-  Share2, XCircle, BookOpen, ChevronRight
+  Share2, XCircle, BookOpen, ChevronRight, CheckCircle2, Loader2, Hand
 } from 'lucide-react'
 
 import {
@@ -114,10 +114,10 @@ function oid4vpDCQLQueryForSelection(format: OID4VCICredentialFormat, haip: bool
 }
 
 const STATUS_BADGE_VARIANTS: Record<string, StatusBadgeVariant> = {
-  completed: { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-400', label: 'Completed', shortLabel: 'Done' },
-  executing: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Executing...', shortLabel: 'Running' },
-  awaiting_user: { bg: 'bg-blue-500/10', border: 'border-blue-500/30', text: 'text-blue-400', label: 'Awaiting input', shortLabel: 'Waiting' },
-  error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'Error', shortLabel: 'Error' },
+  completed: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'Completed', shortLabel: 'Done', icon: CheckCircle2 },
+  executing: { bg: 'bg-cyan-500/10', border: 'border-cyan-500/30', text: 'text-cyan-400', label: 'Executing...', shortLabel: 'Running', icon: Loader2, iconClassName: 'animate-spin' },
+  awaiting_user: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'Awaiting input', shortLabel: 'Waiting', icon: Hand },
+  error: { bg: 'bg-red-500/10', border: 'border-red-500/30', text: 'text-red-400', label: 'Error', shortLabel: 'Error', icon: XCircle },
 }
 
 function formatOID4VPList(values: string[]): string {
