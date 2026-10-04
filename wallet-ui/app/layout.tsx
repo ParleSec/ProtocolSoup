@@ -1,12 +1,5 @@
 import type { Metadata, Viewport } from 'next'
-import '@fontsource/jetbrains-mono/latin-400.css'
-import '@fontsource/jetbrains-mono/latin-500.css'
-import '@fontsource/jetbrains-mono/latin-600.css'
-import '@fontsource/jetbrains-mono/latin-700.css'
-import '@fontsource/space-grotesk/latin-400.css'
-import '@fontsource/space-grotesk/latin-500.css'
-import '@fontsource/space-grotesk/latin-600.css'
-import '@fontsource/space-grotesk/latin-700.css'
+import '@fontsource-variable/jetbrains-mono'
 import '../src/index.css'
 
 const WALLET_ORIGIN = (process.env.WALLET_SITE_URL || 'https://wallet.protocolsoup.com').replace(/\/+$/, '')
@@ -118,7 +111,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#0a0a0f',
+  themeColor: '#a855f7',
 }
 
 const walletSchema = {

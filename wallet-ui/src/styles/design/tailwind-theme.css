@@ -1,0 +1,151 @@
+/* GENERATED from ProtocolLens/design/tailwind-theme.css by design/sync-tokens.mjs. Do not edit. */
+/*
+ * ProtocolSoup GEL: Tailwind v4 theme, shared base layer and shared utilities.
+ *
+ * Canonical source. Import after `@import "tailwindcss"` and `tokens.css`.
+ * Edit here, then run `node design/sync-tokens.mjs` from ProtocolLens/.
+ *
+ * `@theme inline` maps utilities straight onto the --ps-* custom properties so
+ * a token change (or a [data-theme] override) reaches every utility without a
+ * rebuild of the mapping.
+ */
+
+@theme inline {
+  --font-sans: var(--ps-font-sans);
+  --font-mono: var(--ps-font-mono);
+
+  /* Semantic roles: prefer these in new code */
+  --color-canvas: var(--ps-bg-base);
+  --color-raised: var(--ps-bg-raised);
+  --color-overlay: var(--ps-bg-overlay);
+  --color-elevated: var(--ps-bg-elevated);
+  --color-line-subtle: var(--ps-border-subtle);
+  --color-line: var(--ps-border-default);
+  --color-line-strong: var(--ps-border-strong);
+  --color-fg: var(--ps-fg);
+  --color-fg-muted: var(--ps-fg-muted);
+  --color-fg-subtle: var(--ps-fg-subtle);
+  --color-brand: var(--ps-brand);
+  --color-interactive: var(--ps-interactive);
+  --color-success: var(--ps-status-success);
+  --color-danger: var(--ps-status-danger);
+  --color-warning: var(--ps-status-warning);
+  --color-info: var(--ps-status-info);
+  --color-deviation: var(--ps-status-deviation);
+  --color-pending: var(--ps-status-pending);
+
+  --color-protocol-oauth2: var(--ps-protocol-oauth2);
+  --color-protocol-oidc: var(--ps-protocol-oidc);
+  --color-protocol-saml: var(--ps-protocol-saml);
+  --color-protocol-scim: var(--ps-protocol-scim);
+  --color-protocol-spiffe: var(--ps-protocol-spiffe);
+  --color-protocol-ssf: var(--ps-protocol-ssf);
+  --color-protocol-oid4vci: var(--ps-protocol-oid4vci);
+  --color-protocol-oid4vp: var(--ps-protocol-oid4vp);
+
+  /* Structural neutrals and brand accents used across existing components */
+  --color-surface-50: var(--ps-slate-50);
+  --color-surface-100: var(--ps-slate-100);
+  --color-surface-200: var(--ps-slate-200);
+  --color-surface-300: var(--ps-slate-300);
+  --color-surface-400: var(--ps-slate-400);
+  --color-surface-500: var(--ps-slate-500);
+  --color-surface-600: var(--ps-slate-600);
+  --color-surface-700: var(--ps-indigo-700);
+  --color-surface-800: var(--ps-indigo-800);
+  --color-surface-900: var(--ps-indigo-900);
+  --color-surface-950: var(--ps-indigo-950);
+  --color-slate-700: var(--ps-indigo-700);
+  --color-slate-800: var(--ps-indigo-800);
+  --color-slate-900: var(--ps-indigo-900);
+  --color-slate-950: var(--ps-indigo-950);
+  --color-accent-orange: var(--ps-hue-orange);
+  --color-accent-purple: var(--ps-hue-purple);
+  --color-accent-cyan: var(--ps-hue-cyan);
+  --color-accent-green: var(--ps-hue-green);
+  --color-accent-red: var(--ps-hue-red);
+}
+
+@theme {
+  --breakpoint-xs: 475px;
+
+  --animate-fade-in: fade-in 0.3s ease-out forwards;
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-flow: flow 2s ease-in-out infinite;
+  --animate-caret: caret 1.1s steps(1) infinite;
+
+  @keyframes caret {
+    50% { opacity: 0; }
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes flow {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(10px); }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--ps-bg-base);
+    color: var(--ps-fg);
+    font-family: var(--ps-font-mono);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ps-focus-ring);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--ps-bg-raised); }
+  ::-webkit-scrollbar-thumb { background: var(--ps-bg-overlay); border-radius: var(--ps-radius-inline); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ps-bg-elevated); }
+
+  @media (max-width: 640px) {
+    * { -webkit-tap-highlight-color: transparent; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    button, a, [role="button"] { min-height: 44px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@utility glass {
+  background: var(--ps-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--ps-border-subtle);
+}
+
+@utility gradient-text {
+  background: var(--ps-brand-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}

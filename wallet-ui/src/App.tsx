@@ -852,11 +852,11 @@ function Expandable({
   )
 }
 
-function MetricRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline gap-2 py-1 text-[11px] sm:text-xs">
+    <div className="flex items-baseline gap-2 py-1 text-[11px] sm:text-xs font-mono">
       <span className="text-surface-500 shrink-0">{label}</span>
-      <span className={`text-surface-300 break-all ${mono ? 'font-mono' : ''}`}>{value}</span>
+      <span className="text-surface-300 break-all">{value}</span>
     </div>
   )
 }
@@ -865,7 +865,7 @@ function ReviewField({ label, children }: { label: string; children: React.React
   return (
     <div className="rounded-lg border border-white/10 bg-surface-900/50 p-3">
       <div className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-surface-500 mb-1.5">{label}</div>
-      <div className="text-xs sm:text-sm text-surface-300 break-all">{children}</div>
+      <div className="text-xs sm:text-sm font-mono text-surface-300 break-all">{children}</div>
     </div>
   )
 }
@@ -1754,7 +1754,7 @@ export default function WalletApp() {
   }, [result, resultAllowed])
 
   return (
-    <main className="min-h-screen bg-[#0a0a0f] relative">
+    <main className="min-h-screen bg-canvas relative">
       <div className="fixed inset-0 pointer-events-none opacity-[0.015]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.07) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
 
       <div className="relative max-w-5xl mx-auto px-4 sm:px-6 py-5 sm:py-8 space-y-4 sm:space-y-6">
@@ -2065,9 +2065,9 @@ export default function WalletApp() {
                   onToggle={() => toggleStep('offer')}
                 >
                   <div className="space-y-0.5">
-                    <MetricRow label="credential_issuer" value={String(lastImport.credential_issuer || 'n/a')} mono />
+                    <MetricRow label="credential_issuer" value={String(lastImport.credential_issuer || 'n/a')} />
                     <MetricRow label="offer_transport" value={String(lastImport.credential_offer_transport || 'n/a')} />
-                    <MetricRow label="credential_offer_uri" value={String(lastImport.credential_offer_uri || 'n/a')} mono />
+                    <MetricRow label="credential_offer_uri" value={String(lastImport.credential_offer_uri || 'n/a')} />
                     <MetricRow label="tx_code_required" value={String(Boolean(lastImport.tx_code_required))} />
                     {lastImport.tx_code_required && (
                       <>
@@ -2076,9 +2076,9 @@ export default function WalletApp() {
                         <MetricRow label="tx_code_input_mode" value={String(lastImport.tx_code_input_mode || 'n/a')} />
                       </>
                     )}
-                    <MetricRow label="token_endpoint" value={String(lastImport.token_endpoint || 'n/a')} mono />
-                    <MetricRow label="credential_endpoint" value={String(lastImport.credential_endpoint || 'n/a')} mono />
-                    <MetricRow label="nonce_endpoint" value={String(lastImport.nonce_endpoint || 'n/a')} mono />
+                    <MetricRow label="token_endpoint" value={String(lastImport.token_endpoint || 'n/a')} />
+                    <MetricRow label="credential_endpoint" value={String(lastImport.credential_endpoint || 'n/a')} />
+                    <MetricRow label="nonce_endpoint" value={String(lastImport.nonce_endpoint || 'n/a')} />
                   </div>
                 </IssueStep>
               )}
@@ -2095,8 +2095,8 @@ export default function WalletApp() {
                   )}
                 >
                   <div className="space-y-0.5">
-                    <MetricRow label="request_id" value={String(resolved.request_id || 'n/a')} mono />
-                    <MetricRow label="client_id" value={String(resolved.client_id || 'n/a')} mono />
+                    <MetricRow label="request_id" value={String(resolved.request_id || 'n/a')} />
+                    <MetricRow label="client_id" value={String(resolved.client_id || 'n/a')} />
                     <MetricRow label="response_mode" value={String(resolved.response_mode || 'n/a')} />
                     <MetricRow label="matched" value={String(Boolean(resolved.credential_matches?.matched))} />
                   </div>
@@ -2199,7 +2199,7 @@ export default function WalletApp() {
 
               <div className="rounded-lg border border-white/10 bg-surface-900/50 p-3 space-y-0.5">
                 <MetricRow label="credential_count" value={String(credentialEntries.length)} />
-                <MetricRow label="active_credential_id" value={String(activeCredentialEntry?.credential_id || session?.credential_id || 'n/a')} mono />
+                <MetricRow label="active_credential_id" value={String(activeCredentialEntry?.credential_id || session?.credential_id || 'n/a')} />
                 <MetricRow label="active_format" value={String(activeCredentialEntry?.credential_format || session?.credential_format || credentialSummary?.format || 'n/a')} />
                 <MetricRow label="active_configuration" value={String(activeCredentialEntry?.credential_configuration_id || session?.credential_configuration_id || 'n/a')} />
               </div>
@@ -2229,14 +2229,14 @@ export default function WalletApp() {
               )}
 
               <div className="rounded-lg border border-white/10 bg-surface-900/50 p-3 space-y-0.5">
-                <MetricRow label="wallet_subject" value={String(session?.wallet_subject || 'n/a')} mono />
+                <MetricRow label="wallet_subject" value={String(session?.wallet_subject || 'n/a')} />
                 <MetricRow label="wallet_scope" value={String(session?.wallet_scope || 'n/a')} />
                 <MetricRow label="wallet_did_method" value={String(session?.wallet_did_method || 'n/a')} />
                 <MetricRow label="credential_present" value={String(Boolean(session?.credential_present))} />
                 <MetricRow label="format" value={String(credentialSummary?.format || 'n/a')} />
-                <MetricRow label="vct" value={String(credentialSummary?.vct || 'n/a')} mono />
-                <MetricRow label="doctype" value={String(credentialSummary?.doctype || 'n/a')} mono />
-                <MetricRow label="subject" value={String(credentialSummary?.subject || 'n/a')} mono />
+                <MetricRow label="vct" value={String(credentialSummary?.vct || 'n/a')} />
+                <MetricRow label="doctype" value={String(credentialSummary?.doctype || 'n/a')} />
+                <MetricRow label="subject" value={String(credentialSummary?.subject || 'n/a')} />
                 <MetricRow label="expires_at" value={String(credentialSummary?.expires_at || 'n/a')} />
                 <MetricRow label="sd_jwt" value={String(Boolean(credentialSummary?.is_sd_jwt))} />
                 <MetricRow label="disclosure_count" value={String(Number(credentialSummary?.disclosure_count || 0))} />
@@ -2383,9 +2383,9 @@ export default function WalletApp() {
                     <span className="ml-auto text-surface-400 font-normal font-mono text-xs">HTTP {String(result.upstream_status || 'n/a')}</span>
                   </div>
                   <div className="rounded-lg border border-white/10 bg-surface-900/50 p-3 space-y-0.5">
-                    <MetricRow label="request_id" value={String(result.request_id || 'n/a')} mono />
+                    <MetricRow label="request_id" value={String(result.request_id || 'n/a')} />
                     <MetricRow label="response_mode" value={String(result.response_mode || 'n/a')} />
-                    <MetricRow label="response_uri" value={String(result.response_uri || 'n/a')} mono />
+                    <MetricRow label="response_uri" value={String(result.response_uri || 'n/a')} />
                     <MetricRow label="credential_source" value={String(result.credential_source || 'n/a')} />
                     <MetricRow label="policy_reasons" value={policyReasons.length > 0 ? policyReasons.join(', ') : 'none'} />
                   </div>
@@ -2479,7 +2479,10 @@ export default function WalletApp() {
 
         {/* Footer */}
         <footer className="border-t border-white/5 pt-4 pb-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-surface-600">
-          <span>ProtocolSoup Wallet</span>
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            <img src="/brand/wordmark-dark.svg" alt="ProtocolSoup" className="h-[1.08em] w-auto" />
+            <span className="font-bold tracking-tight text-fg">Wallet</span>
+          </span>
           <nav className="flex flex-wrap items-center gap-3" aria-label="Agent and site links">
             <a href="/llms.txt" className="hover:text-surface-400 transition-colors">llms.txt</a>
             <a href="/.well-known/agent-skills/use-wallet-harness/SKILL.md" className="hover:text-surface-400 transition-colors">SKILL.md</a>
