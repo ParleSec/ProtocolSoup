@@ -5,7 +5,7 @@ FROM ghcr.io/spiffe/spire-agent:1.15.3 AS spire-agent
 FROM ghcr.io/spiffe/spire-server:1.15.3 AS spire-server
 
 # Build backend
-FROM golang:1.27.0-alpine AS backend-builder
+FROM golang:1.27.1-alpine AS backend-builder
 
 ARG SERVICE_CMD=./cmd/server
 
