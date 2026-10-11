@@ -15,15 +15,15 @@
 ### Dependencies
 
 - Requires a reachable backend/gateway upstream (for example `gateway:8080` on the same Docker network).
-- HTTP protocol/API traffic is forwarded by Next rewrites.
-- WebSocket routes are **not** rewritten by Next and must be routed by the edge proxy (Nginx/Fly ingress) to backend.
+- HTTP protocol/API traffic is forwarded by `src/proxy.ts`, which reads `BACKEND_ORIGIN` and `WALLET_BACKEND_ORIGIN` at runtime so the published image can be pointed at any backend and wallet without a rebuild.
+- WebSocket routes are **not** forwarded by Next and must be routed by the edge proxy (Nginx/Fly ingress) to backend.
 
 ### Environment Variables
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `BACKEND_ORIGIN` | Yes (outside local defaults) | `http://localhost:8080` | Upstream backend base URL for HTTP rewrites (`/api`, `/oauth2`, `/oidc`, `/oid4vci`, `/oid4vp`, `/saml`, `/spiffe`, `/scim`, `/ssf`) |
-| `WALLET_BACKEND_ORIGIN` | Yes (when Looking Glass uses a remote wallet) | `https://wallet.protocolsoup.com` | Upstream wallet harness origin for the same-origin `/wallet-harness/*` rewrite used by Looking Glass OID4VCI/OID4VP |
+| `BACKEND_ORIGIN` | Yes (outside local defaults) | `http://localhost:8080` | Upstream backend base URL for forwarded HTTP paths (`/api`, `/agentauth`, `/mcp`, `/oauth2`, `/oidc`, `/oid4vci`, `/oid4vp`, `/saml`, `/spiffe`, `/scim`, `/ssf`). Read at runtime |
+| `WALLET_BACKEND_ORIGIN` | Yes (for Looking Glass OID4VCI/OID4VP) | `(unset)` | Upstream wallet harness origin for the same-origin `/wallet-harness/*` path used by Looking Glass. Read at runtime. When unset, `/wallet-harness/*` returns `502` `upstream_not_configured`; there is no hosted-wallet fallback. `WALLET_SITE_URL` is used if this is unset |
 | `NEXT_PUBLIC_SITE_URL` | Yes (production) | `https://protocolsoup.com` | Canonical public origin used in metadata and sitemap generation |
 | `DOCS_SITE_URL` | No | `https://docs.protocolsoup.com` | Docs host used in sitemap-index output |
 
@@ -56,7 +56,7 @@
 - Negotiates `Accept: text/markdown` on page routes, rendering markdown from the
   page's own HTML. Requires `Vary: Accept` to be added at the edge, which the Go
   runtime does when it proxies the frontend.
-- Rewritten HTTP upstream paths:
+- Forwarded HTTP upstream paths:
   - `/api`
   - `/agentauth`
   - `/mcp`
