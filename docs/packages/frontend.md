@@ -33,7 +33,7 @@
 
 ### Health And Readiness
 
-- Container healthcheck probes `http://localhost:3000`.
+- Container healthcheck probes `http://127.0.0.1:3000`. The server binds IPv4 only (`HOSTNAME=0.0.0.0`), and `localhost` resolves to `::1` first in the image.
 - Readiness depends on Next runtime startup and backend reachability for API-backed routes.
 
 ## API Surface
