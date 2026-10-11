@@ -1,11 +1,5 @@
 import type { NextConfig } from 'next'
 
-const backendOrigin = process.env.BACKEND_ORIGIN || 'http://localhost:8080'
-const walletBackendOrigin = (
-  process.env.WALLET_BACKEND_ORIGIN ||
-  process.env.WALLET_SITE_URL ||
-  'https://wallet.protocolsoup.com'
-).replace(/\/+$/, '')
 const canonicalSiteOrigin = (process.env.NEXT_PUBLIC_SITE_URL || 'https://protocolsoup.com').replace(/\/+$/, '')
 const canonicalHost = new URL(canonicalSiteOrigin).host
 const wwwHost = canonicalHost.startsWith('www.') ? canonicalHost : `www.${canonicalHost}`
@@ -31,23 +25,8 @@ const nextConfig: NextConfig = {
     }
     return redirects
   },
-  async rewrites() {
-    return [
-      { source: '/api/:path*', destination: `${backendOrigin}/api/:path*` },
-      { source: '/agentauth/:path*', destination: `${backendOrigin}/agentauth/:path*` },
-      { source: '/mcp/:path*', destination: `${backendOrigin}/mcp/:path*` },
-      { source: '/oauth2/:path*', destination: `${backendOrigin}/oauth2/:path*` },
-      { source: '/oidc/:path*', destination: `${backendOrigin}/oidc/:path*` },
-      { source: '/oid4vci/:path*', destination: `${backendOrigin}/oid4vci/:path*` },
-      { source: '/oid4vp/:path*', destination: `${backendOrigin}/oid4vp/:path*` },
-      { source: '/saml/:path*', destination: `${backendOrigin}/saml/:path*` },
-      { source: '/spiffe/:path*', destination: `${backendOrigin}/spiffe/:path*` },
-      { source: '/scim/:path*', destination: `${backendOrigin}/scim/:path*` },
-      { source: '/ssf/:path*', destination: `${backendOrigin}/ssf/:path*` },
-      // Same-origin Looking Glass / OID4VP → wallet harness (avoids cross-subdomain CORS loss on edge 502s).
-      { source: '/wallet-harness/:path*', destination: `${walletBackendOrigin}/:path*` },
-    ]
-  },
+  // Backend and /wallet-harness forwarding lives in src/proxy.ts so upstream
+  // origins are read at runtime instead of being frozen into the build.
 }
 
 export default nextConfig
