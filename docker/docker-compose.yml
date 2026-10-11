@@ -8,6 +8,7 @@
 # - Federation service (OAuth2/OIDC/SAML)
 # - SCIM service
 # - SSF service
+# - Wallet harness (OID4VCI/OID4VP holder for Looking Glass)
 # - Frontend UI
 #
 # ==============================================
@@ -22,6 +23,7 @@
 #   ghcr.io/parlesec/protocolsoup-federation:latest
 #   ghcr.io/parlesec/protocolsoup-scim:latest
 #   ghcr.io/parlesec/protocolsoup-ssf:latest
+#   ghcr.io/parlesec/protocolsoup-wallet:latest
 #   ghcr.io/parlesec/protocolsoup-frontend:latest
 # ==============================================
 
@@ -90,6 +92,9 @@ services:
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - OAUTH2_REPLAY_REDIS_URL=redis://redis:6379/0
       - SSF_TO_FEDERATION_TOKEN=${SSF_TO_FEDERATION_TOKEN:-ssf-federation-caep-lab}
+      - SHOWCASE_MDOC_PKI_PATH=/app/mdoc-pki
+    volumes:
+      - mdoc-issuer-pki:/app/mdoc-pki
     depends_on:
       redis:
         condition: service_healthy
@@ -194,6 +199,63 @@ services:
     restart: unless-stopped
 
   # ============================================
+  # mdoc IACA trust anchor (one-shot)
+  # ============================================
+  # ISO/IEC 18013-5 trust anchors are provisioned out of band. Copies only the
+  # issuer's public IACA root out of its PKI volume, which also holds the IACA
+  # and document-signer private keys and must not be mounted into the wallet.
+  mdoc-trust-anchor:
+    image: alpine:3.24
+    container_name: protocolsoup-mdoc-trust-anchor
+    command: ["install", "-m", "0644", "/issuer-pki/iaca_root.pem", "/trust/iaca_root.pem"]
+    volumes:
+      - mdoc-issuer-pki:/issuer-pki:ro
+      - mdoc-trust:/trust
+    network_mode: none
+    depends_on:
+      federation-service:
+        condition: service_healthy
+    restart: "no"
+
+  # ============================================
+  # Wallet Harness (OID4VCI / OID4VP holder)
+  # ============================================
+  wallet:
+    # For local development (build from source):
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.wallet-harness
+    # For using published GHCR images, comment 'build:' above and uncomment:
+    # image: ghcr.io/parlesec/protocolsoup-wallet:latest
+    image: protocolsoup-wallet:latest
+    container_name: protocolsoup-wallet
+    # Shares the gateway's network namespace so http://localhost:8080 resolves
+    # to the gateway. The issuer identifies itself by SHOWCASE_BASE_URL, and the
+    # wallet requires metadata and proof audiences to match it exactly.
+    network_mode: "service:gateway"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - set -e; WALLET_MDOC_IACA_ROOT_PEM="$$(cat /run/mdoc-trust/iaca_root.pem)"; export WALLET_MDOC_IACA_ROOT_PEM; exec /app/wallet-harness
+    environment:
+      - WALLET_LISTEN_ADDR=:8090
+      - WALLET_TARGET_BASE_URL=http://localhost:8080
+    volumes:
+      - mdoc-trust:/run/mdoc-trust:ro
+    depends_on:
+      gateway:
+        condition: service_healthy
+      mdoc-trust-anchor:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8090/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
   # Frontend UI
   # ============================================
   frontend:
@@ -203,7 +265,6 @@ services:
       dockerfile: docker/Dockerfile.frontend
       args:
         BACKEND_ORIGIN: http://gateway:8080
-        WALLET_BACKEND_ORIGIN: https://wallet.protocolsoup.com
         NEXT_PUBLIC_SITE_URL: http://localhost:3000
         NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8080
     # For using published GHCR images, comment 'build:' above and uncomment:
@@ -214,7 +275,7 @@ services:
       - "3000:3000"
     environment:
       - BACKEND_ORIGIN=http://gateway:8080
-      - WALLET_BACKEND_ORIGIN=https://wallet.protocolsoup.com
+      - WALLET_BACKEND_ORIGIN=${WALLET_BACKEND_ORIGIN:-http://gateway:8090} # read at runtime; set it in .env to your own wallet harness origin and skip the local one with --scale wallet=0 --scale mdoc-trust-anchor=0
       - NEXT_PUBLIC_SITE_URL=http://localhost:3000
       - NEXT_PUBLIC_WS_BASE_URL=ws://localhost:8080
     depends_on:
@@ -238,4 +299,8 @@ volumes:
   scim-data:
     driver: local
   ssf-data:
+    driver: local
+  mdoc-issuer-pki:
+    driver: local
+  mdoc-trust:
     driver: local
