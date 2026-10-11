@@ -367,6 +367,17 @@ func (g *Gateway) handleSSFConfiguration(w http.ResponseWriter, r *http.Request)
 	g.proxy(upstream, w, r)
 }
 
+func (g *Gateway) handleOriginWellKnown(protocolID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		upstream := g.findProtocolUpstream(r.Context(), protocolID)
+		if upstream == nil {
+			g.writeJSON(w, http.StatusNotFound, map[string]string{"error": "Protocol not found"})
+			return
+		}
+		g.proxy(upstream, w, r)
+	}
+}
+
 func (g *Gateway) findProtocolUpstream(ctx context.Context, protocolID string) *Upstream {
 	if protocolID == "" {
 		return nil

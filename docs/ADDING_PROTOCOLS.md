@@ -215,15 +215,13 @@ const flowMeta = {
 ```
 Use the exact `flow.id` string from the backend, not the URL slug.
 
-4) `frontend/next.config.ts`: add a rewrite entry for the protocol base path so executors can call `/${protocolId}` in local/dev and production runtimes.
+4) `frontend/src/lib/upstream-proxy.ts`: add the protocol base path to `BACKEND_PROXY_PREFIXES` so executors can call `/${protocolId}` in local/dev and production runtimes. The frontend forwards these paths to `BACKEND_ORIGIN` at runtime; do not add rewrites to `next.config.ts`, which `next build` freezes into the image.
 
 ```ts
-async rewrites() {
-  return [
-    // ...
-    { source: '/newprotocol/:path*', destination: `${backendOrigin}/newprotocol/:path*` },
-  ]
-},
+const BACKEND_PROXY_PREFIXES = [
+  // ...
+  '/newprotocol',
+] as const
 ```
 
 ## 7. Parameter explainers and references

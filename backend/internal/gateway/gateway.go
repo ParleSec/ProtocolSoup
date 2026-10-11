@@ -185,6 +185,21 @@ func (g *Gateway) Router() http.Handler {
 	// not under /ssf. Proxy to the SSF upstream with the same path.
 	r.Get("/.well-known/ssf-configuration", g.handleSSFConfiguration)
 
+	// The OP is the pathless origin issuer, so OIDC Discovery 1.0 §4, RFC 8414
+	// §3 and RFC 9728 §3.1 place its metadata at the bare well-known paths.
+	r.Get("/.well-known/openid-configuration", g.handleOriginWellKnown("oidc"))
+	r.Get("/.well-known/oauth-authorization-server", g.handleOriginWellKnown("oidc"))
+	r.Get("/.well-known/oauth-protected-resource", g.handleOriginWellKnown("oidc"))
+
+	// OID4VCI 1.0 §12.2.2, RFC 8414 §3.1 and RFC 9728 §3.1 insert the
+	// well-known suffix between the host and the identifier's path, so the
+	// owning protocol is the first segment after the suffix. Upstreams serve
+	// the path unchanged and reject identifiers they do not publish. The bare
+	// /.well-known/openid-credential-issuer stays unrouted: a non-root
+	// issuer must not answer there.
+	r.Get("/.well-known/{wellKnownSuffix}/{protocolID}", g.handleProtocolRoute)
+	r.Get("/.well-known/{wellKnownSuffix}/{protocolID}/*", g.handleProtocolRoute)
+
 	r.Route("/{protocolID}", func(r chi.Router) {
 		r.Handle("/*", http.HandlerFunc(g.handleProtocolRoute))
 		r.Handle("/", http.HandlerFunc(g.handleProtocolRoute))
