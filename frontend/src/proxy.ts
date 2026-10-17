@@ -5,6 +5,7 @@ import {
   MARKDOWN_TARGET_HEADER,
   prefersMarkdown,
 } from '@/lib/markdown-negotiation'
+import { upstreamResponse } from '@/lib/upstream-proxy'
 
 /**
  * Applies the agent-facing behaviour that has to sit in front of every page
@@ -39,6 +40,11 @@ function isExcluded(pathname: string): boolean {
 
 export function proxy(request: NextRequest): NextResponse {
   const { pathname, search } = request.nextUrl
+
+  const upstream = upstreamResponse(pathname, search)
+  if (upstream) {
+    return upstream
+  }
 
   if (isExcluded(pathname)) {
     return NextResponse.next()

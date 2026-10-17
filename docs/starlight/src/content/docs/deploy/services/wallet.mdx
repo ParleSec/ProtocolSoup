@@ -57,6 +57,31 @@ docker run -p 8081:8080 \
   ghcr.io/parlesec/protocolsoup-wallet:latest
 ```
 
+The default `docker/docker-compose.yml` runs this wallet alongside the stack, sharing the gateway's network so it reaches the issuer at the same `http://localhost:8080` origin the issuer advertises. It loads the issuer's public IACA root from a volume that holds only that certificate.
+
+## Using your own wallet deployment
+
+Looking Glass reaches the wallet through the frontend's same-origin `/wallet-harness/*` path, which the frontend forwards server-side to `WALLET_BACKEND_ORIGIN`. To use a wallet harness you host yourself:
+
+1. Point the frontend at it. The value is read at runtime, so the published frontend image needs no rebuild. With the default compose file, set it in `docker/.env` and skip the local wallet:
+
+   ```bash
+   echo 'WALLET_BACKEND_ORIGIN=https://wallet.example.com' >> docker/.env
+   docker compose up -d --build --scale wallet=0 --scale mdoc-trust-anchor=0
+   ```
+
+2. Make the stack's issuer and verifier reachable from the wallet at the exact origin they advertise. Set `WALLET_TARGET_BASE_URL` on the wallet to the stack's `SHOWCASE_BASE_URL`. Outside that origin, the wallet only fetches public HTTPS hosts, so a wallet that is not on the stack's network needs `SHOWCASE_BASE_URL` to be a public HTTPS origin.
+
+3. Give the wallet the issuer's IACA root out of band. Copy only the public certificate (the PKI directory next to it also holds the issuer's private keys) and set it as `WALLET_MDOC_IACA_ROOT_PEM`:
+
+   ```bash
+   cd docker && docker compose cp federation-service:/app/mdoc-pki/iaca_root.pem ./iaca_root.pem
+   ```
+
+The hosted `https://wallet.protocolsoup.com` trusts only the ProtocolSoup issuer's IACA root, so it rejects `mso_mdoc` credentials from a self-hosted issuer. Use your own wallet deployment for that.
+
+CORS settings on the wallet do not apply to this path: the browser only talks to the frontend's origin.
+
 ## OID4VCI Client
 
 The wallet's metadata-driven OID4VCI client supports:
@@ -79,7 +104,7 @@ The wallet's metadata-driven OID4VCI client supports:
 - Keep strict session isolation enabled in shared environments.
 - Use narrow CORS origin allow-lists outside local development.
 - External `request_uri` and issuer fetches resolve DNS and refuse non-public destinations, including redirect hops. Failed fetches do not reflect upstream response bodies. Pre-patch wallet tags `v2.0.0`–`v4.1.0` are [GHSA-q7jr-2q6f-gw44](/developers/security-advisories/).
-- When the browser-based Looking Glass uses a separately hosted wallet, keep at least one wallet instance warm. Looking Glass calls the wallet through the same-origin `/wallet-harness/*` Next rewrite on `protocolsoup.com` (see frontend `WALLET_BACKEND_ORIGIN`), so a cold-start failure surfaces as a normal HTTP error instead of a CORS-stripped edge 502.
+- When the browser-based Looking Glass uses a separately hosted wallet, keep at least one wallet instance warm. Looking Glass calls the wallet through the same-origin `/wallet-harness/*` path on `protocolsoup.com` (see frontend `WALLET_BACKEND_ORIGIN`), so a cold-start failure surfaces as a normal HTTP error instead of a CORS-stripped edge 502.
 - Add each trusted verifier attestation issuer URL to `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS`; otherwise the wallet will reject `verifier_attestation` request objects even when the JWT signature is valid.
 - Set `WALLET_DEVICE_KEY_PATH` to a durable file for `mso_mdoc` (ISO/IEC 18013-5) credentials: the device key bound at issuance must be reused to sign the `DeviceResponse`, so regenerating it silently breaks every stored mdoc credential's device binding.
 - Set `WALLET_MDOC_IACA_ROOT_PEM` to an independently obtained IACA root. The wallet rejects mdoc issuance when no root is configured or when the credential's document-signer chain, signature, digests, or validity fail verification.

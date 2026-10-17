@@ -155,16 +155,17 @@ Headless wallet interface: `POST /api/issue`, `POST /api/import`, `POST /api/res
 
 ## Architecture
 
-The backend is split into independently deployable services that share one codebase, written in Go behind a Next.js App Router frontend. `docker compose up -d` starts six of them:
+The backend is split into independently deployable services that share one codebase, written in Go behind a Next.js App Router frontend. `docker compose up -d` starts seven of them:
 
 - **Gateway** - aggregates `/api` and routes protocol paths to upstreams
 - **Federation** - OAuth 2.0, OIDC, SAML, OID4VCI, OID4VP
 - **SCIM** - user and group provisioning
 - **SSF** - Shared Signals streams and the event receiver
 - **Redis** - `private_key_jwt` replay protection
+- **Wallet harness** - the OID4VCI/OID4VP holder Looking Glass drives
 - **Frontend** - the Next.js UI
 
-Three more deploy separately: SPIFFE via the `docker-compose.spiffe.yml` overlay, the VC service for standalone OID4VCI and OID4VP, and the wallet harness. `backend/cmd/server` still builds a single-process monolith, which is the quickest way to run everything without Docker.
+Two more deploy separately: SPIFFE via the `docker-compose.spiffe.yml` overlay, and the VC service for standalone OID4VCI and OID4VP. `backend/cmd/server` still builds a single-process monolith, which is the quickest way to run everything without Docker.
 
 Every ProtocolSoup service is published to GHCR, Redis aside since it uses the upstream image. See [deploy/services](https://docs.protocolsoup.com/deploy/services/overview/).
 
