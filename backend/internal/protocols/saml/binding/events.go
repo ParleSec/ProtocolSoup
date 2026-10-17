@@ -11,6 +11,10 @@ import (
 // nothing.
 type Events struct {
 	Engine *lookingglass.Engine
+
+	// Origins are the browser origins an outcome page may hand its outcome
+	// to: the deployment's own origin and the Looking Glass frontend origins.
+	Origins []string
 }
 
 // Emit publishes an event to the Looking Glass session named on r, if any.

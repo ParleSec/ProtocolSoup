@@ -4,10 +4,13 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"sort"
 
+	"github.com/ParleSec/ProtocolSoup/internal/gel"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml/binding"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml/logout"
+	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml/message"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml/metadata"
 	"github.com/go-chi/chi/v5"
 )
@@ -19,13 +22,26 @@ const (
 
 // Routes mounts the IdP's endpoints; the plugin mounts them under /saml/idp.
 func (idp *IdentityProvider) Routes(r chi.Router) {
+	slo := idp.sloService()
 	r.Get("/metadata", idp.handleMetadata)
 	r.Get("/sso", idp.handleSSO)  // HTTP-Redirect binding
 	r.Post("/sso", idp.handleSSO) // HTTP-POST binding
 	r.Post("/login", idp.handleLogin)
 	r.Get("/initiate", idp.handleInitiate)
-	r.Get("/slo", idp.handleSLO)
-	r.Post("/slo", idp.handleSLO)
+	r.Get("/logout", idp.handleLogout)
+	r.Method(http.MethodGet, "/slo", slo)
+	r.Method(http.MethodPost, "/slo", slo)
+}
+
+func (idp *IdentityProvider) sloService() logout.Service {
+	return logout.Service{
+		Role:            logout.RoleSessionAuthority,
+		EntityID:        idp.cfg.EntityID,
+		Credentials:     idp.cfg.Credentials,
+		Events:          idp.cfg.Events,
+		HandleRequest:   idp.HandleLogoutRequest,
+		ConsumeResponse: idp.ConsumeLogoutResponse,
+	}
 }
 
 func (idp *IdentityProvider) handleMetadata(w http.ResponseWriter, r *http.Request) {
@@ -43,16 +59,23 @@ func (idp *IdentityProvider) handleSSO(w http.ResponseWriter, r *http.Request) {
 	login, err := idp.AcceptAuthnRequest(r.Context(), msg)
 	var rejected *RequestError
 	if errors.As(err, &rejected) {
-		idp.cfg.Events.Emit(r, lookingglass.EventTypeSecurityWarning, "AuthnRequest rejected", map[string]interface{}{
+		data := map[string]interface{}{
 			"binding": msg.Binding, "samlXML": string(msg.XML), "status": rejected.Status, "validation": rejected.Validation,
-		}, binding.Reference("Request processing", "The IdP answers a request it will not satisfy with an error <Response>, or discards it when it cannot be trusted.", "SAML Profiles Section 4.1.4.1"))
+		}
+		annotation := binding.Reference("Request processing", "The IdP answers a request it will not satisfy with an error <Response>, or discards it when it cannot be trusted.", "SAML Profiles Section 4.1.4.1")
 		if rejected.Response == nil {
+			idp.cfg.Events.Emit(r, lookingglass.EventTypeSecurityWarning, "AuthnRequest discarded", data, annotation)
 			http.Error(w, "AuthnRequest discarded: "+rejected.Error(), http.StatusBadRequest)
 			return
 		}
-		if _, err := binding.Send(w, r, rejected.Response, idp.cfg.Credentials); err != nil {
+		wire, err := binding.Send(w, r, rejected.Response, idp.cfg.Credentials)
+		if err != nil {
 			http.Error(w, "Failed to send error Response: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
+		data["destination"] = rejected.Response.Location
+		data["samlResponseXML"] = string(wire)
+		idp.cfg.Events.Emit(r, lookingglass.EventTypeSecurityWarning, "AuthnRequest rejected with an error Response", data, annotation)
 		return
 	}
 	if err != nil {
@@ -63,7 +86,7 @@ func (idp *IdentityProvider) handleSSO(w http.ResponseWriter, r *http.Request) {
 		"binding": msg.Binding, "samlXML": string(msg.XML), "relayState": msg.RelayState,
 		"acsUrl": login.ACSURL, "validation": login.Validation,
 	}, binding.Reference("AuthnRequest", "Verified against the SP's metadata before the principal is asked to authenticate.", "SAML Profiles Section 4.1.4.1"))
-	idp.showLoginPage(w, login)
+	idp.showLoginPage(w, r, login)
 }
 
 // handleInitiate starts IdP-initiated SSO to the registered SP.
@@ -73,7 +96,10 @@ func (idp *IdentityProvider) handleInitiate(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	idp.showLoginPage(w, login)
+	idp.cfg.Events.Emit(r, lookingglass.EventTypeFlowStep, "IdP-initiated SSO started", map[string]interface{}{
+		"acsUrl": login.ACSURL, "relayState": login.RelayState,
+	}, binding.Reference("Unsolicited Response", "The IdP sends a <Response> without a preceding <AuthnRequest>, so it carries no InResponseTo.", "SAML Profiles Section 4.1.5"))
+	idp.showLoginPage(w, r, login)
 }
 
 // handleLogin authenticates the principal and posts the signed <Response> to
@@ -114,27 +140,14 @@ func (idp *IdentityProvider) handleLogin(w http.ResponseWriter, r *http.Request)
 	}, binding.Reference("Response", "Sent through the user agent with the HTTP-POST binding; the assertion and the Response are each signed.", "SAML Profiles Section 4.1.4.5"))
 }
 
-// handleSLO is the IdP's SingleLogoutService for requests from the SP and
-// responses to IdP-initiated logout.
-func (idp *IdentityProvider) handleSLO(w http.ResponseWriter, r *http.Request) {
-	msg, err := binding.Decode(r)
-	if err != nil {
-		http.Error(w, "Invalid SAML message: "+err.Error(), http.StatusBadRequest)
-		return
+// handleLogout starts IdP-initiated Single Logout for one IdP session.
+func (idp *IdentityProvider) handleLogout(w http.ResponseWriter, r *http.Request) {
+	relayState := r.URL.Query().Get("RelayState")
+	if relayState == "" {
+		relayState = message.GenerateID()
 	}
-	if msg.Param == binding.ParamSAMLResponse {
-		result, err := idp.ConsumeLogoutResponse(r.Context(), msg)
-		logout.WriteResult(w, r, idp.cfg.Events, "LogoutResponse processed by IdP", msg, result, err)
-		return
-	}
-	out, result, err := idp.HandleLogoutRequest(r.Context(), msg)
-	if out == nil {
-		logout.WriteResult(w, r, idp.cfg.Events, "LogoutRequest rejected by IdP", msg, result, err)
-		return
-	}
-	if _, err := binding.Send(w, r, out, idp.cfg.Credentials); err != nil {
-		http.Error(w, "Failed to send LogoutResponse: "+err.Error(), http.StatusInternalServerError)
-	}
+	out, err := idp.NewLogoutRequest(r.Context(), r.URL.Query().Get("session_id"), binding.FromQuery(r, message.BindingHTTPRedirect), relayState)
+	idp.sloService().SendRequest(w, r, out, err)
 }
 
 var loginPageTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
@@ -142,37 +155,38 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE htm
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SAML IdP Login - ProtocolSoup</title>
-<style>
-body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0; padding: 24px; }
-main { max-width: 480px; margin: 0 auto; }
-form { margin: 0 0 12px; }
-button, input { font: inherit; width: 100%; padding: 10px; box-sizing: border-box; }
-label { display: block; margin: 8px 0 4px; }
-</style>
+<title>SAML Identity Provider - ProtocolSoup</title>
+<style>{{.CSS}}</style>
 </head>
 <body>
 <main>
 <h1>SAML Identity Provider</h1>
-<p>Service provider: {{.SP}}</p>
-<p>Assertion consumer service: {{.ACS}}</p>
-<h2>Demo users</h2>
+<p class="muted">{{.IdP}}</p>
+<div class="panel">
+<dl>
+<dt>Service provider</dt><dd>{{.SP}}</dd>
+<dt>Assertion consumer service</dt><dd>{{.ACS}}</dd>
+{{if .RequestID}}<dt>AuthnRequest</dt><dd>{{.RequestID}}</dd>{{else}}<dt>AuthnRequest</dt><dd>none: unsolicited Response (SAML Profiles Section 4.1.5)</dd>{{end}}
+</dl>
+</div>
+<p class="status status-info">{{.IconInfo}}<span>Mock IdP demo users. Never enter real credentials.</span></p>
+<h2>Sign in as a demo user</h2>
 {{range .Users}}<form method="post" action="{{$.Action}}">
 <input type="hidden" name="email" value="{{.Email}}">
 <input type="hidden" name="password" value="{{.Password}}">
-<button type="submit">{{.Name}} ({{.Email}})</button>
+<button type="submit">{{.Name}} <span class="user-email">{{.Email}}</span></button>
 </form>
-{{end}}<h2>Or sign in</h2>
+{{end}}<h2>Or enter credentials</h2>
 <form method="post" action="{{.Action}}">
-<label for="email">Email</label><input id="email" type="email" name="email" required>
-<label for="password">Password</label><input id="password" type="password" name="password" required>
+<label for="email">Email</label><input id="email" type="email" name="email" autocomplete="username" required>
+<label for="password">Password</label><input id="password" type="password" name="password" autocomplete="current-password" required>
 <p><button type="submit">Sign in</button></p>
 </form>
 </main>
 </body>
 </html>`))
 
-func (idp *IdentityProvider) showLoginPage(w http.ResponseWriter, login *PendingLogin) {
+func (idp *IdentityProvider) showLoginPage(w http.ResponseWriter, r *http.Request, login *PendingLogin) {
 	http.SetCookie(w, &http.Cookie{
 		Name: loginCookieName, Value: login.ID, Path: loginCookiePath,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
@@ -182,9 +196,17 @@ func (idp *IdentityProvider) showLoginPage(w http.ResponseWriter, login *Pending
 	for _, u := range idp.cfg.Users.ListUsers() {
 		users = append(users, demoUser{Name: u.Name, Email: u.Email, Password: u.Password})
 	}
+	sort.Slice(users, func(i, j int) bool { return users[i].Email < users[j].Email })
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = loginPageTemplate.Execute(w, map[string]interface{}{
-		"SP": idp.cfg.SPEntityID, "ACS": login.ACSURL, "Action": idp.cfg.LoginURL, "Users": users,
+		"CSS":       gel.PageCSS(),
+		"IconInfo":  gel.IconInfo,
+		"IdP":       idp.cfg.EntityID,
+		"SP":        idp.cfg.SPEntityID,
+		"ACS":       login.ACSURL,
+		"RequestID": login.RequestID,
+		"Action":    binding.WithSession(r, idp.cfg.LoginURL),
+		"Users":     users,
 	})
 }

@@ -110,10 +110,10 @@ accepted proof algorithms under `dpop_signing_alg_values_supported`.
 The IdP and SP are separate entities; each entityID is its metadata URL.
 
 - `GET /saml/idp/metadata`, `GET /saml/sp/metadata`
-- `GET|POST /saml/idp/sso`, `POST /saml/idp/login`, `GET /saml/idp/initiate`
+- `GET|POST /saml/idp/sso`, `POST /saml/idp/login`, `GET /saml/idp/initiate`, `GET /saml/idp/logout`
 - `POST /saml/sp/acs` (HTTP-POST only), `GET /saml/sp/login`, `GET /saml/sp/logout`
 - `GET|POST /saml/idp/slo`, `GET|POST /saml/sp/slo`
-- `GET /saml/demo/users`, `GET /saml/demo/sessions`
+- `GET /saml/demo/sessions`
 
 ### Verifiable Credentials (Mounted Modules)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -57,8 +58,11 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	if users, ok := config.MockIdP.(*mockidp.MockIdP); ok {
 		p.mockIdP = users
 	}
+	// Outcome pages hand their result to a Looking Glass opener on this
+	// deployment's origin or on one of the configured frontend origins.
+	p.events = binding.Events{Origins: openerOrigins(baseURL, config.CORSOrigins)}
 	if lg, ok := config.LookingGlass.(*lookingglass.Engine); ok {
-		p.events = binding.Events{Engine: lg}
+		p.events.Engine = lg
 	}
 
 	credentialDir := ""
@@ -117,11 +121,35 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Route("/idp", p.idp.Routes)
 	router.Route("/sp", p.sp.Routes)
 
-	router.Get("/demo/users", p.handleListUsers)
 	router.Get("/demo/sessions", p.handleListSessions)
+}
 
-	router.Get("/looking-glass/authn-request", p.handleLookingGlassCreateAuthnRequest)
-	router.Post("/looking-glass/authenticate", p.handleLookingGlassAuthenticate)
-	router.Get("/looking-glass/logout-request", p.handleLookingGlassCreateLogoutRequest)
-	router.Post("/looking-glass/logout", p.handleLookingGlassProcessLogout)
+// handleListSessions lists the security contexts each role currently holds,
+// so Looking Glass can pick one to log out.
+func (p *Plugin) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	binding.WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"sp":  p.sp.Sessions(),
+		"idp": p.idp.Sessions(),
+	})
+}
+
+func openerOrigins(baseURL string, corsOrigins []string) []string {
+	var origins []string
+	seen := map[string]bool{}
+	add := func(raw string) {
+		parsed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return
+		}
+		origin := parsed.Scheme + "://" + parsed.Host
+		if !seen[origin] {
+			seen[origin] = true
+			origins = append(origins, origin)
+		}
+	}
+	add(baseURL)
+	for _, origin := range corsOrigins {
+		add(origin)
+	}
+	return origins
 }

@@ -367,6 +367,16 @@ export const PROTOCOL_CATALOG_DATA: ProtocolCatalogDataItem[] = [
         ],
       },
       {
+        id: 'idp-initiated-logout',
+        backendId: 'idp_initiated_logout',
+        name: 'IdP-Initiated SLO',
+        rfc: 'Profiles §4.4.3.3',
+        references: [
+          { category: 'core', label: 'SAML 2.0 Profiles §4.4.3.3 — LogoutRequest Issued by Identity Provider to Session Participant', href: 'https://docs.oasis-open.org/security/saml/v2.0/saml-profiles-2.0-os.pdf' },
+          { category: 'core', label: 'SAML 2.0 Core §3.7.3.1 — Session Participant Rules', href: 'https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf' },
+        ],
+      },
+      {
         id: 'metadata',
         name: 'Metadata Exchange',
         rfc: 'Metadata',

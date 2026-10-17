@@ -1,71 +1,29 @@
 /**
  * SAML Single Logout (SLO) Flow Executor
  *
- * SP-initiated Single Logout (SAML 2.0 Profiles Section 4.4): the backend's SP
- * ends its session and signs a <LogoutRequest>; the backend's IdP verifies it
- * against the SP's metadata, ends its session, and signs a <LogoutResponse>;
- * the SP matches that response to its request. Every validation result shown
- * here is one the backend ran.
+ * Implements the SAML 2.0 Single Logout Profile (SAML 2.0 Profiles Section
+ * 4.4) over the front-channel bindings:
+ * - SP-initiated: the SP's /saml/sp/logout sends a signed <LogoutRequest> to
+ *   the IdP (Section 4.4.3.1)
+ * - IdP-initiated: the IdP's /saml/idp/logout sends a signed <LogoutRequest>
+ *   to the SP (Section 4.4.3.3)
+ *
+ * The recipient ends its sessions and returns a signed <LogoutResponse>; the
+ * initiator's SingleLogoutService outcome page reports what it received and
+ * every check it ran.
  */
 
-import {
-  FlowExecutorBase,
-  type FlowExecutorConfig,
-  generateSecureRandom,
-} from './base'
+import { type FlowExecutorConfig, generateSecureRandom } from './base'
+import { SAMLBrowserExecutor, type SAMLSessionInfo } from './saml-browser'
 
 export interface SAMLLogoutConfig extends FlowExecutorConfig {
   /** SAML binding to use: 'post' or 'redirect' */
   binding: 'post' | 'redirect'
+  /** Whether logout is initiated by the SP (true) or the IdP (false) */
+  spInitiated: boolean
 }
 
-interface ValidationReport {
-  signed: boolean
-  checks: Array<{ name: string; passed: boolean; detail: string; reference: string }>
-}
-
-interface SessionInfo {
-  sessionId: string
-  peerEntityId: string
-  nameId: string
-  sessionIndex: string
-}
-
-interface LogoutRequestResult {
-  success: boolean
-  error?: string
-  binding: string
-  requestId: string
-  issueInstant: string
-  issuer: string
-  destination: string
-  nameId: string
-  nameIdFormat: string
-  sessionIndexes?: string[]
-  rawXml: string
-  base64Encoded?: string
-  redirectUrl?: string
-  signed: boolean
-  relayState: string
-}
-
-interface LogoutResult {
-  success: boolean
-  error?: string
-  binding?: string
-  responseId?: string
-  inResponseTo?: string
-  issuer?: string
-  statusCode?: string
-  rawXml?: string
-  redirectUrl?: string
-  relayState?: string
-  sessionsCleared?: number
-  responderValidation?: ValidationReport
-  requesterValidation?: ValidationReport
-}
-
-export class SAMLLogoutExecutor extends FlowExecutorBase {
+export class SAMLLogoutExecutor extends SAMLBrowserExecutor {
   readonly flowType: string = 'saml_logout'
   readonly flowName: string = 'SAML Single Logout'
   readonly rfcReference: string = 'SAML 2.0 Profiles Section 4.4'
@@ -79,30 +37,49 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
 
   async execute(): Promise<void> {
     this.abortController = new AbortController()
+    const initiator = this.flowConfig.spInitiated ? 'SP' : 'IdP'
     this.updateState({
       ...this.createInitialState(),
       status: 'executing',
-      currentStep: 'Initiating SP-initiated Single Logout',
+      currentStep: `Initiating ${initiator}-initiated Single Logout`,
     })
 
     try {
-      const sessionsResponse = await fetch(`${this.config.baseUrl}/demo/sessions`, {
+      await this.loadSPMetadata()
+
+      const sessionsResponse = await fetch(this.withCaptureQuery(`${this.config.baseUrl}/demo/sessions`), {
         headers: this.withCaptureHeaders(),
       })
-      const sessions = await sessionsResponse.json() as { sp: SessionInfo[]; idp: SessionInfo[] }
-      const session = sessions.sp[0]
+      if (!sessionsResponse.ok) {
+        throw new Error(`Session list: HTTP ${sessionsResponse.status}`)
+      }
+      const sessions = await sessionsResponse.json() as { sp: SAMLSessionInfo[]; idp: SAMLSessionInfo[] }
+      const session = this.flowConfig.spInitiated ? sessions.sp[0] : sessions.idp[0]
       if (!session) {
-        throw new Error('No active SAML session at the SP. Run an SSO flow first.')
+        throw new Error(`No active SAML session at the ${initiator}. Run an SSO flow first.`)
       }
       this.addEvent({
         type: 'info',
-        title: 'SP Session',
-        description: `Logging out ${session.nameId}`,
+        title: `${initiator} Session`,
+        description: `Logging out ${session.nameId} (SessionIndex ${session.sessionIndex})`,
         data: { ...session },
       })
 
-      await this.logout(session)
+      // RelayState MUST NOT exceed 80 bytes (SAML Bindings Section 3.4.3).
+      const relayState = generateSecureRandom(16)
+      this.updateState({ securityParams: { ...this.state.securityParams, state: relayState } })
+      const query = `binding=${this.flowConfig.binding}&session_id=${encodeURIComponent(session.sessionId)}&RelayState=${encodeURIComponent(relayState)}`
+      const path = this.flowConfig.spInitiated ? `/sp/logout?${query}` : `/idp/logout?${query}`
+      this.addEvent({
+        type: 'rfc',
+        title: `${initiator}-Initiated Single Logout`,
+        description: `The ${initiator} sends a signed <LogoutRequest> over HTTP-${this.flowConfig.binding === 'redirect' ? 'Redirect' : 'POST'}`,
+        rfcReference: this.flowConfig.spInitiated ? 'SAML 2.0 Profiles Section 4.4.3.1' : 'SAML 2.0 Profiles Section 4.4.3.3',
+        data: { binding: this.flowConfig.binding, relayState },
+      })
 
+      const outcome = await this.runInPopup(path, 'The browser carries the LogoutRequest and LogoutResponse between the SP and the IdP')
+      this.reportOutcome(outcome)
       this.updateState({ status: 'completed', currentStep: 'Single Logout completed' })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -112,90 +89,6 @@ export class SAMLLogoutExecutor extends FlowExecutorBase {
         error: { code: 'logout_error', description: message },
       })
       this.addEvent({ type: 'error', title: 'Single Logout Failed', description: message })
-    }
-  }
-
-  private async logout(session: SessionInfo): Promise<void> {
-    const relayState = generateSecureRandom(16)
-    this.updateState({
-      currentStep: 'SP creates LogoutRequest',
-      securityParams: { ...this.state.securityParams, state: relayState },
-    })
-
-    const requestUrl = new URL(`${window.location.origin}${this.config.baseUrl}/looking-glass/logout-request`)
-    requestUrl.searchParams.set('initiator', 'sp')
-    requestUrl.searchParams.set('session_id', session.sessionId)
-    requestUrl.searchParams.set('binding', this.flowConfig.binding)
-    requestUrl.searchParams.set('relay_state', relayState)
-    const requestResponse = await fetch(this.withCaptureQuery(requestUrl.toString()), {
-      headers: this.withCaptureHeaders(),
-    })
-    const request = await requestResponse.json() as LogoutRequestResult
-    if (!requestResponse.ok || !request.success) {
-      throw new Error(request.error || `LogoutRequest creation failed (HTTP ${requestResponse.status})`)
-    }
-
-    this.addEvent({
-      type: 'request',
-      title: 'LogoutRequest',
-      description: `Signed LogoutRequest for ${request.nameId} to ${request.destination}`,
-      rfcReference: 'SAML 2.0 Profiles Section 4.4.3.1',
-      data: { ...request },
-    })
-
-    this.updateState({ currentStep: 'IdP processes LogoutRequest' })
-    const form = new URLSearchParams()
-    if (request.redirectUrl) {
-      form.set('redirect_url', request.redirectUrl)
-    } else if (request.base64Encoded) {
-      form.set('SAMLRequest', request.base64Encoded)
-      form.set('RelayState', request.relayState)
-    }
-    const logoutResponse = await fetch(`${this.config.baseUrl}/looking-glass/logout`, {
-      method: 'POST',
-      headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
-      body: form.toString(),
-    })
-    const result = await logoutResponse.json() as LogoutResult
-
-    if (result.responderValidation) {
-      this.addEvent({
-        type: 'security',
-        title: 'IdP checks on the LogoutRequest',
-        description: result.responderValidation.checks.every((c) => c.passed) ? 'All checks passed' : 'The IdP refused the LogoutRequest',
-        rfcReference: 'SAML 2.0 Core Section 3.7.3.2',
-        data: { ...result.responderValidation },
-      })
-    }
-    if (result.rawXml) {
-      this.addEvent({
-        type: 'response',
-        title: 'LogoutResponse',
-        description: `Status ${result.statusCode ?? 'unknown'}; ${result.sessionsCleared ?? 0} IdP session(s) ended`,
-        rfcReference: 'SAML 2.0 Profiles Section 4.4.3.5',
-        data: {
-          responseId: result.responseId,
-          inResponseTo: result.inResponseTo,
-          issuer: result.issuer,
-          statusCode: result.statusCode,
-          relayState: result.relayState,
-          redirectUrl: result.redirectUrl,
-          rawXml: result.rawXml,
-        },
-      })
-    }
-    if (result.requesterValidation) {
-      this.addEvent({
-        type: 'security',
-        title: 'SP checks on the LogoutResponse',
-        description: result.success ? 'All checks passed' : result.error ?? 'LogoutResponse rejected',
-        rfcReference: 'SAML 2.0 Profiles Section 4.4.4.2',
-        data: { ...result.requesterValidation },
-      })
-    }
-
-    if (!logoutResponse.ok || !result.success) {
-      throw new Error(result.error || `Logout failed (HTTP ${logoutResponse.status})`)
     }
   }
 }

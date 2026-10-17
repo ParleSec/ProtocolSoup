@@ -33,6 +33,7 @@ Keys and certificates persist under `{SHOWCASE_DATA_DIR}/saml/` (`idp.key.pem`, 
 | `sp_initiated_sso` | SP-Initiated SSO | Service Provider starts the login flow |
 | `idp_initiated_sso` | IdP-Initiated SSO | Identity Provider sends an unsolicited Response |
 | `single_logout` | Single Logout | SP-initiated logout with signed LogoutRequest and LogoutResponse |
+| `idp_initiated_logout` | IdP-Initiated Single Logout | The IdP, as session authority, logs the SP out (Profiles Section 4.4.3.3) |
 | `metadata` | Metadata Exchange | SP/IdP metadata discovery and sharing |
 
 ## Endpoints
@@ -45,7 +46,8 @@ Keys and certificates persist under `{SHOWCASE_DATA_DIR}/saml/` (`idp.key.pem`, 
 | `/saml/idp/sso` | GET, POST | SingleSignOnService (HTTP-Redirect, HTTP-POST) |
 | `/saml/idp/login` | POST | Principal authentication; answers with the signed Response |
 | `/saml/idp/initiate` | GET | Start IdP-initiated SSO (optional `RelayState`) |
-| `/saml/idp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST) |
+| `/saml/idp/logout` | GET | Start IdP-initiated Single Logout (`session_id`, `binding`) |
+| `/saml/idp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST); a LogoutResponse gets the outcome page |
 
 ### Service provider
 
@@ -53,22 +55,27 @@ Keys and certificates persist under `{SHOWCASE_DATA_DIR}/saml/` (`idp.key.pem`, 
 |------|---------|---------|
 | `/saml/sp/metadata` | GET | SP `EntityDescriptor` (`application/samlmetadata+xml`) |
 | `/saml/sp/login` | GET | Start SP-initiated SSO (`binding=redirect` or `post`, optional `RelayState`) |
-| `/saml/sp/acs` | POST | AssertionConsumerService (HTTP-POST only) |
+| `/saml/sp/acs` | POST | AssertionConsumerService (HTTP-POST only); answers with the outcome page |
 | `/saml/sp/logout` | GET | Start SP-initiated Single Logout (`session_id`, `binding`) |
-| `/saml/sp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST) |
+| `/saml/sp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST); a LogoutResponse gets the outcome page |
 
-### Demo and Looking Glass
+### Demo
 
 | Path | Methods | Purpose |
 |------|---------|---------|
-| `/saml/demo/users` | GET | Demo users |
-| `/saml/demo/sessions` | GET | Current sessions held by the SP (`sp`) and the IdP (`idp`) |
-| `/saml/looking-glass/authn-request` | GET | SP builds and signs an AuthnRequest for the chosen binding |
-| `/saml/looking-glass/authenticate` | POST | IdP processes the AuthnRequest and issues a signed Response; SP validates it |
-| `/saml/looking-glass/logout-request` | GET | SP (`initiator=sp`) or IdP (`initiator=idp`) builds and signs a LogoutRequest |
-| `/saml/looking-glass/logout` | POST | The addressed role processes the LogoutRequest; the requester validates the LogoutResponse |
+| `/saml/demo/sessions` | GET | Current sessions held by the SP (`sp`) and the IdP (`idp`), so Looking Glass can pick one to log out |
 
-The Looking Glass endpoints run the same IdP and SP code as the binding endpoints, in one request. Every validation result they return comes from checks that actually ran.
+### Looking Glass
+
+Looking Glass runs every SAML flow through the real endpoints above, in a popup, so the browser follows each HTTP-Redirect and HTTP-POST hop itself. The executor adds the Looking Glass session to the first URL as `lg_session`. Each role carries it on to the next endpoint it sends the user agent to, outside the signed query values (SAML Bindings Section 3.4.4.1 signs only `SAMLRequest`/`SAMLResponse`, `RelayState` and `SigAlg`) and outside the `Destination` attribute. The capture middleware and the roles' events therefore record every real exchange.
+
+The endpoint that receives the last message of a flow answers with an outcome page. That is the assertion consumer service for SSO, and the initiator's SingleLogoutService for logout. The page shows:
+
+- the message as it arrived;
+- every check the receiving role ran, with its spec reference;
+- the session or status it produced.
+
+When Looking Glass opened the window, the page also hands the outcome to it with `postMessage`. It addresses only the deployment's own origin and the configured frontend origins (`SHOWCASE_CORS_ORIGINS`).
 
 ## Signatures
 

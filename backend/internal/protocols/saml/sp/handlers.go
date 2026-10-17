@@ -13,12 +13,24 @@ import (
 
 // Routes mounts the SP's endpoints; the plugin mounts them under /saml/sp.
 func (sp *ServiceProvider) Routes(r chi.Router) {
+	slo := sp.sloService()
 	r.Get("/metadata", sp.handleMetadata)
 	r.Get("/login", sp.handleLogin)
 	r.Post("/acs", sp.handleACS) // HTTP-POST only (SAML Profiles Section 4.1.2)
 	r.Get("/logout", sp.handleLogout)
-	r.Get("/slo", sp.handleSLO)
-	r.Post("/slo", sp.handleSLO)
+	r.Method(http.MethodGet, "/slo", slo)
+	r.Method(http.MethodPost, "/slo", slo)
+}
+
+func (sp *ServiceProvider) sloService() logout.Service {
+	return logout.Service{
+		Role:            logout.RoleSessionParticipant,
+		EntityID:        sp.cfg.EntityID,
+		Credentials:     sp.cfg.Credentials,
+		Events:          sp.cfg.Events,
+		HandleRequest:   sp.HandleLogoutRequest,
+		ConsumeResponse: sp.ConsumeLogoutResponse,
+	}
 }
 
 func (sp *ServiceProvider) handleMetadata(w http.ResponseWriter, r *http.Request) {
@@ -47,33 +59,30 @@ func (sp *ServiceProvider) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}, binding.Reference("AuthnRequest", "Signed because this SP publishes AuthnRequestsSigned=\"true\".", "SAML Profiles Section 4.1.4.1"))
 }
 
-// handleACS is the HTTP-POST assertion consumer service.
+// handleACS is the HTTP-POST assertion consumer service. It answers with the
+// outcome page: what arrived, every check that ran, and the session created.
 func (sp *ServiceProvider) handleACS(w http.ResponseWriter, r *http.Request) {
 	msg, err := binding.DecodePost(r)
 	if err != nil {
-		binding.WriteJSON(w, http.StatusBadRequest, map[string]interface{}{"success": false, "error": "Invalid SAML message: " + err.Error()})
+		http.Error(w, "Invalid SAML message: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	result, err := sp.ConsumeResponse(r.Context(), msg)
-	status := http.StatusOK
-	eventType := lookingglass.EventTypeTokenValidated
+	status, eventType := http.StatusOK, lookingglass.EventTypeTokenValidated
 	if err != nil {
-		status = http.StatusForbidden
-		eventType = lookingglass.EventTypeSecurityWarning
+		status, eventType = http.StatusForbidden, lookingglass.EventTypeSecurityWarning
 	}
-	sp.cfg.Events.Emit(r, eventType, "SAML Response processed at ACS", map[string]interface{}{
-		"samlResponseXML": string(msg.XML), "relayState": msg.RelayState, "validation": result.Report,
-	}, binding.Reference("Response processing", "Every check below ran on the received Response; any failure rejects it.", "SAML Profiles Section 4.1.4.3"))
-	body := map[string]interface{}{
-		"success":    err == nil,
-		"validation": result.Report,
-		"relayState": result.RelayState,
-		"session":    result.Session,
+	outcome := binding.NewOutcome("sso", sp.cfg.EntityID, "SAML Response processed at the assertion consumer service", "SAML Profiles Section 4.1.4.3", msg, result.Report, err)
+	details := map[string]interface{}{"unsolicited": result.Unsolicited}
+	if result.Response != nil {
+		details["statusCode"] = result.Response.Status.StatusCode.Value
+		details["inResponseTo"] = result.Response.InResponseTo
 	}
-	if err != nil {
-		body["error"] = err.Error()
+	if result.Session != nil {
+		details["session"] = result.Session
 	}
-	binding.WriteJSON(w, status, body)
+	outcome.Details = details
+	sp.cfg.Events.WriteOutcome(w, r, eventType, status, outcome)
 }
 
 // handleLogout starts SP-initiated Single Logout for one SP session.
@@ -83,33 +92,5 @@ func (sp *ServiceProvider) handleLogout(w http.ResponseWriter, r *http.Request) 
 		relayState = message.GenerateID()
 	}
 	out, err := sp.NewLogoutRequest(r.Context(), r.URL.Query().Get("session_id"), binding.FromQuery(r, message.BindingHTTPRedirect), relayState)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if _, err := binding.Send(w, r, out, sp.cfg.Credentials); err != nil {
-		http.Error(w, "Failed to send LogoutRequest: "+err.Error(), http.StatusInternalServerError)
-	}
-}
-
-// handleSLO is the SP's SingleLogoutService.
-func (sp *ServiceProvider) handleSLO(w http.ResponseWriter, r *http.Request) {
-	msg, err := binding.Decode(r)
-	if err != nil {
-		http.Error(w, "Invalid SAML message: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	if msg.Param == binding.ParamSAMLResponse {
-		result, err := sp.ConsumeLogoutResponse(r.Context(), msg)
-		logout.WriteResult(w, r, sp.cfg.Events, "LogoutResponse processed by SP", msg, result, err)
-		return
-	}
-	out, result, err := sp.HandleLogoutRequest(r.Context(), msg)
-	if out == nil {
-		logout.WriteResult(w, r, sp.cfg.Events, "LogoutRequest rejected by SP", msg, result, err)
-		return
-	}
-	if _, err := binding.Send(w, r, out, sp.cfg.Credentials); err != nil {
-		http.Error(w, "Failed to send LogoutResponse: "+err.Error(), http.StatusInternalServerError)
-	}
+	sp.sloService().SendRequest(w, r, out, err)
 }

@@ -490,6 +490,73 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 			},
 		},
 		{
+			ID:          "idp_initiated_logout",
+			Name:        "IdP-Initiated Single Logout",
+			Description: "The identity provider, acting as session authority, ends a principal's session and sends a signed LogoutRequest to each session participant (saml-profiles §4.4.2: an identity provider \"can initiate this profile at step 2 and issue a <LogoutRequest> to all session participants, also skipping step 5\"). This lab's IdP has one session participant, the SP, and uses the front-channel HTTP-Redirect or HTTP-POST binding through the user agent.",
+			Executable:  true,
+			Category:    "logout",
+			Steps: []plugin.FlowStep{
+				{
+					Order:       1,
+					Name:        "IdP Ends Its Session",
+					Description: "The IdP picks the session it issued an assertion for, removes it, and builds a LogoutRequest naming the principal (NameID) and that session (SessionIndex). As session authority it MUST set NotOnOrAfter (saml-core §3.7.3.2).",
+					From:        "Identity Provider",
+					To:          "Identity Provider",
+					Type:        "internal",
+					Parameters: map[string]string{
+						"NameID":       "The NameID from the assertion the IdP issued",
+						"SessionIndex": "The SessionIndex from that assertion's AuthnStatement",
+						"NotOnOrAfter": "Set to cover the assertion lifetime (saml-core §3.7.3.2)",
+						"Reason":       "urn:oasis:names:tc:SAML:2.0:logout:user",
+					},
+					Security: []string{
+						"\"The <LogoutRequest> message MUST be signed if the HTTP POST or Redirect binding is used\" (saml-profiles §4.4.3.1)",
+					},
+				},
+				{
+					Order:       2,
+					Name:        "LogoutRequest to the SP",
+					Description: "The signed LogoutRequest travels through the user agent to the SingleLogoutService the SP publishes in its metadata (saml-profiles §4.4.3.3).",
+					From:        "Identity Provider",
+					To:          "Service Provider",
+					Type:        "request",
+					Parameters: map[string]string{
+						"SAMLRequest": "DEFLATE + base64 on HTTP-Redirect (signed query string), base64 in a form on HTTP-POST (enveloped signature)",
+						"RelayState":  "Opaque value of at most 80 bytes",
+					},
+					Security: []string{
+						"The SP verifies the signature with the certificate from the IdP's metadata and checks Issuer and Destination",
+					},
+				},
+				{
+					Order:       3,
+					Name:        "SP Ends Its Sessions",
+					Description: "The SP MUST invalidate the principal's sessions named by the NameID and SessionIndex (saml-core §3.7.3.1) and remembers the logout until NotOnOrAfter, so an assertion for that session that arrives later is refused.",
+					From:        "Service Provider",
+					To:          "Service Provider",
+					Type:        "internal",
+					Parameters: map[string]string{
+						"sessionsEnded": "The SP sessions matching NameID and SessionIndex",
+					},
+				},
+				{
+					Order:       4,
+					Name:        "LogoutResponse to the IdP",
+					Description: "The SP MUST issue a LogoutResponse to the requesting IdP (saml-profiles §4.4.3.4), signed, on the same binding, to the IdP's SingleLogoutService. The IdP matches InResponseTo and RelayState to its outstanding LogoutRequest.",
+					From:        "Service Provider",
+					To:          "Identity Provider",
+					Type:        "response",
+					Parameters: map[string]string{
+						"Status":       "urn:oasis:names:tc:SAML:2.0:status:Success",
+						"InResponseTo": "The LogoutRequest ID",
+					},
+					Security: []string{
+						"\"The <LogoutResponse> message MUST be signed if the HTTP POST or Redirect binding is used\" (saml-profiles §4.4.3.4)",
+					},
+				},
+			},
+		},
+		{
 			ID:          "metadata",
 			Name:        "Metadata Exchange",
 			Description: "SAML 2.0 Metadata enables automated trust establishment between Identity Providers and Service Providers (SAML Metadata §2). Each party publishes an XML EntityDescriptor document describing their endpoints, supported bindings, certificates, and capabilities. This eliminates manual configuration and enables dynamic federation.",
@@ -658,14 +725,13 @@ func (p *Plugin) GetDemoScenarios() []plugin.DemoScenario {
 		{
 			ID:          "single_logout_demo",
 			Name:        "Single Logout Demo",
-			Description: "Demonstrate federated logout across multiple SPs",
+			Description: "Log out the SP and the IdP with signed LogoutRequest and LogoutResponse messages",
 			Steps: []plugin.DemoStep{
-				{Order: 1, Name: "Establish Sessions", Description: "Login to multiple SPs via SSO", Auto: true},
-				{Order: 2, Name: "Initiate Logout", Description: "Start logout at one SP", Auto: false},
-				{Order: 3, Name: "LogoutRequest to IdP", Description: "SP sends LogoutRequest", Auto: true},
-				{Order: 4, Name: "Propagate to SPs", Description: "IdP notifies other SPs", Auto: true},
-				{Order: 5, Name: "Collect Responses", Description: "Gather LogoutResponses", Auto: true},
-				{Order: 6, Name: "Final Response", Description: "IdP confirms complete logout", Auto: true},
+				{Order: 1, Name: "Establish Session", Description: "Sign in to the SP via SSO", Auto: false},
+				{Order: 2, Name: "Initiate Logout", Description: "Start logout at the SP or at the IdP", Auto: false},
+				{Order: 3, Name: "LogoutRequest", Description: "The initiator sends a signed LogoutRequest through the browser", Auto: true},
+				{Order: 4, Name: "Sessions Ended", Description: "The recipient ends the matching sessions", Auto: true},
+				{Order: 5, Name: "LogoutResponse", Description: "The recipient returns a signed LogoutResponse; the initiator matches it", Auto: true},
 			},
 		},
 		{

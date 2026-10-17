@@ -321,9 +321,16 @@ func Decode(r *http.Request) (*Received, error) {
 // Send delivers out over its binding and returns the XML that went on the wire:
 // signed for HTTP-POST, unsigned for HTTP-Redirect, whose signature is on the
 // query string.
+//
+// When r carries a Looking Glass capture session, the endpoint URL the user
+// agent is sent to carries it on as lg_session, so the next hop is captured
+// too. It sits outside the signed values (Bindings Section 3.4.4.1: "Any other
+// content in the original query string is not included and not signed") and
+// outside the Destination attribute, which names the endpoint itself.
 func Send(w http.ResponseWriter, r *http.Request, out *Outbound, creds *xmldsig.Credentials) ([]byte, error) {
+	endpoint := WithSession(r, out.Location)
 	if out.Binding == message.BindingHTTPRedirect {
-		location, err := RedirectURL(out.Location, out.Param, out.Element, out.RelayState, creds)
+		location, err := RedirectURL(endpoint, out.Param, out.Element, out.RelayState, creds)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +341,24 @@ func Send(w http.ResponseWriter, r *http.Request, out *Outbound, creds *xmldsig.
 		http.Redirect(w, r, location, http.StatusFound)
 		return xmlBytes, nil
 	}
-	return WritePostForm(w, out.Location, out.Param, out.Element, out.RelayState, creds)
+	return WritePostForm(w, endpoint, out.Param, out.Element, out.RelayState, creds)
+}
+
+// WithSession adds r's Looking Glass capture session to location as
+// lg_session, or returns location unchanged when r carries none.
+func WithSession(r *http.Request, location string) string {
+	sessionID := LookingGlassSession(r)
+	if sessionID == "" {
+		return location
+	}
+	parsed, err := url.Parse(location)
+	if err != nil {
+		return location
+	}
+	query := parsed.Query()
+	query.Set("lg_session", sessionID)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 // FromQuery maps a "binding" query value ("post" or "redirect") to a binding

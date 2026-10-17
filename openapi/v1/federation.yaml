@@ -868,6 +868,44 @@ paths:
             text/plain:
               schema:
                 type: string
+  /saml/idp/logout:
+    get:
+      tags: [SAML]
+      summary: Start IdP-initiated Single Logout
+      operationId: samlIdpLogout
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: binding
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [redirect, post]
+        - name: RelayState
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 80
+      responses:
+        "302":
+          description: Redirect carrying the DEFLATE-encoded LogoutRequest with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
+        "200":
+          description: XHTML auto-submit form carrying the signed LogoutRequest (SAML Bindings Section 3.5.4).
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: No such IdP session, or RelayState longer than 80 bytes.
+          content:
+            text/plain:
+              schema:
+                type: string
   /saml/idp/slo:
     get:
       tags: [SAML]
@@ -877,19 +915,17 @@ paths:
         "302":
           description: Redirect carrying the DEFLATE-encoded message with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
         "200":
-          description: Message accepted; the body lists every check that ran.
+          description: Outcome page with the received message, every check that ran with its spec reference, and the resulting session or status. Opened by Looking Glass, it also posts a saml_outcome message to its opener.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
         "403":
-          description: Message rejected; the body lists every check that ran.
+          description: Outcome page for a rejected message, with the error verbatim and every check that ran.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
     post:
       tags: [SAML]
       summary: IdP SingleLogoutService (HTTP-POST binding)
@@ -902,12 +938,11 @@ paths:
               schema:
                 type: string
         "403":
-          description: Message rejected; the body lists every check that ran.
+          description: Outcome page for a rejected message, with the error verbatim and every check that ran.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
   /saml/sp/metadata:
     get:
       tags: [SAML]
@@ -947,26 +982,23 @@ paths:
       operationId: samlSpAcs
       responses:
         "200":
-          description: Message accepted; the body lists every check that ran.
+          description: Outcome page with the received message, every check that ran with its spec reference, and the resulting session or status. Opened by Looking Glass, it also posts a saml_outcome message to its opener.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
         "400":
-          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
+          description: Message could not be decoded.
           content:
-            application/json:
+            text/plain:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
         "403":
-          description: Message rejected; the body lists every check that ran.
+          description: Outcome page for a rejected message, with the error verbatim and every check that ran.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
   /saml/sp/logout:
     get:
       tags: [SAML]
@@ -996,19 +1028,17 @@ paths:
         "302":
           description: Redirect carrying the DEFLATE-encoded message with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
         "200":
-          description: Message accepted; the body lists every check that ran.
+          description: Outcome page with the received message, every check that ran with its spec reference, and the resulting session or status. Opened by Looking Glass, it also posts a saml_outcome message to its opener.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
         "403":
-          description: Message rejected; the body lists every check that ran.
+          description: Outcome page for a rejected message, with the error verbatim and every check that ran.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
+                type: string
     post:
       tags: [SAML]
       summary: SP SingleLogoutService (HTTP-POST binding)
@@ -1021,25 +1051,11 @@ paths:
               schema:
                 type: string
         "403":
-          description: Message rejected; the body lists every check that ran.
+          description: Outcome page for a rejected message, with the error verbatim and every check that ran.
           content:
-            application/json:
+            text/html:
               schema:
-                type: object
-                additionalProperties: true
-  /saml/demo/users:
-    get:
-      tags: [SAML]
-      summary: List SAML demo users
-      operationId: samlDemoUsers
-      responses:
-        "200":
-          description: Demo users payload.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
+                type: string
   /saml/demo/sessions:
     get:
       tags: [SAML]

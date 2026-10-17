@@ -52,7 +52,7 @@ Each package has one job and depends only on the packages listed above it:
 | `logout` | LogoutRequest/LogoutResponse processing used by whichever role receives the message |
 | `idp` | Identity provider: AuthnRequest processing, error Responses, assertion issuance, IdP side of Single Logout, its HTTP endpoints and login page |
 | `sp` | Service provider: AuthnRequest creation, Response processing rules (`acs.go`), SP side of Single Logout, its HTTP endpoints |
-| `saml` (root) | `plugin.go` wiring and routes, `flows.go` flow and demo definitions, `lookingglass.go` Looking Glass and demo endpoints, end-to-end tests |
+| `saml` (root) | `plugin.go` wiring, routes and the demo session list, `flows.go` flow and demo definitions, end-to-end tests |
 
 ## API Endpoints
 
@@ -65,6 +65,7 @@ Each package has one job and depends only on the packages listed above it:
 | POST | `/saml/idp/sso` | SingleSignOnService, HTTP-POST binding |
 | POST | `/saml/idp/login` | Authenticate the principal (`email`, `password`) and post the signed Response to the SP |
 | GET | `/saml/idp/initiate` | Start IdP-initiated SSO (`RelayState` optional) |
+| GET | `/saml/idp/logout` | Send a signed LogoutRequest to the SP for IdP session `session_id` (`binding=redirect` default, or `post`) |
 | GET, POST | `/saml/idp/slo` | SingleLogoutService |
 
 ### Service provider (`/saml/sp`)
@@ -77,20 +78,24 @@ Each package has one job and depends only on the packages listed above it:
 | GET | `/saml/sp/logout` | Send a signed LogoutRequest for `session_id` (`binding=redirect` default, or `post`) |
 | GET, POST | `/saml/sp/slo` | SingleLogoutService |
 
-The ACS answers with JSON: `success`, the `validation` report (every check with its spec reference), `relayState`, and the created `session`. A rejected Response returns HTTP 403 with the same report.
 
-### Demo and Looking Glass
+### Demo
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/saml/demo/users` | Demo user presets |
 | GET | `/saml/demo/sessions` | Sessions held by the SP (`sp`) and the IdP (`idp`) |
-| GET | `/saml/looking-glass/authn-request` | SP builds and signs an AuthnRequest (`binding`, `relay_state`) |
-| POST | `/saml/looking-glass/authenticate` | IdP processes `SAMLRequest`+`RelayState` or `redirect_url` (or starts IdP-initiated SSO when neither is sent), authenticates `username`/`password`, issues the signed Response; the SP processes it |
-| GET | `/saml/looking-glass/logout-request` | SP (`initiator=sp`) or IdP (`initiator=idp`) builds and signs a LogoutRequest (`session_id`, `binding`, `relay_state`) |
-| POST | `/saml/looking-glass/logout` | The role named in the request's `Destination` processes it; the requester processes the LogoutResponse |
 
-The Looking Glass endpoints call the same role code as the binding endpoints, in one request, and return each side's real validation report. Looking Glass events use the `X-Looking-Glass-Session` header or `lg_session` query parameter.
+### Outcome pages and Looking Glass
+
+The ACS and each SingleLogoutService end a browser exchange with an outcome page (`binding.Events.WriteOutcome`). On a LogoutResponse the page belongs to the initiator; on a rejected LogoutRequest, to the role that rejected it. The page shows:
+
+- the received XML;
+- every check that ran, with its spec reference;
+- the resulting session or status.
+
+A rejected message returns HTTP 403. When Looking Glass opened the window, the page posts a `saml_outcome` message to its opener, addressed only to the base URL's origin and the `CORSOrigins`.
+
+Looking Glass drives the flows in a popup and adds `lg_session` to the first URL. `binding.Send` copies it onto every endpoint the user agent is sent to next, and the IdP login form posts back with it. This happens outside the signed query values and the `Destination` attribute, so each hop is captured and every event reaches the session.
 
 ## Signatures
 

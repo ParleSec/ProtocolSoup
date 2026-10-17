@@ -52,7 +52,7 @@ func newHarness(t *testing.T) *harness {
 	users := mockidp.NewMockIdP(keySet)
 	p := NewPlugin()
 	p.httpClient = server.Client()
-	if err := p.Initialize(context.Background(), plugin.PluginConfig{BaseURL: server.URL, MockIdP: users, KeySet: keySet}); err != nil {
+	if err := p.Initialize(context.Background(), plugin.PluginConfig{BaseURL: server.URL, MockIdP: users, KeySet: keySet, CORSOrigins: []string{"http://frontend.example/"}}); err != nil {
 		t.Fatal(err)
 	}
 	router.Route("/saml", p.RegisterRoutes)
@@ -125,20 +125,28 @@ func (h *harness) loginAtIdP() string {
 	return body
 }
 
-type acsResult struct {
-	Success    bool             `json:"success"`
-	Error      string           `json:"error"`
-	Validation *binding.Report  `json:"validation"`
-	Session    *session.Session `json:"session"`
-	RelayState string           `json:"relayState"`
+// pageOutcome is the outcome an ACS or SingleLogoutService page embeds for
+// its Looking Glass opener.
+type pageOutcome struct {
+	binding.Outcome
+	Details struct {
+		Session    *session.Session `json:"session"`
+		StatusCode string           `json:"statusCode"`
+	} `json:"details"`
 }
 
-func decodeACS(t *testing.T, resp *http.Response) (int, acsResult) {
+var outcomePattern = regexp.MustCompile(`(?s)<script type="application/json" id="saml-outcome">(.*?)</script>`)
+
+func decodeOutcome(t *testing.T, resp *http.Response) (int, pageOutcome) {
 	t.Helper()
-	var result acsResult
 	body := readBody(t, resp)
-	if err := json.Unmarshal([]byte(body), &result); err != nil {
-		t.Fatalf("ACS response is not JSON (HTTP %d): %s", resp.StatusCode, body)
+	match := outcomePattern.FindStringSubmatch(body)
+	if match == nil {
+		t.Fatalf("response is not an outcome page (HTTP %d): %s", resp.StatusCode, body)
+	}
+	var result pageOutcome
+	if err := json.Unmarshal([]byte(match[1]), &result); err != nil {
+		t.Fatalf("outcome JSON: %v: %s", err, match[1])
 	}
 	return resp.StatusCode, result
 }
@@ -217,12 +225,12 @@ func TestSPInitiatedSSOOverBothBindings(t *testing.T) {
 				t.Fatalf("IdP SSO: HTTP %d: %s", idpResp.StatusCode, body)
 			}
 
-			status, result := decodeACS(t, h.submitPostForm(h.loginAtIdP()))
+			status, result := decodeOutcome(t, h.submitPostForm(h.loginAtIdP()))
 			if status != http.StatusOK || !result.Success {
 				t.Fatalf("ACS rejected the response: %s (%s)", result.Error, failedCheck(result.Validation))
 			}
-			if result.Session == nil || result.Session.NameID != h.user || result.Session.SessionIndex == "" {
-				t.Fatalf("unexpected session: %+v", result.Session)
+			if result.Details.Session == nil || result.Details.Session.NameID != h.user || result.Details.Session.SessionIndex == "" {
+				t.Fatalf("unexpected session: %+v", result.Details.Session)
 			}
 			if result.RelayState != "target-42" {
 				t.Fatalf("RelayState = %q", result.RelayState)
@@ -236,10 +244,10 @@ func TestReplayedAssertionIsRejected(t *testing.T) {
 	readBody(t, h.get(h.server.URL+"/saml/idp/initiate"))
 	page := h.loginAtIdP()
 
-	if status, result := decodeACS(t, h.submitPostForm(page)); status != http.StatusOK {
+	if status, result := decodeOutcome(t, h.submitPostForm(page)); status != http.StatusOK {
 		t.Fatalf("first delivery rejected: %s", result.Error)
 	}
-	status, result := decodeACS(t, h.submitPostForm(page))
+	status, result := decodeOutcome(t, h.submitPostForm(page))
 	if status != http.StatusForbidden || !strings.Contains(failedCheck(result.Validation), "Replay") {
 		t.Fatalf("replay accepted or rejected for the wrong reason: HTTP %d %q", status, failedCheck(result.Validation))
 	}
@@ -259,7 +267,7 @@ func TestUnsignedAuthnRequestGetsSAMLErrorResponse(t *testing.T) {
 		t.Fatalf("expected an error Response form, got HTTP %d: %s", resp.StatusCode, page)
 	}
 	// The SP accepts the signed error Response as authentic and reports its status.
-	status, result := decodeACS(t, h.submitPostForm(page))
+	status, result := decodeOutcome(t, h.submitPostForm(page))
 	if status != http.StatusForbidden || !strings.Contains(result.Error, message.StatusRequestDenied) {
 		t.Fatalf("expected RequestDenied, got HTTP %d %q", status, result.Error)
 	}
@@ -408,12 +416,12 @@ func TestSignatureFromKeyOutsideMetadataIsRejected(t *testing.T) {
 func TestSingleLogoutOverRedirectBinding(t *testing.T) {
 	h := newHarness(t)
 	readBody(t, h.get(h.server.URL+"/saml/idp/initiate"))
-	_, result := decodeACS(t, h.submitPostForm(h.loginAtIdP()))
-	if result.Session == nil {
+	_, result := decodeOutcome(t, h.submitPostForm(h.loginAtIdP()))
+	if result.Details.Session == nil {
 		t.Fatalf("SSO failed: %s", result.Error)
 	}
 
-	resp := h.get(h.server.URL + "/saml/sp/logout?binding=redirect&session_id=" + url.QueryEscape(result.Session.ID))
+	resp := h.get(h.server.URL + "/saml/sp/logout?binding=redirect&session_id=" + url.QueryEscape(result.Details.Session.ID))
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("SP logout: HTTP %d %s", resp.StatusCode, readBody(t, resp))
 	}
@@ -421,42 +429,70 @@ func TestSingleLogoutOverRedirectBinding(t *testing.T) {
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("IdP SLO: HTTP %d %s", resp.StatusCode, readBody(t, resp))
 	}
-	resp = h.get(resp.Header.Get("Location")) // LogoutResponse at the SP
-	body := readBody(t, resp)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"success":true`) {
-		t.Fatalf("SP SLO: HTTP %d %s", resp.StatusCode, body)
+	status, outcome := decodeOutcome(t, h.get(resp.Header.Get("Location"))) // LogoutResponse at the SP
+	if status != http.StatusOK || !outcome.Success || outcome.Details.StatusCode != message.StatusSuccess {
+		t.Fatalf("SP SLO: HTTP %d %s (%s)", status, outcome.Error, failedCheck(outcome.Validation))
 	}
 	if n := len(h.plugin.idp.Sessions()) + len(h.plugin.sp.Sessions()); n != 0 {
 		t.Fatalf("%d sessions remain after Single Logout", n)
 	}
 }
 
-func TestLookingGlassEndpointsRunTheRealRoles(t *testing.T) {
+// TestCaptureSessionFollowsEveryHop starts SP-initiated SSO with a Looking
+// Glass capture session and checks that each endpoint the user agent is sent
+// to carries it, outside the signed query values.
+func TestCaptureSessionFollowsEveryHop(t *testing.T) {
+	for _, bindingName := range []string{"redirect", "post"} {
+		t.Run(bindingName, func(t *testing.T) {
+			h := newHarness(t)
+			resp := h.get(h.server.URL + "/saml/sp/login?binding=" + bindingName + "&lg_session=lg-123")
+			var idpResp *http.Response
+			if bindingName == "redirect" {
+				location := resp.Header.Get("Location")
+				if !strings.Contains(location, "lg_session=lg-123") {
+					t.Fatalf("redirect to the IdP lost lg_session: %s", location)
+				}
+				idpResp = h.get(location)
+			} else {
+				page := readBody(t, resp)
+				if !strings.Contains(page, "lg_session=lg-123") {
+					t.Fatalf("POST form to the IdP lost lg_session: %s", page)
+				}
+				idpResp = h.submitPostForm(page)
+			}
+			loginPage := readBody(t, idpResp)
+			if idpResp.StatusCode != http.StatusOK || !strings.Contains(loginPage, "/saml/idp/login?lg_session=lg-123") {
+				t.Fatalf("IdP login form lost lg_session (HTTP %d): %s", idpResp.StatusCode, loginPage)
+			}
+			form := h.post(h.server.URL+"/saml/idp/login?lg_session=lg-123", url.Values{"email": {h.user}, "password": {h.pass}})
+			page := readBody(t, form)
+			if !strings.Contains(page, "/saml/sp/acs?lg_session=lg-123") {
+				t.Fatalf("POST form to the ACS lost lg_session: %s", page)
+			}
+			status, outcome := decodeOutcome(t, h.submitPostForm(page))
+			if status != http.StatusOK || !outcome.Success {
+				t.Fatalf("ACS: HTTP %d %s (%s)", status, outcome.Error, failedCheck(outcome.Validation))
+			}
+		})
+	}
+}
+
+// TestOutcomePageAddressesOnlyConfiguredOrigins checks the origins an outcome
+// page will hand its result to.
+func TestOutcomePageAddressesOnlyConfiguredOrigins(t *testing.T) {
 	h := newHarness(t)
-	var created map[string]interface{}
-	if err := json.Unmarshal([]byte(readBody(t, h.get(h.server.URL+"/saml/looking-glass/authn-request?binding=post&relay_state=lg"))), &created); err != nil {
+	readBody(t, h.get(h.server.URL+"/saml/idp/initiate"))
+	body := readBody(t, h.submitPostForm(h.loginAtIdP()))
+	match := regexp.MustCompile(`<script type="application/json" id="saml-opener-origins">(.*?)</script>`).FindStringSubmatch(body)
+	if match == nil {
+		t.Fatalf("outcome page has no opener origins: %s", body)
+	}
+	var origins []string
+	if err := json.Unmarshal([]byte(match[1]), &origins); err != nil {
 		t.Fatal(err)
 	}
-	resp := h.post(h.server.URL+"/saml/looking-glass/authenticate", url.Values{
-		"username":    {h.user},
-		"password":    {h.pass},
-		"SAMLRequest": {created["base64Encoded"].(string)},
-		"RelayState":  {"lg"},
-	})
-	status, result := decodeACS(t, resp)
-	if status != http.StatusOK || !result.Success || result.Validation == nil || len(result.Validation.Checks) == 0 {
-		t.Fatalf("HTTP %d %s (%s)", status, result.Error, failedCheck(result.Validation))
-	}
-
-	var logout map[string]interface{}
-	_ = json.Unmarshal([]byte(readBody(t, h.get(h.server.URL+"/saml/looking-glass/logout-request?relay_state=bye"))), &logout)
-	resp = h.post(h.server.URL+"/saml/looking-glass/logout", url.Values{
-		"SAMLRequest": {logout["base64Encoded"].(string)},
-		"RelayState":  {"bye"},
-	})
-	body := readBody(t, resp)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `"inResponseTo":"`+logout["requestId"].(string)+`"`) {
-		t.Fatalf("HTTP %d %s", resp.StatusCode, body)
+	if len(origins) != 2 || origins[0] != h.server.URL || origins[1] != "http://frontend.example" {
+		t.Fatalf("opener origins = %v", origins)
 	}
 }
 
@@ -472,14 +508,17 @@ func TestLateAssertionAfterIdPInitiatedLogoutIsRefused(t *testing.T) {
 		t.Fatalf("IdP holds %d sessions", len(idpSessions))
 	}
 
-	resp := h.get(h.server.URL + "/saml/looking-glass/logout-request?initiator=idp&binding=redirect&relay_state=x&session_id=" + url.QueryEscape(idpSessions[0].ID))
-	var request map[string]interface{}
-	if err := json.Unmarshal([]byte(readBody(t, resp)), &request); err != nil || request["redirectUrl"] == nil {
-		t.Fatalf("IdP LogoutRequest: %v %v", err, request)
+	resp := h.get(h.server.URL + "/saml/idp/logout?binding=redirect&session_id=" + url.QueryEscape(idpSessions[0].ID))
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("IdP logout: HTTP %d %s", resp.StatusCode, readBody(t, resp))
 	}
-	resp = h.post(h.server.URL+"/saml/looking-glass/logout", url.Values{"redirect_url": {request["redirectUrl"].(string)}})
-	if body := readBody(t, resp); resp.StatusCode != http.StatusOK || !strings.Contains(body, `"success":true`) {
-		t.Fatalf("IdP-initiated logout over HTTP-Redirect: HTTP %d %s", resp.StatusCode, body)
+	resp = h.get(resp.Header.Get("Location")) // LogoutRequest at the SP
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("SP SLO: HTTP %d %s", resp.StatusCode, readBody(t, resp))
+	}
+	status, outcome := decodeOutcome(t, h.get(resp.Header.Get("Location"))) // LogoutResponse at the IdP
+	if status != http.StatusOK || !outcome.Success || outcome.Details.StatusCode != message.StatusSuccess {
+		t.Fatalf("IdP-initiated logout over HTTP-Redirect: HTTP %d %s (%s)", status, outcome.Error, failedCheck(outcome.Validation))
 	}
 
 	if _, err := h.deliver(response); err == nil || !strings.Contains(err.Error(), "LogoutRequest already processed") {
