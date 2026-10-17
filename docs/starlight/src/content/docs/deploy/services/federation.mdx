@@ -43,7 +43,8 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 
 ### SAML
 
-- `GET /saml/metadata`, `GET|POST /saml/sso`, `GET|POST /saml/acs`, `GET|POST /saml/slo`
+- IdP: `GET /saml/idp/metadata`, `GET|POST /saml/idp/sso`, `POST /saml/idp/login`, `GET /saml/idp/initiate`, `GET /saml/idp/logout`, `GET|POST /saml/idp/slo`
+- SP: `GET /saml/sp/metadata`, `GET /saml/sp/login`, `POST /saml/sp/acs`, `GET /saml/sp/logout`, `GET|POST /saml/sp/slo`
 
 ### OID4VCI
 
@@ -65,7 +66,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External URL for issuer metadata and redirect URIs; production requires a pathless HTTPS origin |
 | `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed browser origins |
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in identity provider |
-| `SHOWCASE_DATA_DIR` | No | - | Persistent storage for VC/session state |
+| `SHOWCASE_DATA_DIR` | No | - | Persistent storage for VC/session state, and the SAML IdP and SP signing keys and certificates (`saml/`). Without it the SAML certificates change on every restart. |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
 | `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared replay store. Production requires a reachable `rediss://` secret; demo may use `redis://` on a private local network. Also backs the RFC 9449 DPoP proof `jti` replay stores for both oauth2 and OID4VCI. |
 | `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |

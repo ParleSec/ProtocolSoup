@@ -236,10 +236,11 @@ ProtocolSoup/design/brand/              wordmark.generated.ts + wordmark-{dark,l
         ├─ wallet-ui/src/styles/design/     → wallet-ui/src/index.css
         ├─ wallet-ui/public/brand/
         ├─ docs/starlight/src/styles/design/tokens.css → custom.css maps --sl-* onto --ps-*
-        └─ docs/starlight/src/assets/wordmark-*.svg
+        ├─ docs/starlight/src/assets/wordmark-*.svg
+        └─ backend/internal/gel/tokens.css → embedded by gel.PageCSS for server-rendered pages
 ```
 
-The copies are committed because each Docker build context only contains its own app directory. To change a token:
+The copies are committed because each Docker build context only contains its own app directory. Server-rendered pages (the SAML IdP login page and result pages) cannot load the app's fonts or Tailwind build, so they read the tokens through `backend/internal/gel` and fall back along `--ps-font-mono` to the system monospace face. To change a token:
 
 1. Edit `ProtocolSoup/design/tokens.css` or `tailwind-theme.css` (or regenerate the brand assets, see above).
 2. Run `node design/sync-tokens.mjs` from `ProtocolSoup/`.

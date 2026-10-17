@@ -30,7 +30,7 @@
 | `SHOWCASE_CORS_ORIGINS` | No | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
 | `SHOWCASE_ENV` | No | `development` | Runtime environment label |
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in mock identity provider |
-| `SHOWCASE_DATA_DIR` | No | `(none)` | Enables durable VC wallet-credential and verifier-session persistence |
+| `SHOWCASE_DATA_DIR` | No | `(none)` | Enables durable VC wallet-credential and verifier-session persistence, and persists the SAML IdP and SP signing keys and certificates under `saml/` |
 | `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared Redis URL for atomic client-assertion replay protection. Production requires `rediss://`; demo and production fail startup if the store is missing or unreachable. Also backs the RFC 9449 DPoP proof `jti` replay stores for both oauth2 and OID4VCI (distinct key prefix and instance from the `private_key_jwt` store). |
 | `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 server-provided nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |
 | `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints (`/oid4vci/credential`, `/oid4vci/nonce`, `/oid4vci/deferred_credential`). |
@@ -107,11 +107,13 @@ accepted proof algorithms under `dpop_signing_alg_values_supported`.
 
 ### SAML 2.0
 
-- `GET /saml/metadata`
-- `GET|POST /saml/sso`
-- `GET|POST /saml/acs`
-- `GET|POST /saml/slo`
-- `GET /saml/demo/users`
+The IdP and SP are separate entities; each entityID is its metadata URL.
+
+- `GET /saml/idp/metadata`, `GET /saml/sp/metadata`
+- `GET|POST /saml/idp/sso`, `POST /saml/idp/login`, `GET /saml/idp/initiate`, `GET /saml/idp/logout`
+- `POST /saml/sp/acs` (HTTP-POST only), `GET /saml/sp/login`, `GET /saml/sp/logout`
+- `GET|POST /saml/idp/slo`, `GET|POST /saml/sp/slo`
+- `GET /saml/demo/sessions`
 
 ### Verifiable Credentials (Mounted Modules)
 

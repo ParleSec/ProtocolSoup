@@ -334,6 +334,7 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
     'sp-initiated-sso': ['sp initiated sso', 'service provider sso', 'saml redirect'],
     'idp-initiated-sso': ['idp initiated sso', 'identity provider sso', 'unsolicited response'],
     'single-logout': ['saml single logout', 'slo', 'federated logout'],
+    'idp-initiated-logout': ['idp initiated logout', 'saml idp slo', 'session authority logout'],
     'metadata': ['saml metadata', 'federation metadata', 'entity descriptor'],
     'x509-svid-issuance': ['x509 svid', 'spiffe certificate', 'workload certificate'],
     'jwt-svid-issuance': ['jwt svid', 'spiffe jwt', 'workload jwt token'],

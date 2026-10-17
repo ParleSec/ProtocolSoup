@@ -158,7 +158,6 @@ The OIDC plugin extends the OAuth 2.0 plugin, sharing the Mock IdP and key manag
 |--------|----------|-------------|
 | GET | `/oauth2/demo/users` | List demo users with credentials |
 | GET | `/oauth2/demo/clients` | List registered clients |
-| GET | `/saml/demo/users` | List SAML demo users |
 
 ## Supported Flows
 

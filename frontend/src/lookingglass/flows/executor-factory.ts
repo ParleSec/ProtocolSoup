@@ -266,17 +266,24 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
   },
   'saml-logout': {
     executorClass: SAMLLogoutExecutor,
-    description: 'SAML Single Logout',
-    rfcReference: 'SAML 2.0 Profiles Section 4.4',
-    requiresUserInteraction: false,
+    description: 'SP-initiated SAML Single Logout',
+    rfcReference: 'SAML 2.0 Profiles Section 4.4.3.1',
+    requiresUserInteraction: true,
     additionalConfig: { spInitiated: true, binding: 'post' as const },
   },
   'saml-logout-redirect': {
     executorClass: SAMLLogoutExecutor,
-    description: 'SAML Single Logout with HTTP-Redirect binding',
+    description: 'SP-initiated SAML Single Logout with HTTP-Redirect binding',
     rfcReference: 'SAML 2.0 Bindings Section 3.4',
-    requiresUserInteraction: false,
+    requiresUserInteraction: true,
     additionalConfig: { spInitiated: true, binding: 'redirect' as const },
+  },
+  'saml-idp-logout': {
+    executorClass: SAMLLogoutExecutor,
+    description: 'IdP-initiated SAML Single Logout',
+    rfcReference: 'SAML 2.0 Profiles Section 4.4.3.3',
+    requiresUserInteraction: true,
+    additionalConfig: { spInitiated: false, binding: 'redirect' as const },
   },
 
   // SPIFFE/SPIRE Flows
@@ -671,6 +678,7 @@ export function getFlowRequirements(flowId: string): {
       return { requiresClientSecret: false, requiresRefreshToken: true }
     case 'saml-logout':
     case 'saml-logout-redirect':
+    case 'saml-idp-logout':
       return { requiresClientSecret: false, requiresRefreshToken: false, requiresSessionInfo: true }
     case 'token-introspection':
     case 'token_introspection':
