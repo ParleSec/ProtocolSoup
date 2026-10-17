@@ -1,15 +1,14 @@
 /**
  * SAML SSO Flow Executor
- * 
+ *
  * Implements SAML 2.0 Single Sign-On flows:
  * - SP-Initiated SSO (SAML 2.0 Profiles Section 4.1)
  * - IdP-Initiated SSO (SAML 2.0 Profiles Section 4.1.5)
- * 
- * Supports both HTTP-POST and HTTP-Redirect bindings.
- * 
- * **USES SAML PROTOCOL EXECUTION**
- * All data comes from actual protocol execution via Looking Glass API.
- * No fake data, no placeholder IDs, no hardcoded values.
+ *
+ * The backend's SP builds and signs the <AuthnRequest>; the backend's IdP
+ * verifies it against the SP's metadata, authenticates the principal, and
+ * signs the <Response>; the SP verifies that Response against the IdP's
+ * metadata. Every validation result shown here is one the backend ran.
  */
 
 import {
@@ -21,18 +20,34 @@ import {
 export interface SAMLSSOConfig extends FlowExecutorConfig {
   /** Whether this is SP-initiated (true) or IdP-initiated (false) */
   spInitiated: boolean
-  /** SAML binding to use: 'post' or 'redirect' */
+  /** SAML binding for the AuthnRequest: 'post' or 'redirect' */
   binding: 'post' | 'redirect'
-  /** Target SP entity ID (for IdP-initiated) */
-  targetSP?: string
-  /** RelayState to pass through the flow */
+  /** RelayState to pass through the flow (at most 80 bytes) */
   relayState?: string
 }
 
-// Response types from Looking Glass API
-interface LookingGlassAuthnRequestResponse {
+interface ValidationCheck {
+  name: string
+  passed: boolean
+  detail: string
+  reference: string
+}
+
+interface ValidationReport {
+  signed: boolean
+  signature?: {
+    signatureMethod: string
+    digestMethod: string
+    canonicalization: string
+    referenceUri: string
+  }
+  checks: ValidationCheck[]
+}
+
+interface AuthnRequestResult {
   success: boolean
   error?: string
+  binding: string
   requestId: string
   issueInstant: string
   issuer: string
@@ -40,75 +55,54 @@ interface LookingGlassAuthnRequestResponse {
   acsUrl: string
   protocolBinding: string
   rawXml: string
-  base64Encoded: string
-  deflatedBase64?: string
+  base64Encoded?: string
+  redirectUrl?: string
   relayState: string
   signed: boolean
-  signatureAlgorithm?: string
-  redirectUrl?: string
+  signatureAlgorithm: string
 }
 
-interface LookingGlassSecurityValidation {
-  responseSigned: boolean
-  assertionSigned: boolean
-  signatureValid: boolean
-  signatureAlgorithm?: string
-  digestAlgorithm?: string
-  signatureErrors?: string[]
-  signatureWarnings?: string[]
-  inResponseToValid: boolean
-  inResponseToError?: string
-  isIdPInitiated: boolean
-  replayCheckPassed: boolean
-  replayError?: string
-  subjectConfirmed: boolean
-  recipientValid?: boolean
-  notOnOrAfterValid?: boolean
-  conditionsValid: boolean
-  audienceValid?: boolean
-  timeValid?: boolean
-}
-
-interface LookingGlassAssertionDetails {
-  assertionId: string
-  issueInstant: string
-  issuer: string
-  nameId: string
-  nameIdFormat: string
-  notBefore: string
-  notOnOrAfter: string
-  audience: string
-  authnInstant: string
-  sessionIndex: string
-  authnContextClass: string
-  attributes: Record<string, string[]>
-}
-
-interface LookingGlassSessionInfo {
-  sessionId: string
-  nameId: string
-  nameIdFormat: string
-  sessionIndex: string
-  authnInstant: string
-  attributes: Record<string, string[]>
-}
-
-interface LookingGlassSAMLResponse {
+interface SSOResult {
   success: boolean
   error?: string
-  responseId: string
+  responseId?: string
   inResponseTo?: string
-  issueInstant: string
-  issuer: string
-  destination: string
-  statusCode: string
-  statusMessage?: string
-  assertion: LookingGlassAssertionDetails
-  rawResponseXml: string
-  rawAssertionXml?: string
-  base64Encoded: string
-  security: LookingGlassSecurityValidation
-  session: LookingGlassSessionInfo
+  issueInstant?: string
+  issuer?: string
+  destination?: string
+  statusCode?: string
+  relayState?: string
+  rawResponseXml?: string
+  base64Encoded?: string
+  unsolicited?: boolean
+  idpValidation?: ValidationReport
+  validation?: ValidationReport
+  assertion?: {
+    assertionId: string
+    issueInstant: string
+    issuer: string
+    nameId: string
+    nameIdFormat: string
+    notBefore: string
+    notOnOrAfter: string
+    audience: string[]
+    authnInstant: string
+    sessionIndex: string
+    authnContextClass: string
+    attributes: Record<string, string[]>
+    rawXml: string
+  }
+  session?: {
+    sessionId: string
+    nameId: string
+    sessionIndex: string
+    attributes?: Record<string, string[]>
+  }
+}
+
+function firstFailure(report?: ValidationReport): string | undefined {
+  const failed = report?.checks.find((check) => !check.passed)
+  return failed ? `${failed.name}: ${failed.detail} (${failed.reference})` : undefined
 }
 
 export class SAMLSSOExecutor extends FlowExecutorBase {
@@ -125,421 +119,185 @@ export class SAMLSSOExecutor extends FlowExecutorBase {
 
   async execute(): Promise<void> {
     this.abortController = new AbortController()
-    
+
     const flowTypeDesc = this.flowConfig.spInitiated ? 'SP-Initiated' : 'IdP-Initiated'
-    
+
     this.updateState({
       ...this.createInitialState(),
       status: 'executing',
       currentStep: `Initiating ${flowTypeDesc} SSO`,
     })
 
-    this.addEvent({
-      type: 'info',
-      title: `Starting ${flowTypeDesc} SAML SSO`,
-      description: `Using HTTP-${this.flowConfig.binding.toUpperCase()} binding`,
-      rfcReference: this.rfcReference,
-      data: {
-        spInitiated: this.flowConfig.spInitiated,
-        binding: this.flowConfig.binding,
-      },
-    })
-
     try {
+      const form = new URLSearchParams()
       if (this.flowConfig.spInitiated) {
-        await this.executeSPInitiated()
+        await this.createAuthnRequest(form)
       } else {
-        await this.executeIdPInitiated()
+        this.addEvent({
+          type: 'rfc',
+          title: 'Unsolicited Response',
+          description: 'IdP-initiated SSO: the IdP sends a <Response> without a preceding <AuthnRequest>, so it carries no InResponseTo.',
+          rfcReference: 'SAML 2.0 Profiles Section 4.1.5',
+        })
       }
 
-      this.updateState({
-        status: 'completed',
-        currentStep: 'SSO completed successfully',
-      })
+      await this.authenticateAndConsume(form)
 
-      this.addEvent({
-        type: 'info',
-        title: 'SAML SSO Complete',
-        description: 'User successfully authenticated via SAML',
-        rfcReference: this.rfcReference,
-      })
-
+      this.updateState({ status: 'completed', currentStep: 'SSO completed successfully' })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
       this.updateState({
         status: 'error',
         currentStep: 'SSO failed',
-        error: {
-          code: 'saml_error',
-          description: message,
-        },
+        error: { code: 'saml_error', description: message },
       })
-      this.addEvent({
-        type: 'error',
-        title: 'SAML SSO Failed',
-        description: message,
-      })
+      this.addEvent({ type: 'error', title: 'SAML SSO Failed', description: message })
     }
   }
 
-  private async executeSPInitiated(): Promise<void> {
-    // Step 1: Create AuthnRequest via Looking Glass API
+  /** The SP builds and signs an AuthnRequest addressed to the IdP's SingleSignOnService. */
+  private async createAuthnRequest(form: URLSearchParams): Promise<void> {
     const relayState = this.flowConfig.relayState || generateSecureRandom(16)
-    
     this.updateState({
-      securityParams: {
-        ...this.state.securityParams,
-        state: relayState,
-      },
+      currentStep: 'SP creates AuthnRequest',
+      securityParams: { ...this.state.securityParams, state: relayState },
     })
 
-    this.addEvent({
-      type: 'rfc',
-      title: 'SAML 2.0 Profiles Section 4.1.3',
-      description: 'SP creates AuthnRequest and sends to IdP',
-      rfcReference: 'SAML 2.0 Profiles Section 4.1.3',
-    })
-
-    this.updateState({
-      status: 'executing',
-      currentStep: 'Creating AuthnRequest',
-    })
-
-    // Call Looking Glass API to create AuthnRequest
-    const authnRequestUrl = `${this.config.baseUrl}/looking-glass/authn-request?binding=${this.flowConfig.binding}&relay_state=${encodeURIComponent(relayState)}`
-    const authnResponse = await fetch(this.withCaptureQuery(authnRequestUrl), {
-      headers: this.withCaptureHeaders(),
-    })
-    
-    if (!authnResponse.ok) {
-      throw new Error('Failed to create AuthnRequest')
-    }
-    
-    const authnData = await authnResponse.json() as LookingGlassAuthnRequestResponse
-    
-    if (!authnData.success) {
-      throw new Error(authnData.error || 'AuthnRequest creation failed')
+    const url = `${this.config.baseUrl}/looking-glass/authn-request?binding=${this.flowConfig.binding}&relay_state=${encodeURIComponent(relayState)}`
+    const response = await fetch(this.withCaptureQuery(url), { headers: this.withCaptureHeaders() })
+    const request = await response.json() as AuthnRequestResult
+    if (!response.ok || !request.success) {
+      throw new Error(request.error || `AuthnRequest creation failed (HTTP ${response.status})`)
     }
 
-    // Emit AuthnRequest data
-    this.addEvent({
-      type: 'security',
-      title: 'AuthnRequest Created',
-      description: `Request ID: ${authnData.requestId}`,
-      rfcReference: 'SAML 2.0 Core Section 3.4',
-      data: {
-        requestId: authnData.requestId,
-        issueInstant: authnData.issueInstant,
-        issuer: authnData.issuer,
-        destination: authnData.destination,
-        acsUrl: authnData.acsUrl,
-        protocolBinding: authnData.protocolBinding,
-        signed: authnData.signed,
-        signatureAlgorithm: authnData.signatureAlgorithm,
-      },
-    })
-
-    // Show raw XML for inspection
     this.addEvent({
       type: 'request',
-      title: 'AuthnRequest XML',
-      description: 'Raw SAML AuthnRequest message',
-      rfcReference: 'SAML 2.0 Core Section 3.4.1',
+      title: 'AuthnRequest',
+      description: request.binding.endsWith('HTTP-Redirect')
+        ? 'HTTP-Redirect binding: DEFLATE + base64 in the query string, with the signature over the query string itself'
+        : 'HTTP-POST binding: base64 in a form field, with an enveloped XML signature',
+      rfcReference: request.binding.endsWith('HTTP-Redirect') ? 'SAML 2.0 Bindings Section 3.4.4.1' : 'SAML 2.0 Bindings Section 3.5.4',
       data: {
-        rawXml: authnData.rawXml,
-        base64Encoded: authnData.base64Encoded,
-        binding: this.flowConfig.binding,
+        requestId: request.requestId,
+        issueInstant: request.issueInstant,
+        issuer: request.issuer,
+        destination: request.destination,
+        acsUrl: request.acsUrl,
+        protocolBinding: request.protocolBinding,
+        signatureAlgorithm: request.signatureAlgorithm,
+        relayState: request.relayState,
+        redirectUrl: request.redirectUrl,
+        rawXml: request.rawXml,
+        base64Encoded: request.base64Encoded,
       },
     })
 
-    this.addEvent({
-      type: 'security',
-      title: 'RelayState Generated',
-      description: 'Opaque value to maintain state across SSO flow',
-      rfcReference: 'SAML 2.0 Bindings Section 3.4.3',
-      data: { relayState: authnData.relayState },
-    })
+    if (request.redirectUrl) {
+      form.set('redirect_url', request.redirectUrl)
+    } else if (request.base64Encoded) {
+      form.set('SAMLRequest', request.base64Encoded)
+      form.set('RelayState', request.relayState)
+    }
+  }
 
-    // Step 2: Get demo users and authenticate
-    this.updateState({
-      status: 'executing',
-      currentStep: 'User authenticates at IdP',
-    })
+  /** The IdP authenticates the principal and issues a Response; the SP validates it. */
+  private async authenticateAndConsume(form: URLSearchParams): Promise<void> {
+    this.updateState({ currentStep: 'User authenticates at IdP' })
 
-    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`, {
-      headers: this.withCaptureHeaders(),
-    })
+    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`, { headers: this.withCaptureHeaders() })
     if (!usersResponse.ok) {
       throw new Error('Failed to fetch demo users from IdP')
     }
     const usersData = await usersResponse.json() as {
       users: Array<{ id: string; name: string; credentials?: { email: string; password: string } }>
     }
-
     const selectedUser = usersData.users[0]
-    const selectedEmail = selectedUser?.credentials?.email
-    const selectedPassword = selectedUser?.credentials?.password
-    if (!selectedEmail || !selectedPassword) {
+    const email = selectedUser?.credentials?.email
+    const password = selectedUser?.credentials?.password
+    if (!email || !password) {
       throw new Error('Demo user credentials unavailable')
     }
-    
     this.addEvent({
       type: 'user_action',
       title: 'User Authentication',
-      description: `Authenticating as ${selectedUser.name} (${selectedEmail})`,
-      data: { user: { id: selectedUser.id, name: selectedUser.name, email: selectedEmail } },
+      description: `Authenticating at the IdP as ${selectedUser.name} (${email})`,
+      data: { user: { id: selectedUser.id, name: selectedUser.name, email } },
     })
 
-    // Step 3: Authenticate and get SAML Response
-    this.updateState({
-      status: 'executing',
-      currentStep: 'IdP processing authentication',
-    })
+    form.set('username', email)
+    form.set('password', password)
 
-    const authFormData = new URLSearchParams()
-    authFormData.set('username', selectedUser.id)
-    authFormData.set('password', selectedPassword)
-    authFormData.set('request_id', authnData.requestId)
-    authFormData.set('acs_url', authnData.acsUrl)
-    authFormData.set('sp_entity_id', authnData.issuer)
-
-    const authResponse = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
+    this.updateState({ currentStep: 'IdP issues Response; SP validates it' })
+    const response = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
       method: 'POST',
       headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
-      body: authFormData.toString(),
+      body: form.toString(),
     })
+    const result = await response.json() as SSOResult
 
-    if (!authResponse.ok) {
-      const errorText = await authResponse.text()
-      throw new Error(`Authentication failed: ${errorText}`)
+    if (result.idpValidation) {
+      this.addEvent({
+        type: 'security',
+        title: 'IdP checks on the AuthnRequest',
+        description: result.idpValidation.checks.every((c) => c.passed) ? 'All checks passed' : 'The IdP refused the AuthnRequest',
+        rfcReference: 'SAML 2.0 Profiles Section 4.1.4.1',
+        data: { ...result.idpValidation },
+      })
     }
 
-    const samlResponse = await authResponse.json() as LookingGlassSAMLResponse
-
-    if (!samlResponse.success) {
-      throw new Error(samlResponse.error || 'SAML Response creation failed')
-    }
-
-    // Step 4: Emit SAML Response data
-    this.addEvent({
-      type: 'rfc',
-      title: 'SAML 2.0 Profiles Section 4.1.4',
-      description: 'IdP responded with SAML Response containing Assertion',
-      rfcReference: 'SAML 2.0 Profiles Section 4.1.4',
-      data: {
-        responseId: samlResponse.responseId,
-        inResponseTo: samlResponse.inResponseTo,
-        issuer: samlResponse.issuer,
-        destination: samlResponse.destination,
-        statusCode: samlResponse.statusCode,
-      },
-    })
-
-    // Show raw Response XML
-    this.addEvent({
-      type: 'response',
-      title: 'SAML Response XML',
-      description: 'Raw SAML Response with Assertion',
-      rfcReference: 'SAML 2.0 Core Section 3.4',
-      data: {
-        rawXml: samlResponse.rawResponseXml,
-        base64Encoded: samlResponse.base64Encoded,
-      },
-    })
-
-    // Step 5: Show assertion details
-    this.addEvent({
-      type: 'token',
-      title: 'SAML Assertion',
-      description: `Assertion for ${samlResponse.assertion.nameId}`,
-      rfcReference: 'SAML 2.0 Core Section 2.3',
-      data: {
-        assertionId: samlResponse.assertion.assertionId,
-        issueInstant: samlResponse.assertion.issueInstant,
-        issuer: samlResponse.assertion.issuer,
-        nameId: samlResponse.assertion.nameId,
-        nameIdFormat: samlResponse.assertion.nameIdFormat,
-        sessionIndex: samlResponse.assertion.sessionIndex,
-        authnInstant: samlResponse.assertion.authnInstant,
-        authnContextClass: samlResponse.assertion.authnContextClass,
-        conditions: {
-          notBefore: samlResponse.assertion.notBefore,
-          notOnOrAfter: samlResponse.assertion.notOnOrAfter,
-          audience: samlResponse.assertion.audience,
+    if (result.rawResponseXml) {
+      this.addEvent({
+        type: 'response',
+        title: 'SAML Response',
+        description: `Status ${result.statusCode ?? 'unknown'}, delivered with the HTTP-POST binding`,
+        rfcReference: 'SAML 2.0 Profiles Section 4.1.4.2',
+        data: {
+          responseId: result.responseId,
+          inResponseTo: result.inResponseTo,
+          issuer: result.issuer,
+          destination: result.destination,
+          statusCode: result.statusCode,
+          relayState: result.relayState,
+          rawXml: result.rawResponseXml,
+          base64Encoded: result.base64Encoded,
         },
-        attributes: samlResponse.assertion.attributes,
-        rawXml: samlResponse.rawAssertionXml,
-      },
-    })
-
-    // Step 6: Show security validation results
-    this.addEvent({
-      type: 'security',
-      title: 'Security Validation Results',
-      description: `Signature: ${samlResponse.security.signatureValid ? 'VALID' : 'INVALID/MISSING'}`,
-      rfcReference: 'SAML 2.0 Core Section 5',
-      data: {
-        // Signature validation - not hardcoded
-        responseSigned: samlResponse.security.responseSigned,
-        assertionSigned: samlResponse.security.assertionSigned,
-        signatureValid: samlResponse.security.signatureValid,
-        signatureAlgorithm: samlResponse.security.signatureAlgorithm,
-        digestAlgorithm: samlResponse.security.digestAlgorithm,
-        signatureErrors: samlResponse.security.signatureErrors,
-        signatureWarnings: samlResponse.security.signatureWarnings,
-        // InResponseTo validation
-        inResponseToValid: samlResponse.security.inResponseToValid,
-        inResponseToError: samlResponse.security.inResponseToError,
-        // Replay check
-        replayCheckPassed: samlResponse.security.replayCheckPassed,
-        replayError: samlResponse.security.replayError,
-        // Subject confirmation
-        subjectConfirmed: samlResponse.security.subjectConfirmed,
-        recipientValid: samlResponse.security.recipientValid,
-        notOnOrAfterValid: samlResponse.security.notOnOrAfterValid,
-        // Conditions validation
-        conditionsValid: samlResponse.security.conditionsValid,
-        audienceValid: samlResponse.security.audienceValid,
-        timeValid: samlResponse.security.timeValid,
-      },
-    })
-
-    // Step 7: Session established with live data
-    this.addEvent({
-      type: 'info',
-      title: 'SP Session Created',
-      description: 'Service Provider has created a local session based on the SAML assertion',
-      data: {
-        sessionId: samlResponse.session.sessionId,
-        nameId: samlResponse.session.nameId,
-        sessionIndex: samlResponse.session.sessionIndex,
-        attributes: samlResponse.session.attributes,
-      },
-    })
-
-    // Validate RelayState
-    this.addEvent({
-      type: 'security',
-      title: 'RelayState Validated',
-      description: 'RelayState matches original value',
-      data: { relayState },
-    })
-  }
-
-  private async executeIdPInitiated(): Promise<void> {
-    // IdP-initiated flow starts at the IdP
-    this.addEvent({
-      type: 'rfc',
-      title: 'SAML 2.0 Profiles Section 4.1.5',
-      description: 'IdP-Initiated SSO - unsolicited response flow',
-      rfcReference: 'SAML 2.0 Profiles Section 4.1.5',
-    })
-
-    this.addEvent({
-      type: 'security',
-      title: 'Security Consideration',
-      description: 'IdP-initiated SSO has no InResponseTo to validate, increasing replay risk',
-      rfcReference: 'SAML 2.0 Profiles Section 4.1.5',
-    })
-
-    // Get demo users
-    this.updateState({
-      status: 'executing',
-      currentStep: 'User authenticates at IdP',
-    })
-
-    const usersResponse = await fetch(`${this.config.baseUrl}/demo/users`, {
-      headers: this.withCaptureHeaders(),
-    })
-    if (!usersResponse.ok) {
-      throw new Error('Failed to fetch demo users from IdP')
-    }
-    const usersData = await usersResponse.json() as {
-      users: Array<{ id: string; name: string; credentials?: { email: string; password: string } }>
-    }
-    const selectedUser = usersData.users[0]
-    const selectedEmail = selectedUser?.credentials?.email
-    const selectedPassword = selectedUser?.credentials?.password
-    if (!selectedEmail || !selectedPassword) {
-      throw new Error('Demo user credentials unavailable')
+      })
     }
 
-    this.addEvent({
-      type: 'user_action',
-      title: 'User at IdP Portal',
-      description: `User ${selectedUser.name} selects Service Provider to access`,
-      data: { user: { id: selectedUser.id, name: selectedUser.name, email: selectedEmail } },
-    })
-
-    // Authenticate without request ID (IdP-initiated)
-    this.updateState({
-      status: 'executing',
-      currentStep: 'IdP generating unsolicited response',
-    })
-
-    const authFormData = new URLSearchParams()
-    authFormData.set('username', selectedUser.id)
-    authFormData.set('password', selectedPassword)
-    // NO request_id for IdP-initiated
-    authFormData.set('acs_url', `${window.location.origin}${this.config.baseUrl}/acs`)
-    authFormData.set('sp_entity_id', window.location.origin)
-
-    const authResponse = await fetch(`${this.config.baseUrl}/looking-glass/authenticate`, {
-      method: 'POST',
-      headers: this.withCaptureHeaders({ 'Content-Type': 'application/x-www-form-urlencoded' }),
-      body: authFormData.toString(),
-    })
-
-    if (!authResponse.ok) {
-      const errorText = await authResponse.text()
-      throw new Error(`Authentication failed: ${errorText}`)
+    if (result.validation) {
+      this.addEvent({
+        type: 'security',
+        title: 'SP checks on the Response',
+        description: result.success ? 'All checks passed' : firstFailure(result.validation) ?? 'Response rejected',
+        rfcReference: 'SAML 2.0 Profiles Section 4.1.4.3',
+        data: { ...result.validation },
+      })
     }
 
-    const samlResponse = await authResponse.json() as LookingGlassSAMLResponse
-
-    if (!samlResponse.success) {
-      throw new Error(samlResponse.error || 'SAML Response creation failed')
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || `SSO failed (HTTP ${response.status})`)
     }
 
-    this.addEvent({
-      type: 'token',
-      title: 'Unsolicited SAML Assertion',
-      description: 'Assertion received without prior AuthnRequest',
-      rfcReference: 'SAML 2.0 Profiles Section 4.1.5',
-      data: {
-        assertionId: samlResponse.assertion.assertionId,
-        nameId: samlResponse.assertion.nameId,
-        sessionIndex: samlResponse.assertion.sessionIndex,
-        isIdPInitiated: samlResponse.security.isIdPInitiated,
-        note: 'No InResponseTo field - this is an unsolicited response',
-        rawXml: samlResponse.rawAssertionXml,
-      },
-    })
+    if (result.assertion) {
+      this.addEvent({
+        type: 'token',
+        title: 'SAML Assertion',
+        description: `Assertion for ${result.assertion.nameId}`,
+        rfcReference: 'SAML 2.0 Core Section 2.3',
+        data: { ...result.assertion },
+      })
+    }
 
-    // Show security validation (note: InResponseTo not validated for IdP-initiated)
-    this.addEvent({
-      type: 'security',
-      title: 'Security Validation (IdP-Initiated)',
-      description: 'Limited validation - no request ID to verify',
-      data: {
-        isIdPInitiated: samlResponse.security.isIdPInitiated,
-        responseSigned: samlResponse.security.responseSigned,
-        signatureValid: samlResponse.security.signatureValid,
-        replayCheckPassed: samlResponse.security.replayCheckPassed,
-        conditionsValid: samlResponse.security.conditionsValid,
-        warning: 'IdP-initiated SSO cannot validate InResponseTo',
-      },
-    })
-
-    this.addEvent({
-      type: 'info',
-      title: 'SP Session Created',
-      description: 'Service Provider has created a local session from unsolicited assertion',
-      data: {
-        sessionId: samlResponse.session.sessionId,
-        nameId: samlResponse.session.nameId,
-      },
-    })
+    if (result.session) {
+      this.addEvent({
+        type: 'info',
+        title: 'SP Session Created',
+        description: result.unsolicited
+          ? 'The SP accepted an unsolicited Response and created a session'
+          : 'The SP created a session from the validated assertion',
+        data: { ...result.session },
+      })
+    }
   }
 }
 

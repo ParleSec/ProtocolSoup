@@ -269,14 +269,14 @@ export const FLOW_EXECUTOR_MAP: Record<string, {
     description: 'SAML Single Logout',
     rfcReference: 'SAML 2.0 Profiles Section 4.4',
     requiresUserInteraction: false,
-    additionalConfig: { spInitiated: true, binding: 'post' as const },
+    additionalConfig: { binding: 'post' as const },
   },
   'saml-logout-redirect': {
     executorClass: SAMLLogoutExecutor,
     description: 'SAML Single Logout with HTTP-Redirect binding',
     rfcReference: 'SAML 2.0 Bindings Section 3.4',
     requiresUserInteraction: false,
-    additionalConfig: { spInitiated: true, binding: 'redirect' as const },
+    additionalConfig: { binding: 'redirect' as const },
   },
 
   // SPIFFE/SPIRE Flows

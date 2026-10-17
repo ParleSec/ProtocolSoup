@@ -55,7 +55,6 @@ export {
 } from './saml-sso'
 export { 
   SAMLLogoutExecutor, 
-  SPInitiatedLogoutExecutor,
   type SAMLLogoutConfig 
 } from './saml-logout'
 
