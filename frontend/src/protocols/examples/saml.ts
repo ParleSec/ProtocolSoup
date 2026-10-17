@@ -26,27 +26,36 @@ const authnRequest = \`
       AllowCreate="true"/>
 </samlp:AuthnRequest>\`;
 
-// IMPORTANT: Store requestId for InResponseTo validation when the Response arrives.
-// This prevents replay attacks and unsolicited response injection.
-sessionStorage.setItem('saml_request_id', requestId);
+// IMPORTANT: Store requestId (server side) for InResponseTo validation when the
+// Response arrives, together with the RelayState sent with it.
+// RelayState is an opaque value of at most 80 bytes (saml-bindings §3.4.3),
+// not the target URL itself; keep the target URL in server-side state.
+const relayState = crypto.randomUUID();
+pendingRequests.set(requestId, { relayState, targetUrl: TARGET_URL });
 
-// Step 2a: HTTP-Redirect binding (saml-bindings §3.4)
-// DEFLATE-compress, Base64-encode, URL-encode
+// Step 2a: HTTP-Redirect binding (saml-bindings §3.4.4.1)
+// The XML is sent WITHOUT a <ds:Signature>; DEFLATE-compress, Base64-encode,
+// URL-encode. When the SP signs its requests (AuthnRequestsSigned="true" in
+// its metadata), the signature covers the query string, in this order:
 const deflated = pako.deflateRaw(new TextEncoder().encode(authnRequest));
 const encoded = btoa(String.fromCharCode(...deflated));
-const redirectUrl = IDP_SSO_URL
-  + '?SAMLRequest=' + encodeURIComponent(encoded)
-  + '&RelayState=' + encodeURIComponent(TARGET_URL);
-// Optionally append SigAlg + Signature for signed redirect requests
-window.location.href = redirectUrl;
+const sigAlg = 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256';
+const signedQuery = 'SAMLRequest=' + encodeURIComponent(encoded)
+  + '&RelayState=' + encodeURIComponent(relayState)
+  + '&SigAlg=' + encodeURIComponent(sigAlg);
+const signature = await signRsaSha256(SP_SIGNING_KEY, signedQuery); // base64
+window.location.href = IDP_SSO_URL + '?' + signedQuery
+  + '&Signature=' + encodeURIComponent(signature);
 
 // Step 2b: HTTP-POST binding (saml-bindings §3.5)
-// Base64-encode the raw XML (no DEFLATE) and submit via auto-posting form
-const postEncoded = btoa(authnRequest);
+// Sign the XML with an enveloped <ds:Signature> placed after <saml:Issuer>
+// (exclusive C14N, saml-core §5.4), Base64-encode it (no DEFLATE), and submit
+// via an auto-posting form. Escape the values for HTML.
+const postEncoded = btoa(signEnveloped(authnRequest, SP_SIGNING_KEY));
 document.body.innerHTML = \`
 <form method="POST" action="\${IDP_SSO_URL}">
   <input type="hidden" name="SAMLRequest" value="\${postEncoded}"/>
-  <input type="hidden" name="RelayState" value="\${TARGET_URL}"/>
+  <input type="hidden" name="RelayState" value="\${relayState}"/>
 </form>\`;
 document.forms[0].submit();`,
   },
@@ -59,61 +68,47 @@ document.forms[0].submit();`,
 // The IdP sends an unsolicited SAML Response — no AuthnRequest was issued.
 // ⚠️  This flow has weaker security properties than SP-initiated SSO.
 
-// The SP receives a SAML Response via HTTP-POST without a prior AuthnRequest:
-// <form method="POST" action="/saml/acs">
-//   <input name="SAMLResponse" value="PHNhbWxwOlJlc3BvbnNl..." />
-//   <input name="RelayState" value="https://app.example.com/dashboard" />
-// </form>
+// The SP's assertion consumer service receives the Response over HTTP-POST
+// (the HTTP-Redirect binding MUST NOT carry a <Response>, saml-profiles §4.1.2).
 
-// Step 1: Decode and parse the SAML Response
-const samlResponseB64 = formData.get('SAMLResponse');
-const xml = atob(samlResponseB64);
-const parser = new DOMParser();
-const doc = parser.parseFromString(xml, 'application/xml');
+// Step 1: Decode the SAML Response exactly as received
+const xml = atob(formData.get('SAMLResponse'));
 
-// Step 2: Validate the Response (saml-profiles §4.1.4.3)
-// The IdP-initiated flow SKIPS InResponseTo validation because
-// no AuthnRequest was issued. This is the key security trade-off.
+// Step 2: Verify the signature, then read ONLY what it covers.
+// verifyEnvelopedSignature must trust only the certificate from the IdP's
+// metadata (never one carried in <ds:KeyInfo>), require a single <ds:Reference>
+// to "#" + the element's ID (saml-core §5.4.2), reject an ID declared twice,
+// and return the signed element. Reading <Assertion> from the whole document
+// after checking "a" signature is how XML Signature Wrapping attacks succeed.
+const assertion = await verifyEnvelopedSignature(xml, 'Assertion', idpMetadata.signingCerts);
 
-// 2a. Verify XML Digital Signature (xmldsig-core §3)
-//     - Validate <ds:Signature> using IdP certificate from metadata
-//     - Check SignedInfo references cover the Assertion or Response
-const signature = doc.querySelector('Signature');
-await verifyXMLSignature(signature, idpCertificate);
+// Step 3: Validate the verified assertion (saml-profiles §4.1.4.2-§4.1.4.3)
+const CLOCK_SKEW = 3 * 60 * 1000; // saml-core §1.3.3 (Errata E92): 3-5 minutes
+const now = Date.now();
+if (assertion.issuer !== idpMetadata.entityID) throw new Error('Issuer mismatch');
 
-// 2b. InResponseTo: SKIPPED (no request was issued)
-//     This is the primary weakness — without a request-response binding,
-//     the SP cannot detect replayed responses via request correlation.
+// 3a. A bearer SubjectConfirmation addressed to this ACS. In an unsolicited
+//     Response, InResponseTo MUST NOT be present (saml-profiles §4.1.5).
+const scd = assertion.bearerSubjectConfirmationData;
+if (scd.recipient !== SP_ACS_URL) throw new Error('Recipient mismatch');
+if (now >= Date.parse(scd.notOnOrAfter) + CLOCK_SKEW) throw new Error('Subject confirmation expired');
+if (scd.inResponseTo) throw new Error('Unsolicited Response carries InResponseTo');
 
-// 2c. Assertion replay detection (CRITICAL for IdP-initiated)
-//     Cache Assertion IDs to detect reuse. This is the SP's ONLY defense
-//     against replay attacks in the IdP-initiated flow.
-const assertionId = doc.querySelector('Assertion')?.getAttribute('ID');
-if (consumedAssertionIds.has(assertionId)) {
-  throw new Error('Assertion replay detected');
-}
-consumedAssertionIds.add(assertionId);
-
-// 2d. Validate Conditions (saml-core §2.5)
-const conditions = doc.querySelector('Conditions');
-const notBefore = new Date(conditions.getAttribute('NotBefore'));
-const notOnOrAfter = new Date(conditions.getAttribute('NotOnOrAfter'));
-const now = new Date();
-const CLOCK_SKEW = 5 * 60 * 1000; // 5-minute tolerance
-if (now < notBefore.getTime() - CLOCK_SKEW || now > notOnOrAfter.getTime() + CLOCK_SKEW) {
-  throw new Error('Assertion conditions not met');
+// 3b. Conditions (saml-core §2.5.1): time window and every AudienceRestriction
+if (now + CLOCK_SKEW < Date.parse(assertion.conditions.notBefore)) throw new Error('Not yet valid');
+if (now >= Date.parse(assertion.conditions.notOnOrAfter) + CLOCK_SKEW) throw new Error('Expired');
+if (!assertion.conditions.audienceRestrictions.every((audiences) => audiences.includes(SP_ENTITY_ID))) {
+  throw new Error('This SP is not in every AudienceRestriction');
 }
 
-// 2e. Validate AudienceRestriction — SP entity ID MUST be listed
-const audience = doc.querySelector('AudienceRestriction Audience')?.textContent;
-if (audience !== SP_ENTITY_ID) {
-  throw new Error('Audience mismatch');
-}
+// 3c. Replay detection (saml-profiles §4.1.4.5). With no AuthnRequest to
+//     correlate, this is the SP's main defence. Keep each ID until its
+//     SubjectConfirmationData NotOnOrAfter has passed.
+if (consumedAssertionIds.has(assertion.id)) throw new Error('Assertion replay detected');
+consumedAssertionIds.set(assertion.id, Date.parse(scd.notOnOrAfter) + CLOCK_SKEW);
 
-// Step 3: Extract identity and create local session
-const nameId = doc.querySelector('NameID')?.textContent;
-const sessionIndex = doc.querySelector('AuthnStatement')?.getAttribute('SessionIndex');
-// Store sessionIndex for Single Logout coordination`,
+// Step 4: Create the local session; keep NameID and SessionIndex for Single Logout
+const { nameId, sessionIndex } = assertion;`,
   },
 
   /* ------------------------------------------------------------------ */
@@ -133,7 +128,8 @@ const logoutRequest = \`
     ID="\${logoutRequestId}"
     Version="2.0"
     IssueInstant="\${new Date().toISOString()}"
-    Destination="\${IDP_SLO_URL}">
+    Destination="\${IDP_SLO_URL}"
+    NotOnOrAfter="\${new Date(Date.now() + 5 * 60 * 1000).toISOString()}">
   <saml:Issuer>\${SP_ENTITY_ID}</saml:Issuer>
   <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">
     \${userEmail}
@@ -141,12 +137,18 @@ const logoutRequest = \`
   <samlp:SessionIndex>\${sessionIndex}</samlp:SessionIndex>
 </samlp:LogoutRequest>\`;
 
-// Send via HTTP-Redirect (DEFLATE + Base64)
+// Send via HTTP-Redirect (DEFLATE + Base64). "The <LogoutRequest> message MUST
+// be signed if the HTTP POST or Redirect binding is used" (saml-profiles
+// §4.4.3.1); on Redirect the signature covers the query string.
 const deflated = pako.deflateRaw(new TextEncoder().encode(logoutRequest));
 const encoded = btoa(String.fromCharCode(...deflated));
-window.location.href = IDP_SLO_URL
-  + '?SAMLRequest=' + encodeURIComponent(encoded)
-  + '&RelayState=' + encodeURIComponent(POST_LOGOUT_URL);
+const relayState = crypto.randomUUID(); // opaque, at most 80 bytes
+const signedQuery = 'SAMLRequest=' + encodeURIComponent(encoded)
+  + '&RelayState=' + encodeURIComponent(relayState)
+  + '&SigAlg=' + encodeURIComponent('http://www.w3.org/2001/04/xmldsig-more#rsa-sha256');
+const signature = await signRsaSha256(SP_SIGNING_KEY, signedQuery);
+window.location.href = IDP_SLO_URL + '?' + signedQuery
+  + '&Signature=' + encodeURIComponent(signature);
 
 // === IdP-side: Process LogoutRequest ===
 // 1. IdP receives LogoutRequest, identifies the user by NameID
@@ -156,7 +158,9 @@ window.location.href = IDP_SLO_URL
 // 5. IdP sends final LogoutResponse to the initiating SP
 
 // === SP-side: Receive LogoutResponse ===
-// Validate: InResponseTo matches the ID of our LogoutRequest
+// Validate: the signature, against the IdP certificate from its metadata
+// Validate: Issuer is the IdP; Destination is this SingleLogoutService
+// Validate: InResponseTo matches the ID of our LogoutRequest; RelayState matches
 // Validate: Status is "urn:oasis:names:tc:SAML:2.0:status:Success"
 // Destroy local session and redirect to post-logout URL`,
   },
@@ -169,11 +173,14 @@ window.location.href = IDP_SLO_URL
 <!-- Both SP and IdP publish metadata documents that describe their capabilities -->
 <!-- and endpoints. These are fetched once and cached for trust establishment. -->
 
-<!-- SP Metadata — published at /saml/metadata -->
+<!-- SP Metadata, published at its entityID URL (saml-metadata §4.1.1) -->
+<!-- and served as application/samlmetadata+xml -->
 <md:EntityDescriptor
     xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata"
     xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
-    entityID="https://sp.example.com">
+    entityID="https://sp.example.com/saml/metadata"
+    validUntil="2026-12-31T00:00:00Z"
+    cacheDuration="PT1H">
   <md:SPSSODescriptor
       AuthnRequestsSigned="true"
       WantAssertionsSigned="true"
@@ -186,12 +193,6 @@ window.location.href = IDP_SLO_URL
       </ds:KeyInfo>
     </md:KeyDescriptor>
 
-    <!-- Assertion Consumer Service — where IdP POSTs the SAML Response -->
-    <md:AssertionConsumerService
-        Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
-        Location="https://sp.example.com/saml/acs"
-        index="0" isDefault="true"/>
-
     <!-- Single Logout Service — where IdP sends LogoutRequest/Response -->
     <md:SingleLogoutService
         Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
@@ -199,11 +200,19 @@ window.location.href = IDP_SLO_URL
 
     <!-- NameID formats this SP accepts -->
     <md:NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</md:NameIDFormat>
+
+    <!-- Assertion Consumer Service — where IdP POSTs the SAML Response. -->
+    <!-- The schema orders it after SingleLogoutService and NameIDFormat. -->
+    <md:AssertionConsumerService
+        Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST"
+        Location="https://sp.example.com/saml/acs"
+        index="0" isDefault="true"/>
   </md:SPSSODescriptor>
 </md:EntityDescriptor>
 
-<!-- To consume IdP metadata programmatically: -->
-<!-- const response = await fetch('/saml/metadata');           -->
+<!-- To consume IdP metadata, dereference the IdP's entityID:  -->
+<!-- const response = await fetch(IDP_ENTITY_ID);               -->
+<!-- (ProtocolSoup's IdP publishes at /saml/idp/metadata)       -->
 <!-- const xml = await response.text();                        -->
 <!-- Parse SSO endpoint, SLO endpoint, and signing certificate -->
 <!-- from the IdP's EntityDescriptor / IDPSSODescriptor.       -->`,
