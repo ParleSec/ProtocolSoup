@@ -789,108 +789,244 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
-  /saml/metadata:
+  /saml/idp/metadata:
     get:
       tags: [SAML]
-      summary: SAML metadata endpoint
-      operationId: samlMetadata
+      summary: SAML IdP metadata
+      operationId: samlIdpMetadata
       responses:
         "200":
-          description: SAML IdP metadata XML.
+          description: SAML metadata EntityDescriptor (SAML Metadata Section 4.1.1).
           content:
-            application/xml:
+            application/samlmetadata+xml:
               schema:
                 type: string
-            text/xml:
-              schema:
-                type: string
-  /saml/sso:
+  /saml/idp/sso:
     get:
       tags: [SAML]
-      summary: SAML SSO endpoint (Redirect binding)
-      operationId: samlSsoGet
+      summary: IdP SingleSignOnService (HTTP-Redirect binding)
+      operationId: samlIdpSsoRedirect
       responses:
         "200":
-          description: SSO response or redirect form.
+          description: IdP login page, or an XHTML form posting a signed error Response to the SP ACS when the AuthnRequest is unsigned or cannot be satisfied (SAML Profiles Section 4.1.4.1).
           content:
             text/html:
               schema:
                 type: string
         "400":
-          description: Invalid SAML request.
+          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
           content:
-            application/json:
+            text/plain:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                type: string
     post:
       tags: [SAML]
-      summary: SAML SSO endpoint (POST binding)
-      operationId: samlSsoPost
+      summary: IdP SingleSignOnService (HTTP-POST binding)
+      operationId: samlIdpSsoPost
       responses:
         "200":
-          description: SSO response.
+          description: IdP login page, or an XHTML form posting a signed error Response to the SP ACS when the AuthnRequest is unsigned or cannot be satisfied (SAML Profiles Section 4.1.4.1).
           content:
             text/html:
               schema:
                 type: string
         "400":
-          description: Invalid SAML request.
+          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
           content:
-            application/json:
+            text/plain:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-  /saml/acs:
+                type: string
+  /saml/idp/login:
     post:
       tags: [SAML]
-      summary: SAML assertion consumer endpoint
-      operationId: samlAcsPost
+      summary: Authenticate the principal and post the signed Response to the ACS
+      operationId: samlIdpLogin
       responses:
         "200":
-          description: Assertion processed.
+          description: XHTML auto-submit form carrying the signed SAML message (SAML Bindings Section 3.5.4).
+          content:
+            text/html:
+              schema:
+                type: string
+        "401":
+          description: Authentication failed.
+  /saml/idp/initiate:
+    get:
+      tags: [SAML]
+      summary: Start IdP-initiated SSO (unsolicited Response)
+      operationId: samlIdpInitiate
+      responses:
+        "200":
+          description: IdP login page.
           content:
             text/html:
               schema:
                 type: string
         "400":
-          description: Invalid assertion payload.
+          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
+          content:
+            text/plain:
+              schema:
+                type: string
+  /saml/idp/slo:
+    get:
+      tags: [SAML]
+      summary: IdP SingleLogoutService (HTTP-Redirect binding)
+      operationId: samlIdpSloRedirect
+      responses:
+        "302":
+          description: Redirect carrying the DEFLATE-encoded message with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
+        "200":
+          description: Message accepted; the body lists every check that ran.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
-    get:
-      tags: [SAML]
-      summary: SAML assertion consumer endpoint (GET)
-      operationId: samlAcsGet
-      responses:
-        "200":
-          description: Assertion processed.
+                type: object
+                additionalProperties: true
+        "403":
+          description: Message rejected; the body lists every check that ran.
           content:
-            text/html:
+            application/json:
               schema:
-                type: string
-  /saml/slo:
-    get:
-      tags: [SAML]
-      summary: SAML single logout endpoint (GET)
-      operationId: samlSloGet
-      responses:
-        "200":
-          description: Logout processed.
-          content:
-            text/html:
-              schema:
-                type: string
+                type: object
+                additionalProperties: true
     post:
       tags: [SAML]
-      summary: SAML single logout endpoint (POST)
-      operationId: samlSloPost
+      summary: IdP SingleLogoutService (HTTP-POST binding)
+      operationId: samlIdpSloPost
       responses:
         "200":
-          description: Logout processed.
+          description: XHTML auto-submit form carrying the signed SAML message (SAML Bindings Section 3.5.4).
           content:
             text/html:
               schema:
                 type: string
+        "403":
+          description: Message rejected; the body lists every check that ran.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /saml/sp/metadata:
+    get:
+      tags: [SAML]
+      summary: SAML SP metadata
+      operationId: samlSpMetadata
+      responses:
+        "200":
+          description: SAML metadata EntityDescriptor (SAML Metadata Section 4.1.1).
+          content:
+            application/samlmetadata+xml:
+              schema:
+                type: string
+  /saml/sp/login:
+    get:
+      tags: [SAML]
+      summary: Start SP-initiated SSO with a signed AuthnRequest
+      operationId: samlSpLogin
+      responses:
+        "302":
+          description: Redirect carrying the DEFLATE-encoded message with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
+        "200":
+          description: XHTML auto-submit form carrying the signed SAML message (SAML Bindings Section 3.5.4).
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
+          content:
+            text/plain:
+              schema:
+                type: string
+  /saml/sp/acs:
+    post:
+      tags: [SAML]
+      summary: SP AssertionConsumerService (HTTP-POST binding only)
+      operationId: samlSpAcs
+      responses:
+        "200":
+          description: Message accepted; the body lists every check that ran.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "403":
+          description: Message rejected; the body lists every check that ran.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /saml/sp/logout:
+    get:
+      tags: [SAML]
+      summary: Start SP-initiated Single Logout
+      operationId: samlSpLogout
+      responses:
+        "302":
+          description: Redirect carrying the DEFLATE-encoded message with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
+        "200":
+          description: XHTML auto-submit form carrying the signed SAML message (SAML Bindings Section 3.5.4).
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          description: Message could not be decoded, or was discarded (bad signature or Destination mismatch).
+          content:
+            text/plain:
+              schema:
+                type: string
+  /saml/sp/slo:
+    get:
+      tags: [SAML]
+      summary: SP SingleLogoutService (HTTP-Redirect binding)
+      operationId: samlSpSloRedirect
+      responses:
+        "302":
+          description: Redirect carrying the DEFLATE-encoded message with SigAlg and Signature (SAML Bindings Section 3.4.4.1).
+        "200":
+          description: Message accepted; the body lists every check that ran.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "403":
+          description: Message rejected; the body lists every check that ran.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+    post:
+      tags: [SAML]
+      summary: SP SingleLogoutService (HTTP-POST binding)
+      operationId: samlSpSloPost
+      responses:
+        "200":
+          description: XHTML auto-submit form carrying the signed SAML message (SAML Bindings Section 3.5.4).
+          content:
+            text/html:
+              schema:
+                type: string
+        "403":
+          description: Message rejected; the body lists every check that ran.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
   /saml/demo/users:
     get:
       tags: [SAML]
@@ -899,6 +1035,19 @@ paths:
       responses:
         "200":
           description: Demo users payload.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /saml/demo/sessions:
+    get:
+      tags: [SAML]
+      summary: List the sessions held by the SP and the IdP
+      operationId: samlDemoSessions
+      responses:
+        "200":
+          description: Sessions keyed by role (sp, idp).
           content:
             application/json:
               schema:

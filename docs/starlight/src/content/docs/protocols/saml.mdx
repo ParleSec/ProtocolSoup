@@ -1,6 +1,6 @@
 ---
 title: "SAML 2.0"
-description: "Enterprise SSO with assertion exchange, metadata, and Single Logout."
+description: "Enterprise SSO with signed assertion exchange, metadata, and Single Logout between a real IdP and SP."
 ---
 
 # SAML 2.0
@@ -11,50 +11,105 @@ description: "Enterprise SSO with assertion exchange, metadata, and Single Logou
 - SAML 2.0 Bindings
 - SAML 2.0 Profiles
 - SAML 2.0 Metadata
+- W3C XML Signature (Exclusive Canonicalization, enveloped signatures)
+
+## Two Separate Entities
+
+ProtocolSoup runs a SAML identity provider and a SAML service provider as two distinct entities. Each has its own entityID, its own RSA signing key with a self-signed X.509 certificate, and its own metadata.
+
+| Role | entityID (also its metadata location) |
+|------|---------------------------------------|
+| Identity provider | `{BASE_URL}/saml/idp/metadata` |
+| Service provider | `{BASE_URL}/saml/sp/metadata` |
+
+Each entityID is the URL its metadata is published at (SAML Metadata Section 4.1.1). Neither role reads the other's state. Each fetches the other's metadata over HTTP and trusts only the signing certificate published there. A certificate carried in a message's `<ds:KeyInfo>` is never trusted unless it matches that metadata.
+
+Keys and certificates persist under `{SHOWCASE_DATA_DIR}/saml/` (`idp.key.pem`, `idp.cert.pem`, `sp.key.pem`, `sp.cert.pem`). Without a data directory they are generated on each start.
 
 ## Available Flows
 
 | Flow ID | Name | Description |
 |---------|------|-------------|
 | `sp_initiated_sso` | SP-Initiated SSO | Service Provider starts the login flow |
-| `idp_initiated_sso` | IdP-Initiated SSO | Identity Provider starts the login flow |
-| `single_logout` | Single Logout | Coordinated logout across participants |
+| `idp_initiated_sso` | IdP-Initiated SSO | Identity Provider sends an unsolicited Response |
+| `single_logout` | Single Logout | SP-initiated logout with signed LogoutRequest and LogoutResponse |
 | `metadata` | Metadata Exchange | SP/IdP metadata discovery and sharing |
-
-## Demo Scenarios
-
-- **SP-Initiated SSO Demo** -- Complete SP redirect flow
-- **IdP-Initiated SSO Demo** -- IdP pushes assertion to SP
-- **Single Logout Demo** -- Logout propagation
-- **Assertion Deep Dive** -- Assertion parsing and validation
-- **Metadata Exploration** -- SP/IdP metadata inspection
 
 ## Endpoints
 
+### Identity provider
+
 | Path | Methods | Purpose |
 |------|---------|---------|
-| `/saml/metadata` | GET | SP/IdP metadata |
-| `/saml/sso` | GET, POST | SSO service (IdP side) |
-| `/saml/acs` | GET, POST | Assertion Consumer Service (SP side) |
-| `/saml/slo` | GET, POST | Single Logout |
-| `/saml/login` | GET, POST | SP-initiated login |
-| `/saml/idp-initiated` | GET | IdP-initiated SSO |
+| `/saml/idp/metadata` | GET | IdP `EntityDescriptor` (`application/samlmetadata+xml`) |
+| `/saml/idp/sso` | GET, POST | SingleSignOnService (HTTP-Redirect, HTTP-POST) |
+| `/saml/idp/login` | POST | Principal authentication; answers with the signed Response |
+| `/saml/idp/initiate` | GET | Start IdP-initiated SSO (optional `RelayState`) |
+| `/saml/idp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST) |
+
+### Service provider
+
+| Path | Methods | Purpose |
+|------|---------|---------|
+| `/saml/sp/metadata` | GET | SP `EntityDescriptor` (`application/samlmetadata+xml`) |
+| `/saml/sp/login` | GET | Start SP-initiated SSO (`binding=redirect` or `post`, optional `RelayState`) |
+| `/saml/sp/acs` | POST | AssertionConsumerService (HTTP-POST only) |
+| `/saml/sp/logout` | GET | Start SP-initiated Single Logout (`session_id`, `binding`) |
+| `/saml/sp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST) |
+
+### Demo and Looking Glass
+
+| Path | Methods | Purpose |
+|------|---------|---------|
 | `/saml/demo/users` | GET | Demo users |
-| `/saml/demo/sessions` | GET | Active demo sessions |
+| `/saml/demo/sessions` | GET | Current sessions held by the SP (`sp`) and the IdP (`idp`) |
+| `/saml/looking-glass/authn-request` | GET | SP builds and signs an AuthnRequest for the chosen binding |
+| `/saml/looking-glass/authenticate` | POST | IdP processes the AuthnRequest and issues a signed Response; SP validates it |
+| `/saml/looking-glass/logout-request` | GET | SP (`initiator=sp`) or IdP (`initiator=idp`) builds and signs a LogoutRequest |
+| `/saml/looking-glass/logout` | POST | The addressed role processes the LogoutRequest; the requester validates the LogoutResponse |
 
-### Looking Glass Endpoints
+The Looking Glass endpoints run the same IdP and SP code as the binding endpoints, in one request. Every validation result they return comes from checks that actually ran.
 
-| Path | Methods | Purpose |
-|------|---------|---------|
-| `/saml/looking-glass/authn-request` | GET | Create AuthnRequest for inspection |
-| `/saml/looking-glass/authenticate` | POST | Authenticate with Looking Glass tracking |
-| `/saml/looking-glass/logout-request` | GET | Create LogoutRequest for inspection |
-| `/saml/looking-glass/logout` | POST | Process logout with Looking Glass tracking |
+## Signatures
 
-## What To Validate
+- Enveloped XML signatures (SAML Core Section 5.4.1), RSA-SHA256, SHA-256 digests, and Exclusive Canonicalization (Section 5.4.3).
+- `<ds:Signature>` sits immediately after `<saml:Issuer>`. It holds a single `<ds:Reference>` whose URI is `#` plus the signed element's `ID` (Section 5.4.2).
+- Verifiers reject transforms other than enveloped-signature and exclusive canonicalization (Section 5.4.4). They also reject `<ds:Object>` (Errata E91) and any `ID` declared more than once (Section 1.3.4).
+- Only the signed bytes are read after verification, which defeats XML Signature Wrapping.
+- The HTTP-Redirect binding carries no XML signature. The query string `SAMLRequest|SAMLResponse=…&RelayState=…&SigAlg=…` is signed, and verified over the received URL-encoded values (Bindings Section 3.4.4.1).
 
-- AuthnRequest: `ID`, `IssueInstant`, `Destination`, `AssertionConsumerServiceURL`
-- Assertion: `Issuer`, `Subject`, `Conditions`, `AuthnStatement`, `AttributeStatement`
-- Signature: XML signature on assertion or response
-- Replay: `InResponseTo` matching, `NotOnOrAfter` constraints
-- SLO: `LogoutRequest` and `LogoutResponse` sequencing
+## What Each Role Checks
+
+**IdP, on an AuthnRequest**
+
+- The signature verifies against the SP's metadata. An unsigned request gets a SAML error Response with status `Requester` / `RequestDenied`, because the SP's metadata declares `AuthnRequestsSigned="true"` (Metadata Section 2.4.4, Errata E7).
+- `Destination` is checked.
+- The `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex` must be an HTTP-POST endpoint in the SP's metadata (Profiles Section 4.1.4.1).
+- Unsupported `NameIDPolicy` and `IsPassive` requests get error Responses.
+
+**SP, on a Response** (Profiles Sections 4.1.4.3 and 4.1.4.5)
+
+- Delivery over HTTP-POST only.
+- Response and assertion signatures are verified against the IdP's metadata. The assertion must carry its own signature (`WantAssertionsSigned="true"`).
+- `Destination`, `Issuer` (with `Format` omitted or `entity`) and `Version` are checked.
+- `InResponseTo` must match an outstanding AuthnRequest, and `RelayState` must equal the value sent with it.
+- At least one bearer `SubjectConfirmation` must have a matching `Recipient`, an unexpired `NotOnOrAfter`, no `NotBefore` and a matching `InResponseTo`.
+- `Conditions` must hold their time window, and every `AudienceRestriction` must include the SP.
+- An `AuthnStatement` with a `SessionIndex` must be present.
+- The assertion ID must not be a replay.
+- Clock skew is 3 minutes (SAML Core Errata E92).
+- Any failed check rejects the Response.
+
+**Single Logout**
+
+- LogoutRequest and LogoutResponse must be signed on the front-channel bindings (Profiles Sections 4.4.3.1 and 4.4.3.4).
+- `Issuer`, `Destination` and `NotOnOrAfter` are checked.
+- A LogoutRequest from the SP must carry a `SessionIndex` (Section 4.4.4.1).
+- `InResponseTo` and `RelayState` must match the outstanding request.
+
+**Limits**
+
+- The bindings are HTTP-Redirect and HTTP-POST only; there is no Artifact or SOAP binding.
+- There is no `EncryptedAssertion` support.
+- The SP accepts unsolicited Responses.
+- RelayState longer than 80 bytes is refused (Bindings Sections 3.4.3 and 3.5.3).
