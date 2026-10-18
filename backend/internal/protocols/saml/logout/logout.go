@@ -42,6 +42,7 @@ type Result struct {
 	SessionsEnded []*session.Session `json:"sessionsEnded,omitempty"`
 	StatusCode    string             `json:"statusCode,omitempty"`
 	InResponseTo  string             `json:"inResponseTo,omitempty"`
+	NameID        string             `json:"nameId,omitempty"` // principal named by a processed LogoutRequest
 }
 
 // ProcessRequest validates a received <LogoutRequest> (SAML Core Section
@@ -121,6 +122,7 @@ func ProcessRequest(msg *binding.Received, party Party) (*binding.Outbound, *Res
 	}
 	result.StatusCode = status.Code
 	result.InResponseTo = request.ID
+	result.NameID = request.NameID.Value
 
 	response := message.BuildLogoutResponse(party.EntityID, responseLocation, request.ID, status)
 	return &binding.Outbound{

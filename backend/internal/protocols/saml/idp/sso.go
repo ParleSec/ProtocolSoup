@@ -14,13 +14,16 @@ import (
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
-// PendingLogin is an accepted <AuthnRequest>, or an IdP-initiated start,
-// waiting for the principal to authenticate.
+// PendingLogin is an accepted <AuthnRequest>, or an IdP-initiated start. When
+// Reuse is set, the IdP answers it from its existing authentication session;
+// otherwise it waits for the principal to authenticate.
 type PendingLogin struct {
 	ID         string
 	RequestID  string // empty for an unsolicited response
 	ACSURL     string
 	RelayState string
+	ForceAuthn bool
+	Reuse      *AuthnSession
 	Validation *binding.Report
 	IssuedAt   time.Time
 }
@@ -49,15 +52,23 @@ func (s *loginStore) store(login *PendingLogin) {
 	s.pending[login.ID] = login
 }
 
-func (s *loginStore) take(id string) (*PendingLogin, bool) {
+// get returns the pending login with id without consuming it, so a mistyped
+// password can be retried.
+func (s *loginStore) get(id string) (*PendingLogin, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	login, ok := s.pending[id]
-	delete(s.pending, id)
 	if !ok || time.Since(login.IssuedAt) > s.ttl {
+		delete(s.pending, id)
 		return nil, false
 	}
 	return login, true
+}
+
+func (s *loginStore) remove(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.pending, id)
 }
 
 // RequestError is an <AuthnRequest> the IdP will not satisfy. When the SP is
@@ -76,9 +87,11 @@ func (e *RequestError) Error() string {
 	return e.Status.Message
 }
 
-// AcceptAuthnRequest validates a received <AuthnRequest> and resolves the
-// assertion consumer service from the SP's metadata.
-func (idp *IdentityProvider) AcceptAuthnRequest(ctx context.Context, msg *binding.Received) (*PendingLogin, error) {
+// AcceptAuthnRequest validates a received <AuthnRequest>, resolves the
+// assertion consumer service from the SP's metadata, and decides whether the
+// principal's existing authentication session (existing, which may be nil)
+// can answer it.
+func (idp *IdentityProvider) AcceptAuthnRequest(ctx context.Context, msg *binding.Received, existing *AuthnSession) (*PendingLogin, error) {
 	report := &binding.Report{}
 	discard := func(name, detail, reference string) (*PendingLogin, error) {
 		report.Add(name, false, detail, reference)
@@ -176,26 +189,40 @@ func (idp *IdentityProvider) AcceptAuthnRequest(ctx context.Context, msg *bindin
 		return reject(message.StatusInfo{Code: message.StatusRequester, SubCode: message.StatusInvalidNameIDPolicy, Message: "NameIDPolicy Format " + policy.Format + " is not supported"},
 			"NameIDPolicy", "SAML Core Section 3.4.1.1")
 	}
-	// The IdP keeps no authentication session of its own, so it cannot satisfy
-	// IsPassive without interacting with the principal.
-	if request.IsPassive {
-		return reject(message.StatusInfo{Code: message.StatusResponder, SubCode: message.StatusNoPassive, Message: "IsPassive was requested and the principal has no session at this IdP"},
-			"IsPassive", "SAML Core Section 3.4.1")
-	}
-
 	login := &PendingLogin{
 		RequestID:  request.ID,
 		ACSURL:     acs.Location,
 		RelayState: msg.RelayState,
+		ForceAuthn: request.ForceAuthn,
 		Validation: report,
+	}
+	switch {
+	// IsPassive: "the identity provider and the user agent itself MUST NOT
+	// visibly take control of the user interface from the requester and
+	// interact with the presenter in a noticeable fashion." With ForceAuthn as
+	// well, "the identity provider MUST NOT freshly authenticate the presenter
+	// unless the constraints of IsPassive can be met" (SAML Core Section 3.4.1).
+	case request.IsPassive && existing == nil:
+		return reject(message.StatusInfo{Code: message.StatusResponder, SubCode: message.StatusNoPassive, Message: "IsPassive was requested and the principal has no authentication session at this IdP"},
+			"IsPassive", "SAML Core Section 3.4.1")
+	case request.IsPassive && request.ForceAuthn:
+		return reject(message.StatusInfo{Code: message.StatusResponder, SubCode: message.StatusNoPassive, Message: "ForceAuthn and IsPassive were both requested; fresh authentication would require interacting with the principal"},
+			"IsPassive", "SAML Core Section 3.4.1")
+	case existing != nil && request.ForceAuthn:
+		report.Add("ForceAuthn", true, "ForceAuthn=\"true\": the IdP \"MUST authenticate the presenter directly rather than rely on a previous security context\"", "SAML Core Section 3.4.1")
+	case existing != nil:
+		login.Reuse = existing
+		report.Add("Authentication", true, fmt.Sprintf("existing IdP session for %s, authenticated at %s, is reused", existing.User.Email, message.FormatTime(existing.AuthnInstant)), "SAML Profiles Section 4.1.3.4")
+		return login, nil
 	}
 	idp.logins.store(login)
 	return login, nil
 }
 
 // StartUnsolicited prepares an IdP-initiated login to the SP's default
-// assertion consumer service (SAML Profiles Section 4.1.5).
-func (idp *IdentityProvider) StartUnsolicited(ctx context.Context, relayState string) (*PendingLogin, error) {
+// assertion consumer service (SAML Profiles Section 4.1.5), answered from the
+// existing authentication session when there is one.
+func (idp *IdentityProvider) StartUnsolicited(ctx context.Context, relayState string, existing *AuthnSession) (*PendingLogin, error) {
 	if err := binding.CheckRelayState(relayState); err != nil {
 		return nil, err
 	}
@@ -207,15 +234,31 @@ func (idp *IdentityProvider) StartUnsolicited(ctx context.Context, relayState st
 	if !ok {
 		return nil, errors.New("SP metadata publishes no HTTP-POST AssertionConsumerService")
 	}
-	login := &PendingLogin{ACSURL: acs.Location, RelayState: relayState}
-	idp.logins.store(login)
+	login := &PendingLogin{ACSURL: acs.Location, RelayState: relayState, Reuse: existing}
+	if existing == nil {
+		idp.logins.store(login)
+	}
 	return login, nil
 }
 
-// IssueResponse builds the signed <Assertion> for an authenticated user and
-// the <Response> that carries it over HTTP-POST. The Response itself is
-// signed when the binding serializes it.
-func (idp *IdentityProvider) IssueResponse(login *PendingLogin, user *models.User) (*binding.Outbound, *session.Session, error) {
+// FailLogin answers a pending login the principal did not complete with an
+// error <Response>: "Regardless of the success or failure of the
+// <AuthnRequest>, the identity provider SHOULD produce an HTTP response to the
+// user agent containing a <Response> message" (SAML Profiles Section 4.1.3.5).
+func (idp *IdentityProvider) FailLogin(login *PendingLogin, status message.StatusInfo) *binding.Outbound {
+	idp.logins.remove(login.ID)
+	response := message.BuildResponse(idp.cfg.EntityID, login.ACSURL, login.RequestID, status, nil)
+	return &binding.Outbound{
+		Element: response, Location: login.ACSURL, Binding: message.BindingHTTPPost,
+		Param: binding.ParamSAMLResponse, RelayState: login.RelayState,
+	}
+}
+
+// IssueResponse builds the signed <Assertion> for a user authenticated at
+// authnInstant and the <Response> that carries it over HTTP-POST. The Response
+// itself is signed when the binding serializes it.
+func (idp *IdentityProvider) IssueResponse(login *PendingLogin, user *models.User, authnInstant time.Time) (*binding.Outbound, *session.Session, error) {
+	idp.logins.remove(login.ID)
 	sessionIndex := message.GenerateID()
 	assertion := message.BuildAssertion(message.AssertionParams{
 		Issuer:       idp.cfg.EntityID,
@@ -225,7 +268,7 @@ func (idp *IdentityProvider) IssueResponse(login *PendingLogin, user *models.Use
 		InResponseTo: login.RequestID,
 		Audience:     idp.cfg.SPEntityID,
 		SessionIndex: sessionIndex,
-		AuthnInstant: time.Now(),
+		AuthnInstant: authnInstant,
 		Lifetime:     assertionLifetime,
 		Attributes:   releasedAttributes(user),
 	})
@@ -241,7 +284,7 @@ func (idp *IdentityProvider) IssueResponse(login *PendingLogin, user *models.Use
 		NameID:       user.Email,
 		NameIDFormat: message.NameIDFormatEmail,
 		SessionIndex: sessionIndex,
-		AuthnInstant: message.FormatTime(time.Now()),
+		AuthnInstant: message.FormatTime(authnInstant),
 		AssertionID:  assertion.SelectAttrValue("ID", ""),
 	}
 	idp.sessions.Add(sess)

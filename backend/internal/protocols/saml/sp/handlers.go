@@ -38,13 +38,16 @@ func (sp *ServiceProvider) handleMetadata(w http.ResponseWriter, r *http.Request
 }
 
 // handleLogin starts SP-initiated SSO: it sends a signed <AuthnRequest> to the
-// IdP over HTTP-Redirect (default) or HTTP-POST.
+// IdP over HTTP-Redirect (default) or HTTP-POST. force_authn=true and
+// is_passive=true set ForceAuthn and IsPassive on the request.
 func (sp *ServiceProvider) handleLogin(w http.ResponseWriter, r *http.Request) {
 	relayState := r.URL.Query().Get("RelayState")
 	if relayState == "" {
 		relayState = message.GenerateID()
 	}
-	out, err := sp.NewAuthnRequest(r.Context(), binding.FromQuery(r, message.BindingHTTPRedirect), relayState)
+	query := r.URL.Query()
+	out, err := sp.NewAuthnRequest(r.Context(), binding.FromQuery(r, message.BindingHTTPRedirect), relayState,
+		query.Get("force_authn") == "true", query.Get("is_passive") == "true")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

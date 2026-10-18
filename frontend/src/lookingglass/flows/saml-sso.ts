@@ -70,7 +70,7 @@ export class SAMLSSOExecutor extends SAMLBrowserExecutor {
         })
       }
 
-      const outcome = await this.runInPopup(path, 'Sign in at the IdP with a demo user')
+      const outcome = await this.runInPopup(path, 'Sign in at the IdP once; later SSO runs reuse the IdP session without asking again')
       this.reportOutcome(outcome)
 
       const session = outcome.details?.session as SAMLSessionInfo | undefined

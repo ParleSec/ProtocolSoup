@@ -45,7 +45,8 @@ type IdentityProvider struct {
 	cfg            Config
 	logins         *loginStore
 	logoutRequests *session.Pending
-	sessions       *session.Store
+	sessions       *session.Store // assertions issued to the SP
+	authn          *authnStore    // the IdP's own authentication sessions
 }
 
 // New returns an identity provider with empty state.
@@ -55,6 +56,7 @@ func New(cfg Config) *IdentityProvider {
 		logins:         newLoginStore(pendingTTL),
 		logoutRequests: session.NewPending(pendingTTL),
 		sessions:       session.NewStore(),
+		authn:          newAuthnStore(),
 	}
 }
 
@@ -141,13 +143,25 @@ func (idp *IdentityProvider) HandleLogoutRequest(ctx context.Context, msg *bindi
 	if err != nil {
 		return nil, &logout.Result{Report: &binding.Report{}}, err
 	}
-	return logout.ProcessRequest(msg, logout.Party{
+	out, result, err := logout.ProcessRequest(msg, logout.Party{
 		EntityID:            idp.cfg.EntityID,
 		Location:            idp.cfg.SLOURL,
 		Peer:                meta,
 		Sessions:            idp.sessions,
 		RequireSessionIndex: true,
 	})
+	// The session authority also terminates "the principal's current session"
+	// (SAML Core Section 3.7.3.2): its own authentication session ends, so the
+	// next <AuthnRequest> asks the principal to sign in again.
+	if out != nil && result.StatusCode == message.StatusSuccess {
+		idp.endAuthentication(result)
+	}
+	return out, result, err
+}
+
+func (idp *IdentityProvider) endAuthentication(result *logout.Result) {
+	ended := idp.authn.endFor(result.NameID)
+	result.Report.Add("IdP authentication session", true, fmt.Sprintf("ended %d authentication session(s) for %s", ended, result.NameID), "SAML Core Section 3.7.3.2")
 }
 
 // NewLogoutRequest starts IdP-initiated Single Logout for one IdP session.
@@ -179,6 +193,7 @@ func (idp *IdentityProvider) NewLogoutRequest(ctx context.Context, sessionID, bi
 		Reason:       message.LogoutReasonUser,
 	})
 	idp.sessions.Remove(sess.ID)
+	idp.authn.endFor(sess.NameID)
 	idp.logoutRequests.Store(session.PendingRequest{ID: request.SelectAttrValue("ID", ""), RelayState: relayState})
 	return &binding.Outbound{Element: request, Location: ep.Location, Binding: bindingID, Param: binding.ParamSAMLRequest, RelayState: relayState}, nil
 }

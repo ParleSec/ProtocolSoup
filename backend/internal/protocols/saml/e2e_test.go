@@ -256,7 +256,7 @@ func TestReplayedAssertionIsRejected(t *testing.T) {
 func TestUnsignedAuthnRequestGetsSAMLErrorResponse(t *testing.T) {
 	h := newHarness(t)
 	// A real AuthnRequest from the SP, sent without its signature.
-	out, err := h.plugin.sp.NewAuthnRequest(context.Background(), message.BindingHTTPPost, "")
+	out, err := h.plugin.sp.NewAuthnRequest(context.Background(), message.BindingHTTPPost, "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,12 +310,12 @@ func TestSignedRequestWithWrongDestinationIsDiscarded(t *testing.T) {
 // login, without delivering it.
 func (h *harness) issueSignedResponse() *etree.Element {
 	h.t.Helper()
-	login, err := h.plugin.idp.StartUnsolicited(context.Background(), "")
+	login, err := h.plugin.idp.StartUnsolicited(context.Background(), "", nil)
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	user, _ := h.plugin.idp.Authenticate(h.user, h.pass)
-	out, _, err := h.plugin.idp.IssueResponse(login, user)
+	out, _, err := h.plugin.idp.IssueResponse(login, user, time.Now())
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -395,9 +395,9 @@ func TestSignatureFromKeyOutsideMetadataIsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	login, _ := h.plugin.idp.StartUnsolicited(context.Background(), "")
+	login, _ := h.plugin.idp.StartUnsolicited(context.Background(), "", nil)
 	user, _ := h.plugin.idp.Authenticate(h.user, h.pass)
-	out, _, _ := h.plugin.idp.IssueResponse(login, user)
+	out, _, _ := h.plugin.idp.IssueResponse(login, user, time.Now())
 	// Re-sign the assertion and the Response with a key whose certificate is
 	// carried in KeyInfo but not published in the IdP's metadata.
 	assertion := out.Element.FindElement("./Assertion")
@@ -523,5 +523,136 @@ func TestLateAssertionAfterIdPInitiatedLogoutIsRefused(t *testing.T) {
 
 	if _, err := h.deliver(response); err == nil || !strings.Contains(err.Error(), "LogoutRequest already processed") {
 		t.Fatalf("late assertion accepted after logout: %v", err)
+	}
+}
+
+// startSSO sends a signed AuthnRequest from the SP over HTTP-Redirect and
+// returns the IdP's answer: the sign-in page, or the HTTP-POST form carrying
+// the Response when the IdP answers from its session.
+func (h *harness) startSSO(query string) (*http.Response, string) {
+	h.t.Helper()
+	resp := h.get(h.server.URL + "/saml/sp/login?binding=redirect" + query)
+	if resp.StatusCode != http.StatusFound {
+		h.t.Fatalf("SP login: HTTP %d %s", resp.StatusCode, readBody(h.t, resp))
+	}
+	idpResp := h.get(resp.Header.Get("Location"))
+	return idpResp, readBody(h.t, idpResp)
+}
+
+func isSignInPage(page string) bool {
+	return strings.Contains(page, `name="password"`)
+}
+
+func isResponseForm(page string) bool {
+	return strings.Contains(page, `name="SAMLResponse"`)
+}
+
+// signInOnce completes one SP-initiated SSO by signing in at the IdP.
+func (h *harness) signInOnce() pageOutcome {
+	h.t.Helper()
+	_, page := h.startSSO("")
+	if !isSignInPage(page) {
+		h.t.Fatalf("first SSO did not ask for credentials: %s", page)
+	}
+	status, outcome := decodeOutcome(h.t, h.submitPostForm(h.loginAtIdP()))
+	if status != http.StatusOK || !outcome.Success {
+		h.t.Fatalf("first SSO failed: %s (%s)", outcome.Error, failedCheck(outcome.Validation))
+	}
+	return outcome
+}
+
+// TestSecondSSOReusesTheIdPSession is single sign-on: after one sign-in, the
+// IdP answers the next AuthnRequest from its session without asking for
+// credentials (SAML Profiles Section 4.1.3.4).
+func TestSecondSSOReusesTheIdPSession(t *testing.T) {
+	h := newHarness(t)
+	first := h.signInOnce()
+
+	_, page := h.startSSO("")
+	if isSignInPage(page) || !isResponseForm(page) {
+		t.Fatalf("second SSO did not answer from the IdP session: %s", page)
+	}
+	status, second := decodeOutcome(t, h.submitPostForm(page))
+	if status != http.StatusOK || !second.Success {
+		t.Fatalf("second SSO rejected: %s (%s)", second.Error, failedCheck(second.Validation))
+	}
+	if second.Details.Session.AuthnInstant != first.Details.Session.AuthnInstant {
+		t.Fatalf("AuthnInstant %s is not the original authentication %s", second.Details.Session.AuthnInstant, first.Details.Session.AuthnInstant)
+	}
+
+	resp := h.get(h.server.URL + "/saml/idp/initiate")
+	if page := readBody(t, resp); !isResponseForm(page) {
+		t.Fatalf("IdP-initiated SSO did not reuse the session: %s", page)
+	}
+}
+
+func TestForceAuthnAsksForCredentialsAgain(t *testing.T) {
+	h := newHarness(t)
+	h.signInOnce()
+	_, page := h.startSSO("&force_authn=true")
+	if !isSignInPage(page) || !strings.Contains(page, "ForceAuthn") {
+		t.Fatalf("ForceAuthn did not ask the principal to authenticate: %s", page)
+	}
+}
+
+func TestIsPassive(t *testing.T) {
+	h := newHarness(t)
+	_, page := h.startSSO("&is_passive=true")
+	if !isResponseForm(page) {
+		t.Fatalf("IsPassive without a session did not get an error Response: %s", page)
+	}
+	if status, outcome := decodeOutcome(t, h.submitPostForm(page)); status != http.StatusForbidden || !strings.Contains(outcome.Error, message.StatusNoPassive) {
+		t.Fatalf("expected NoPassive, got HTTP %d %q", status, outcome.Error)
+	}
+
+	h.signInOnce()
+	_, page = h.startSSO("&is_passive=true")
+	if status, outcome := decodeOutcome(t, h.submitPostForm(page)); status != http.StatusOK || !outcome.Success {
+		t.Fatalf("IsPassive with a session failed: HTTP %d %s", status, outcome.Error)
+	}
+	_, page = h.startSSO("&is_passive=true&force_authn=true")
+	if status, outcome := decodeOutcome(t, h.submitPostForm(page)); status != http.StatusForbidden || !strings.Contains(outcome.Error, message.StatusNoPassive) {
+		t.Fatalf("ForceAuthn with IsPassive: expected NoPassive, got HTTP %d %q", status, outcome.Error)
+	}
+}
+
+// TestLogoutEndsTheIdPSession: after Single Logout the session authority has
+// terminated the principal's session (SAML Core Section 3.7.3.2), so the next
+// SSO asks for credentials.
+func TestLogoutEndsTheIdPSession(t *testing.T) {
+	h := newHarness(t)
+	first := h.signInOnce()
+	resp := h.get(h.server.URL + "/saml/sp/logout?binding=redirect&session_id=" + url.QueryEscape(first.Details.Session.ID))
+	resp = h.get(resp.Header.Get("Location"))
+	if status, outcome := decodeOutcome(t, h.get(resp.Header.Get("Location"))); status != http.StatusOK || !outcome.Success {
+		t.Fatalf("SLO failed: HTTP %d %s", status, outcome.Error)
+	}
+	if _, page := h.startSSO(""); !isSignInPage(page) {
+		t.Fatalf("SSO after logout did not ask for credentials: %s", page)
+	}
+}
+
+func TestWrongPasswordCanBeRetried(t *testing.T) {
+	h := newHarness(t)
+	h.startSSO("")
+	resp := h.post(h.server.URL+"/saml/idp/login", url.Values{"email": {h.user}, "password": {"wrong"}})
+	if page := readBody(t, resp); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(page, "Invalid email or password") {
+		t.Fatalf("wrong password: HTTP %d %s", resp.StatusCode, page)
+	}
+	if status, outcome := decodeOutcome(t, h.submitPostForm(h.loginAtIdP())); status != http.StatusOK || !outcome.Success {
+		t.Fatalf("retry failed: HTTP %d %s", status, outcome.Error)
+	}
+}
+
+func TestCancelSendsAuthnFailed(t *testing.T) {
+	h := newHarness(t)
+	h.startSSO("")
+	resp := h.post(h.server.URL+"/saml/idp/login", url.Values{"user_action": {"cancel"}})
+	page := readBody(t, resp)
+	if !isResponseForm(page) {
+		t.Fatalf("cancel did not send an error Response: %s", page)
+	}
+	if status, outcome := decodeOutcome(t, h.submitPostForm(page)); status != http.StatusForbidden || !strings.Contains(outcome.Error, message.StatusAuthnFailed) {
+		t.Fatalf("expected AuthnFailed, got HTTP %d %q", status, outcome.Error)
 	}
 }

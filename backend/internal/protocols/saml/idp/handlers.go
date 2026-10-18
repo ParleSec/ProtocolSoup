@@ -2,11 +2,8 @@ package idp
 
 import (
 	"errors"
-	"html/template"
 	"net/http"
-	"sort"
 
-	"github.com/ParleSec/ProtocolSoup/internal/gel"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml/binding"
 	"github.com/ParleSec/ProtocolSoup/internal/protocols/saml/logout"
@@ -49,14 +46,16 @@ func (idp *IdentityProvider) handleMetadata(w http.ResponseWriter, r *http.Reque
 }
 
 // handleSSO is the SingleSignOnService for HTTP-Redirect (GET) and HTTP-POST
-// (POST).
+// (POST). With a live authentication session the IdP answers at once;
+// otherwise it asks the principal to sign in.
 func (idp *IdentityProvider) handleSSO(w http.ResponseWriter, r *http.Request) {
 	msg, err := binding.Decode(r)
 	if err != nil {
 		http.Error(w, "Invalid SAML message: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	login, err := idp.AcceptAuthnRequest(r.Context(), msg)
+	existing, _ := idp.authn.lookup(r)
+	login, err := idp.AcceptAuthnRequest(r.Context(), msg, existing)
 	var rejected *RequestError
 	if errors.As(err, &rejected) {
 		data := map[string]interface{}{
@@ -84,14 +83,15 @@ func (idp *IdentityProvider) handleSSO(w http.ResponseWriter, r *http.Request) {
 	}
 	idp.cfg.Events.Emit(r, lookingglass.EventTypeFlowStep, "AuthnRequest accepted", map[string]interface{}{
 		"binding": msg.Binding, "samlXML": string(msg.XML), "relayState": msg.RelayState,
-		"acsUrl": login.ACSURL, "validation": login.Validation,
-	}, binding.Reference("AuthnRequest", "Verified against the SP's metadata before the principal is asked to authenticate.", "SAML Profiles Section 4.1.4.1"))
-	idp.showLoginPage(w, r, login)
+		"acsUrl": login.ACSURL, "forceAuthn": login.ForceAuthn, "validation": login.Validation,
+	}, binding.Reference("AuthnRequest", "Verified against the SP's metadata before the principal is identified.", "SAML Profiles Section 4.1.4.1"))
+	idp.continueLogin(w, r, login)
 }
 
 // handleInitiate starts IdP-initiated SSO to the registered SP.
 func (idp *IdentityProvider) handleInitiate(w http.ResponseWriter, r *http.Request) {
-	login, err := idp.StartUnsolicited(r.Context(), r.URL.Query().Get("RelayState"))
+	existing, _ := idp.authn.lookup(r)
+	login, err := idp.StartUnsolicited(r.Context(), r.URL.Query().Get("RelayState"), existing)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -99,19 +99,45 @@ func (idp *IdentityProvider) handleInitiate(w http.ResponseWriter, r *http.Reque
 	idp.cfg.Events.Emit(r, lookingglass.EventTypeFlowStep, "IdP-initiated SSO started", map[string]interface{}{
 		"acsUrl": login.ACSURL, "relayState": login.RelayState,
 	}, binding.Reference("Unsolicited Response", "The IdP sends a <Response> without a preceding <AuthnRequest>, so it carries no InResponseTo.", "SAML Profiles Section 4.1.5"))
-	idp.showLoginPage(w, r, login)
+	idp.continueLogin(w, r, login)
 }
 
-// handleLogin authenticates the principal and posts the signed <Response> to
-// the SP's assertion consumer service.
+// continueLogin answers from the existing authentication session, or shows
+// the sign-in page.
+func (idp *IdentityProvider) continueLogin(w http.ResponseWriter, r *http.Request, login *PendingLogin) {
+	if login.Reuse == nil {
+		idp.showLoginPage(w, r, login, http.StatusOK, "")
+		return
+	}
+	out, _, err := idp.IssueResponse(login, login.Reuse.User, login.Reuse.AuthnInstant)
+	if err != nil {
+		http.Error(w, "Failed to issue Response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	wire, err := binding.Send(w, r, out, idp.cfg.Credentials)
+	if err != nil {
+		http.Error(w, "Failed to send Response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	idp.cfg.Events.Emit(r, lookingglass.EventTypeTokenIssued, "SAML Response issued from the existing IdP session", map[string]interface{}{
+		"user":            login.Reuse.User.Email,
+		"authnInstant":    message.FormatTime(login.Reuse.AuthnInstant),
+		"destination":     out.Location,
+		"relayState":      out.RelayState,
+		"samlResponseXML": string(wire),
+	}, binding.Reference("Single sign-on", "The principal already authenticated at this IdP, so no credentials are asked for; the assertion's AuthnInstant is that earlier authentication.", "SAML Profiles Section 4.1.3.4"))
+}
+
+// handleLogin authenticates the principal, starts the IdP authentication
+// session, and posts the signed <Response> to the SP's assertion consumer
+// service. Cancel answers with an AuthnFailed error <Response>.
 func (idp *IdentityProvider) handleLogin(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie(loginCookieName)
 	if err != nil || cookie.Value == "" {
 		http.Error(w, "No pending SAML login at this IdP", http.StatusBadRequest)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: loginCookieName, Path: loginCookiePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	login, ok := idp.logins.take(cookie.Value)
+	login, ok := idp.logins.get(cookie.Value)
 	if !ok {
 		http.Error(w, "SAML login request expired or unknown", http.StatusBadRequest)
 		return
@@ -120,12 +146,33 @@ func (idp *IdentityProvider) handleLogin(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Invalid form data", http.StatusBadRequest)
 		return
 	}
-	user, err := idp.Authenticate(r.PostForm.Get("email"), r.PostForm.Get("password"))
-	if err != nil {
-		http.Error(w, "Authentication failed: "+err.Error(), http.StatusUnauthorized)
+
+	if r.PostForm.Get("user_action") == "cancel" {
+		clearLoginCookie(w)
+		out := idp.FailLogin(login, message.StatusInfo{Code: message.StatusResponder, SubCode: message.StatusAuthnFailed, Message: "The principal cancelled authentication at the IdP"})
+		wire, err := binding.Send(w, r, out, idp.cfg.Credentials)
+		if err != nil {
+			http.Error(w, "Failed to send error Response: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		idp.cfg.Events.Emit(r, lookingglass.EventTypeSecurityWarning, "Authentication cancelled; error Response sent", map[string]interface{}{
+			"destination": out.Location, "relayState": out.RelayState, "samlResponseXML": string(wire),
+		}, binding.Reference("Response", "\"Regardless of the success or failure of the <AuthnRequest>, the identity provider SHOULD produce an HTTP response to the user agent containing a <Response> message\".", "SAML Profiles Section 4.1.3.5"))
 		return
 	}
-	out, _, err := idp.IssueResponse(login, user)
+
+	user, err := idp.Authenticate(r.PostForm.Get("email"), r.PostForm.Get("password"))
+	if err != nil {
+		idp.showLoginPage(w, r, login, http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+	clearLoginCookie(w)
+	authn := idp.authn.start(w, user)
+	idp.cfg.Events.Emit(r, lookingglass.EventTypeFlowStep, "Principal authenticated; IdP session started", map[string]interface{}{
+		"user": user.Email, "authnInstant": message.FormatTime(authn.AuthnInstant), "sessionLifetime": authnLifetime.String(),
+	}, binding.Reference("Identity Provider Identifies Principal", "Later AuthnRequests reuse this session unless they carry ForceAuthn=\"true\".", "SAML Profiles Section 4.1.3.4"))
+
+	out, _, err := idp.IssueResponse(login, user, authn.AuthnInstant)
 	if err != nil {
 		http.Error(w, "Failed to issue Response: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -140,6 +187,10 @@ func (idp *IdentityProvider) handleLogin(w http.ResponseWriter, r *http.Request)
 	}, binding.Reference("Response", "Sent through the user agent with the HTTP-POST binding; the assertion and the Response are each signed.", "SAML Profiles Section 4.1.4.5"))
 }
 
+func clearLoginCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{Name: loginCookieName, Path: loginCookiePath, MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+}
+
 // handleLogout starts IdP-initiated Single Logout for one IdP session.
 func (idp *IdentityProvider) handleLogout(w http.ResponseWriter, r *http.Request) {
 	relayState := r.URL.Query().Get("RelayState")
@@ -148,65 +199,4 @@ func (idp *IdentityProvider) handleLogout(w http.ResponseWriter, r *http.Request
 	}
 	out, err := idp.NewLogoutRequest(r.Context(), r.URL.Query().Get("session_id"), binding.FromQuery(r, message.BindingHTTPRedirect), relayState)
 	idp.sloService().SendRequest(w, r, out, err)
-}
-
-var loginPageTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SAML Identity Provider - ProtocolSoup</title>
-<style>{{.CSS}}</style>
-</head>
-<body>
-<main>
-<h1>SAML Identity Provider</h1>
-<p class="muted">{{.IdP}}</p>
-<div class="panel">
-<dl>
-<dt>Service provider</dt><dd>{{.SP}}</dd>
-<dt>Assertion consumer service</dt><dd>{{.ACS}}</dd>
-{{if .RequestID}}<dt>AuthnRequest</dt><dd>{{.RequestID}}</dd>{{else}}<dt>AuthnRequest</dt><dd>none: unsolicited Response (SAML Profiles Section 4.1.5)</dd>{{end}}
-</dl>
-</div>
-<p class="status status-info">{{.IconInfo}}<span>Mock IdP demo users. Never enter real credentials.</span></p>
-<h2>Sign in as a demo user</h2>
-{{range .Users}}<form method="post" action="{{$.Action}}">
-<input type="hidden" name="email" value="{{.Email}}">
-<input type="hidden" name="password" value="{{.Password}}">
-<button type="submit">{{.Name}} <span class="user-email">{{.Email}}</span></button>
-</form>
-{{end}}<h2>Or enter credentials</h2>
-<form method="post" action="{{.Action}}">
-<label for="email">Email</label><input id="email" type="email" name="email" autocomplete="username" required>
-<label for="password">Password</label><input id="password" type="password" name="password" autocomplete="current-password" required>
-<p><button type="submit">Sign in</button></p>
-</form>
-</main>
-</body>
-</html>`))
-
-func (idp *IdentityProvider) showLoginPage(w http.ResponseWriter, r *http.Request, login *PendingLogin) {
-	http.SetCookie(w, &http.Cookie{
-		Name: loginCookieName, Value: login.ID, Path: loginCookiePath,
-		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
-	})
-	type demoUser struct{ Name, Email, Password string }
-	var users []demoUser
-	for _, u := range idp.cfg.Users.ListUsers() {
-		users = append(users, demoUser{Name: u.Name, Email: u.Email, Password: u.Password})
-	}
-	sort.Slice(users, func(i, j int) bool { return users[i].Email < users[j].Email })
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	_ = loginPageTemplate.Execute(w, map[string]interface{}{
-		"CSS":       gel.PageCSS(),
-		"IconInfo":  gel.IconInfo,
-		"IdP":       idp.cfg.EntityID,
-		"SP":        idp.cfg.SPEntityID,
-		"ACS":       login.ACSURL,
-		"RequestID": login.RequestID,
-		"Action":    binding.WithSession(r, idp.cfg.LoginURL),
-		"Users":     users,
-	})
 }
