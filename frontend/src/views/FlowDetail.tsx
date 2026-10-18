@@ -91,14 +91,14 @@ export function FlowDetail({
       badges.push({ label: 'direct_post.jwt', color: 'purple', icon: Shield })
       badges.push({ label: 'Encrypted Response', color: 'cyan', icon: Lock })
     }
-    // SAML badges — backend IDs: sp_initiated_sso, idp_initiated_sso, single_logout, metadata
+    // SAML badges — backend IDs: sp_initiated_sso, idp_initiated_sso, single_logout, idp_initiated_logout, metadata
     if (protocolId === 'saml') {
       badges.push({ label: 'XML-Based', color: 'cyan', icon: FileKey })
     }
     if (currentFlowId === 'sp_initiated_sso' || currentFlowId === 'idp_initiated_sso') {
       badges.push({ label: 'SSO', color: 'green', icon: Shield })
     }
-    if (currentFlowId === 'single_logout') {
+    if (currentFlowId === 'single_logout' || currentFlowId === 'idp_initiated_logout') {
       badges.push({ label: 'Federated Logout', color: 'yellow', icon: Globe })
     }
     // SPIFFE/SPIRE badges

@@ -603,6 +603,9 @@ function mapFlowId(protocolId: string | null, backendFlowId: string | null): str
         return 'saml-logout'
       case 'single-logout-redirect':
         return 'saml-logout-redirect'
+      case 'idp-initiated-logout':
+      case 'idp-logout':
+        return 'saml-idp-logout'
       default:
         // Fall through to default handling
     }

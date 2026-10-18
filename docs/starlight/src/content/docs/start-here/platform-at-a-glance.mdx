@@ -56,7 +56,7 @@ Federation  SCIM       SSF       SPIFFE
 Each protocol is a Go plugin implementing a standard interface:
 
 - **`Info()`** -- returns protocol ID, name, version, description, and tags
-- **`RegisterRoutes()`** -- mounts HTTP endpoints (e.g. `/oauth2/token`, `/saml/sso`)
+- **`RegisterRoutes()`** -- mounts HTTP endpoints (e.g. `/oauth2/token`, `/saml/idp/sso`)
 - **`GetFlowDefinitions()`** -- declares available flows for the UI
 - **`GetDemoScenarios()`** -- provides pre-configured demo scenarios
 

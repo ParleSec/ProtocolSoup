@@ -13,7 +13,7 @@ const designDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(designDir, '..')
 
 const TARGETS = [
-  { file: 'tokens.css', to: ['frontend/src/styles/design', 'wallet-ui/src/styles/design', 'docs/starlight/src/styles/design'] },
+  { file: 'tokens.css', to: ['frontend/src/styles/design', 'wallet-ui/src/styles/design', 'docs/starlight/src/styles/design', 'backend/internal/gel'] },
   { file: 'tailwind-theme.css', to: ['frontend/src/styles/design', 'wallet-ui/src/styles/design'] },
   { file: 'brand/wordmark.generated.ts', to: ['frontend/src/components/common'] },
   { file: 'brand/wordmark-dark.svg', to: ['frontend/public/brand', 'wallet-ui/public/brand', 'docs/starlight/src/assets'] },

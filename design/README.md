@@ -4,7 +4,7 @@ Canonical source for the ProtocolSoup Global Expression Language (GEL). The guid
 
 | File | Consumed by |
 |------|-------------|
-| `tokens.css` | frontend, wallet-ui, docs (plain `--ps-*` custom properties) |
+| `tokens.css` | frontend, wallet-ui, docs, and backend `internal/gel` (embedded into server-rendered pages such as the SAML IdP login page) |
 | `tailwind-theme.css` | frontend, wallet-ui (Tailwind v4 `@theme`, base layer, shared utilities) |
 | `brand/wordmark.generated.ts` | frontend (`Wordmark` / `WordmarkArt` in `components/common/Brand.tsx`, also used by the `next/og` cards) |
 | `brand/wordmark-dark.svg`, `brand/wordmark-light.svg` | frontend and wallet `public/brand/`, docs `src/assets/` (Starlight header, API reference, share cards) |
