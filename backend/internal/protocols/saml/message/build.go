@@ -54,12 +54,23 @@ type AuthnRequestParams struct {
 	Destination  string
 	ACSURL       string
 	NameIDFormat string
+
+	// ForceAuthn asks the IdP to authenticate the principal afresh; IsPassive
+	// forbids it from interacting with the principal (SAML Core Section 3.4.1).
+	ForceAuthn bool
+	IsPassive  bool
 }
 
 // BuildAuthnRequest returns an <samlp:AuthnRequest> (SAML Core Section 3.4.1)
 // asking for the response over HTTP-POST at ACSURL.
 func BuildAuthnRequest(p AuthnRequestParams) *etree.Element {
 	root := newProtocolRoot("AuthnRequest", GenerateID(), FormatTime(time.Now()), p.Destination)
+	if p.ForceAuthn {
+		root.CreateAttr("ForceAuthn", "true")
+	}
+	if p.IsPassive {
+		root.CreateAttr("IsPassive", "true")
+	}
 	root.CreateAttr("ProtocolBinding", BindingHTTPPost)
 	root.CreateAttr("AssertionConsumerServiceURL", p.ACSURL)
 	addIssuer(root, p.Issuer)

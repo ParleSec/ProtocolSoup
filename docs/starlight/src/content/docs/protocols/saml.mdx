@@ -44,7 +44,7 @@ Keys and certificates persist under `{SHOWCASE_DATA_DIR}/saml/` (`idp.key.pem`, 
 |------|---------|---------|
 | `/saml/idp/metadata` | GET | IdP `EntityDescriptor` (`application/samlmetadata+xml`) |
 | `/saml/idp/sso` | GET, POST | SingleSignOnService (HTTP-Redirect, HTTP-POST) |
-| `/saml/idp/login` | POST | Principal authentication; answers with the signed Response |
+| `/saml/idp/login` | POST | Principal authentication; starts the IdP session and answers with the signed Response (Cancel answers `AuthnFailed`) |
 | `/saml/idp/initiate` | GET | Start IdP-initiated SSO (optional `RelayState`) |
 | `/saml/idp/logout` | GET | Start IdP-initiated Single Logout (`session_id`, `binding`) |
 | `/saml/idp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST); a LogoutResponse gets the outcome page |
@@ -54,7 +54,7 @@ Keys and certificates persist under `{SHOWCASE_DATA_DIR}/saml/` (`idp.key.pem`, 
 | Path | Methods | Purpose |
 |------|---------|---------|
 | `/saml/sp/metadata` | GET | SP `EntityDescriptor` (`application/samlmetadata+xml`) |
-| `/saml/sp/login` | GET | Start SP-initiated SSO (`binding=redirect` or `post`, optional `RelayState`) |
+| `/saml/sp/login` | GET | Start SP-initiated SSO (`binding=redirect` or `post`, optional `RelayState`, `force_authn=true`, `is_passive=true`) |
 | `/saml/sp/acs` | POST | AssertionConsumerService (HTTP-POST only); answers with the outcome page |
 | `/saml/sp/logout` | GET | Start SP-initiated Single Logout (`session_id`, `binding`) |
 | `/saml/sp/slo` | GET, POST | SingleLogoutService (HTTP-Redirect, HTTP-POST); a LogoutResponse gets the outcome page |
@@ -92,7 +92,15 @@ When Looking Glass opened the window, the page also hands the outcome to it with
 - The signature verifies against the SP's metadata. An unsigned request gets a SAML error Response with status `Requester` / `RequestDenied`, because the SP's metadata declares `AuthnRequestsSigned="true"` (Metadata Section 2.4.4, Errata E7).
 - `Destination` is checked.
 - The `AssertionConsumerServiceURL` or `AssertionConsumerServiceIndex` must be an HTTP-POST endpoint in the SP's metadata (Profiles Section 4.1.4.1).
-- Unsupported `NameIDPolicy` and `IsPassive` requests get error Responses.
+- An unsupported `NameIDPolicy` gets an error Response.
+
+**IdP, identifying the principal** (Profiles Section 4.1.3.4)
+
+- The principal signs in once at the IdP. The IdP keeps an authentication session (the `saml_idp_session` cookie, 8 hours) and answers every later AuthnRequest, and IdP-initiated SSO, from it without asking for credentials. That is the single sign-on. The assertion's `AuthnInstant` is the original sign-in.
+- `ForceAuthn="true"` makes the IdP ask for credentials again despite the session (Core Section 3.4.1).
+- `IsPassive="true"` succeeds only from a live session. Without one, or together with `ForceAuthn`, the IdP returns `Responder` / `NoPassive`.
+- Cancel at the sign-in page returns `Responder` / `AuthnFailed` (Profiles Section 4.1.3.5).
+- Single Logout ends the IdP session, so the next SSO asks for credentials (Core Section 3.7.3.2).
 
 **SP, on a Response** (Profiles Sections 4.1.4.3 and 4.1.4.5)
 

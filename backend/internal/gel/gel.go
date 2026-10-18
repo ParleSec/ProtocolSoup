@@ -96,6 +96,12 @@ pre {
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 `
 
+// TokensCSS is the --ps-* custom properties alone, for a page that brings its
+// own rules.
+func TokensCSS() template.CSS {
+	return template.CSS(tokensCSS)
+}
+
 // PageCSS is the stylesheet for a server-rendered page: the tokens followed
 // by the shared page rules.
 func PageCSS() template.CSS {

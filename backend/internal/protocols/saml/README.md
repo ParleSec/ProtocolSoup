@@ -63,7 +63,7 @@ Each package has one job and depends only on the packages listed above it:
 | GET | `/saml/idp/metadata` | IdP `EntityDescriptor` |
 | GET | `/saml/idp/sso` | SingleSignOnService, HTTP-Redirect binding |
 | POST | `/saml/idp/sso` | SingleSignOnService, HTTP-POST binding |
-| POST | `/saml/idp/login` | Authenticate the principal (`email`, `password`) and post the signed Response to the SP |
+| POST | `/saml/idp/login` | Authenticate the principal (`email`, `password`), start the IdP session and post the signed Response to the SP; `user_action=cancel` posts an `AuthnFailed` error Response |
 | GET | `/saml/idp/initiate` | Start IdP-initiated SSO (`RelayState` optional) |
 | GET | `/saml/idp/logout` | Send a signed LogoutRequest to the SP for IdP session `session_id` (`binding=redirect` default, or `post`) |
 | GET, POST | `/saml/idp/slo` | SingleLogoutService |
@@ -73,7 +73,7 @@ Each package has one job and depends only on the packages listed above it:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/saml/sp/metadata` | SP `EntityDescriptor` |
-| GET | `/saml/sp/login` | Send a signed AuthnRequest (`binding=redirect` default, or `post`; `RelayState` optional, at most 80 bytes) |
+| GET | `/saml/sp/login` | Send a signed AuthnRequest (`binding=redirect` default, or `post`; `RelayState` optional, at most 80 bytes; `force_authn=true` and `is_passive=true` set `ForceAuthn` and `IsPassive`) |
 | POST | `/saml/sp/acs` | AssertionConsumerService. HTTP-POST only: "The HTTP Redirect binding MUST NOT be used" for the Response (Profiles §4.1.2) |
 | GET | `/saml/sp/logout` | Send a signed LogoutRequest for `session_id` (`binding=redirect` default, or `post`) |
 | GET, POST | `/saml/sp/slo` | SingleLogoutService |
@@ -115,7 +115,18 @@ Looking Glass drives the flows in a popup and adds `lg_session` to the first URL
 2. Resolve the SP's metadata. Verify the signature against its certificate, and check `Destination` against the SingleSignOnService URL.
 3. If the signature or `Destination` fails, discard the request with HTTP 400, because the responder "MUST NOT rely on the contents" (Core §3.2.1).
 4. If the request is unsigned, return a signed error Response (`Requester`/`RequestDenied`) to the SP's default ACS. The SP publishes `AuthnRequestsSigned="true"` (Metadata §2.4.4, Errata E7).
-5. Check `Version`, `ProtocolBinding`, and `AssertionConsumerServiceURL`/`AssertionConsumerServiceIndex` against the SP metadata (Profiles §4.1.4.1). Also check `NameIDPolicy` and `IsPassive`; each failure gets an error Response with the matching status code.
+5. Check `Version`, `ProtocolBinding`, and `AssertionConsumerServiceURL`/`AssertionConsumerServiceIndex` against the SP metadata (Profiles §4.1.4.1), and check `NameIDPolicy`. Each failure gets an error Response with the matching status code.
+6. Identify the principal (Profiles §4.1.3.4), from the IdP's authentication session when it can:
+   - **With a live session** (the `saml_idp_session` cookie), the IdP answers at once. It does not ask for credentials, and the assertion's `AuthnInstant` is the original sign-in.
+   - **`ForceAuthn="true"`:** the IdP "MUST authenticate the presenter directly rather than rely on a previous security context" (Core §3.4.1), so it shows the sign-in page despite the session.
+   - **`IsPassive="true"`:** succeeds only from a live session. Without one, or combined with `ForceAuthn`, the IdP returns `Responder`/`NoPassive` (Core §3.4.1).
+   - **Otherwise** the IdP shows the sign-in page. A wrong password shows the page again with an error. Cancel returns `Responder`/`AuthnFailed`, because the IdP "SHOULD produce an HTTP response to the user agent containing a <Response> message" regardless of success or failure (Profiles §4.1.3.5).
+
+### IdP authentication session
+
+A successful sign-in starts the IdP's own authentication session. It is held server side, named by the `saml_idp_session` cookie (HttpOnly, Secure, SameSite=Lax, path `/saml/idp`) and lasts 8 hours. Later AuthnRequests, and IdP-initiated SSO, are answered from it. That is single sign-on: the principal signs in once at the IdP.
+
+Single Logout ends it. When the IdP processes a LogoutRequest from the SP, or starts logout itself, it terminates the principal's authentication sessions (Core §3.7.3.2), and the next SSO asks for credentials again.
 
 ### IdP, issuing the Response
 
@@ -244,7 +255,6 @@ cd backend && go test ./internal/protocols/saml/... -count=1
 
 - HTTP-Artifact and SOAP bindings (and so back-channel Single Logout)
 - `EncryptedAssertion`, `EncryptedID` and metadata signing
-- An IdP authentication session: every SSO prompts for credentials, so `IsPassive` requests get `NoPassive`
 - More than one SP, so logout has no other participants to propagate to
 
 ## Decisions

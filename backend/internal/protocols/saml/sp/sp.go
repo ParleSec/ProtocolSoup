@@ -90,7 +90,9 @@ func (sp *ServiceProvider) idpMetadata(ctx context.Context) (*metadata.Peer, err
 
 // NewAuthnRequest builds an <AuthnRequest> for the IdP's SingleSignOnService
 // on the chosen binding and remembers its ID and RelayState.
-func (sp *ServiceProvider) NewAuthnRequest(ctx context.Context, bindingID, relayState string) (*binding.Outbound, error) {
+//
+// forceAuthn and isPassive set the <AuthnRequest> attributes of the same name.
+func (sp *ServiceProvider) NewAuthnRequest(ctx context.Context, bindingID, relayState string, forceAuthn, isPassive bool) (*binding.Outbound, error) {
 	if err := binding.CheckRelayState(relayState); err != nil {
 		return nil, err
 	}
@@ -107,6 +109,8 @@ func (sp *ServiceProvider) NewAuthnRequest(ctx context.Context, bindingID, relay
 		Destination:  location,
 		ACSURL:       sp.cfg.ACSURL,
 		NameIDFormat: message.NameIDFormatEmail,
+		ForceAuthn:   forceAuthn,
+		IsPassive:    isPassive,
 	})
 	sp.authnRequests.Store(session.PendingRequest{ID: request.SelectAttrValue("ID", ""), RelayState: relayState})
 	return &binding.Outbound{Element: request, Location: location, Binding: bindingID, Param: binding.ParamSAMLRequest, RelayState: relayState}, nil
