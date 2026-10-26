@@ -284,39 +284,6 @@ func mdocSelectiveDisclosureSummaryPE(rawCredential string, lifecycleStage Crede
 	}, nil
 }
 
-func normalizeComparableJSONValuePE(value interface{}) interface{} {
-	switch typed := value.(type) {
-	case []string:
-		result := make([]interface{}, 0, len(typed))
-		for _, item := range typed {
-			result = append(result, normalizeComparableJSONValuePE(item))
-		}
-		return result
-	case []interface{}:
-		result := make([]interface{}, 0, len(typed))
-		for _, item := range typed {
-			result = append(result, normalizeComparableJSONValuePE(item))
-		}
-		return result
-	case map[string]interface{}:
-		result := make(map[string]interface{}, len(typed))
-		for key, item := range typed {
-			result[key] = normalizeComparableJSONValuePE(item)
-		}
-		return result
-	case int:
-		return float64(typed)
-	case int32:
-		return float64(typed)
-	case int64:
-		return float64(typed)
-	case float32:
-		return float64(typed)
-	default:
-		return typed
-	}
-}
-
 func aliasVerifiableCredentialClaimsPE(fullClaims map[string]interface{}, vcClaims map[string]interface{}) {
 	if len(fullClaims) == 0 || len(vcClaims) == 0 {
 		return
