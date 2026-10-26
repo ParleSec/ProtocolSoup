@@ -2,6 +2,7 @@ package oid4vci
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -947,7 +948,10 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_request", "tx_code was not expected")
 		return
 	}
-	if record.TxCodeRequired && txCode != record.TxCodeValue {
+	// tx_code is a secret the user transcribes from another channel, so it is
+	// compared in constant time. Its length is not secret: the offer's tx_code
+	// object publishes it (OID4VCI 1.0 Section 4.1.1).
+	if record.TxCodeRequired && subtle.ConstantTimeCompare([]byte(txCode), []byte(record.TxCodeValue)) != 1 {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "invalid tx_code")
 		return
 	}
@@ -1024,10 +1028,16 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	tokenClientID := strings.TrimSpace(r.FormValue("client_id"))
+	if attestationUsed {
+		tokenClientID = attestation.ClientID
+	}
+
 	p.mu.Lock()
 	p.accessGrants[accessToken] = &accessGrant{
 		Token:                      accessToken,
 		Subject:                    wallet.Subject,
+		ClientID:                   tokenClientID,
 		WalletID:                   wallet.ID,
 		CredentialConfigurationIDs: allowedCredentialIDs,
 		CredentialIdentifiers:      credentialIdentifiers,
@@ -1241,6 +1251,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	p.accessGrants[accessToken] = &accessGrant{
 		Token:                      accessToken,
 		Subject:                    wallet.Subject,
+		ClientID:                   clientID,
 		WalletID:                   wallet.ID,
 		CredentialConfigurationIDs: authorizedCredentialConfigurations,
 		CredentialIdentifiers:      credentialIdentifiers,
@@ -1429,6 +1440,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	p.accessGrants[accessToken] = &accessGrant{
 		Token:                      accessToken,
 		Subject:                    priorGrant.Subject,
+		ClientID:                   clientID,
 		WalletID:                   priorGrant.WalletID,
 		CredentialConfigurationIDs: cloneStringSet(priorGrant.CredentialConfigurationIDs),
 		CredentialIdentifiers:      cloneStringMap(priorGrant.CredentialIdentifiers),
@@ -1553,8 +1565,13 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		sessionID = p.issuerInitiatedSessionID(grant.IssuerState)
 	}
 	var req credentialRequest
-	if err := p.decodeCredentialRequest(r, &req); err != nil {
+	requestEncrypted, err := p.decodeCredentialRequest(r, &req)
+	if err != nil {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", err.Error())
+		return
+	}
+	if req.CredentialResponseEncryption != nil && !requestEncrypted {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_encryption_parameters", errResponseEncryptionNeedsEncryptedRequest)
 		return
 	}
 	req.CredentialConfigurationID = strings.TrimSpace(req.CredentialConfigurationID)
@@ -1634,15 +1651,14 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proofDeclaredSubject := ""
 	holderJWKs := make([]*crypto.JWK, 0, len(proofs))
 	credentialNonce := ""
 	seenHolderThumbprints := make(map[string]struct{}, len(proofs))
 	for _, proof := range proofs {
-		nonce, proofSub, proofKey, keyAttestationJWT, err := p.validateProofJWT(
+		nonce, proofKey, keyAttestationJWT, err := p.validateProofJWT(
 			proof,
 			p.issuerID(),
-			grant.Subject,
+			grant.ClientID,
 			credentialConfiguration.ProofSigningAlgsSupported,
 		)
 		if err != nil {
@@ -1659,9 +1675,6 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 			)
 			writeOID4VCIError(w, http.StatusBadRequest, "invalid_proof", err.Error())
 			return
-		}
-		if proofSub != "" {
-			proofDeclaredSubject = proofSub
 		}
 		var holderJWK *crypto.JWK
 		if strings.TrimSpace(proofKey.Kty) != "" {
@@ -1733,10 +1746,10 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The credential is issued to the subject the access token was granted
+	// for. A proof's iss names the client (OID4VCI 1.0 Appendix F.1), not the
+	// holder, so it never chooses whose credential this is.
 	effectiveSubject := grant.Subject
-	if proofDeclaredSubject != "" {
-		effectiveSubject = proofDeclaredSubject
-	}
 
 	wallet, ok := p.getWalletByID(grant.WalletID)
 	if !ok {
@@ -1901,8 +1914,13 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req deferredCredentialRequest
-	if err := p.decodeJSONOrEncryptedJWTRequest(r, &req, "deferred credential request"); err != nil {
+	requestEncrypted, err := p.decodeJSONOrEncryptedJWTRequest(r, &req, "deferred credential request")
+	if err != nil {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_credential_request", err.Error())
+		return
+	}
+	if req.CredentialResponseEncryption != nil && !requestEncrypted {
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_encryption_parameters", errResponseEncryptionNeedsEncryptedRequest)
 		return
 	}
 	req.TransactionID = strings.TrimSpace(req.TransactionID)
@@ -1955,11 +1973,16 @@ func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request
 			p.vcAnnotation("deferred_credential")...,
 		)
 
+		// OID4VCI 1.0 Section 9.2: a requested encryption applies to the
+		// Deferred Credential Response "regardless of the content", so the
+		// still-pending answer is encrypted exactly like an issued one.
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
-		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		if err := writeCredentialResponse(w, http.StatusAccepted, map[string]interface{}{
 			"transaction_id": req.TransactionID,
 			"interval":       retryAfterSeconds,
-		})
+		}, req.CredentialResponseEncryption); err != nil {
+			writeServerError(w, "encrypt deferred credential response", err)
+		}
 		return
 	}
 
@@ -2304,35 +2327,26 @@ func (p *Plugin) collectProofs(req credentialRequest) ([]credentialProof, error)
 // key_attestation JOSE header value (Appendix F.1) for the caller to validate
 // separately against a credential configuration's key_attestations_required
 // (registry.go, key_attestation.go).
-func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string, expectedSubject string, supportedAlgorithms []string) (nonce string, subject string, holderJWK crypto.JWK, keyAttestationJWT string, err error) {
+func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string, expectedClientID string, supportedAlgorithms []string) (nonce string, holderJWK crypto.JWK, keyAttestationJWT string, err error) {
 	emptyJWK := crypto.JWK{}
 	if strings.TrimSpace(proof.JWT) == "" {
-		return "", "", emptyJWK, "", fmt.Errorf("proof jwt is required")
+		return "", emptyJWK, "", fmt.Errorf("proof jwt is required")
 	}
 	if strings.TrimSpace(strings.ToLower(proof.ProofType)) != "jwt" {
-		return "", "", emptyJWK, "", fmt.Errorf("unsupported proof_type %q", proof.ProofType)
+		return "", emptyJWK, "", fmt.Errorf("unsupported proof_type %q", proof.ProofType)
 	}
 
 	decodedToken, err := crypto.DecodeTokenWithoutValidation(proof.JWT)
 	if err != nil {
-		return "", "", emptyJWK, "", fmt.Errorf("proof jwt decode failed: %w", err)
+		return "", emptyJWK, "", fmt.Errorf("proof jwt decode failed: %w", err)
 	}
 	if err := ValidateOID4VCIProofType(fmt.Sprint(decodedToken.Header["typ"])); err != nil {
-		return "", "", emptyJWK, "", err
+		return "", emptyJWK, "", err
 	}
 	keyAttestationHeader, _ := decodedToken.Header["key_attestation"].(string)
-	iss, _ := decodedToken.Payload["iss"].(string)
-	proofSubject := strings.TrimSpace(iss)
-
-	if strings.HasPrefix(expectedSubject, "did:example:") &&
-		strings.HasPrefix(proofSubject, "did:example:") &&
-		proofSubject != expectedSubject {
-		return "", "", emptyJWK, "", fmt.Errorf("proof subject %q does not match grant subject %q", proofSubject, expectedSubject)
-	}
-
 	verificationKey, expectedAlgPrefix, proofJWK, err := proofVerificationKeyFromHeader(decodedToken.Header)
 	if err != nil {
-		return "", "", emptyJWK, "", err
+		return "", emptyJWK, "", err
 	}
 	parsed, err := jwt.Parse(proof.JWT, func(token *jwt.Token) (interface{}, error) {
 		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
@@ -2351,44 +2365,71 @@ func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string
 		return verificationKey, nil
 	})
 	if err != nil {
-		return "", "", emptyJWK, "", fmt.Errorf("invalid proof jwt: %w", err)
+		return "", emptyJWK, "", fmt.Errorf("invalid proof jwt: %w", err)
 	}
 	if !parsed.Valid {
-		return "", "", emptyJWK, "", fmt.Errorf("proof jwt failed signature validation")
+		return "", emptyJWK, "", fmt.Errorf("proof jwt failed signature validation")
 	}
 	if err := ValidateOID4VCIProofType(fmt.Sprint(parsed.Header["typ"])); err != nil {
-		return "", "", emptyJWK, "", err
+		return "", emptyJWK, "", err
 	}
 
 	claims, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok {
-		return "", "", emptyJWK, "", fmt.Errorf("proof claims are invalid")
+		return "", emptyJWK, "", fmt.Errorf("proof claims are invalid")
 	}
 	if err := validateAudienceClaim(claims["aud"], expectedAudience); err != nil {
-		return "", "", emptyJWK, "", err
+		return "", emptyJWK, "", err
 	}
 	iatUnix, err := numericDateToInt64(claims["iat"])
 	if err != nil {
-		return "", "", emptyJWK, "", fmt.Errorf("proof iat claim is invalid")
+		return "", emptyJWK, "", fmt.Errorf("proof iat claim is invalid")
 	}
 	now := time.Now().UTC().Unix()
 	if rawExp, exists := claims["exp"]; exists {
 		expUnix, expErr := numericDateToInt64(rawExp)
 		if expErr != nil {
-			return "", "", emptyJWK, "", fmt.Errorf("proof exp claim is invalid")
+			return "", emptyJWK, "", fmt.Errorf("proof exp claim is invalid")
 		}
 		if now >= expUnix {
-			return "", "", emptyJWK, "", fmt.Errorf("proof is expired")
+			return "", emptyJWK, "", fmt.Errorf("proof is expired")
 		}
 	}
 	if iatUnix > now+60 {
-		return "", "", emptyJWK, "", fmt.Errorf("proof iat is in the future")
+		return "", emptyJWK, "", fmt.Errorf("proof iat is in the future")
 	}
 	nonceValue, _ := claims["nonce"].(string)
 	if strings.TrimSpace(nonceValue) == "" {
-		return "", "", emptyJWK, "", fmt.Errorf("proof nonce is required")
+		return "", emptyJWK, "", fmt.Errorf("proof nonce is required")
 	}
-	return nonceValue, proofSubject, proofJWK, strings.TrimSpace(keyAttestationHeader), nil
+	if err := validateProofIssuer(decodedToken.Payload, expectedClientID); err != nil {
+		return "", emptyJWK, "", err
+	}
+	return nonceValue, proofJWK, strings.TrimSpace(keyAttestationHeader), nil
+}
+
+// validateProofIssuer applies OID4VCI 1.0 Appendix F.1 to a jwt proof's iss:
+// "The value of this claim MUST be the client_id of the Client making the
+// Credential request. This claim MUST be omitted if the access token
+// authorizing the issuance call was obtained from a Pre-Authorized Code Flow
+// through anonymous access to the token endpoint." An empty clientID means the
+// access token came from that anonymous access.
+func validateProofIssuer(payload map[string]interface{}, clientID string) error {
+	rawIss, present := payload["iss"]
+	if !present {
+		return nil
+	}
+	iss, ok := rawIss.(string)
+	if !ok {
+		return fmt.Errorf("proof iss must be a string")
+	}
+	if clientID == "" {
+		return fmt.Errorf("proof iss must be omitted: the access token was obtained through anonymous access to the token endpoint (OID4VCI 1.0 Appendix F.1)")
+	}
+	if iss != clientID {
+		return fmt.Errorf("proof iss %q must be the client_id %q of the Client making the Credential request (OID4VCI 1.0 Appendix F.1)", iss, clientID)
+	}
+	return nil
 }
 
 func proofVerificationKeyFromHeader(header map[string]interface{}) (interface{}, string, crypto.JWK, error) {

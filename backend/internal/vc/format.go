@@ -71,7 +71,6 @@ type PresentationBuildInput struct {
 	HolderVerificationMethod string
 	Audience                 string
 	Nonce                    string
-	PresentationDefinition   map[string]interface{}
 	Signer                   TokenSigner
 	ProofSigner              func(data []byte) ([]byte, error)
 }
@@ -307,9 +306,6 @@ func (f *SDJWTFormat) BuildPresentation(input PresentationBuildInput) (*Presenta
 	envelope, err := ParseSDJWTEnvelope(parsed.Original)
 	if err != nil {
 		return nil, err
-	}
-	if input.PresentationDefinition != nil {
-		return buildWrappedPresentation(input, strings.TrimSpace(envelope.IssuerSignedJWT), parsed.Format)
 	}
 
 	sdJWTWithoutKB := BuildSDJWTSerialization(envelope.IssuerSignedJWT, envelope.Disclosures, "")
@@ -729,14 +725,10 @@ func buildWrappedPresentation(input PresentationBuildInput, credentialForVP inte
 		"exp":   now.Add(5 * time.Minute).Unix(),
 		"jti":   randomFormatValue(20),
 	}
-	if input.PresentationDefinition != nil {
-		vpClaim["holder"] = holder
-	} else {
-		claims["sub"] = holder
-		claims["cnf"] = map[string]interface{}{
-			"jwk": input.HolderPublicJWK,
-			"jkt": input.HolderJWKThumbprint,
-		}
+	claims["sub"] = holder
+	claims["cnf"] = map[string]interface{}{
+		"jwk": input.HolderPublicJWK,
+		"jkt": input.HolderJWKThumbprint,
 	}
 	claims["vp"] = vpClaim
 	vpToken, err := input.Signer(claims, map[string]interface{}{"typ": "vp+jwt"})

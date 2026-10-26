@@ -148,14 +148,13 @@ type walletSubmitRequest struct {
 }
 
 type resolvedRequestContext struct {
-	RequestID              string
-	State                  string
-	Nonce                  string
-	ClientID               string
-	ResponseMode           string
-	ResponseURI            string
-	Trusted                bool
-	PresentationDefinition map[string]interface{}
+	RequestID    string
+	State        string
+	Nonce        string
+	ClientID     string
+	ResponseMode string
+	ResponseURI  string
+	Trusted      bool
 	// DCQLQuery is the raw DCQL query JSON carried by the request object
 	// (OID4VP 1.0 Section 6), when present. The mso_mdoc presentation path uses
 	// it to select which namespace/elements to disclose in the DeviceResponse.
@@ -1695,7 +1694,8 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 	}
 
 	var (
-		req *http.Request
+		req         *http.Request
+		walletNonce string
 	)
 	switch normalizedMethod {
 	case "get":
@@ -1706,8 +1706,9 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 	case "post":
 		// OID4VP 1.0 §5.10.2 / RFC 9101: POST request_uri retrieval includes a
 		// wallet_nonce that the verifier binds into the returned request object.
+		walletNonce = randomValue(32)
 		form := url.Values{}
-		form.Set("wallet_nonce", randomValue(32))
+		form.Set("wallet_nonce", walletNonce)
 		req, err = http.NewRequestWithContext(ctx, http.MethodPost, requestURI, strings.NewReader(form.Encode()))
 		if err != nil {
 			return "", "", fmt.Errorf("request_uri POST build failed: %w", err)
@@ -1740,7 +1741,32 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 	if strings.Count(requestJWT, ".") != 2 {
 		return "", "", fmt.Errorf("request_uri %s body is not a compact signed JWT", strings.ToUpper(normalizedMethod))
 	}
+	if walletNonce != "" {
+		// OID4VP 1.0 Section 5.10.1: "if the Wallet passed a wallet_nonce in
+		// the POST request, the Wallet MUST validate whether the request object
+		// contains the respective nonce value in a wallet_nonce claim. If it
+		// does not, the Wallet MUST terminate request processing." The
+		// signature is verified afterwards, so a claim that only matches here
+		// still fails if the object was not signed by the Verifier.
+		if err := requireRequestObjectWalletNonce(requestJWT, walletNonce); err != nil {
+			return "", "", err
+		}
+	}
 	return requestJWT, "", nil
+}
+
+// requireRequestObjectWalletNonce reports an error unless the request object's
+// wallet_nonce claim is exactly the nonce the Wallet sent.
+func requireRequestObjectWalletNonce(requestJWT string, walletNonce string) error {
+	decoded, err := intcrypto.DecodeTokenWithoutValidation(requestJWT)
+	if err != nil {
+		return fmt.Errorf("decode request object: %w", err)
+	}
+	got, _ := decoded.Payload["wallet_nonce"].(string)
+	if got != walletNonce {
+		return fmt.Errorf("request object does not contain the wallet_nonce sent in the request_uri POST (OID4VP 1.0 Section 5.10.1); terminating")
+	}
+	return nil
 }
 
 func (s *walletHarnessServer) evaluateTrust(requestContext *resolvedRequestContext, requestPayload map[string]interface{}) trustEvaluation {
@@ -3398,62 +3424,6 @@ func matchedDCQLRequirementIDsForCredential(credID string, cred walletCredential
 	return matchedIDs, reasons
 }
 
-func matchWalletCredentialsToPresentationDefinition(credentials map[string]walletCredentialMaterial, presentationDefinition map[string]interface{}) ([]walletCredentialMaterial, []string) {
-	definition, err := vc.ParsePresentationDefinition(presentationDefinition)
-	if err != nil {
-		return nil, []string{err.Error()}
-	}
-	if definition == nil || len(definition.InputDescriptors) == 0 {
-		return nil, nil
-	}
-
-	var matched []walletCredentialMaterial
-	var reasons []string
-	for credentialID, credential := range credentials {
-		// mso_mdoc credentials are matched via DCQL (ISO/IEC 18013-5 claims are
-		// addressed by [namespace, elementIdentifier] pairs), never
-		// Presentation Exchange, mirroring the format guard in
-		// matchWalletCredentialsToDCQL above. vc.MSOMdocFormat means
-		// BuildCredentialEvidence below now parses mdoc successfully rather
-		// than failing at parse, so without this guard an mdoc credential
-		// would proceed into PE field-path matching against
-		// CredentialEvidence.FullClaims, a shape PE constraints were never
-		// meant to address for this format.
-		if strings.EqualFold(strings.TrimSpace(credential.Format), credentialFormatMsoMdoc) {
-			reasons = append(reasons, fmt.Sprintf("credential %s: mso_mdoc credentials are matched via DCQL, not presentation_exchange", credentialID))
-			continue
-		}
-		// Same reasoning as matchWalletCredentialsToDCQL above: this checks
-		// wallet-held issued credentials for PE eligibility, not a
-		// presentation artifact.
-		evidence, err := vc.BuildCredentialEvidence(credential.CredentialJWT, vc.LifecycleStageIssued)
-		if err != nil {
-			reasons = append(reasons, fmt.Sprintf("credential %s: %v", credentialID, err))
-			continue
-		}
-		candidate := vc.PresentationCandidate{
-			CredentialFormats: []string{strings.TrimSpace(credential.Format)},
-			Evidence:          *evidence,
-		}
-		anyMatch := false
-		for _, descriptor := range definition.InputDescriptors {
-			if _, err := vc.MatchCredentialToDescriptor(descriptor, candidate); err == nil {
-				anyMatch = true
-				break
-			} else {
-				reasons = append(reasons, fmt.Sprintf("credential %s: %v", credentialID, err))
-			}
-		}
-		if anyMatch {
-			matched = append(matched, credential)
-		}
-	}
-	sort.Slice(matched, func(i, j int) bool {
-		return matched[i].UpdatedAt.After(matched[j].UpdatedAt)
-	})
-	return matched, reasons
-}
-
 func summarizeWalletRequestMatches(wallet *walletMaterial, envelope *resolvedRequestEnvelope, requestContext *resolvedRequestContext) walletRequestMatchSummary {
 	summary := walletRequestMatchSummary{
 		Matched:              true,
@@ -3480,9 +3450,6 @@ func summarizeWalletRequestMatches(wallet *walletMaterial, envelope *resolvedReq
 		}
 		summary.QueryType = "dcql"
 		matchedCredentials, reasons = matchWalletCredentialsToDCQL(wallet.Credentials, string(rawQuery))
-	case requestContext != nil && requestContext.PresentationDefinition != nil:
-		summary.QueryType = "presentation_exchange"
-		matchedCredentials, reasons = matchWalletCredentialsToPresentationDefinition(wallet.Credentials, requestContext.PresentationDefinition)
 	default:
 		return summary
 	}
@@ -3580,13 +3547,6 @@ func (s *walletHarnessServer) submitToVerifier(
 			form.Set("state", requestContext.State)
 		}
 		form.Set("vp_token", normalizedVPToken)
-		ps, err := buildPresentationSubmission(requestContext.PresentationDefinition, normalizedVPToken)
-		if err != nil {
-			return 0, nil, fmt.Errorf("build presentation_submission: %w", err)
-		}
-		if ps != "" {
-			form.Set("presentation_submission", ps)
-		}
 	}
 
 	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, requestContext.ResponseURI, strings.NewReader(form.Encode()))
@@ -3710,11 +3670,6 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 		}
 	}
 
-	var presDef map[string]interface{}
-	if pd, ok := decodedRequest.Payload["presentation_definition"].(map[string]interface{}); ok {
-		presDef = pd
-	}
-
 	dcqlQuery := ""
 	rawDCQL, dcqlPresent := decodedRequest.Payload["dcql_query"]
 	hasDCQL := dcqlPresent && rawDCQL != nil
@@ -3746,17 +3701,16 @@ func (s *walletHarnessServer) resolveRequestContextWithOptions(requestID string,
 	}
 
 	return &resolvedRequestContext{
-		RequestID:              normalizedRequestID,
-		State:                  state,
-		Nonce:                  nonce,
-		ClientID:               clientID,
-		ResponseMode:           responseMode,
-		ResponseURI:            responseURI,
-		Trusted:                trusted,
-		PresentationDefinition: presDef,
-		DCQLQuery:              dcqlQuery,
-		ResponseEncryptionJWK:  responseEncryptionJWK,
-		ResponseEncValues:      responseEncValues,
+		RequestID:             normalizedRequestID,
+		State:                 state,
+		Nonce:                 nonce,
+		ClientID:              clientID,
+		ResponseMode:          responseMode,
+		ResponseURI:           responseURI,
+		Trusted:               trusted,
+		DCQLQuery:             dcqlQuery,
+		ResponseEncryptionJWK: responseEncryptionJWK,
+		ResponseEncValues:     responseEncValues,
 	}, nil
 }
 
@@ -3992,7 +3946,6 @@ func (s *walletHarnessServer) createVPToken(wallet *walletMaterial, requestConte
 		HolderVerificationMethod: holderVerificationMethod,
 		Audience:                 requestContext.ClientID,
 		Nonce:                    requestContext.Nonce,
-		PresentationDefinition:   requestContext.PresentationDefinition,
 		Signer: func(claims map[string]interface{}, headerOverrides map[string]interface{}) (string, error) {
 			jwtClaims := jwt.MapClaims{}
 			for key, value := range claims {
@@ -5398,13 +5351,6 @@ func parseBoolEnv(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
-}
-
-func buildPresentationSubmission(presDef map[string]interface{}, vpToken string) (string, error) {
-	if presDef == nil {
-		return "", nil
-	}
-	return vc.BuildPresentationSubmission(presDef, vpToken)
 }
 
 func asString(value interface{}) string {

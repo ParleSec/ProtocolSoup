@@ -21,13 +21,13 @@ content/
     {concept-id}.md
   walkthroughs/          # one file per long-form walkthrough (not yet populated)
     {walkthrough-id}.md
-  assertions/            # one human-authored explainer per registry requirement (not yet populated)
+  assertions/            # one human-authored explainer per registry requirement
     {requirement-id}.md  # lowercase registry ID, e.g. vp-001.md
 ```
 
-The `walkthroughs/` and `assertions/` directories are recognised by the
-validator and indexer but do not exist in the repository yet. Create them when
-the first artefact of that type is authored.
+The `walkthroughs/` directory is recognised by the validator and indexer but
+does not exist in the repository yet. Create it when the first walkthrough is
+authored.
 
 The validator discovers artefacts by walking `content/**/*.md`. The directory
 relative to `content/` determines the artefact `type`:
@@ -118,9 +118,11 @@ indexing. Nothing here is generated.
   registry requirement ID (`VP-001` becomes `vp-001.md` with `id: vp-001`).
   The validator rejects an ID that is not in the registry.
 - `normative_anchors` is required and must contain at least one entry.
-- `normative_level` (one of `MUST`, `SHOULD`, `MAY`, `MUST NOT`,
-  `SHOULD NOT`) is required.
-- `assertion_text` is required; use the registry statement verbatim.
+- `normative_level` is required and must equal the registry row's `level`
+  exactly (for example `MUST NOT` or `OPTIONAL`).
+- `assertion_text` is required and must be the registry statement verbatim.
+  The validator compares the two with runs of whitespace collapsed, so a YAML
+  folded scalar (`>-`) may wrap it.
 - The body must contain exactly these `##` headings, in this order, and no
   other `##` headings:
   1. `## What this requires`
@@ -217,6 +219,7 @@ The validator fails the build on any of:
 - Unknown top-level frontmatter field.
 - Markdown file outside the recognised directories listed in **File layout**.
 - `spec-assertion` whose `id` is not a registry requirement, is not lowercase,
+  whose `normative_level` or `assertion_text` differs from its registry row,
   whose `##` headings differ from the four required ones, or whose body
   contains a fenced code block or raw HTML.
 

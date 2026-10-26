@@ -278,8 +278,9 @@ type VCAuthorizationCodeGrant struct {
 
 // VCPreAuthorizedCodeGrant models credential offer parameters for pre-authorized code flow.
 type VCPreAuthorizedCodeGrant struct {
-	PreAuthorizedCode string    `json:"pre-authorized_code"`
-	TxCode            *VCTxCode `json:"tx_code,omitempty"`
+	PreAuthorizedCode   string    `json:"pre-authorized_code"`
+	TxCode              *VCTxCode `json:"tx_code,omitempty"`
+	AuthorizationServer string    `json:"authorization_server,omitempty"`
 }
 
 // VCTxCode describes transaction code constraints in pre-authorized issuance.

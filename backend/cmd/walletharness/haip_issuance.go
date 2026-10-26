@@ -282,11 +282,16 @@ func buildKeyAttestationJWT(
 	return token.SignedString(attesterKey)
 }
 
+// createCredentialProofJWTWithKeyAttestation builds a jwt proof for the HAIP
+// path. OID4VCI 1.0 Appendix F.1: iss "MUST be the client_id of the Client
+// making the Credential request" and is omitted when there is none (anonymous
+// Pre-Authorized Code access). The proof names no holder subject: the Issuer
+// takes that from the access token.
 func createCredentialProofJWTWithKeyAttestation(
 	holderKey *ecdsa.PrivateKey,
 	holderJWK intcrypto.JWK,
 	nonce string,
-	subject string,
+	clientID string,
 	audience string,
 	keyAttestationJWT string,
 ) (string, error) {
@@ -295,13 +300,14 @@ func createCredentialProofJWTWithKeyAttestation(
 	}
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   strings.TrimSpace(subject),
-		"sub":   strings.TrimSpace(subject),
 		"aud":   strings.TrimSpace(audience),
 		"nonce": strings.TrimSpace(nonce),
 		"iat":   now.Unix(),
 		"exp":   now.Add(3 * time.Minute).Unix(),
 		"jti":   "proof-" + randomValue(16),
+	}
+	if trimmedClientID := strings.TrimSpace(clientID); trimmedClientID != "" {
+		claims["iss"] = trimmedClientID
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
 	token.Header["typ"] = "openid4vci-proof+jwt"
@@ -526,7 +532,7 @@ func (s *walletHarnessServer) createHAIPCredentialProofJWTs(
 			holder.key,
 			holder.jwk,
 			cNonce,
-			walletSubject,
+			s.haipAttestedClientID,
 			audience,
 			keyAttestationJWT,
 		)

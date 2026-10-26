@@ -43,8 +43,8 @@ Use the wallet service to run wallet-side OID4VCI issuance (bootstrap or externa
 | `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` | No | `(empty)` | Attester private JWK (+ `x5c`) that mints Appendix D `key_attestation` JWTs for HAIP proofs |
 | `WALLET_OID4VCI_ATTESTED_CLIENT_ID` | No | `protocolsoup-wallet` | Attested `client_id` / client attestation JWT `sub` / client attestation PoP JWT `iss` when HAIP attestation material is configured |
 | `WALLET_CLIENT_ATTESTATION_ISSUER` | No | `https://wallet.protocolsoup.com/attester` | `iss` on client attestation JWTs |
-| `WALLET_KEY_ATTESTATION_KEY_STORAGE` | No | `(empty)` | Comma-separated `key_storage` levels asserted in key attestation (e.g. `iso_18045_moderate`). Leave unset unless the claim is intentional for this deployment; the hosted Looking Glass wallet sets `iso_18045_moderate` so HAIP mDL configs can be demonstrated |
-| `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` | No | `(empty)` | Comma-separated `user_authentication` levels asserted in key attestation. Leave unset unless intentional; hosted Looking Glass wallet pairs this with `iso_18045_moderate` |
+| `WALLET_KEY_ATTESTATION_KEY_STORAGE` | No | `(empty)` | Comma-separated `key_storage` levels asserted in key attestation (e.g. `iso_18045_moderate`). Leave unset unless the deployment's key storage really meets the level; a software wallet must not claim one (OID4VCI 1.0 Appendix D.2). The hosted wallet sets none, and ProtocolSoup's HAIP configurations require a key attestation at no particular level |
+| `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` | No | `(empty)` | Comma-separated `user_authentication` levels asserted in key attestation. Leave unset unless the deployment's user authentication really meets the level. The hosted wallet sets none |
 
 `fly.wallet.toml` sets `WALLET_DEVICE_KEY_PATH=/data/device-key.pem` on the `protocolsoup_wallet_data` volume. `WALLET_MDOC_IACA_ROOT_PEM` is staged as a Fly secret from the live issuer IACA, not baked into the toml.
 

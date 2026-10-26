@@ -355,61 +355,6 @@ func TestSDJWTFormatValidateIssuerSignatureRejectsTampering(t *testing.T) {
 	}
 }
 
-func TestJWTVCFormatBuildPresentationUsesHolderForPE(t *testing.T) {
-	registry := DefaultCredentialFormatRegistry()
-	format, ok := registry.Lookup("jwt_vc_json")
-	if !ok {
-		t.Fatalf("jwt_vc_json format handler not found")
-	}
-
-	rawCredential := signedTestJWT(t, jwt.SigningMethodHS256, []byte("jwt-secret"), "vc+jwt", jwt.MapClaims{
-		"sub": "did:example:holder",
-		"vc": map[string]interface{}{
-			"@context": []string{"https://www.w3.org/2018/credentials/v1"},
-			"type":     []string{"VerifiableCredential", "UniversityDegreeCredential"},
-		},
-	})
-
-	var capturedClaims map[string]interface{}
-	result, err := format.BuildPresentation(PresentationBuildInput{
-		Credential: rawCredential,
-		Holder:     "did:example:holder",
-		Audience:   "did:example:verifier",
-		Nonce:      "nonce-123",
-		PresentationDefinition: map[string]interface{}{
-			"id": "pd-123",
-		},
-		Signer: func(claims map[string]interface{}, headerOverrides map[string]interface{}) (string, error) {
-			if headerOverrides["typ"] != "vp+jwt" {
-				t.Fatalf("unexpected signer typ %v", headerOverrides["typ"])
-			}
-			capturedClaims = claims
-			return "vp.jwt.token", nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("BuildPresentation(jwt-vc): %v", err)
-	}
-	if result.VPToken != "vp.jwt.token" {
-		t.Fatalf("unexpected vp token %q", result.VPToken)
-	}
-	if _, ok := capturedClaims["sub"]; ok {
-		t.Fatalf("expected PE presentation to omit sub claim")
-	}
-
-	vpClaim, ok := capturedClaims["vp"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("vp claim has type %T", capturedClaims["vp"])
-	}
-	if vpClaim["holder"] != "did:example:holder" {
-		t.Fatalf("unexpected vp holder %v", vpClaim["holder"])
-	}
-	credentials, ok := vpClaim["verifiableCredential"].([]interface{})
-	if !ok || len(credentials) != 1 || credentials[0] != rawCredential {
-		t.Fatalf("unexpected verifiableCredential payload %#v", vpClaim["verifiableCredential"])
-	}
-}
-
 func TestJWTVCFormatValidateIssuerSignatureWithEdDSA(t *testing.T) {
 	registry := DefaultCredentialFormatRegistry()
 	format, ok := registry.Lookup("jwt_vc_json")

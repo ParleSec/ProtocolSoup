@@ -128,8 +128,11 @@ says *Not evaluated for this build*. The wording is fixed: it is a self-test,
 not an OpenID Foundation certification.
 
 Pages are added to `/sitemap.xml` and spec indexes to `/llms.txt` only when
-they are indexable, which requires a valid report, no MUST-family `FAIL`
-verdicts anywhere in the registry, and a written explainer for the requirement.
+they are indexable, which requires a valid report, no MUST-family requirement
+anywhere in the registry with a `FAIL`, `MISSING_TEST` or `CHECK` verdict, a
+`PASS`, `DEVIATION` or `N/A` verdict for the requirement itself, and a written
+explainer for it in `content/assertions/`. A spec index is indexable once one
+of its requirements is.
 Until then they are served with `noindex` so a crawler is never sent to a page
 that only restates its registry row. The same pages answer
 `Accept: text/markdown` like every other page. The JSON behind them is

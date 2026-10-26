@@ -35,11 +35,60 @@ func TestCredentialOfferEnvelopeRejectsBothTransports(t *testing.T) {
 
 func TestMetadataCredentialIssuerMismatchRejection(t *testing.T) {
 	t.Parallel()
-	if sameURLIdentifier("https://issuer.example/oid4vci", "https://other.example/oid4vci") {
-		t.Fatal("expected CW-024 mismatch for different credential_issuer identifiers")
+	if !sameURLIdentifier("https://issuer.example/oid4vci", "https://issuer.example/oid4vci") {
+		t.Fatal("identical credential_issuer identifiers must match")
 	}
-	if !sameURLIdentifier("https://issuer.example/oid4vci/", "https://issuer.example/oid4vci") {
-		t.Fatal("trailing slash should not break issuer identity match")
+	// OID4VCI 1.0 Section 12.2.4: "a simple string comparison with no
+	// normalization". Each pair differs only by something a normalizing
+	// comparison would erase, so each must be a mismatch.
+	for _, pair := range [][2]string{
+		{"https://issuer.example/oid4vci", "https://other.example/oid4vci"},
+		{"https://issuer.example/oid4vci/", "https://issuer.example/oid4vci"},
+		{"https://Issuer.example/oid4vci", "https://issuer.example/oid4vci"},
+		{"https://issuer.example:443/oid4vci", "https://issuer.example/oid4vci"},
+		{"https://issuer.example/oid%34vci", "https://issuer.example/oid4vci"},
+	} {
+		if sameURLIdentifier(pair[0], pair[1]) {
+			t.Fatalf("expected CW-024 mismatch for %q and %q", pair[0], pair[1])
+		}
+	}
+}
+
+func TestOfferAuthorizationServerHintMustMatchMetadata(t *testing.T) {
+	t.Parallel()
+	two := []string{"https://as1.example", "https://as2.example"}
+
+	selected, err := selectOfferAuthorizationServer("https://as2.example", two)
+	if err != nil || len(selected) != 1 || selected[0] != "https://as2.example" {
+		t.Fatalf("hint naming a listed server must select only that server, got %v, %v", selected, err)
+	}
+
+	// OID4VCI 1.0 Section 4.1.1: with a single entry the hint "MUST NOT be
+	// used", but it still has to match.
+	one := []string{"https://as1.example"}
+	if selected, err := selectOfferAuthorizationServer("https://as1.example", one); err != nil || len(selected) != 1 {
+		t.Fatalf("matching hint with one server must leave the list unchanged, got %v, %v", selected, err)
+	}
+
+	if selected, err := selectOfferAuthorizationServer("", two); err != nil || len(selected) != 2 {
+		t.Fatalf("absent hint must leave the list unchanged, got %v, %v", selected, err)
+	}
+
+	// Section 12.2.4: the Wallet "MUST NOT proceed with the flow" when the
+	// hint matches no entry, including when the metadata lists none, and the
+	// comparison is exact.
+	for name, tc := range map[string]struct {
+		hint    string
+		servers []string
+	}{
+		"unlisted server":      {"https://attacker.example", two},
+		"trailing slash":       {"https://as1.example/", two},
+		"metadata lists none":  {"https://as1.example", nil},
+		"single entry differs": {"https://attacker.example", one},
+	} {
+		if _, err := selectOfferAuthorizationServer(tc.hint, tc.servers); err == nil {
+			t.Fatalf("%s: expected the wallet to stop", name)
+		}
 	}
 }
 

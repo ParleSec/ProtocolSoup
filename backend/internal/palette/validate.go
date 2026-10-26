@@ -31,10 +31,13 @@ var (
 
 // RequirementRef is the registry row a spec-assertion explains. Spec is the
 // registry specification ID, which becomes the first path segment of the
-// artefact's href.
+// artefact's href. Level and Statement are what the explainer's
+// normative_level and assertion_text must repeat, so the two cannot drift.
 type RequirementRef struct {
-	ID   string
-	Spec string
+	ID        string
+	Spec      string
+	Level     string
+	Statement string
 }
 
 // RequirementIndex maps lowercase registry requirement IDs to their
@@ -65,7 +68,12 @@ func LoadRequirementIndex(path string) (RequirementIndex, error) {
 func NewRequirementIndex(registry conformance.Registry) RequirementIndex {
 	index := make(RequirementIndex, len(registry.Requirements))
 	for _, req := range registry.Requirements {
-		index[strings.ToLower(req.ID)] = RequirementRef{ID: req.ID, Spec: req.Specification}
+		index[strings.ToLower(req.ID)] = RequirementRef{
+			ID:        req.ID,
+			Spec:      req.Specification,
+			Level:     req.Level,
+			Statement: req.Statement,
+		}
 	}
 	return index
 }
@@ -277,9 +285,7 @@ func validateArtefact(a Artefact, t Taxonomy, known map[string]Artefact) []Issue
 			add("spec-assertion requires at least one normative_anchors entry")
 		}
 		if a.NormativeLevel == "" {
-			add("spec-assertion requires normative_level (MUST, SHOULD, MAY, MUST NOT, SHOULD NOT)")
-		} else if _, ok := NormativeLevels[a.NormativeLevel]; !ok {
-			add("normative_level %q is not one of MUST, SHOULD, MAY, MUST NOT, SHOULD NOT", a.NormativeLevel)
+			add("spec-assertion requires normative_level")
 		}
 		if strings.TrimSpace(a.AssertionText) == "" {
 			add("spec-assertion requires assertion_text describing the normative statement")
@@ -325,8 +331,15 @@ func validateExplainer(a Artefact, requirements RequirementIndex) []Issue {
 		}
 		if requirements == nil {
 			add("spec-assertion %q cannot be checked: no requirement registry loaded (pass -registry)", a.ID)
-		} else if _, ok := requirements[strings.ToLower(a.ID)]; !ok {
+		} else if ref, ok := requirements[strings.ToLower(a.ID)]; !ok {
 			add("spec-assertion id %q is not a requirement in the conformance registry", a.ID)
+		} else {
+			if a.NormativeLevel != "" && a.NormativeLevel != ref.Level {
+				add("normative_level %q does not match the registry level %q for %s", a.NormativeLevel, ref.Level, ref.ID)
+			}
+			if text := collapseSpace(a.AssertionText); text != "" && text != collapseSpace(ref.Statement) {
+				add("assertion_text does not match the registry statement for %s", ref.ID)
+			}
 		}
 	}
 
@@ -347,6 +360,12 @@ func validateExplainer(a Artefact, requirements RequirementIndex) []Issue {
 	}
 
 	return issues
+}
+
+// collapseSpace folds runs of whitespace to one space, so a statement wrapped
+// by a YAML folded scalar compares equal to the same statement on one line.
+func collapseSpace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func equalStrings(a, b []string) bool {

@@ -2352,6 +2352,79 @@ func TestAuthorizationRequestPOSTBindsWalletNonceAndIsSafelyRepeatable(t *testin
 	}
 }
 
+// TestAuthorizationRequestPOSTWithoutWalletNonce covers OID4VP 1.0 Section
+// 5.10, where wallet_nonce is OPTIONAL: a POST without it is served the request
+// object as signed at creation, binds nothing, and leaves a later wallet free
+// to bind its own nonce.
+func TestAuthorizationRequestPOSTWithoutWalletNonce(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	createPayload := createVPRequestPayload(t, env.Server.URL, map[string]interface{}{
+		"response_mode":      "direct_post",
+		"response_uri":       env.Server.URL + "/oid4vp/response",
+		"request_uri_method": "post",
+		"dcql_query": map[string]interface{}{
+			"credentials": []map[string]interface{}{{
+				"id":     "degree",
+				"format": "dc+sd-jwt",
+				"meta": map[string]interface{}{
+					"vct_values": []string{"https://protocolsoup.com/credentials/university_degree"},
+				},
+			}},
+		},
+	})
+	endpoint := env.Server.URL + "/oid4vp/request/" + asVPString(createPayload["request_id"])
+
+	fetch := func(form url.Values) (int, string) {
+		t.Helper()
+		resp, err := http.PostForm(endpoint, form)
+		if err != nil {
+			t.Fatalf("POST request object: %v", err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read request object: %v", err)
+		}
+		if resp.StatusCode == http.StatusOK && resp.Header.Get("Content-Type") != "application/oauth-authz-req+jwt" {
+			t.Fatalf("Content-Type = %q", resp.Header.Get("Content-Type"))
+		}
+		return resp.StatusCode, string(body)
+	}
+
+	status, unbound := fetch(url.Values{})
+	if status != http.StatusOK {
+		t.Fatalf("POST without wallet_nonce status = %d, want 200: %s", status, unbound)
+	}
+	decoded, err := crypto.DecodeTokenWithoutValidation(unbound)
+	if err != nil {
+		t.Fatalf("decode request object: %v", err)
+	}
+	if _, present := decoded.Payload["wallet_nonce"]; present {
+		t.Fatalf("request object served without a wallet_nonce must not carry one, got %v", decoded.Payload["wallet_nonce"])
+	}
+	if status, again := fetch(url.Values{}); status != http.StatusOK || again != unbound {
+		t.Fatalf("repeated POST without wallet_nonce was not stable: status=%d", status)
+	}
+
+	status, bound := fetch(url.Values{"wallet_nonce": {"wallet-nonce-456"}})
+	if status != http.StatusOK {
+		t.Fatalf("POST with wallet_nonce after an unbound retrieval status = %d, want 200: %s", status, bound)
+	}
+	decodedBound, err := crypto.DecodeTokenWithoutValidation(bound)
+	if err != nil {
+		t.Fatalf("decode bound request object: %v", err)
+	}
+	if decodedBound.Payload["wallet_nonce"] != "wallet-nonce-456" {
+		t.Fatalf("wallet_nonce = %v, want wallet-nonce-456", decodedBound.Payload["wallet_nonce"])
+	}
+
+	if status, _ := fetch(url.Values{}); status != http.StatusBadRequest {
+		t.Fatalf("POST without wallet_nonce after binding status = %d, want 400", status)
+	}
+}
+
 func TestRequestObjectTypHeaderValidatedByVerifier(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -2420,6 +2493,25 @@ func TestRequestObjectContainsClientMetadataWithVPFormats(t *testing.T) {
 		if _, ok := vpFormats[format]; !ok {
 			t.Fatalf("expected %q in vp_formats_supported", format)
 		}
+	}
+	// OID4VP 1.0 Appendix B defines each format's metadata parameters; the
+	// draft *_supported names are not among them.
+	for format, field := range map[string]string{"jwt_vc_json": "alg_values", "ldp_vc": "proof_type_values"} {
+		entry, ok := vpFormats[format].(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected %q metadata object", format)
+		}
+		if values, ok := entry[field].([]interface{}); !ok || len(values) == 0 {
+			t.Fatalf("%s.%s must be a non-empty array, got %v", format, field, entry[field])
+		}
+		for name := range entry {
+			if name != field {
+				t.Fatalf("%s carries %q, which OID4VP 1.0 Appendix B does not define", format, name)
+			}
+		}
+	}
+	if entry, ok := vpFormats["jwt_vc_json-ld"].(map[string]interface{}); !ok || len(entry) != 0 {
+		t.Fatalf("jwt_vc_json-ld must be an empty object (OID4VP 1.0 defines no parameters for it), got %v", vpFormats["jwt_vc_json-ld"])
 	}
 	mdocMetadata, ok := vpFormats["mso_mdoc"].(map[string]interface{})
 	if !ok {

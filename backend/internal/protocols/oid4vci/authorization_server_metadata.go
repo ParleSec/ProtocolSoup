@@ -56,6 +56,10 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		// RFC 9207 / FAPI 2.0 SP §5.3.2.2: advertise and return iss on
 		// authorization responses so clients can detect mix-up attacks.
 		"authorization_response_iss_parameter_supported": true,
+		// OID4VCI 1.0 Section 12.3: whether a Pre-Authorized Code Token
+		// Request is accepted without a client_id. "The default is false."
+		// handlePreAuthorizedTokenGrant accepts it, so the metadata says so.
+		"pre-authorized_grant_anonymous_access_supported": true,
 		// RFC 9449 Section 5.1: signals DPoP support and the acceptable
 		// proof JWS algorithms at this issuer's own token endpoint. DPoP is
 		// opt-in per request (no separate on/off switch to reflect here);

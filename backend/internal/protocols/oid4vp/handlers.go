@@ -501,10 +501,8 @@ func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.R
 		writeOID4VPError(w, http.StatusMethodNotAllowed, "invalid_request", "this request_uri uses GET")
 		return
 	}
-	if walletNonce == "" {
-		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_nonce is required")
-		return
-	}
+	// OID4VP 1.0 Section 5.10: wallet_nonce is OPTIONAL. A POST without one
+	// is a valid retrieval and is answered with the stored request object.
 	if len(walletNonce) > 256 {
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_nonce is too long")
 		return
@@ -536,12 +534,18 @@ func (p *Plugin) handlePostAuthorizationRequest(w http.ResponseWriter, r *http.R
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request_uri", "request object expired")
 		return
 	}
+	// Once a wallet_nonce is bound, the request object belongs to that
+	// retrieval: any other value, including none, is refused rather than
+	// handed the object bound to someone else's nonce.
 	if session.WalletNonce != "" && session.WalletNonce != walletNonce {
 		p.mu.Unlock()
 		writeOID4VPError(w, http.StatusBadRequest, "invalid_request", "wallet_nonce does not match the first request")
 		return
 	}
-	if session.WalletNonce == "" {
+	// "When received, the Verifier MUST use it as the wallet_nonce value in the
+	// signed authorization request object." Without one there is nothing to
+	// bind, and the object is served exactly as signed at creation.
+	if session.WalletNonce == "" && walletNonce != "" {
 		decoded, err := crypto.DecodeTokenWithoutValidation(session.RequestJWT)
 		if err != nil {
 			p.mu.Unlock()
@@ -1356,14 +1360,19 @@ func defaultVPFormatsSupported() map[string]interface{} {
 			"sd-jwt_alg_values": []string{"ES256"},
 			"kb-jwt_alg_values": []string{"ES256"},
 		},
+		// OID4VP 1.0 Appendix B.1.3.1.3: the jwt_vc_json value "MUST be an
+		// object consisting of" alg_values.
 		credentialFormatJWTVCJSON: map[string]interface{}{
-			"alg_values_supported": []string{"ES256", "RS256", "EdDSA"},
+			"alg_values": []string{"ES256", "RS256", "EdDSA"},
 		},
-		credentialFormatJWTVCJSONL: map[string]interface{}{
-			"alg_values_supported": []string{"ES256", "RS256", "EdDSA"},
-		},
+		// jwt_vc_json-ld is an OpenID4VCI 1.0 Credential Format Identifier, but
+		// OID4VP 1.0 defines no metadata parameters for it, so its entry says
+		// only that the format is accepted rather than inventing any.
+		credentialFormatJWTVCJSONL: map[string]interface{}{},
+		// Appendix B.1.3.2.3: the ldp_vc value is built from proof_type_values
+		// and cryptosuite_values.
 		credentialFormatLDPVC: map[string]interface{}{
-			"proof_type_values_supported": []string{
+			"proof_type_values": []string{
 				"DataIntegrityProof",
 			},
 		},

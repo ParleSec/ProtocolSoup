@@ -117,8 +117,6 @@ func createECDeviceProof(t *testing.T, deviceKey *ecdsa.PrivateKey, nonce, subje
 	publicJWK := crypto.JWKFromECPublicKey(&deviceKey.PublicKey, "device-key-1")
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   subject,
-		"sub":   subject,
 		"aud":   audience,
 		"nonce": nonce,
 		"iat":   now.Unix(),
@@ -310,9 +308,9 @@ func TestMsoMdocAuthorizationCodeIssuance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate device key: %v", err)
 	}
-	// The proof subject must equal the grant subject, which the issuer derives as
-	// the wallet DID from the (normalized) user id. Use the same normalization so
-	// the proof binding matches.
+	// The credential subject is the grant subject, which the issuer derives as
+	// the wallet DID from the (normalized) user id. The proof carries no iss, so
+	// this value only labels the proof's jti.
 	proofSubject := "did:example:wallet:" + normalizeSubjectComponent(userID)
 	proofJWT := createECDeviceProof(t, deviceKey, cNonce, proofSubject, testIssuerAudience)
 

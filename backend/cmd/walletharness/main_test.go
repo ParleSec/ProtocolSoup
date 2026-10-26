@@ -1680,36 +1680,79 @@ func TestHandleAuthorizeRedirectsToConsentFlow(t *testing.T) {
 	}
 }
 
-func TestFetchRequestObjectPOSTSendsWalletNonce(t *testing.T) {
-	requestJWT := buildTestRequestJWT(t, "https://protocolsoup.com/oid4vp/response")
-	var sawNonce string
-	requestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("unexpected method %s", r.Method)
+// TestFetchRequestObjectPOSTChecksWalletNonce covers OID4VP 1.0 Section
+// 5.10.1: the Wallet sends a wallet_nonce on POST request_uri retrieval and
+// "MUST terminate request processing" unless the request object carries the
+// same value in its wallet_nonce claim.
+func TestFetchRequestObjectPOSTChecksWalletNonce(t *testing.T) {
+	signWithWalletNonce := func(t *testing.T, walletNonce interface{}) string {
+		t.Helper()
+		claims := jwt.MapClaims{
+			"jti":           "req-123",
+			"state":         "state-123",
+			"nonce":         "nonce-123",
+			"client_id":     "did:example:verifier",
+			"response_type": "vp_token",
+			"response_mode": "direct_post",
+			"response_uri":  "https://protocolsoup.com/oid4vp/response",
 		}
-		if err := r.ParseForm(); err != nil {
-			t.Fatalf("ParseForm: %v", err)
+		if walletNonce != nil {
+			claims["wallet_nonce"] = walletNonce
 		}
-		sawNonce = strings.TrimSpace(r.Form.Get("wallet_nonce"))
-		if sawNonce == "" {
-			t.Fatal("expected wallet_nonce")
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		token.Header["typ"] = "oauth-authz-req+jwt"
+		signed, err := token.SignedString([]byte("wallet-harness-test-secret"))
+		if err != nil {
+			t.Fatalf("sign request jwt: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
-		_, _ = w.Write([]byte(requestJWT))
-	}))
-	defer requestServer.Close()
+		return signed
+	}
 
-	host, _ := url.Parse(requestServer.URL)
-	server := &walletHarnessServer{httpClient: requestServer.Client(), targetHost: host.Host}
-	gotJWT, _, err := server.fetchRequestObject(context.Background(), requestServer.URL, "post")
-	if err != nil {
-		t.Fatalf("fetchRequestObject(post): %v", err)
-	}
-	if gotJWT != requestJWT {
-		t.Fatalf("unexpected JWT %q", gotJWT)
-	}
-	if sawNonce == "" {
-		t.Fatal("wallet_nonce was not captured")
+	for name, tc := range map[string]struct {
+		claim   func(sent string) interface{}
+		wantErr bool
+	}{
+		"echoed nonce":     {func(sent string) interface{} { return sent }, false},
+		"claim missing":    {func(string) interface{} { return nil }, true},
+		"different nonce":  {func(sent string) interface{} { return sent + "-tampered" }, true},
+		"non-string claim": {func(string) interface{} { return 42 }, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var sawNonce string
+			var served string
+			requestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Fatalf("unexpected method %s", r.Method)
+				}
+				if err := r.ParseForm(); err != nil {
+					t.Fatalf("ParseForm: %v", err)
+				}
+				sawNonce = strings.TrimSpace(r.Form.Get("wallet_nonce"))
+				if sawNonce == "" {
+					t.Fatal("expected wallet_nonce")
+				}
+				served = signWithWalletNonce(t, tc.claim(sawNonce))
+				w.Header().Set("Content-Type", "application/oauth-authz-req+jwt")
+				_, _ = w.Write([]byte(served))
+			}))
+			defer requestServer.Close()
+
+			host, _ := url.Parse(requestServer.URL)
+			server := &walletHarnessServer{httpClient: requestServer.Client(), targetHost: host.Host}
+			gotJWT, _, err := server.fetchRequestObject(context.Background(), requestServer.URL, "post")
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "wallet_nonce") {
+					t.Fatalf("expected the wallet to terminate on a wallet_nonce mismatch, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("fetchRequestObject(post): %v", err)
+			}
+			if gotJWT != served {
+				t.Fatalf("unexpected JWT %q", gotJWT)
+			}
+		})
 	}
 }
 
@@ -1740,6 +1783,52 @@ func TestResolveRequestContextRejectsRedirectURIWithResponseURI(t *testing.T) {
 	_, err = server.resolveRequestContextWithOptions("req-123", requestJWT, true)
 	if err == nil || !strings.Contains(err.Error(), "must not include redirect_uri") {
 		t.Fatalf("expected redirect_uri rejection, got %v", err)
+	}
+}
+
+// TestResolveRequestContextIgnoresUnrecognizedParameters covers OID4VP 1.0
+// Section 5: "The Wallet MUST ignore any unrecognized parameters, other than
+// the transaction_data parameter." The draft presentation_definition and
+// client_id_scheme parameters are not defined by 1.0, so a request carrying
+// them resolves exactly as one without them.
+func TestResolveRequestContextIgnoresUnrecognizedParameters(t *testing.T) {
+	responseURI := "https://protocolsoup.com/oid4vp/response"
+	server := &walletHarnessServer{
+		targetHost:        "protocolsoup.com",
+		targetResponseURI: responseURI,
+	}
+	claims := jwt.MapClaims{
+		"jti":           "req-123",
+		"nonce":         "nonce-123",
+		"client_id":     "redirect_uri:" + responseURI,
+		"response_type": "vp_token",
+		"response_mode": "direct_post",
+		"response_uri":  responseURI,
+		"dcql_query": map[string]interface{}{
+			"credentials": []interface{}{map[string]interface{}{"id": "credential-query"}},
+		},
+		"presentation_definition": map[string]interface{}{
+			"id":                "pd-123",
+			"input_descriptors": []interface{}{map[string]interface{}{"id": "descriptor"}},
+		},
+		"client_id_scheme": "x509_san_dns",
+		"x-unrecognized":   map[string]interface{}{"nested": true},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token.Header["typ"] = "oauth-authz-req+jwt"
+	requestJWT, err := token.SignedString([]byte("wallet-harness-test-secret"))
+	if err != nil {
+		t.Fatalf("sign request: %v", err)
+	}
+	requestContext, err := server.resolveRequestContextWithOptions("req-123", requestJWT, true)
+	if err != nil {
+		t.Fatalf("unrecognized parameters must be ignored, got %v", err)
+	}
+	if requestContext.ResponseURI != responseURI || requestContext.Nonce != "nonce-123" {
+		t.Fatalf("unexpected request context %+v", requestContext)
+	}
+	if !strings.Contains(requestContext.DCQLQuery, "credential-query") {
+		t.Fatalf("dcql_query must still drive the request, got %q", requestContext.DCQLQuery)
 	}
 }
 
@@ -1932,7 +2021,7 @@ func TestHAIPAttestationJWTBuildersUseExpectedHeaders(t *testing.T) {
 		holderKey,
 		holderJWK,
 		"test-c-nonce",
-		"did:example:wallet:alice",
+		"protocolsoup-wallet",
 		"https://issuer.example/oid4vci",
 		keyAttestationJWT,
 	)
@@ -1951,6 +2040,26 @@ func TestHAIPAttestationJWTBuildersUseExpectedHeaders(t *testing.T) {
 	}
 	if asString(decodedProof.Payload["nonce"]) != "test-c-nonce" {
 		t.Fatalf("proof nonce = %q", decodedProof.Payload["nonce"])
+	}
+	// OID4VCI 1.0 Appendix F.1: iss is the client_id, and the proof names no
+	// holder subject.
+	if got := asString(decodedProof.Payload["iss"]); got != "protocolsoup-wallet" {
+		t.Fatalf("proof iss = %q, want the client_id", got)
+	}
+	if _, ok := decodedProof.Payload["sub"]; ok {
+		t.Fatal("proof must not carry sub")
+	}
+
+	anonymousProof, err := createCredentialProofJWTWithKeyAttestation(holderKey, holderJWK, "test-c-nonce", "", "https://issuer.example/oid4vci", keyAttestationJWT)
+	if err != nil {
+		t.Fatalf("createCredentialProofJWTWithKeyAttestation without client_id: %v", err)
+	}
+	decodedAnonymous, err := intcrypto.DecodeTokenWithoutValidation(anonymousProof)
+	if err != nil {
+		t.Fatalf("decode anonymous proof jwt: %v", err)
+	}
+	if _, ok := decodedAnonymous.Payload["iss"]; ok {
+		t.Fatal("proof without a client_id must omit iss")
 	}
 }
 

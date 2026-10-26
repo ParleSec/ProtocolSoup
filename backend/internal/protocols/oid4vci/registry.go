@@ -270,9 +270,14 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			ProofSigningAlgsSupported: []string{"ES256"},
 			CredentialSigningAlgs:     []interface{}{-7},
 			SupportedDisplayName:      "Mobile Driving Licence (ISO/IEC 18013-5 mso_mdoc, HAIP key-attested)",
-			RequireKeyAttestation:     true,
-			KeyAttestationKeyStorage:  []string{"iso_18045_moderate"},
-			KeyAttestationUserAuth:    []string{"iso_18045_moderate"},
+			// A valid key attestation is required, at no particular
+			// attack-potential level: key_attestations_required is published
+			// empty, "indicating a key attestation is needed without additional
+			// constraints" (OID4VCI 1.0 Section 12.2.4). HAIP 1.0 sets no level,
+			// and the hosted wallet is software, so demanding iso_18045_moderate
+			// could only be met by claiming a level it cannot prove (OID4VCI 1.0
+			// Appendix D.2; registry requirement CW-H014).
+			RequireKeyAttestation: true,
 			Claims: []claimDescription{
 				{Path: []string{mdlNamespace, "family_name"}, Mandatory: true},
 				{Path: []string{mdlNamespace, "given_name"}, Mandatory: true},
