@@ -844,9 +844,19 @@ func (s *walletHarnessServer) issueFromExternalIssuer(
 		return nil, err
 	}
 
-	if authCodeGrant != nil && strings.TrimSpace(authCodeGrant.AuthorizationServer) != "" {
-		issuerMetadata.AuthorizationServers = dedupeStringList(append([]string{strings.TrimSpace(authCodeGrant.AuthorizationServer)}, issuerMetadata.AuthorizationServers...))
+	// The pre-authorized grant runs whenever it is offered, so its hint is
+	// the one that applies; the authorization_code hint applies otherwise.
+	offerAuthorizationServer := ""
+	if preAuthorizedGrant != nil {
+		offerAuthorizationServer = preAuthorizedGrant.AuthorizationServer
+	} else if authCodeGrant != nil {
+		offerAuthorizationServer = authCodeGrant.AuthorizationServer
 	}
+	authorizationServers, err := selectOfferAuthorizationServer(offerAuthorizationServer, issuerMetadata.AuthorizationServers)
+	if err != nil {
+		return nil, err
+	}
+	issuerMetadata.AuthorizationServers = authorizationServers
 	authorizationServerMetadata, err := s.resolveExternalAuthorizationServerMetadata(ctx, issuerMetadata, input.LookingGlassSessionID)
 	if err != nil {
 		return nil, err
@@ -2737,8 +2747,46 @@ func containsStringFold(values []string, target string) bool {
 	return false
 }
 
+// selectOfferAuthorizationServer applies a Credential Offer's
+// authorization_server hint to the Credential Issuer metadata's
+// authorization_servers. OID4VCI 1.0 Section 4.1.1: the hint identifies the
+// Authorization Server "when authorization_servers parameter in the Credential
+// Issuer metadata has multiple entries. It MUST NOT be used otherwise. The
+// value of this parameter MUST match with one of the values in the
+// authorization_servers array". Section 12.2.4 adds that the Wallet "MUST NOT
+// proceed with the flow" when it matches none. Offer values are untrusted
+// (Section 13.5), so a hint never adds a server the metadata did not list.
+func selectOfferAuthorizationServer(hint string, authorizationServers []string) ([]string, error) {
+	if hint == "" {
+		return authorizationServers, nil
+	}
+	for _, candidate := range authorizationServers {
+		if !sameURLIdentifier(candidate, hint) {
+			continue
+		}
+		if len(authorizationServers) > 1 {
+			return []string{candidate}, nil
+		}
+		return authorizationServers, nil
+	}
+	return nil, &walletAPIError{
+		Status: http.StatusBadRequest,
+		Code:   "invalid_request",
+		Description: fmt.Sprintf(
+			"credential offer authorization_server %q does not match any authorization_servers entry in the Credential Issuer metadata (OID4VCI 1.0 Section 4.1.1); stopping",
+			hint,
+		),
+	}
+}
+
+// sameURLIdentifier compares two issuer or authorization server identifiers
+// as the specs require: "a simple string comparison with no normalization"
+// (OID4VCI 1.0 Section 12.2.4), "MUST be identical" (RFC 8414 Section 3.3,
+// OpenID Connect Discovery 1.0 Section 4.3), and the simple string comparison
+// of RFC 9207 Section 2.4. A trailing slash, case or percent-encoding
+// difference is a different identifier.
 func sameURLIdentifier(left string, right string) bool {
-	return strings.TrimRight(strings.TrimSpace(left), "/") == strings.TrimRight(strings.TrimSpace(right), "/")
+	return left == right
 }
 
 func valueOrEmpty[T any](value *T, selector func(*T) string) string {
