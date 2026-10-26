@@ -22,7 +22,7 @@ cd backend
 go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db
 ```
 
-The indexer resolves `spec-assertion` artefacts (requirement explainers under `content/assertions/`) against the conformance registry. `-registry` defaults to `internal/conformance/vc-requirements.yaml` relative to `backend/`; pass it explicitly when running from elsewhere. An explainer whose ID is not in the registry fails the build.
+The indexer resolves `spec-assertion` artefacts (requirement explainers under `content/assertions/`) against the conformance registry. `-registry` defaults to `internal/conformance/vc-requirements.yaml` relative to `backend/`; pass it explicitly when running from elsewhere. An explainer whose ID is not in the registry, or whose `normative_level` or `assertion_text` differs from its registry row, fails the build.
 
 ## Baked into the image (recommended)
 

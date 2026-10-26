@@ -52,15 +52,6 @@ const (
 	StatusDeprecated = "deprecated"
 )
 
-// Normative-level values recognised on spec-assertion artefacts.
-var NormativeLevels = map[string]struct{}{
-	"MUST":       {},
-	"SHOULD":     {},
-	"MAY":        {},
-	"MUST NOT":   {},
-	"SHOULD NOT": {},
-}
-
 // dirToType maps the directory immediately under content/ to an artefact type.
 // Markdown files outside these directories are a validation error so the file
 // layout is enforced.

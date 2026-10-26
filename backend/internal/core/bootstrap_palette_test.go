@@ -47,7 +47,13 @@ func TestBootstrap_paletteLoadsFromFile(t *testing.T) {
 		t.Skipf("content tree not available: %v", err)
 	}
 	out := filepath.Join(t.TempDir(), "palette.db")
-	if err := palette.BuildIndex(contentDir, out, nil); err != nil {
+	// The content tree carries spec-assertion explainers, which only validate
+	// against the conformance registry, so build with the embedded one.
+	requirements, err := palette.LoadRequirementIndex("")
+	if err != nil {
+		t.Fatalf("load requirement registry: %v", err)
+	}
+	if err := palette.BuildIndex(contentDir, out, requirements); err != nil {
 		t.Fatalf("build index: %v", err)
 	}
 

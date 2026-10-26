@@ -397,7 +397,7 @@ run_defaults:
 
 // seedRequirements is the registry slice the explainer tests resolve against.
 var seedRequirements = RequirementIndex{
-	"vp-001": {ID: "VP-001", Spec: "oid4vp"},
+	"vp-001": {ID: "VP-001", Spec: "oid4vp", Level: "MUST", Statement: "The Verifier MUST use a Client Identifier Prefix."},
 }
 
 const explainerFrontmatter = `---
@@ -452,8 +452,8 @@ func TestLoadRequirementIndex(t *testing.T) {
 		t.Fatalf("embedded has %d requirements, disk has %d", len(embedded), len(fromDisk))
 	}
 	ref, ok := embedded["vp-001"]
-	if !ok || ref.ID != "VP-001" || ref.Spec != "oid4vp" {
-		t.Fatalf("vp-001 resolved to %+v (ok=%t); want VP-001 in oid4vp", ref, ok)
+	if !ok || ref.ID != "VP-001" || ref.Spec != "oid4vp" || ref.Level != "MUST" || ref.Statement == "" {
+		t.Fatalf("vp-001 resolved to %+v (ok=%t); want VP-001 in oid4vp with its level and statement", ref, ok)
 	}
 	if _, err := LoadRequirementIndex(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
 		t.Fatalf("expected an error for a missing registry path")
@@ -509,6 +509,50 @@ func TestValidateExplainerRejectsUppercaseID(t *testing.T) {
 	}
 	if !containsIssue(issues, "assertions/VP-001.md", "must be the lowercase registry requirement id") {
 		t.Fatalf("expected lowercase issue, got: %v", issues)
+	}
+}
+
+func TestValidateExplainerMatchesRegistryRow(t *testing.T) {
+	t.Run("wrapped statement still matches", func(t *testing.T) {
+		dir := seedContent(t)
+		wrapped := strings.Replace(explainerFrontmatter,
+			"assertion_text: The Verifier MUST use a Client Identifier Prefix.",
+			"assertion_text: >-\n  The Verifier MUST use a\n  Client Identifier Prefix.", 1)
+		writeFile(t, dir, "assertions/vp-001.md", wrapped+explainerBody)
+		_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+		if err != nil {
+			t.Fatalf("ValidateContent error: %v", err)
+		}
+		if len(issues) != 0 {
+			t.Fatalf("a folded statement must match its one-line registry form, got: %v", issues)
+		}
+	})
+
+	cases := map[string]struct {
+		old, new, want string
+	}{
+		"level differs": {
+			"normative_level: MUST", "normative_level: SHOULD",
+			`normative_level "SHOULD" does not match the registry level "MUST" for VP-001`,
+		},
+		"statement paraphrased": {
+			"assertion_text: The Verifier MUST use a Client Identifier Prefix.",
+			"assertion_text: Verifiers need a Client Identifier Prefix.",
+			"assertion_text does not match the registry statement for VP-001",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := seedContent(t)
+			writeFile(t, dir, "assertions/vp-001.md", strings.Replace(explainerFrontmatter, tc.old, tc.new, 1)+explainerBody)
+			_, _, _, issues, err := ValidateContent(dir, seedRequirements)
+			if err != nil {
+				t.Fatalf("ValidateContent error: %v", err)
+			}
+			if !containsIssue(issues, "assertions/vp-001.md", tc.want) {
+				t.Fatalf("expected %q, got: %v", tc.want, issues)
+			}
+		})
 	}
 }
 
