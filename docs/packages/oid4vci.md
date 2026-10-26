@@ -141,6 +141,9 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
   scope (for example both general and HAIP mDL under `vc:mdl`) would invent
   configuration IDs the wallet did not request.
 - Authorization Server Metadata advertises
+  `pre-authorized_grant_anonymous_access_supported: true` (OID4VCI 1.0 §12.3),
+  because a Pre-Authorized Code Token Request is accepted without a `client_id`.
+- Authorization Server Metadata advertises
   `authorization_response_iss_parameter_supported: true` (RFC 9207); the shared
   `/oidc/authorize` endpoint returns `iss` equal to the OID4VCI AS issuer on
   OID4VCI authorization responses (FAPI 2.0 SP §5.3.2.2).
@@ -210,7 +213,8 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 - Deferred issuance not ready: `issuance_pending`
 - Client attestation presented but invalid, missing trust anchor, or replayed PoP `jti`: `invalid_client` (401, `WWW-Authenticate: Bearer`)
 - Key attestation required but missing, invalid, or insufficient `key_storage`/`user_authentication`: `invalid_proof`
-- Unsupported `credential_response_encryption.jwk.alg` / `.enc`: `invalid_encryption_parameters`
+- Unsupported `credential_response_encryption.jwk.alg` / `.enc`, or `credential_response_encryption` in a plaintext `application/json` request (OID4VCI 1.0 §8.2 / §9.1): `invalid_encryption_parameters`
+- Proof `iss` on an access token from anonymous pre-authorized access, or an `iss` that is not the token's `client_id` (Appendix F.1): `invalid_proof`
 
 ## Demo Flow IDs
 

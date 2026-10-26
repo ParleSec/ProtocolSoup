@@ -3,6 +3,9 @@ package oid4vci
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1386,11 +1389,14 @@ func TestCredentialRequestRejectsProofSignedByDifferentWallet(t *testing.T) {
 	tokenPayload := decodeJSONMap(t, tokenResp)
 	accessToken := asString(t, tokenPayload["access_token"])
 
-	proofJWT := createWalletProofJWT(
+	// A proof that names Bob's wallet as iss cannot ride on Alice's token. The
+	// token came from anonymous Pre-Authorized Code access, so OID4VCI 1.0
+	// Appendix F.1 requires the proof to omit iss altogether.
+	proofJWT := createWalletProofJWTWithIss(
 		t,
 		fetchCNonce(t, server.URL, accessToken),
-		asString(t, bobOffer["wallet_subject"]),
 		testIssuerAudience,
+		asString(t, bobOffer["wallet_subject"]),
 	)
 
 	credentialResp := postJSONWithHeaders(
@@ -2110,15 +2116,100 @@ func TestDeferredRequestIgnoresUnknownParametersAndRejectsDuplicates(t *testing.
 func TestProofAlgorithmMustBeAdvertisedForConfiguration(t *testing.T) {
 	plugin := NewPlugin()
 	proofJWT := createWalletProofJWT(t, "nonce", "did:example:wallet:alice", testIssuerAudience)
-	_, _, _, _, err := plugin.validateProofJWT(
+	_, _, _, err := plugin.validateProofJWT(
 		credentialProof{ProofType: "jwt", JWT: proofJWT},
 		testIssuerAudience,
-		"did:example:wallet:alice",
+		"",
 		[]string{"ES256"},
 	)
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("expected unadvertised proof algorithm rejection, got %v", err)
 	}
+}
+
+// TestProofIssFollowsClientID covers OID4VCI 1.0 Appendix F.1: a jwt proof's
+// iss "MUST be the client_id of the Client making the Credential request" and
+// "MUST be omitted if the access token ... was obtained from a Pre-Authorized
+// Code Flow through anonymous access to the token endpoint".
+func TestProofIssFollowsClientID(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tokenClientID string
+		proofIss      string
+		wantStatus    int
+	}{
+		"anonymous access, no iss":       {"", "", http.StatusOK},
+		"anonymous access, iss present":  {"", "wallet-client", http.StatusBadRequest},
+		"client_id sent, matching iss":   {"wallet-client", "wallet-client", http.StatusOK},
+		"client_id sent, no iss":         {"wallet-client", "", http.StatusOK},
+		"client_id sent, iss differs":    {"wallet-client", "other-client", http.StatusBadRequest},
+		"client_id sent, iss is the DID": {"wallet-client", "did:example:wallet:attacker", http.StatusBadRequest},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := newTestServer(t)
+			defer server.Close()
+
+			offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+				"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+			})
+			assertStatus(t, offerResp, http.StatusCreated)
+			offerPayload := decodeJSONMap(t, offerResp)
+			form := url.Values{
+				"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+				"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+			}
+			if tc.tokenClientID != "" {
+				form.Set("client_id", tc.tokenClientID)
+			}
+			tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", form)
+			if err != nil {
+				t.Fatalf("token request failed: %v", err)
+			}
+			assertStatus(t, tokenResp, http.StatusOK)
+			accessToken := asString(t, decodeJSONMap(t, tokenResp)["access_token"])
+			cNonce := fetchCNonce(t, server.URL, accessToken)
+			proofJWT := createWalletProofJWTWithIss(t, cNonce, testIssuerAudience, tc.proofIss)
+
+			credentialResp := postJSONWithHeaders(t, server.URL+"/oid4vci/credential", map[string]interface{}{
+				"credential_configuration_id": "UniversityDegreeCredential",
+				"proofs":                      map[string]interface{}{"jwt": []string{proofJWT}},
+			}, map[string]string{"Authorization": "Bearer " + accessToken})
+			assertStatus(t, credentialResp, tc.wantStatus)
+			if tc.wantStatus == http.StatusBadRequest {
+				payload := decodeJSONMap(t, credentialResp)
+				if asString(t, payload["error"]) != "invalid_proof" {
+					t.Fatalf("expected invalid_proof, got %v", payload["error"])
+				}
+			}
+		})
+	}
+}
+
+// createWalletProofJWTWithIss builds an ES256 proof whose iss is iss, or which
+// carries no iss when iss is empty.
+func createWalletProofJWTWithIss(t *testing.T, nonce string, audience string, iss string) string {
+	t.Helper()
+	holderKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate holder key: %v", err)
+	}
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"aud":   audience,
+		"nonce": nonce,
+		"iat":   now.Unix(),
+		"exp":   now.Add(3 * time.Minute).Unix(),
+	}
+	if iss != "" {
+		claims["iss"] = iss
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = "openid4vci-proof+jwt"
+	token.Header["jwk"] = crypto.JWKFromECPublicKey(&holderKey.PublicKey, "")
+	signed, err := token.SignedString(holderKey)
+	if err != nil {
+		t.Fatalf("sign proof jwt: %v", err)
+	}
+	return signed
 }
 
 func TestNotificationRejectsConflictingTerminalEvent(t *testing.T) {
@@ -2332,8 +2423,6 @@ func createWalletProofJWTWithAlgorithm(t *testing.T, nonce string, subject strin
 	}
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   subject,
-		"sub":   subject,
 		"aud":   audience,
 		"nonce": nonce,
 		"iat":   now.Unix(),

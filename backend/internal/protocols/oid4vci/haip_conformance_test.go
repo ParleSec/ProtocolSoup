@@ -211,6 +211,11 @@ func TestAuthorizationServerMetadataDiscoverable(t *testing.T) {
 	if supported, ok := payload["authorization_response_iss_parameter_supported"].(bool); !ok || !supported {
 		t.Fatalf("authorization_response_iss_parameter_supported = %#v, want true (RFC 9207 / FAPI 2.0 SP)", payload["authorization_response_iss_parameter_supported"])
 	}
+	// OID4VCI 1.0 Section 12.3: the parameter defaults to false, and this issuer
+	// accepts Pre-Authorized Code Token Requests without a client_id.
+	if supported, ok := payload["pre-authorized_grant_anonymous_access_supported"].(bool); !ok || !supported {
+		t.Fatalf("pre-authorized_grant_anonymous_access_supported = %#v, want true", payload["pre-authorized_grant_anonymous_access_supported"])
+	}
 	if asString(t, payload["authorization_endpoint"]) == "" {
 		t.Fatalf("expected authorization_endpoint in AS metadata")
 	}
@@ -1418,7 +1423,9 @@ func TestCredentialRequestRequiresKeyAttestationForHAIPConfiguration(t *testing.
 		t.Fatalf("generate key attestation leaf key: %v", err)
 	}
 	attesterLeafDER := issueLeafCertificate(t, caKey, caCert, attesterKey, "Key Attestation Leaf")
-	keyAttestationJWT := buildKeyAttestationJWT(t, attesterKey, attesterLeafDER, caCertDER, []crypto.JWK{holderJWK}, []string{"iso_18045_moderate"}, []string{"iso_18045_moderate"}, cNonce)
+	// The shipped HAIP mDL configuration requires a key attestation but no
+	// attack-potential level, so an attestation that claims none is enough.
+	keyAttestationJWT := buildKeyAttestationJWT(t, attesterKey, attesterLeafDER, caCertDER, []crypto.JWK{holderJWK}, nil, nil, cNonce)
 
 	proofJWT := createECProofJWTWithKeyAttestation(t, holderKey, holderJWK, cNonce, walletSubject, testPlugin.issuerID(), keyAttestationJWT)
 
@@ -1522,7 +1529,13 @@ func TestCredentialRequestRejectsKeyAttestationBelowRequiredLevel(t *testing.T) 
 		t.Fatalf("generate key attestation leaf key: %v", err)
 	}
 	attesterLeafDER := issueLeafCertificate(t, caKey, caCert, attesterKey, "Key Attestation Leaf")
-	// key_storage is below the "iso_18045_moderate" the HAIP configuration requires.
+	// Appendix D.2 enforcement: give the configuration explicit levels, which
+	// the shipped HAIP mDL configuration does not set, then present less.
+	configuration := testPlugin.credentialConfigurations["MobileDrivingLicenceMsoMdocHAIP"]
+	configuration.KeyAttestationKeyStorage = []string{"iso_18045_moderate"}
+	configuration.KeyAttestationUserAuth = []string{"iso_18045_moderate"}
+	testPlugin.credentialConfigurations["MobileDrivingLicenceMsoMdocHAIP"] = configuration
+	// key_storage is below the "iso_18045_moderate" the configuration now requires.
 	keyAttestationJWT := buildKeyAttestationJWT(t, attesterKey, attesterLeafDER, caCertDER, []crypto.JWK{holderJWK}, []string{"iso_18045_basic"}, []string{"iso_18045_moderate"}, cNonce)
 
 	proofJWT := createECProofJWTWithKeyAttestation(t, holderKey, holderJWK, cNonce, walletSubject, testPlugin.issuerID(), keyAttestationJWT)
@@ -1551,10 +1564,37 @@ func TestCredentialRequestRejectsKeyAttestationBelowRequiredLevel(t *testing.T) 
 	}
 }
 
+// TestHAIPMdocKeyAttestationRequirementHasNoLevels checks that the shipped HAIP
+// mDL configuration publishes key_attestations_required as an empty object:
+// a key attestation is required "without additional constraints" (OID4VCI 1.0
+// Section 12.2.4), so an honest software wallet can satisfy it.
+func TestHAIPMdocKeyAttestationRequirementHasNoLevels(t *testing.T) {
+	server, _, _ := newAttestationTestServer(t)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/oid4vci/.well-known/openid-credential-issuer")
+	if err != nil {
+		t.Fatalf("metadata request failed: %v", err)
+	}
+	assertStatus(t, resp, http.StatusOK)
+	metadata := decodeJSONMap(t, resp)
+	configurations, _ := metadata["credential_configurations_supported"].(map[string]interface{})
+	mdl, _ := configurations["MobileDrivingLicenceMsoMdocHAIP"].(map[string]interface{})
+	proofTypes, _ := mdl["proof_types_supported"].(map[string]interface{})
+	jwtProof, _ := proofTypes["jwt"].(map[string]interface{})
+	requirement, ok := jwtProof["key_attestations_required"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("MobileDrivingLicenceMsoMdocHAIP must still require a key attestation, got %v", jwtProof["key_attestations_required"])
+	}
+	if len(requirement) != 0 {
+		t.Fatalf("key_attestations_required must be empty, got %v", requirement)
+	}
+}
+
 // --- OID4VCI 1.0 encrypted Credential Response (B5) -----------------------
 
 func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
-	server, _, _ := newAttestationTestServer(t)
+	server, issuer, _ := newAttestationTestServer(t)
 	defer server.Close()
 
 	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
@@ -1584,7 +1624,7 @@ func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
 	responseJWK := crypto.JWKFromECPublicKey(&responseKey.PublicKey, "response-key")
 	responseJWK.Alg = "ECDH-ES"
 
-	req, err := http.NewRequest(http.MethodPost, server.URL+"/oid4vci/credential", strings.NewReader(mustMarshalJSON(t, map[string]interface{}{
+	resp := postEncryptedOID4VCIRequest(t, server.URL+"/oid4vci/credential", issuer, map[string]interface{}{
 		"credential_configuration_id": "UniversityDegreeCredential",
 		"proofs": map[string]interface{}{
 			"jwt": []string{proofJWT},
@@ -1593,16 +1633,7 @@ func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
 			"jwk": responseJWK,
 			"enc": "A128GCM",
 		},
-	})))
-	if err != nil {
-		t.Fatalf("build credential request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("execute credential request: %v", err)
-	}
+	}, accessToken)
 	assertStatus(t, resp, http.StatusOK)
 	if contentType := resp.Header.Get("Content-Type"); contentType != "application/jwt" {
 		t.Fatalf("expected application/jwt content type for encrypted response, got %q", contentType)
@@ -1636,7 +1667,7 @@ func TestCredentialResponseEncryptionRoundTrip(t *testing.T) {
 }
 
 func TestCredentialResponseEncryptionRejectsUnsupportedEnc(t *testing.T) {
-	server, _, _ := newAttestationTestServer(t)
+	server, issuer, _ := newAttestationTestServer(t)
 	defer server.Close()
 
 	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
@@ -1666,26 +1697,252 @@ func TestCredentialResponseEncryptionRejectsUnsupportedEnc(t *testing.T) {
 	responseJWK := crypto.JWKFromECPublicKey(&responseKey.PublicKey, "response-key")
 	responseJWK.Alg = "ECDH-ES"
 
-	credentialResp := postJSONWithHeaders(
-		t,
-		server.URL+"/oid4vci/credential",
-		map[string]interface{}{
-			"credential_configuration_id": "UniversityDegreeCredential",
-			"proofs": map[string]interface{}{
-				"jwt": []string{proofJWT},
-			},
-			"credential_response_encryption": map[string]interface{}{
-				"jwk": responseJWK,
-				"enc": "A192GCM",
-			},
+	// Encrypted, so the request reaches the enc check rather than failing the
+	// Section 8.2 rule that a plaintext request cannot ask for encryption.
+	credentialResp := postEncryptedOID4VCIRequest(t, server.URL+"/oid4vci/credential", issuer, map[string]interface{}{
+		"credential_configuration_id": "UniversityDegreeCredential",
+		"proofs": map[string]interface{}{
+			"jwt": []string{proofJWT},
 		},
-		map[string]string{"Authorization": "Bearer " + accessToken},
-	)
+		"credential_response_encryption": map[string]interface{}{
+			"jwk": responseJWK,
+			"enc": "A192GCM",
+		},
+	}, accessToken)
 	assertStatus(t, credentialResp, http.StatusBadRequest)
 	payload := decodeJSONMap(t, credentialResp)
 	if asString(t, payload["error"]) != "invalid_encryption_parameters" {
 		t.Fatalf("expected invalid_encryption_parameters, got %v", payload["error"])
 	}
+	if asString(t, payload["error_description"]) == errResponseEncryptionNeedsEncryptedRequest {
+		t.Fatal("encrypted request was rejected as if it were plaintext")
+	}
+}
+
+// TestPlaintextRequestCannotAskForEncryptedResponse covers OID4VCI 1.0
+// Section 8.2 ("Credential Request encryption MUST be used if the
+// credential_response_encryption parameter is included") and the same rule
+// for the Deferred Credential Request in Section 9.1.
+func TestPlaintextRequestCannotAskForEncryptedResponse(t *testing.T) {
+	server, _, _ := newAttestationTestServer(t)
+	defer server.Close()
+
+	offerResp := postJSON(t, server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	accessToken := asString(t, decodeJSONMap(t, tokenResp)["access_token"])
+	cNonce := fetchCNonce(t, server.URL, accessToken)
+	proofJWT := createWalletProofJWT(t, cNonce, asString(t, offerPayload["wallet_subject"]), testIssuerAudience)
+
+	responseKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate response encryption key: %v", err)
+	}
+	responseJWK := crypto.JWKFromECPublicKey(&responseKey.PublicKey, "response-key")
+	responseJWK.Alg = "ECDH-ES"
+	encryption := map[string]interface{}{"jwk": responseJWK, "enc": "A128GCM"}
+
+	for name, tc := range map[string]struct {
+		endpoint string
+		body     map[string]interface{}
+	}{
+		"credential": {"/oid4vci/credential", map[string]interface{}{
+			"credential_configuration_id":    "UniversityDegreeCredential",
+			"proofs":                         map[string]interface{}{"jwt": []string{proofJWT}},
+			"credential_response_encryption": encryption,
+		}},
+		"deferred credential": {"/oid4vci/deferred_credential", map[string]interface{}{
+			"transaction_id":                 "any-transaction",
+			"credential_response_encryption": encryption,
+		}},
+	} {
+		resp := postJSONWithHeaders(t, server.URL+tc.endpoint, tc.body, map[string]string{"Authorization": "Bearer " + accessToken})
+		assertStatus(t, resp, http.StatusBadRequest)
+		payload := decodeJSONMap(t, resp)
+		if asString(t, payload["error"]) != "invalid_encryption_parameters" {
+			t.Fatalf("%s: expected invalid_encryption_parameters, got %v", name, payload["error"])
+		}
+		if asString(t, payload["error_description"]) != errResponseEncryptionNeedsEncryptedRequest {
+			t.Fatalf("%s: unexpected error_description %v", name, payload["error_description"])
+		}
+	}
+}
+
+// TestDeferredPendingResponseIsEncryptedWhenRequested covers OID4VCI 1.0
+// Section 9.2: a requested encryption applies to the Deferred Credential
+// Response "regardless of the content", including the still-pending answer.
+func TestDeferredPendingResponseIsEncryptedWhenRequested(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/pre-authorized/deferred", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offerPayload := decodeJSONMap(t, offerResp)
+	tokenResp, err := http.PostForm(env.Server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offerPayload["pre_authorized_code"])},
+	})
+	if err != nil {
+		t.Fatalf("token request failed: %v", err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	accessToken := asString(t, decodeJSONMap(t, tokenResp)["access_token"])
+	cNonce := fetchCNonce(t, env.Server.URL, accessToken)
+	proofJWT := createWalletProofJWT(t, cNonce, asString(t, offerPayload["wallet_subject"]), testIssuerAudience)
+
+	credentialResp := postJSONWithHeaders(t, env.Server.URL+"/oid4vci/credential", map[string]interface{}{
+		"credential_configuration_id": "UniversityDegreeCredential",
+		"proofs":                      map[string]interface{}{"jwt": []string{proofJWT}},
+	}, map[string]string{"Authorization": "Bearer " + accessToken})
+	assertStatus(t, credentialResp, http.StatusAccepted)
+	transactionID := asString(t, decodeJSONMap(t, credentialResp)["transaction_id"])
+
+	responseKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate response encryption key: %v", err)
+	}
+	responseJWK := crypto.JWKFromECPublicKey(&responseKey.PublicKey, "response-key")
+	responseJWK.Alg = "ECDH-ES"
+
+	pendingResp := postEncryptedOID4VCIRequest(t, env.Server.URL+"/oid4vci/deferred_credential", env.Plugin, map[string]interface{}{
+		"transaction_id":                 transactionID,
+		"credential_response_encryption": map[string]interface{}{"jwk": responseJWK, "enc": "A128GCM"},
+	}, accessToken)
+	assertStatus(t, pendingResp, http.StatusAccepted)
+	if contentType := pendingResp.Header.Get("Content-Type"); contentType != "application/jwt" {
+		t.Fatalf("pending deferred response Content-Type = %q, want application/jwt", contentType)
+	}
+	if strings.TrimSpace(pendingResp.Header.Get("Retry-After")) == "" {
+		t.Fatal("expected Retry-After on the encrypted pending response")
+	}
+	defer pendingResp.Body.Close()
+	compact, err := io.ReadAll(pendingResp.Body)
+	if err != nil {
+		t.Fatalf("read pending response: %v", err)
+	}
+	jwe, err := jose.ParseEncrypted(string(compact), []jose.KeyAlgorithm{jose.ECDH_ES}, []jose.ContentEncryption{jose.A128GCM})
+	if err != nil {
+		t.Fatalf("pending response is not a JWE: %v", err)
+	}
+	plaintext, err := jwe.Decrypt(responseKey)
+	if err != nil {
+		t.Fatalf("decrypt pending response: %v", err)
+	}
+	var pending map[string]interface{}
+	if err := json.Unmarshal(plaintext, &pending); err != nil {
+		t.Fatalf("unmarshal pending response: %v", err)
+	}
+	if asString(t, pending["transaction_id"]) != transactionID {
+		t.Fatalf("decrypted transaction_id = %v, want %q", pending["transaction_id"], transactionID)
+	}
+	if interval, ok := pending["interval"].(float64); !ok || interval < 1 {
+		t.Fatalf("decrypted interval = %v, want >= 1", pending["interval"])
+	}
+}
+
+// TestCredentialRequestEncryptionKeyIsDedicated checks that the Credential
+// Request decryption key is not the mdoc Document Signer key, that the
+// metadata advertises it, that a request encrypted to the signing key is
+// refused, and that a configured store keeps the key across restarts.
+func TestCredentialRequestEncryptionKeyIsDedicated(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	signer := env.Plugin.mdocPKI.DocumentSignerKey()
+	if env.Plugin.requestEncryptionKey == nil {
+		t.Fatal("request encryption key was not initialised")
+	}
+	if env.Plugin.requestEncryptionKey.Equal(signer) {
+		t.Fatal("request encryption key must not be the mdoc Document Signer key")
+	}
+
+	metadata, err := env.Plugin.credentialRequestEncryptionMetadata()
+	if err != nil {
+		t.Fatalf("credentialRequestEncryptionMetadata: %v", err)
+	}
+	keys := metadata["jwks"].(crypto.JWKS).Keys
+	advertised := crypto.JWKFromECPublicKey(&env.Plugin.requestEncryptionKey.PublicKey, "")
+	if len(keys) != 1 || keys[0].X != advertised.X || keys[0].Y != advertised.Y || keys[0].Use != "enc" {
+		t.Fatalf("metadata must advertise exactly the request encryption key with use enc, got %+v", keys)
+	}
+
+	encrypter, err := jose.NewEncrypter(jose.A128GCM, jose.Recipient{Algorithm: jose.ECDH_ES, Key: &signer.PublicKey}, nil)
+	if err != nil {
+		t.Fatalf("NewEncrypter: %v", err)
+	}
+	object, err := encrypter.Encrypt([]byte(`{"credential_configuration_id":"UniversityDegreeCredential"}`))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	compact, err := object.CompactSerialize()
+	if err != nil {
+		t.Fatalf("CompactSerialize: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oid4vci/credential", strings.NewReader(compact))
+	req.Header.Set("Content-Type", "application/jwt")
+	var decoded credentialRequest
+	if _, err := env.Plugin.decodeCredentialRequest(req, &decoded); err == nil {
+		t.Fatal("a request encrypted to the Document Signer key must not decrypt")
+	}
+
+	storeDir := t.TempDir()
+	first, err := loadOrCreateRequestEncryptionKey(storeDir)
+	if err != nil {
+		t.Fatalf("create request encryption key: %v", err)
+	}
+	second, err := loadOrCreateRequestEncryptionKey(storeDir)
+	if err != nil {
+		t.Fatalf("reload request encryption key: %v", err)
+	}
+	if !first.Equal(second) {
+		t.Fatal("a configured store must return the same request encryption key after a restart")
+	}
+}
+
+// postEncryptedOID4VCIRequest sends body to endpoint as an application/jwt
+// JWE encrypted to the issuer's credential_request_encryption key, the only
+// form in which credential_response_encryption is honoured (Section 8.2).
+func postEncryptedOID4VCIRequest(t *testing.T, endpoint string, issuer *Plugin, body map[string]interface{}, accessToken string) *http.Response {
+	t.Helper()
+	encrypter, err := jose.NewEncrypter(
+		jose.A128GCM,
+		jose.Recipient{Algorithm: jose.ECDH_ES, Key: &issuer.requestEncryptionKey.PublicKey},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewEncrypter: %v", err)
+	}
+	object, err := encrypter.Encrypt([]byte(mustMarshalJSON(t, body)))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	compact, err := object.CompactSerialize()
+	if err != nil {
+		t.Fatalf("CompactSerialize: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(compact))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/jwt")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("encrypted request to %s: %v", endpoint, err)
+	}
+	return resp
 }
 
 func TestCredentialRequestEncryptionRoundTrip(t *testing.T) {
@@ -1720,7 +1977,7 @@ func TestCredentialRequestEncryptionRoundTrip(t *testing.T) {
 		jose.A128GCM,
 		jose.Recipient{
 			Algorithm: jose.ECDH_ES,
-			Key:       &env.Plugin.mdocPKI.DocumentSignerKey().PublicKey,
+			Key:       &env.Plugin.requestEncryptionKey.PublicKey,
 		},
 		nil,
 	)
@@ -1926,8 +2183,6 @@ func createECProofJWTWithKeyAttestation(t *testing.T, holderKey *ecdsa.PrivateKe
 	t.Helper()
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
-		"iss":   subject,
-		"sub":   subject,
 		"aud":   audience,
 		"nonce": nonce,
 		"iat":   now.Unix(),

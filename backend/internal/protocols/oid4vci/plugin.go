@@ -2,6 +2,7 @@ package oid4vci
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
@@ -55,8 +56,13 @@ type offerRecord struct {
 }
 
 type accessGrant struct {
-	Token                      string
-	Subject                    string
+	Token   string
+	Subject string
+	// ClientID is the client_id the token was issued to. It is empty only for
+	// a Pre-Authorized Code Token Request sent without a client_id, which
+	// OID4VCI 1.0 calls anonymous access (Appendix G.3.1). A proof's iss is
+	// checked against it (Appendix F.1).
+	ClientID                   string
 	WalletID                   string
 	CredentialConfigurationIDs map[string]struct{}
 	CredentialIdentifiers      map[string]string
@@ -151,9 +157,12 @@ type notificationRecord struct {
 type Plugin struct {
 	*plugin.BasePlugin
 
-	mockIDP                  *mockidp.MockIdP
-	keySet                   *crypto.KeySet
-	mdocPKI                  *mdoc.IssuerPKI
+	mockIDP *mockidp.MockIdP
+	keySet  *crypto.KeySet
+	mdocPKI *mdoc.IssuerPKI
+	// requestEncryptionKey decrypts encrypted Credential and Deferred
+	// Credential Requests and nothing else (see loadOrCreateRequestEncryptionKey).
+	requestEncryptionKey     *ecdsa.PrivateKey
 	lookingGlass             *lookingglass.Engine
 	baseURL                  string
 	walletStore              *vc.WalletCredentialStore
@@ -950,6 +959,11 @@ func (p *Plugin) initIssuerPKI(dataDir string) error {
 		return err
 	}
 	p.mdocPKI = pki
+	requestEncryptionKey, err := loadOrCreateRequestEncryptionKey(storeDir)
+	if err != nil {
+		return fmt.Errorf("oid4vci: credential request encryption key: %w", err)
+	}
+	p.requestEncryptionKey = requestEncryptionKey
 	if storeDir == "" {
 		log.Println("OID4VCI: mso_mdoc issuer PKI initialised (ephemeral, in-memory)")
 	} else {

@@ -127,7 +127,8 @@ encrypted-credential-request material together in one end-to-end HAIP demo.
 
 - **Client attestation**: `OAuth-Client-Attestation` + `OAuth-Client-Attestation-PoP` headers at `/oid4vci/token` are validated end-to-end when `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` is configured — attestation `x5c` chain, `sub`/`exp`/`cnf.jwk`, PoP signature (against `cnf.jwk`), `aud`/`jti`/`iat`, and single-use `jti` replay protection. Presenting either header at all makes attestation the authentication verdict; a failure is never downgraded to `client_secret`/public-client auth. Unset trust anchor means the issuer accepts none.
 - **Key attestation**: credential configurations with `RequireKeyAttestation` (e.g. `MobileDrivingLicenceMsoMdocHAIP`) require a `key_attestation` JOSE header on the proof JWT, validated against `OID4VCI_KEY_ATTESTATION_TRUST_ANCHOR_PEM` — `x5c` chain, `iat`/`exp`/`attested_keys`, optional `nonce` match against the active `c_nonce`, and that the proof's JOSE-header `jwk` is among `attested_keys` and meets any required `key_storage`/`user_authentication` level.
-- **Encrypted responses**: a `credential_response_encryption` object on the Credential or Deferred Credential Request is validated against advertised `alg_values_supported`/`enc_values_supported` (`ECDH-ES`; `A128GCM`/`A256GCM`) and, when valid, the response is returned as a compact JWE instead of JSON.
+- **Encrypted responses**: a `credential_response_encryption` object on the Credential or Deferred Credential Request is validated against advertised `alg_values_supported`/`enc_values_supported` (`ECDH-ES`; `A128GCM`/`A256GCM`) and, when valid, the response is returned as a compact JWE instead of JSON. That includes the deferred `202` that reports the Credential is not ready yet (OID4VCI 1.0 §9.2). The request carrying the object must itself be an encrypted `application/jwt` request; a plaintext one is refused with `invalid_encryption_parameters` (§8.2 / §9.1).
+- **Proof `iss`**: the access token records the `client_id` it was issued to, empty for a pre-authorized Token Request sent without one (anonymous access). A proof `iss` must be omitted on an anonymous token and must equal the `client_id` otherwise (Appendix F.1). The Credential subject always comes from the access token, never from the proof.
 - **DPoP sender-constraining (RFC 9449)**: a `DPoP` proof header on the token request binds the issued access token to the proof's key via `cnf.jkt`, with `token_type: DPoP`. The `authorization_code` grant also issues a refresh token; under Client Attestation that refresh token is bound to the Client Instance Key (OAuth2-ATCA §10.3) and not to the DPoP key (so FAPI2 may rotate the DPoP key on refresh). Without attestation, a DPoP-bound public-client refresh token stays bound to the proof key (RFC 9449 §5). Refresh tokens themselves are not rotated (FAPI2 SP Final §5.3.2.1-9). Client Attestation PoP jti values are committed only after DPoP validation so a use_dpop_nonce challenge can be retried with the same attestation PoP. Pre-authorized code grants still do not issue refresh tokens. A DPoP-bound access token is then rejected at `/oid4vci/nonce`, `/oid4vci/credential`, `/oid4vci/deferred_credential`, and `/oid4vci/notification` unless presented as `Authorization: DPoP <token>` with a matching, unreplayed proof — presenting it as a bare bearer token fails outright. An independent, off-by-default `DPoP-Nonce` challenge is available separately at the token endpoint (`SHOWCASE_DPOP_NONCE_REQUIRED`) and at the resource endpoints (`SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED`), enforcing RFC 9449 §8.2's independent AS/RS nonce spaces even though both roles run in this same process. This issuer's own RFC 8414 metadata advertises `dpop_signing_alg_values_supported` for the accepted proof algorithms (RS256, ES256, EdDSA). Opaque/reference access tokens cannot be bound; only JWT access tokens can.
 
 ## Error Semantics
@@ -146,7 +147,7 @@ encrypted-credential-request material together in one end-to-end HAIP demo.
 | `invalid_transaction_id` | Unknown deferred transaction |
 | `issuance_pending` | Deferred credential not ready yet |
 | `invalid_client` | Client attestation presented but invalid/expired/untrusted, missing trust anchor, replayed PoP `jti`, or `client_id` mismatch with the attested `sub` |
-| `invalid_encryption_parameters` | Unsupported `credential_response_encryption.jwk.alg` or `.enc` |
+| `invalid_encryption_parameters` | Unsupported `credential_response_encryption.jwk.alg` or `.enc`, or `credential_response_encryption` in a plaintext request |
 
 ## Configuration
 
@@ -154,7 +155,7 @@ encrypted-credential-request material together in one end-to-end HAIP demo.
 |----------|-------------|---------|
 | `SHOWCASE_BASE_URL` | Public base URL used in issuer metadata | `http://localhost:8080` |
 | `SHOWCASE_DATA_DIR` | Durable state root for wallet credential persistence | (unset) |
-| `SHOWCASE_MDOC_PKI_PATH` | Persistent store directory for the `mso_mdoc` issuer PKI | `{DataDir}/mdoc` (else ephemeral) |
+| `SHOWCASE_MDOC_PKI_PATH` | Persistent store directory for the `mso_mdoc` issuer PKI and the separate Credential Request decryption key (`credential_request_encryption_key.pem`) | `{DataDir}/mdoc` (else ephemeral) |
 | `MDOC_ISSUER_COUNTRY` | Two-letter country code for the `mso_mdoc` issuer PKI certificate subjects | `US` |
 | `MDOC_ISSUER_ORG` | Organization name for the `mso_mdoc` issuer PKI certificate subjects | `ProtocolSoup` |
 | `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` | PEM CA trust anchor for OAuth 2.0 Attestation-Based Client Authentication `x5c` chains | (unset — attestation-based auth refused) |
@@ -171,7 +172,7 @@ When `SHOWCASE_DATA_DIR` is configured, credentials are persisted under:
 
 - The plugin is designed to interoperate directly with the OID4VP plugin through shared wallet credential state
 - Looking Glass events for offer creation, token exchange, proof checks, and issuance are emitted from real handler execution
-- `tx_code` values are cryptographically random 6-digit numeric codes generated per offer, delivered out-of-band through the offer response
+- `tx_code` values are cryptographically random 6-digit numeric codes generated per offer, delivered out-of-band through the offer response, and compared in constant time at the token endpoint
 
 ## Specifications
 

@@ -61,7 +61,7 @@ The issuer's default and lead `credential_configurations_supported` entry is the
 | Proof container | OID4VCI 1.0 `proofs` object keyed by proof type (for example, `{"jwt":["<compact-jws>", "..."]}`). Issuer metadata advertises `batch_credential_issuance.batch_size` (20); each JWT in the array receives one credential copy of the same Credential Dataset bound to that proof key. Other proof types are not advertised; the removed draft `proof` parameter is ignored. |
 | `mso_mdoc` device key binding | Proof JOSE header `jwk` must be an EC P-256 key; it is bound into the MSO `deviceKeyInfo.deviceKey` as a COSE_Key. Issuer metadata advertises the credential signing algorithm as COSE identifier `-7`, while the JWT proof algorithm remains JOSE `ES256`. Issued mDLs include the mandatory portrait as a valid, identity-derived stylized JPEG rather than presenting it as a real person's photograph. |
 | Proof JWT header type | `openid4vci-proof+jwt` |
-| Proof JWT | Protected header contains exactly one key reference (`jwk` is supported); payload requires `aud`, `nonce`, and `iat`. Anonymous pre-authorized clients omit `iss`. |
+| Proof JWT | Protected header contains exactly one key reference (`jwk` is supported); payload requires `aud`, `nonce`, and `iat`. Anonymous pre-authorized clients omit `iss`; otherwise `iss`, when present, must equal the access token's `client_id` (Appendix F.1). The Credential subject comes from the access token. |
 | Deferred issuance indicator | `transaction_id` returned by credential endpoint (e.g., an opaque identifier such as `"txn_..."`) |
 
 ## Pre-Authorized Code Issuance Flow (OID4VCI §4, §6.1, §7)
@@ -92,8 +92,9 @@ In addition to `pre-authorized_code`, the token endpoint accepts
    `openid-configuration` for OID4VCI. Discovery yields
    `authorization_endpoint`, `token_endpoint`, `grant_types_supported`,
    `code_challenge_methods_supported` (`S256`),
-   `authorization_response_iss_parameter_supported` (`true`, RFC 9207), and
-   `token_endpoint_auth_methods_supported`. Scope-only authorization does not
+   `authorization_response_iss_parameter_supported` (`true`, RFC 9207),
+   `pre-authorized_grant_anonymous_access_supported` (`true`, OID4VCI 1.0
+   Section 12.3), and `token_endpoint_auth_methods_supported`. Scope-only authorization does not
    invent `authorization_details` in the Token Response; RAR requests still
    receive `credential_identifiers` for the requested configurations.
 3. HAIP wallets push the request to the advertised RFC 9126
@@ -250,7 +251,7 @@ reference client when HAIP attestation env is configured.
 - `tx_code` is required when the offer grant includes a `tx_code` object.
 - Proofs are required when proof types are declared for the credential configuration.
 - Proof JWT header `typ` must be `openid4vci-proof+jwt`.
-- Proof payload must include `aud`, `nonce`, and `iat`; anonymous clients omit `iss`. The proof key is carried in exactly one JOSE key-reference header, with `jwk` supported by this issuer.
+- Proof payload must include `aud`, `nonce`, and `iat`; anonymous clients omit `iss`, and any other `iss` must equal the access token's `client_id`. The proof key is carried in exactly one JOSE key-reference header, with `jwk` supported by this issuer.
 - Nonce is freshness-bound and one-time in issuance requests (replay and expiry are rejected).
 - Deferred polling requires matching `transaction_id` and same access token lineage.
 - Authorization codes and deferred transaction identifiers are redeemed
@@ -328,5 +329,5 @@ Both fields are part of the shared, format-agnostic evidence/assurance shape rat
 - Authorization Server metadata: `authorization_endpoint`/`token_endpoint` resolve and accept the discovered `authorization_code` grant
 - Client attestation (when configured): a request presenting `OAuth-Client-Attestation`/`-PoP` is authenticated by that mechanism, not silently downgraded on failure; replayed PoP `jti` is rejected
 - Key attestation (when a configuration requires it): credential requests without a valid `key_attestation` proof header are rejected with `invalid_proof`
-- Encrypted responses (when requested): `credential_response_encryption` is validated against advertised `alg`/`enc` values and the response is returned as a JWE
+- Encrypted responses (when requested): the request carrying `credential_response_encryption` must itself be encrypted (§8.2 / §9.1), the object is validated against advertised `alg`/`enc` values, and every response is returned as a JWE, including the deferred "not ready" `202` (§9.2)
 - Credential inspection: `POST /lookingglass/decode/credential` on an issued `mso_mdoc` reports a non-zero, exact `committed_count` and `issuer_trust: not_evaluated` (never `failed`, since no trust anchor was supplied); the same call on `dc+sd-jwt` reports `committed_count_is_exact: false`
