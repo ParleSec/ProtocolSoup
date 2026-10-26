@@ -66,9 +66,11 @@ no browser Digital Credentials API executor. The hosted wallet harness accepts
 - **DC API handover** (`OpenID4VPDCAPIHandover`, OID4VP 1.0 Appendix B.2.6.2) is a *distinct* SessionTranscript variant over `[origin, nonce, jwkThumbprint]` — not the redirect `OpenID4VPHandover` over `[client_id, nonce, jwkThumbprint, response_uri]`. The verifier selects it by invocation path.
 - **Attestation**: HAIP 1.0 makes attestation *support* mandatory but leaves the wire format an Ecosystem extension point; no single attestation format is pinned, so none is required by the presentation profile. The `verifier_attestation` scheme remains available only outside HAIP mode.
 - **POST request URI**: create the request with `request_uri_method: "post"`.
-  The wallet must supply `wallet_nonce` as form data; `wallet_metadata` is
-  optional. The verifier signs the nonce into the returned request object and
-  rejects a later fetch that changes it. Looking Glass exposes this under
+  `wallet_nonce` and `wallet_metadata` are optional form parameters (OID4VP 1.0
+  §5.10). A POST without a nonce receives the request object as signed at
+  creation and binds nothing. The first nonce received is signed into the
+  returned request object, and any later fetch with a different nonce, or none,
+  is rejected. Looking Glass exposes this under
   Advanced as a GET/POST selector; selecting POST also appends
   `request_uri_method=post` to the generated `openid4vp://` wallet-handoff
   deep link.

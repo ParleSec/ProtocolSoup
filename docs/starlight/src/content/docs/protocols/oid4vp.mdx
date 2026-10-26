@@ -178,8 +178,8 @@ Credential Manager), not a hosted web wallet.
 
 - Public authorization endpoint: `https://wallet.protocolsoup.com/authorize`
   (`client_id`, `request_uri`, `request_uri_method`).
-- Request-object retrieval supports GET and RFC-compatible POST (with
-  `wallet_nonce`).
+- Request-object retrieval supports GET and RFC-compatible POST (with an
+  optional `wallet_nonce`, which the verifier signs into the request object).
 - External `x509_hash` verifiers are accepted only after the request object's
   `x5c` chain validates to `WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM` (or system
   roots), the leaf hash matches the `x509_hash:` `client_id`, and the holder
@@ -314,7 +314,10 @@ appoint its own trust root.
    from `request_uri` with media type `application/oauth-authz-req+jwt`. GET is
    the default; `request_uri_method=post` (OpenID4VP 1.0 Section 5.10) has the
    wallet POST a `wallet_nonce` and receive a request object bound to that nonce.
-   The wallet validates signature, `typ`, and expiry.
+   The wallet terminates unless the object's `wallet_nonce` claim is the value it
+   sent (Section 5.10.1), then validates signature, `typ`, and expiry. It ignores
+   parameters OpenID4VP 1.0 does not define, including the draft
+   `presentation_definition`.
 3. **Wallet Submits Response** — Wallet evaluates DCQL query, selects matching credentials, creates the `vp_token`, and submits it:
    - `direct_post`: form-post `vp_token` + `state`
    - `direct_post.jwt`: form-post encrypted `response` JWE (ECDH-ES) whose JSON payload contains `vp_token` and `state`
