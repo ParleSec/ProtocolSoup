@@ -216,43 +216,22 @@ export function FlowDetail({
           <span className="text-surface-300">{flow.name}</span>
         </div>
         
-        {/* Mobile layout - stacked */}
-        <div className="flex flex-col gap-3 sm:hidden">
+        {/* Stacked on mobile, side by side from sm up. One heading for every
+            viewport: hiding a second copy with CSS still ships two <h1>s. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div>
-            <h1 className="text-xl font-semibold text-white mb-1.5">{flow.name}</h1>
-            <p className="text-sm text-surface-400">{flow.description}</p>
+            <h1 className="text-xl sm:text-2xl font-semibold text-white mb-1.5 sm:mb-2">{flow.name}</h1>
+            <p className="text-sm sm:text-base text-surface-400">{flow.description}</p>
           </div>
-          
+
           {flowExecutionPath && (
             <Link
               href={flowExecutionPath}
-              className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-gradient-to-r ${
-                protocolId === 'ssf' 
-                  ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
+              className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 rounded-lg bg-gradient-to-r ${
+                protocolId === 'ssf'
+                  ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30'
                   : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
-              } border text-sm font-medium transition-all w-full`}
-            >
-              {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              Try in Looking Glass
-            </Link>
-          )}
-        </div>
-        
-        {/* Desktop layout - side by side */}
-        <div className="hidden sm:flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-white mb-2">{flow.name}</h1>
-            <p className="text-surface-400">{flow.description}</p>
-          </div>
-          
-          {flowExecutionPath && (
-            <Link
-              href={flowExecutionPath}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r ${
-                protocolId === 'ssf' 
-                  ? 'from-amber-500/20 to-orange-500/20 border-amber-500/30 text-amber-400 hover:from-amber-500/30 hover:to-orange-500/30' 
-                  : 'from-cyan-500/20 to-purple-500/20 border-cyan-500/30 text-cyan-400 hover:from-cyan-500/30 hover:to-purple-500/30'
-              } border text-sm font-medium transition-all flex-shrink-0`}
+              } border text-sm font-medium transition-all w-full sm:w-auto flex-shrink-0`}
             >
               {protocolId === 'ssf' ? <Radio className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               Try in Looking Glass
