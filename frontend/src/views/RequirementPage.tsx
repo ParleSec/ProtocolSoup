@@ -2,11 +2,13 @@ import Link from 'next/link'
 import { ArrowLeft, ArrowRight, ExternalLink, FileCode2, FlaskConical } from 'lucide-react'
 import { MarkdownLite } from '@/components/palette/MarkdownLite'
 import type {
+  ConformanceRequirementArtefacts,
   ConformanceRequirementResponse,
   ConformanceVerdict,
 } from '@/lib/conformance.server'
 import { requirementPath, specPath } from '@/lib/conformance.server'
 import type { ProtocolCatalogDataItem } from '@/protocols/presentation/protocol-catalog-data'
+import { RequirementArtefacts } from '@/views/RequirementArtefacts'
 
 /**
  * Fixed wording required on every verdict block. Do not reword: the page must
@@ -86,10 +88,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 interface RequirementPageProps {
   requirement: ConformanceRequirementResponse
+  artefacts: ConformanceRequirementArtefacts
   relatedProtocol?: ProtocolCatalogDataItem
 }
 
-export function RequirementPage({ requirement, relatedProtocol }: RequirementPageProps) {
+export function RequirementPage({ requirement, artefacts, relatedProtocol }: RequirementPageProps) {
   const spec = requirement.specification
   const commit = requirement.commit
   const shortCommit = commit ? commit.slice(0, 7) : ''
@@ -168,6 +171,10 @@ export function RequirementPage({ requirement, relatedProtocol }: RequirementPag
             <p className="text-xs sm:text-sm text-surface-400">{SELF_TEST_SENTENCE}</p>
           </div>
         )}
+      </Section>
+
+      <Section title="Captured from production">
+        <RequirementArtefacts artefacts={artefacts} />
       </Section>
 
       <Section title="Tests">

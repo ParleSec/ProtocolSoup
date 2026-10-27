@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -116,6 +117,7 @@ func (c *Catalogue) Routes() chi.Router {
 	r.Get("/specs", c.handleSpecs)
 	r.Get("/specs/{specId}", c.handleSpec)
 	r.Get("/requirements/{id}", c.handleRequirement)
+	r.Get("/requirements/{id}/artefacts", c.handleRequirementArtefacts)
 	r.Get("/sitemap", c.handleSitemap)
 	return r
 }
@@ -186,6 +188,19 @@ func (c *Catalogue) handleSpec(w http.ResponseWriter, r *http.Request) {
 		response.Requirements = append(response.Requirements, row)
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (c *Catalogue) handleRequirementArtefacts(w http.ResponseWriter, r *http.Request) {
+	req, ok := c.Requirement(chi.URLParam(r, "id"))
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "requirement not found"})
+		return
+	}
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	writeJSON(w, http.StatusOK, c.requirementArtefacts(req, now()))
 }
 
 func (c *Catalogue) handleRequirement(w http.ResponseWriter, r *http.Request) {
