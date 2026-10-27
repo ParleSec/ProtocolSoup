@@ -1,0 +1,9 @@
+---
+// Starlight's default head plus a preload for the Latin Inter face, so body prose
+// does not wait on the stylesheet before the font request starts.
+import Default from '@astrojs/starlight/components/Head.astro';
+import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url';
+---
+
+<Default><slot /></Default>
+<link rel="preload" href={interLatin} as="font" type="font/woff2" crossorigin />

@@ -1,7 +1,10 @@
 ---
 import '@fontsource-variable/inter';
+import '@fontsource-variable/inter/wght-italic.css';
 import '@fontsource-variable/jetbrains-mono';
+import '@fontsource-variable/jetbrains-mono/wght-italic.css';
 import '../styles/design/tokens.css';
+import interLatin from '@fontsource-variable/inter/files/inter-latin-wght-normal.woff2?url';
 import logoDark from '../assets/wordmark-dark.svg';
 ---
 
@@ -13,9 +16,16 @@ import logoDark from '../assets/wordmark-dark.svg';
     <meta name="theme-color" content="#a855f7" />
     <title>API Reference | ProtocolSoup</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preload" href={interLatin} as="font" type="font/woff2" crossorigin />
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { background: var(--ps-bg-base); color: var(--ps-fg); }
+      /* Unlayered, so these beat Scalar's @layer scalar-base defaults; withDefaultFonts: false stops its font CDN */
+      :root {
+        --scalar-font: var(--ps-font-sans);
+        --scalar-font-code: var(--ps-font-mono);
+      }
+
+      body { background: var(--ps-bg-base); color: var(--ps-fg); font-family: var(--ps-font-sans); }
 
       .api-topbar {
         position: sticky;
@@ -180,6 +190,7 @@ import logoDark from '../assets/wordmark-dark.svg';
       var scalarInstance = Scalar.createApiReference('#scalar-ref', {
         theme: 'purple',
         darkMode: true,
+        withDefaultFonts: false,
         hideDownloadButton: false,
         hideTestRequestButton: false,
         proxyUrl: 'https://proxy.scalar.com',
@@ -208,6 +219,7 @@ import logoDark from '../assets/wordmark-dark.svg';
           scalarInstance = Scalar.createApiReference('#scalar-ref', {
             theme: 'purple',
             darkMode: true,
+            withDefaultFonts: false,
             hideDownloadButton: false,
             hideTestRequestButton: false,
             proxyUrl: 'https://proxy.scalar.com',
