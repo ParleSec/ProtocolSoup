@@ -147,8 +147,13 @@ Bearer flow is unchanged -- DPoP is opt-in, never mandatory, on this endpoint.
   `iat` (60-second window), and a replayed `jti` -- replay-store outages fail
   the request closed with `server_error`, never open.
 - A server-provided nonce challenge (`DPoP-Nonce` response header,
-  `use_dpop_nonce` error) is available but off by default, enabled via
-  `SHOWCASE_DPOP_NONCE_REQUIRED`. See [Environment
+  `use_dpop_nonce` error) runs at `/oauth2/token` when
+  `SHOWCASE_DPOP_NONCE_REQUIRED` is set (RFC 9449 Section 8), and as a
+  separate nonce space at `/oauth2/resource` when
+  `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` is set (Section 9). Both are on in
+  the hosted deployment at protocolsoup.com, so the DPoP flow there always
+  shows the challenge and the retry with the supplied nonce. Both default to
+  off for local and self-hosted runs. See [Environment
   Variables](/deploy/environment-variables/).
 - Only JWT access tokens can be bound. Opaque/reference access token binding
   is a separate mechanism this platform does not implement.

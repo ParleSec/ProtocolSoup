@@ -69,8 +69,8 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | `SHOWCASE_DATA_DIR` | No | - | Persistent storage for VC/session state, and the SAML IdP and SP signing keys and certificates (`saml/`). Without it the SAML certificates change on every restart. |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
 | `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared replay store. Production requires a reachable `rediss://` secret; demo may use `redis://` on a private local network. Also backs the RFC 9449 DPoP proof `jti` replay stores for both oauth2 and OID4VCI. |
-| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |
-| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints. |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token` and `/oid4vci/par`. The hosted deployment sets it to `true`. |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §9 resource-server nonce challenge, as a separate nonce space, at `/oauth2/resource` and OID4VCI's credential, deferred_credential, and notification endpoints. The hosted deployment sets it to `true`. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
 | `SSF_STREAM_CLIENT_SECRET` | No | auto-generated | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |

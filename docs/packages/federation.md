@@ -32,8 +32,8 @@
 | `SHOWCASE_MOCK_IDP` | No | `true` | Enable built-in mock identity provider |
 | `SHOWCASE_DATA_DIR` | No | `(none)` | Enables durable VC wallet-credential and verifier-session persistence, and persists the SAML IdP and SP signing keys and certificates under `saml/` |
 | `OAUTH2_REPLAY_REDIS_URL` | Demo and production | In-memory in development/tests | Shared Redis URL for atomic client-assertion replay protection. Production requires `rediss://`; demo and production fail startup if the store is missing or unreachable. Also backs the RFC 9449 DPoP proof `jti` replay stores for both oauth2 and OID4VCI (distinct key prefix and instance from the `private_key_jwt` store). |
-| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 server-provided nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token`. |
-| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at OID4VCI's resource-server endpoints (`/oid4vci/credential`, `/oid4vci/nonce`, `/oid4vci/deferred_credential`). |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 server-provided nonce challenge at oauth2's `/oauth2/token` and OID4VCI's own `/oid4vci/token` and `/oid4vci/par`. The hosted deployment sets it to `true`. |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §9 resource-server nonce challenge, as a separate nonce space, at `/oauth2/resource`, `/oid4vci/credential`, `/oid4vci/deferred_credential`, and `/oid4vci/notification`. The hosted deployment sets it to `true`. |
 | `MOCKIDP_ALICE_PASSWORD` | No | `(auto-generated)` | Demo user password override |
 | `MOCKIDP_BOB_PASSWORD` | No | `(auto-generated)` | Demo user password override |
 | `MOCKIDP_ADMIN_PASSWORD` | No | `(auto-generated)` | Demo user password override |

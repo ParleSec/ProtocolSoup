@@ -179,14 +179,18 @@ flow remains unaffected by default.
   (FAPI2 SP Final §5.3.2.1-9); FAPI2 may still present a new DPoP proof key on
   refresh. Pre-authorized code grants do not issue refresh tokens. A
   DPoP-bound access token
-  is then rejected at the credential, nonce,
+  is then rejected at the credential,
   deferred_credential, and notification endpoints unless presented as `Authorization: DPoP
   <token>` with a matching, unreplayed DPoP proof — presenting it as a bare
-  bearer token fails outright, never silently downgrades. A server-provided
-  nonce challenge (`DPoP-Nonce` response header, `use_dpop_nonce` error) is
-  available independently at the token endpoint (`SHOWCASE_DPOP_NONCE_REQUIRED`)
-  and at the resource endpoints (`SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED`), off
-  by default. This issuer's own RFC 8414 metadata advertises
+  bearer token fails outright, never silently downgrades. The Nonce Endpoint
+  takes no access token. A server-provided nonce challenge (`DPoP-Nonce`
+  response header, `use_dpop_nonce` error) runs independently at the PAR and
+  token endpoints (`SHOWCASE_DPOP_NONCE_REQUIRED`, RFC 9449 Section 8) and at
+  the credential, deferred_credential, and notification endpoints
+  (`SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED`, Section 9). Both are on in the
+  hosted deployment, so DPoP issuance through the hosted wallet always shows
+  the challenge and retry in Looking Glass there; both default to off for
+  local and self-hosted runs. This issuer's own RFC 8414 metadata advertises
   `dpop_signing_alg_values_supported` for the accepted proof algorithms. Only
   JWT access tokens can be bound; opaque/reference token binding is out of
   scope.
