@@ -285,6 +285,9 @@ func TestMsoMdocAuthorizationCodeIssuance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create authorization code: %v", err)
 	}
+	if err := idp.BindCredentialConfigurationIDs(authCode.Code, []string{mdocConfigurationID}); err != nil {
+		t.Fatalf("bind credential configuration ids: %v", err)
+	}
 
 	tokenResp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
 		"grant_type":   {"authorization_code"},
