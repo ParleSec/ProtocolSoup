@@ -6,56 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 )
-
-// TestEveryRequirementHasAnEntry keeps the scenario catalogue and the
-// registry in step: every requirement is demonstrated, explained as
-// unavailable, or explicitly pending, and nothing is registered for a
-// requirement the registry does not have.
-func TestEveryRequirementHasAnEntry(t *testing.T) {
-	registry, err := conformance.Embedded()
-	if err != nil {
-		t.Fatalf("embedded registry: %v", err)
-	}
-	known := map[string]bool{}
-	for _, req := range registry.Requirements {
-		known[req.ID] = true
-		entry, ok := entries[req.ID]
-		if !ok {
-			t.Errorf("%s has no capture entry; register scenarios, an unavailable reason, or list it in pending", req.ID)
-			continue
-		}
-		if entry.Pending {
-			continue
-		}
-		for _, kind := range []conformance.ArtefactKind{conformance.KindPassing, conformance.KindFailing} {
-			scenario := entry.Passing
-			want := conformance.OutcomeAccepted
-			if kind == conformance.KindFailing {
-				scenario = entry.Failing
-				want = conformance.OutcomeRejected
-			}
-			reason := strings.TrimSpace(entry.Unavailable[kind])
-			switch {
-			case scenario == nil && reason == "":
-				t.Errorf("%s %s has neither a scenario nor an unavailable reason", req.ID, kind)
-			case scenario != nil && reason != "":
-				t.Errorf("%s %s has both a scenario and an unavailable reason", req.ID, kind)
-			case scenario != nil && scenario.Expected != want:
-				t.Errorf("%s %s scenario %q expects %s; a %s scenario expects %s", req.ID, kind, scenario.Name, scenario.Expected, kind, want)
-			case scenario != nil && (scenario.Name == "" || scenario.Description == "" || scenario.Actor == "" || scenario.Run == nil):
-				t.Errorf("%s %s scenario is missing a name, description, actor or Run", req.ID, kind)
-			}
-		}
-	}
-	for id := range entries {
-		if !known[id] {
-			t.Errorf("capture entry %s is not a registry requirement", id)
-		}
-	}
-}
 
 // TestRecorderKeepsWholeBodies checks the recorder stores what crossed the
 // wire in full, including bodies far beyond the Looking Glass capture limit.
@@ -115,13 +66,5 @@ func TestRecorderKeepsWholeBodies(t *testing.T) {
 	}
 	if len(recorder.Take()) != 0 {
 		t.Fatal("Take must clear the recorded exchanges")
-	}
-}
-
-func TestDifferentDigits(t *testing.T) {
-	for _, code := range []string{"123456", "999999", "000000"} {
-		if got := differentDigits(code); got == code || len(got) != len(code) {
-			t.Fatalf("differentDigits(%q) = %q", code, got)
-		}
 	}
 }

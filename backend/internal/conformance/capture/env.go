@@ -64,7 +64,7 @@ type Response struct {
 func (r *Response) JSON() (map[string]any, error) {
 	var out map[string]any
 	if err := json.Unmarshal(r.Body, &out); err != nil {
-		return nil, fmt.Errorf("decode %d response: %w: %s", r.Status, err, truncate(r.Body))
+		return nil, fmt.Errorf("decode %d response: %w: %s", r.Status, err, Truncate(r.Body))
 	}
 	return out, nil
 }
@@ -155,7 +155,7 @@ func NewJSON(target string, body any) (*http.Request, error) {
 	return req, nil
 }
 
-func truncate(body []byte) string {
+func Truncate(body []byte) string {
 	const limit = 300
 	if len(body) > limit {
 		return string(body[:limit]) + "..."

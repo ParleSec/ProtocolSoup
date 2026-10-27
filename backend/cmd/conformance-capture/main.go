@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture"
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/scenarios"
 )
 
 func main() {

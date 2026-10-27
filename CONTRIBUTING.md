@@ -208,7 +208,7 @@ Run the smallest set that covers your change. CI may run additional checks, but 
 | OpenAPI contracts | `npx @redocly/cli lint --config redocly.yaml gateway@v1 scim@v1 federation@v1 vc@v1` |
 | Docker or service topology | `cd docker && docker compose config` and, when practical, `docker compose up -d` |
 | OID4VCI/OID4VP protocol behavior | `cd backend && go test ./internal/protocols/oid4vci ./internal/protocols/oid4vp -count=1` |
-| Conformance capture scenarios (`internal/conformance/capture`, `cmd/conformance-capture`) | `cd backend && go test ./internal/conformance/...`, then against a local server started with `BUILD_COMMIT` set: `go run ./cmd/conformance-capture -base http://localhost:8080 -only <IDs>` |
+| Conformance capture scenarios (`internal/conformance/capture/**`, `cmd/conformance-capture`) | `cd backend && go test ./internal/conformance/...`, then against a local server started with `BUILD_COMMIT` and `SHOWCASE_DPOP_NONCE_REQUIRED=true`: `CAPTURE_BASE=http://localhost:8080 go test ./internal/conformance/capture/<family> -run TestLive -v` |
 | Palette content (`content/**`) | `cd backend && go run ./cmd/content-validate -content ../content && go test ./internal/palette/...` |
 | Palette indexer or query service | `cd backend && go test ./internal/palette/... && go run ./cmd/palette-indexer -content ../content -out ./dist/palette.db` |
 
