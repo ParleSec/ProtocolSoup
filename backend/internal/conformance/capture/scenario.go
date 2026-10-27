@@ -26,20 +26,21 @@ type Scenario struct {
 }
 
 // Entry says how a requirement is demonstrated. Each kind is either a
-// scenario or an unavailable reason; Pending marks a requirement whose
-// scenarios are not written yet and is removed once every row has them.
+// scenario or an unavailable reason.
 type Entry struct {
 	Passing     *Scenario
 	Failing     *Scenario
 	Unavailable map[conformance.ArtefactKind]string
-	Pending     bool
 }
 
-// entries maps a registry requirement ID to how it is demonstrated. Every
-// registry row must appear; TestEveryRequirementHasAnEntry enforces it.
+// entries maps a registry requirement ID to how it is demonstrated. The
+// scenario packages fill it from init; package scenarios imports them all
+// and checks every registry row is covered.
 var entries = map[string]Entry{}
 
-func register(id string, entry Entry) {
+// Register records how requirement id is demonstrated. Scenario packages
+// call it from init; registering an ID twice is a programming error.
+func Register(id string, entry Entry) {
 	if _, exists := entries[id]; exists {
 		panic("capture: duplicate entry for " + id)
 	}
@@ -77,8 +78,8 @@ func Run(ctx context.Context, env *Env, recorder *Recorder, commit string, only 
 		wanted[strings.ToUpper(strings.TrimSpace(id))] = true
 	}
 	ids := make([]string, 0, len(entries))
-	for id, entry := range entries {
-		if entry.Pending || (len(wanted) > 0 && !wanted[id]) {
+	for id := range entries {
+		if len(wanted) > 0 && !wanted[id] {
 			continue
 		}
 		ids = append(ids, id)

@@ -1,16 +1,14 @@
-package capture
+package oid4vp
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance"
+	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture"
 	"github.com/google/uuid"
 )
 
@@ -18,22 +16,22 @@ import (
 const requestObjectLifetime = 5 * time.Minute
 
 func init() {
-	register("VP-008", Entry{
-		Passing: &Scenario{
+	capture.Register("VP-008", capture.Entry{
+		Passing: &capture.Scenario{
 			Name:        "bind-and-repeat",
 			Description: "The conformance client POSTs a wallet_nonce to a request_uri_method=post request_uri, then repeats the same POST. The first response must carry the nonce in the signed request object; the second must be byte-identical.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeAccepted,
-			Run: func(ctx context.Context, env *Env) (conformance.ArtefactOutcome, error) {
+			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return walletNonceBinding(ctx, env, false)
 			},
 		},
-		Failing: &Scenario{
+		Failing: &capture.Scenario{
 			Name:        "change-nonce",
 			Description: "The conformance client binds one wallet_nonce, then POSTs a different wallet_nonce to the same request_uri.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
-			Run: func(ctx context.Context, env *Env) (conformance.ArtefactOutcome, error) {
+			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return walletNonceBinding(ctx, env, true)
 			},
 		},
@@ -42,8 +40,8 @@ func init() {
 
 // postRequestURI creates a request_uri_method=post Authorization Request and
 // returns its request_uri.
-func postRequestURI(ctx context.Context, env *Env) (string, error) {
-	req, err := NewJSON(env.BaseURL+"/oid4vp/request/create", map[string]any{
+func postRequestURI(ctx context.Context, env *capture.Env) (string, error) {
+	req, err := capture.NewJSON(env.BaseURL+"/oid4vp/request/create", map[string]any{
 		"response_mode":      "direct_post",
 		"response_uri":       env.BaseURL + "/oid4vp/response",
 		"request_uri_method": "post",
@@ -63,7 +61,7 @@ func postRequestURI(ctx context.Context, env *Env) (string, error) {
 		return "", err
 	}
 	if resp.Status != http.StatusCreated {
-		return "", fmt.Errorf("request creation answered %d %s", resp.Status, truncate(resp.Body))
+		return "", fmt.Errorf("request creation answered %d %s", resp.Status, capture.Truncate(resp.Body))
 	}
 	body, err := resp.JSON()
 	if err != nil {
@@ -80,14 +78,14 @@ func postRequestURI(ctx context.Context, env *Env) (string, error) {
 // walletNonceBinding exercises OID4VP 1.0 Section 5.10: "When received, the
 // Verifier MUST use it as the wallet_nonce value in the signed authorization
 // request object."
-func walletNonceBinding(ctx context.Context, env *Env, changeNonce bool) (conformance.ArtefactOutcome, error) {
+func walletNonceBinding(ctx context.Context, env *capture.Env, changeNonce bool) (conformance.ArtefactOutcome, error) {
 	requestURI, err := postRequestURI(ctx, env)
 	if err != nil {
 		return "", err
 	}
 	first := uuid.NewString()
-	fetch := func(nonce string) (*Response, error) {
-		req, err := NewForm(requestURI, url.Values{"wallet_nonce": {nonce}})
+	fetch := func(nonce string) (*capture.Response, error) {
+		req, err := capture.NewForm(requestURI, url.Values{"wallet_nonce": {nonce}})
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +100,7 @@ func walletNonceBinding(ctx context.Context, env *Env, changeNonce bool) (confor
 	if bound.Status != http.StatusOK {
 		return conformance.OutcomeRejected, nil
 	}
-	claim, err := jwtClaim(string(bound.Body), "wallet_nonce")
+	claim, err := capture.JWTClaim(string(bound.Body), "wallet_nonce")
 	if err != nil {
 		return "", err
 	}
@@ -129,25 +127,6 @@ func walletNonceBinding(ctx context.Context, env *Env, changeNonce bool) (confor
 	case again.Status == http.StatusBadRequest && again.Error() == "invalid_request":
 		return conformance.OutcomeRejected, nil
 	default:
-		return "", fmt.Errorf("request_uri answered %d %s", again.Status, truncate(again.Body))
+		return "", fmt.Errorf("request_uri answered %d %s", again.Status, capture.Truncate(again.Body))
 	}
-}
-
-// jwtClaim reads one string claim from a compact JWS payload without
-// verifying it; the scenario only checks what the verifier put there.
-func jwtClaim(compact, name string) (string, error) {
-	parts := strings.Split(strings.TrimSpace(compact), ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("request object is not a compact JWS")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("decode request object payload: %w", err)
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", fmt.Errorf("parse request object payload: %w", err)
-	}
-	value, _ := claims[name].(string)
-	return value, nil
 }
