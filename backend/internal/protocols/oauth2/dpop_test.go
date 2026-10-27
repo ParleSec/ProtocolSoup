@@ -819,6 +819,45 @@ func TestTokenEndpointNonceDisabledByDefaultNoBehaviouralChange(t *testing.T) {
 	}
 }
 
+// TestInitializeWiresDPoPNonceFlagsIndependently covers the path production
+// takes: SHOWCASE_DPOP_NONCE_REQUIRED and SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED
+// reach the plugin through PluginConfig, and each switch enables only its own
+// nonce space (RFC 9449 Section 9: "nonces will be only accepted by the
+// server that issued them").
+func TestInitializeWiresDPoPNonceFlagsIndependently(t *testing.T) {
+	cases := []struct {
+		name          string
+		tokenNonce    bool
+		resourceNonce bool
+	}{
+		{name: "token endpoint only", tokenNonce: true},
+		{name: "resource only", resourceNonce: true},
+		{name: "both", tokenNonce: true, resourceNonce: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oauthPlugin := NewPlugin()
+			if err := oauthPlugin.Initialize(context.Background(), plugin.PluginConfig{
+				Environment:               "test",
+				BaseURL:                   "https://as.example",
+				DPoPNonceRequired:         tc.tokenNonce,
+				DPoPResourceNonceRequired: tc.resourceNonce,
+			}); err != nil {
+				t.Fatalf("initialize: %v", err)
+			}
+			if got := oauthPlugin.dpopNonceIssuer != nil; got != tc.tokenNonce {
+				t.Fatalf("token endpoint nonce issuer enabled = %v, want %v", got, tc.tokenNonce)
+			}
+			if got := oauthPlugin.dpopRSNonceIssuer != nil; got != tc.resourceNonce {
+				t.Fatalf("resource nonce issuer enabled = %v, want %v", got, tc.resourceNonce)
+			}
+			if tc.tokenNonce && tc.resourceNonce && oauthPlugin.dpopNonceIssuer == oauthPlugin.dpopRSNonceIssuer {
+				t.Fatal("AS and RS nonce spaces must be independent issuers (RFC 9449 Section 9)")
+			}
+		})
+	}
+}
+
 func TestTokenEndpointChallengesMissingNonceWhenRequired(t *testing.T) {
 	server := newOAuthAssertionTestServer(t)
 	server.plugin.dpopNonceIssuer = dpop.NewNonceIssuer(time.Minute)

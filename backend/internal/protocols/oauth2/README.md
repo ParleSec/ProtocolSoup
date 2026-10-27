@@ -441,7 +441,8 @@ The authorization server advertises `response_types_supported: ["code", "token"]
 | `SHOWCASE_BASE_URL` | Public base URL | `http://localhost:8080` |
 | `SHOWCASE_CORS_ORIGINS` | CORS allowed origins | `http://localhost:3000,http://localhost:5173` |
 | `OAUTH2_REPLAY_REDIS_URL` | Shared replay Redis URL for `private_key_jwt` assertion replay; required in demo and reachable `rediss://` is required in production. Also backs this plugin's RFC 9449 DPoP proof `jti` replay store (separate key prefix/instance) | in-memory in development/tests |
-| `SHOWCASE_DPOP_NONCE_REQUIRED` | Enables the RFC 9449 §8 nonce challenge at `/oauth2/token` | `false` |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | Enables the RFC 9449 §8 nonce challenge at `/oauth2/token` (on in the hosted deployment) | `false` |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | Enables the RFC 9449 §9 nonce challenge, as a separate nonce space, at `/oauth2/resource` (on in the hosted deployment) | `false` |
 | `MOCKIDP_DEMO_CLIENT_SECRET` | demo-app client secret | (auto-generated) |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | machine-client secret | (auto-generated) |
 | `SSF_STREAM_CLIENT_SECRET` | ssf-stream-client secret | (auto-generated) |

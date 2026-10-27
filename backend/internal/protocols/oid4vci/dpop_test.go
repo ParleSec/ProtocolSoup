@@ -742,6 +742,54 @@ func TestTokenEndpointNonceDisabledByDefaultOID4VCI(t *testing.T) {
 	}
 }
 
+// TestInitializeWiresDPoPNonceFlagsIndependentlyOID4VCI covers the path
+// production takes: the two SHOWCASE_DPOP_*NONCE_REQUIRED switches reach the
+// plugin through PluginConfig, and each enables only its own nonce space
+// (RFC 9449 Section 9: "nonces will be only accepted by the server that
+// issued them").
+func TestInitializeWiresDPoPNonceFlagsIndependentlyOID4VCI(t *testing.T) {
+	cases := []struct {
+		name          string
+		tokenNonce    bool
+		resourceNonce bool
+	}{
+		{name: "token endpoint only", tokenNonce: true},
+		{name: "resource only", resourceNonce: true},
+		{name: "both", tokenNonce: true, resourceNonce: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := vc.DefaultWalletCredentialStore()
+			store.DisablePersistence()
+			store.Reset()
+			keySet, err := internalcrypto.NewKeySet()
+			if err != nil {
+				t.Fatalf("new key set: %v", err)
+			}
+			testPlugin := NewPlugin()
+			if err := testPlugin.Initialize(context.Background(), plugin.PluginConfig{
+				BaseURL:                   "http://localhost:8080",
+				KeySet:                    keySet,
+				MockIdP:                   mockidp.NewMockIdP(keySet),
+				DPoPNonceRequired:         tc.tokenNonce,
+				DPoPResourceNonceRequired: tc.resourceNonce,
+			}); err != nil {
+				t.Fatalf("initialize plugin: %v", err)
+			}
+			t.Cleanup(func() { _ = testPlugin.Shutdown(context.Background()) })
+			if got := testPlugin.dpopASNonceIssuer != nil; got != tc.tokenNonce {
+				t.Fatalf("token endpoint nonce issuer enabled = %v, want %v", got, tc.tokenNonce)
+			}
+			if got := testPlugin.dpopRSNonceIssuer != nil; got != tc.resourceNonce {
+				t.Fatalf("resource nonce issuer enabled = %v, want %v", got, tc.resourceNonce)
+			}
+			if tc.tokenNonce && tc.resourceNonce && testPlugin.dpopASNonceIssuer == testPlugin.dpopRSNonceIssuer {
+				t.Fatal("AS and RS nonce spaces must be independent issuers (RFC 9449 Section 9)")
+			}
+		})
+	}
+}
+
 func TestTokenEndpointChallengesMissingNonceOID4VCI(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	server.plugin.dpopASNonceIssuer = dpop.NewNonceIssuer(time.Minute)
