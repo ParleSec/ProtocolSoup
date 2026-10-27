@@ -27,9 +27,7 @@
   --sl-color-black: var(--ps-bg-base);
 
   --sl-font: var(--ps-font-sans);
-  --sl-font-system: var(--ps-font-sans);
   --sl-font-mono: var(--ps-font-mono);
-  --sl-text-code: var(--ps-font-mono);
 }
 
 :root[data-theme='light'] {
@@ -49,8 +47,9 @@
   letter-spacing: var(--ps-tracking-heading);
 }
 
-[data-current="true"] > a {
-  background: color-mix(in srgb, var(--ps-brand) 8%, transparent) !important;
+.sidebar-content a[aria-current='page'] {
+  color: var(--sl-color-text-accent);
+  background: color-mix(in srgb, var(--ps-brand) 8%, transparent);
 }
 
 .protocol-badge {
@@ -70,7 +69,7 @@
   color: var(--sl-color-accent-high);
 }
 
-.hero-home h1 {
+.hero h1 {
   font-size: var(--ps-text-display);
   font-weight: 800;
   line-height: 1.1;
