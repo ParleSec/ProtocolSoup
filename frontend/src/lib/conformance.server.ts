@@ -35,6 +35,7 @@ export interface ConformanceSpecsResponse {
 export interface ConformanceRequirementRow {
   id: string
   title: string
+  question: string
   section: string
   level: string
   roles: string[]
@@ -53,6 +54,7 @@ export interface ConformanceSpecResponse extends ConformanceSpecSummary {
 export interface ConformanceRequirementLink {
   id: string
   title: string
+  question: string
 }
 
 export interface ConformanceTestEvidence {
@@ -70,6 +72,7 @@ export interface ConformanceRequirementResponse {
   section_url: string
   level: string
   title: string
+  question: string
   statement: string
   roles: string[]
   applicability: 'applicable' | 'not_applicable' | 'deviation'
