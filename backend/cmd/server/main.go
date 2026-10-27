@@ -196,5 +196,16 @@ func loadConformanceCatalogue(cfg *core.Config, explainers *palette.Service) *co
 		log.Printf("Conformance report at %s does not match this build (report commit %q, dirty=%t, BUILD_COMMIT %q); requirement pages will show no verdicts",
 			cfg.ConformanceReportPath, report.Commit, report.Dirty, cfg.BuildCommit)
 	}
+	if cfg.ConformanceArtefactsPath != "" {
+		if set, err := conformance.LoadArtefacts(cfg.ConformanceArtefactsPath); err != nil {
+			log.Printf("Conformance artefacts unavailable at %s: %v; requirement pages will show no captured exchanges", cfg.ConformanceArtefactsPath, err)
+		} else {
+			catalogue.SetArtefacts(set)
+			if !catalogue.ArtefactsValid() {
+				log.Printf("Conformance artefacts at %s were captured from commit %q, not BUILD_COMMIT %q; requirement pages will show no captured exchanges",
+					cfg.ConformanceArtefactsPath, set.Commit, cfg.BuildCommit)
+			}
+		}
+	}
 	return catalogue
 }

@@ -93,6 +93,7 @@ ENV BACKEND_ORIGIN=http://127.0.0.1:8080
 ENV NEXT_PUBLIC_SITE_URL=https://protocolsoup.com
 ENV SHOWCASE_PALETTE_DB=/app/palette.db
 ENV CONFORMANCE_REPORT=/app/artifacts/vc-conformance/report.json
+ENV CONFORMANCE_ARTEFACTS=/app/artifacts/vc-conformance/artefacts.json
 
 EXPOSE 8080
 

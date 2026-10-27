@@ -5,9 +5,11 @@ import { createPageMetadata, absoluteUrl } from '@/lib/seo'
 import { generateBreadcrumbSchema, generateTechArticleSchema } from '@/utils/schema'
 import {
   getConformanceRequirement,
+  getConformanceRequirementArtefacts,
   requirementPath,
   specPath,
   truncateDescription,
+  type ConformanceRequirementArtefacts,
   type ConformanceRequirementResponse,
 } from '@/lib/conformance.server'
 import { isBackendNotFoundError } from '@/lib/protocols.server'
@@ -27,6 +29,15 @@ async function loadRequirement(requirementId: string): Promise<ConformanceRequir
       notFound()
     }
     throw error
+  }
+}
+
+/** Artefacts are optional evidence: an unreachable route renders as not captured. */
+async function loadArtefacts(requirementId: string): Promise<ConformanceRequirementArtefacts> {
+  try {
+    return await getConformanceRequirementArtefacts(requirementId)
+  } catch {
+    return { id: requirementId, status: 'not_captured' }
   }
 }
 
@@ -87,7 +98,11 @@ export default async function RequirementRoute({ params }: RequirementPageProps)
           dangerouslySetInnerHTML={{ __html: JSON.stringify(entry) }}
         />
       ))}
-      <RequirementPage requirement={requirement} relatedProtocol={getProtocolForSpec(spec.id)} />
+      <RequirementPage
+        requirement={requirement}
+        artefacts={await loadArtefacts(requirement.id)}
+        relatedProtocol={getProtocolForSpec(spec.id)}
+      />
     </>
   )
 }

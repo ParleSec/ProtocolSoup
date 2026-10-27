@@ -502,6 +502,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/conformance/requirements/{id}/artefacts:
+    get:
+      tags: [Conformance]
+      summary: Get exchanges captured from production for a requirement
+      description: >-
+        Returns the passing and failing exchanges `cmd/conformance-capture`
+        recorded against the deployed build, every request and response in
+        full. `status` is `not_captured` when no artefact set for the running
+        build is loaded or the requirement has none, and `pending` while some
+        token, code or nonce in the captured exchanges could still be used;
+        exchanges are only included once `status` is `published`. A kind that
+        could not be captured from production carries its reason in
+        `unavailable`. The lookup is case-insensitive.
+      operationId: getConformanceRequirementArtefacts
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: DP-001
+      responses:
+        "200":
+          description: Captured artefacts for the requirement.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConformanceRequirementArtefacts"
+        "404":
+          description: Unknown requirement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/conformance/sitemap:
     get:
       tags: [Conformance]
@@ -1304,6 +1343,153 @@ components:
           $ref: "#/components/schemas/ConformanceRequirementLink"
         next:
           $ref: "#/components/schemas/ConformanceRequirementLink"
+    ConformanceRequirementArtefacts:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          example: DP-001
+        status:
+          type: string
+          enum: [published, pending, not_captured]
+        commit:
+          type: string
+          description: Commit the artefacts were captured from, equal to the serving build.
+        captured_at:
+          type: string
+          format: date-time
+        publish_after:
+          type: string
+          format: date-time
+          description: >-
+            When every token, code and nonce obtained during capture has
+            expired or been revoked. Exchanges are withheld until then.
+        source_base_url:
+          type: string
+          format: uri
+        passing:
+          $ref: "#/components/schemas/ConformanceArtefact"
+        failing:
+          $ref: "#/components/schemas/ConformanceArtefact"
+        unavailable:
+          type: object
+          description: Reason, per kind, that an artefact could not be captured from production.
+          properties:
+            passing:
+              type: string
+            failing:
+              type: string
+    ConformanceArtefact:
+      type: object
+      required: [scenario, actor, description, expected_outcome, outcome, exchanges]
+      properties:
+        scenario:
+          type: string
+          example: two-dpop-headers
+        actor:
+          type: string
+          enum: [conformance_client, hosted_wallet, counterparty]
+          description: >-
+            Who sent the requests. Malformed requests always come from the
+            conformance client; the hosted wallet only acts as a conformant
+            wallet.
+        description:
+          type: string
+        expected_outcome:
+          type: string
+          enum: [accepted, rejected]
+          description: What a conformant server does with these requests.
+        outcome:
+          type: string
+          enum: [accepted, rejected]
+          description: What the deployed server actually did.
+        exchanges:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapturedExchange"
+    CapturedExchange:
+      type: object
+      required: [id, request, response, timing, meta]
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        request:
+          $ref: "#/components/schemas/CapturedMessage"
+        response:
+          $ref: "#/components/schemas/CapturedMessage"
+        timing:
+          type: object
+          properties:
+            start_unix_micro:
+              type: integer
+            end_unix_micro:
+              type: integer
+            duration_micro:
+              type: integer
+        tls:
+          type: object
+          description: TLS session details when the exchange used TLS.
+          additionalProperties: true
+        meta:
+          type: object
+          properties:
+            capture_source:
+              type: string
+              example: conformance_client
+            header_order_preserved:
+              type: boolean
+            body_limit_bytes:
+              type: integer
+              description: 0 means no limit; bodies are complete.
+            request_body_read_bytes:
+              type: integer
+            response_body_written_bytes:
+              type: integer
+            raw_reconstructed:
+              type: boolean
+    CapturedMessage:
+      type: object
+      properties:
+        method:
+          type: string
+        url:
+          type: string
+        host:
+          type: string
+        proto:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        body:
+          $ref: "#/components/schemas/CapturedPayload"
+        raw:
+          $ref: "#/components/schemas/CapturedPayload"
+        status:
+          type: integer
+        status_text:
+          type: string
+    CapturedPayload:
+      type: object
+      required: [encoding, size, truncated]
+      properties:
+        encoding:
+          type: string
+          enum: [utf-8, base64]
+        data:
+          type: string
+        size:
+          type: integer
+        truncated:
+          type: boolean
+        content_type:
+          type: string
     ConformanceSitemapEntry:
       type: object
       required: [path, lastmod]

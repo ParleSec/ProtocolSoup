@@ -2,8 +2,6 @@ package spiffe
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -12,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -692,7 +689,7 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.TLSState != nil {
-		tlsInfo := buildOutboundTLSInfo(result.TLSState, result.ClientCerts)
+		tlsInfo := lookingglass.OutboundTLSInfo(result.TLSState, result.ClientCerts)
 		if tlsInfo != nil {
 			setTLSInfo(w, tlsInfo)
 		}
@@ -715,110 +712,6 @@ func (p *Plugin) handleMTLSCall(w http.ResponseWriter, r *http.Request) {
 		"steps":              result.Steps,
 		"target":             targetAddr,
 	})
-}
-
-func buildOutboundTLSInfo(state *tls.ConnectionState, clientCerts []*x509.Certificate) *lookingglass.TLSInfo {
-	if state == nil {
-		return nil
-	}
-
-	version := tls.VersionName(state.Version)
-	if version == "" {
-		version = "0x" + strconv.FormatUint(uint64(state.Version), 16)
-	}
-	cipher := tls.CipherSuiteName(state.CipherSuite)
-	if cipher == "" {
-		cipher = "0x" + strconv.FormatUint(uint64(state.CipherSuite), 16)
-	}
-
-	peerCerts := make([]string, 0, len(state.PeerCertificates))
-	for _, cert := range state.PeerCertificates {
-		if cert == nil {
-			continue
-		}
-		peerCerts = append(peerCerts, cert.Subject.String())
-	}
-
-	verifiedChainLength := 0
-	serverChain := state.PeerCertificates
-	if len(state.VerifiedChains) > 0 && len(state.VerifiedChains[0]) > 0 {
-		serverChain = state.VerifiedChains[0]
-		verifiedChainLength = len(state.VerifiedChains[0])
-	}
-
-	var serverCert *lookingglass.CertificateInfo
-	serverChainInfo := make([]lookingglass.CertificateInfo, 0, len(serverChain))
-	for _, cert := range serverChain {
-		info := certificateInfoFromX509(cert)
-		if info == nil {
-			continue
-		}
-		if serverCert == nil {
-			serverCert = info
-		}
-		serverChainInfo = append(serverChainInfo, *info)
-	}
-
-	var clientCert *lookingglass.CertificateInfo
-	clientChainInfo := make([]lookingglass.CertificateInfo, 0, len(clientCerts))
-	for _, cert := range clientCerts {
-		info := certificateInfoFromX509(cert)
-		if info == nil {
-			continue
-		}
-		if clientCert == nil {
-			clientCert = info
-		}
-		clientChainInfo = append(clientChainInfo, *info)
-	}
-
-	return &lookingglass.TLSInfo{
-		Version:             version,
-		CipherSuite:         cipher,
-		ServerName:          state.ServerName,
-		NegotiatedProtocol:  state.NegotiatedProtocol,
-		PeerCertificates:    peerCerts,
-		ClientCert:          clientCert,
-		ServerCert:          serverCert,
-		ClientChain:         clientChainInfo,
-		ServerChain:         serverChainInfo,
-		MutualTLS:           clientCert != nil && serverCert != nil,
-		VerifiedChainLength: verifiedChainLength,
-		Source:              "outbound",
-	}
-}
-
-func certificateInfoFromX509(cert *x509.Certificate) *lookingglass.CertificateInfo {
-	if cert == nil {
-		return nil
-	}
-
-	thumbprint := ""
-	if len(cert.Raw) > 0 {
-		sum := sha256.Sum256(cert.Raw)
-		thumbprint = base64.RawURLEncoding.EncodeToString(sum[:])
-	}
-
-	spiffeID := ""
-	for _, uri := range cert.URIs {
-		if uri == nil {
-			continue
-		}
-		if uri.Scheme == "spiffe" {
-			spiffeID = uri.String()
-			break
-		}
-	}
-
-	return &lookingglass.CertificateInfo{
-		Subject:      cert.Subject.String(),
-		Issuer:       cert.Issuer.String(),
-		SPIFFEID:     spiffeID,
-		Thumbprint:   thumbprint,
-		NotBefore:    cert.NotBefore,
-		NotAfter:     cert.NotAfter,
-		SerialNumber: cert.SerialNumber.String(),
-	}
 }
 
 func setTLSInfo(w http.ResponseWriter, info *lookingglass.TLSInfo) {

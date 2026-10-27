@@ -141,6 +141,18 @@ that only restates its registry row. The same pages answer
 documented under the `Conformance` tag of the gateway contract in the
 [API reference](/api/reference/).
 
+Each requirement page also shows exchanges captured from production: a
+passing exchange, where the deployed server does what the requirement says,
+and a failing one, where it refuses a request that breaks it. After each
+deploy, CI runs `cmd/conformance-capture` against protocolsoup.com and the
+hosted wallet and redeploys the same commit with the result
+(`CONFORMANCE_ARTEFACTS`). Every request and response is shown in full, with
+the sender named: malformed requests come from ProtocolSoup's conformance
+client, never from the hosted wallet. A set is only shown for the build that
+captured it, and only once every token, code and nonce in it has expired;
+until then the page says when it publishes. A kind that cannot be captured
+from production says why.
+
 ```bash
 curl -s https://protocolsoup.com/api/conformance/specs | jq '.specs[] | {id, requirement_count, indexable}'
 curl -H 'Accept: text/markdown' https://protocolsoup.com/spec/oid4vp/vp-001
