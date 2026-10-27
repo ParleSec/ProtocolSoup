@@ -115,7 +115,9 @@ worth the dependency weight.
 Each requirement in the conformance registry
 (`backend/internal/conformance/vc-requirements.yaml`) has a server-rendered
 page at `/spec/{spec}/{requirement}` (for example `/spec/oid4vp/vp-001`), and
-each specification has an index at `/spec/{spec}`. A page carries the
+each specification has an index at `/spec/{spec}`. A page is titled with the
+question the requirement answers (the registry's `question` field, for
+example "What must a DPoP proof's htu claim match?"), and carries the
 requirement statement, the specification section it comes from with a link to
 that section, the BCP 14 level and roles, and ProtocolSoup's self-test verdict
 for the build serving the page, with links to the exact test functions and

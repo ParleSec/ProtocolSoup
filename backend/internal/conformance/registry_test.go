@@ -47,6 +47,7 @@ func validRegistryFixture(t *testing.T) (Registry, string) {
 			Section:        "1",
 			Level:          "MUST",
 			Title:          "Executable evidence for the implementation",
+			Question:       "Does the implementation have executable evidence?",
 			Statement:      "The implementation MUST have executable evidence.",
 			Roles:          []string{"server"},
 			Applicability:  "applicable",
@@ -133,6 +134,33 @@ func TestRegistryValidationTitleRules(t *testing.T) {
 	registry.Requirements[0].Title = strings.Repeat("a", MaxTitleLength)
 	if err := Validate(registry, root); err != nil {
 		t.Fatalf("Validate(title at limit): %v", err)
+	}
+}
+
+func TestRegistryValidationQuestionRules(t *testing.T) {
+	cases := []struct {
+		name     string
+		question string
+		want     string
+	}{
+		{name: "missing", question: "", want: "question is required"},
+		{name: "too long", question: strings.Repeat("a", MaxQuestionLength) + "?", want: "exceeds 100 characters"},
+		{name: "not a question", question: "The implementation has evidence.", want: "must end with a question mark"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			registry, root := validRegistryFixture(t)
+			registry.Requirements[0].Question = tc.question
+			if err := Validate(registry, root); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate(question %q) = %v, want %q", tc.question, err, tc.want)
+			}
+		})
+	}
+
+	registry, root := validRegistryFixture(t)
+	registry.Requirements[0].Question = strings.Repeat("a", MaxQuestionLength-1) + "?"
+	if err := Validate(registry, root); err != nil {
+		t.Fatalf("Validate(question at limit): %v", err)
 	}
 }
 

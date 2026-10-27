@@ -13,6 +13,7 @@ import { buildFlowExecutionPath } from '@/components/palette/runDispatch'
 import { FLOW_PRESENTATION_META, getFeatureDescription } from '../protocols/presentation/flow-meta'
 import { getCatalogProtocol, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
 import { ProtocolReferences } from '../components/ProtocolReferences'
+import { getProtocolQuestion } from '../config/seo'
 
 const NEUTRAL_PROTOCOL_META = {
   icon: 'Shield',
@@ -84,9 +85,12 @@ export function ProtocolDemo({
           <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5" />
         </Link>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl sm:text-3xl font-bold text-white flex items-center gap-2 sm:gap-3">
-            <ProtocolIcon className="w-6 h-6 sm:w-8 sm:h-8 text-accent-orange flex-shrink-0" />
+          <p className="text-sm sm:text-base font-semibold text-surface-200 flex items-center gap-2 sm:gap-3">
+            <ProtocolIcon className="w-5 h-5 sm:w-6 sm:h-6 text-accent-orange flex-shrink-0" aria-hidden="true" />
             <span className="truncate">{protocol.name}</span>
+          </p>
+          <h1 className="text-xl sm:text-3xl font-bold text-white mt-1">
+            {getProtocolQuestion(protocolId) ?? protocol.name}
           </h1>
           <p className="text-surface-400 mt-1.5 sm:mt-2 max-w-3xl text-sm sm:text-base">{protocol.description}</p>
         </div>

@@ -107,10 +107,12 @@ export function RequirementPage({ requirement, relatedProtocol }: RequirementPag
       </nav>
 
       <header className="space-y-2">
-        <h1 className="text-2xl sm:text-3xl font-bold text-white">{requirement.title}</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-white">{requirement.question}</h1>
         {/* Visible separators keep the markdown rendering readable: turndown
             collapses adjacent inline spans without whitespace. */}
         <p className="text-sm sm:text-base text-surface-400 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-surface-200">{requirement.title}</span>
+          <span aria-hidden="true">{' · '}</span>
           <span>{spec.short_title} §{requirement.section}</span>
           <span aria-hidden="true">{' · '}</span>
           <span className="font-mono text-xs px-2 py-0.5 rounded bg-white/5 border border-white/10 text-surface-200">{requirement.level}</span>
@@ -229,7 +231,7 @@ export function RequirementPage({ requirement, relatedProtocol }: RequirementPag
                 <li key={sibling.id}>
                   <Link href={requirementPath(spec.id, sibling.id)} className="text-sm text-surface-200 hover:text-white transition-colors">
                     <span className="font-mono text-surface-400 mr-2">{sibling.id}</span>
-                    {sibling.title}
+                    {sibling.question}
                   </Link>
                 </li>
               ))}
@@ -241,13 +243,13 @@ export function RequirementPage({ requirement, relatedProtocol }: RequirementPag
             <Link href={requirementPath(spec.id, requirement.previous.id)} className="inline-flex items-center gap-1.5 text-surface-300 hover:text-white transition-colors">
               <ArrowLeft className="w-3.5 h-3.5" />
               <span className="font-mono text-surface-400">{requirement.previous.id}</span>
-              <span className="truncate">{requirement.previous.title}</span>
+              <span className="truncate">{requirement.previous.question}</span>
             </Link>
           ) : <span />}
           {requirement.next && (
             <Link href={requirementPath(spec.id, requirement.next.id)} className="inline-flex items-center gap-1.5 text-surface-300 hover:text-white transition-colors sm:text-right">
               <span className="font-mono text-surface-400">{requirement.next.id}</span>
-              <span className="truncate">{requirement.next.title}</span>
+              <span className="truncate">{requirement.next.question}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           )}

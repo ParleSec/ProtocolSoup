@@ -52,6 +52,7 @@ type SpecResponse struct {
 type RequirementRow struct {
 	ID        string   `json:"id"`
 	Title     string   `json:"title"`
+	Question  string   `json:"question"`
 	Section   string   `json:"section"`
 	Level     string   `json:"level"`
 	Roles     []string `json:"roles"`
@@ -61,8 +62,9 @@ type RequirementRow struct {
 
 // RequirementLink identifies a related requirement.
 type RequirementLink struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Question string `json:"question"`
 }
 
 // TestEvidence is a registry test with its verdict for this build. Test
@@ -83,6 +85,7 @@ type RequirementResponse struct {
 	SectionURL        string            `json:"section_url"`
 	Level             string            `json:"level"`
 	Title             string            `json:"title"`
+	Question          string            `json:"question"`
 	Statement         string            `json:"statement"`
 	Roles             []string          `json:"roles"`
 	Applicability     string            `json:"applicability"`
@@ -171,6 +174,7 @@ func (c *Catalogue) handleSpec(w http.ResponseWriter, r *http.Request) {
 		row := RequirementRow{
 			ID:        req.ID,
 			Title:     req.Title,
+			Question:  req.Question,
 			Section:   req.Section,
 			Level:     req.Level,
 			Roles:     req.Roles,
@@ -200,6 +204,7 @@ func (c *Catalogue) handleRequirement(w http.ResponseWriter, r *http.Request) {
 		SectionURL:     c.registry.SectionURL(req),
 		Level:          req.Level,
 		Title:          req.Title,
+		Question:       req.Question,
 		Statement:      req.Statement,
 		Roles:          req.Roles,
 		Applicability:  req.Applicability,
@@ -237,13 +242,13 @@ func (c *Catalogue) handleRequirement(w http.ResponseWriter, r *http.Request) {
 
 	siblings, previous, next := c.Neighbours(req.ID)
 	for _, sibling := range siblings {
-		response.Siblings = append(response.Siblings, RequirementLink{ID: sibling.ID, Title: sibling.Title})
+		response.Siblings = append(response.Siblings, RequirementLink{ID: sibling.ID, Title: sibling.Title, Question: sibling.Question})
 	}
 	if previous != nil {
-		response.Previous = &RequirementLink{ID: previous.ID, Title: previous.Title}
+		response.Previous = &RequirementLink{ID: previous.ID, Title: previous.Title, Question: previous.Question}
 	}
 	if next != nil {
-		response.Next = &RequirementLink{ID: next.ID, Title: next.Title}
+		response.Next = &RequirementLink{ID: next.ID, Title: next.Title, Question: next.Question}
 	}
 	writeJSON(w, http.StatusOK, response)
 }

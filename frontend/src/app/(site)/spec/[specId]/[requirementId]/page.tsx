@@ -31,7 +31,7 @@ async function loadRequirement(requirementId: string): Promise<ConformanceRequir
 }
 
 function pageTitle(requirement: ConformanceRequirementResponse): string {
-  return `${requirement.title} · ${requirement.specification.short_title} §${requirement.section} (${requirement.level})`
+  return `${requirement.question} · ${requirement.specification.short_title} §${requirement.section}`
 }
 
 export async function generateMetadata({ params }: RequirementPageProps): Promise<Metadata> {

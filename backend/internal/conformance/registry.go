@@ -25,6 +25,10 @@ const SchemaVersion = 1
 // search result titles without truncation.
 const MaxTitleLength = 70
 
+// MaxQuestionLength bounds requirement questions, which become the page
+// title and H1 of each requirement page.
+const MaxQuestionLength = 100
+
 // SectionPlaceholder is substituted with the requirement section when a
 // specification declares a section_anchor template.
 const SectionPlaceholder = "{section}"
@@ -88,7 +92,11 @@ type Requirement struct {
 	Level         string `yaml:"level" json:"level"`
 	// Title is a descriptive noun phrase drawn from the statement, at most
 	// MaxTitleLength characters, with no trailing full stop.
-	Title          string    `yaml:"title" json:"title"`
+	Title string `yaml:"title" json:"title"`
+	// Question is the question a practitioner would ask that this requirement
+	// answers. It is the requirement page's title and H1, so it ends with a
+	// question mark and fits in MaxQuestionLength characters.
+	Question       string    `yaml:"question" json:"question"`
 	Statement      string    `yaml:"statement" json:"statement"`
 	Roles          []string  `yaml:"roles" json:"roles"`
 	Applicability  string    `yaml:"applicability" json:"applicability"`
@@ -245,6 +253,15 @@ func Validate(registry Registry, repoRoot string) error {
 			issues = append(issues, fmt.Sprintf("%s: title exceeds %d characters", prefix, MaxTitleLength))
 		case strings.HasSuffix(title, "."):
 			issues = append(issues, prefix+": title must not end with a full stop")
+		}
+		question := strings.TrimSpace(requirement.Question)
+		switch {
+		case question == "":
+			issues = append(issues, prefix+": question is required")
+		case len([]rune(question)) > MaxQuestionLength:
+			issues = append(issues, fmt.Sprintf("%s: question exceeds %d characters", prefix, MaxQuestionLength))
+		case !strings.HasSuffix(question, "?"):
+			issues = append(issues, prefix+": question must end with a question mark")
 		}
 		if len(requirement.Roles) == 0 {
 			issues = append(issues, prefix+": at least one role is required")

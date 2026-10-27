@@ -1127,7 +1127,7 @@ components:
             $ref: "#/components/schemas/ConformanceSpecSummary"
     ConformanceRequirementRow:
       type: object
-      required: [id, title, section, level, roles, indexable]
+      required: [id, title, question, section, level, roles, indexable]
       properties:
         id:
           type: string
@@ -1135,6 +1135,12 @@ components:
         title:
           type: string
           example: Client identifier prefix detection by colon
+        question:
+          type: string
+          description: >-
+            The question a practitioner would ask that this requirement
+            answers. Requirement pages use it as their title and heading.
+          example: How does a wallet tell whether an OpenID4VP client_id uses a Client Identifier Prefix?
         section:
           type: string
           example: "5.9.1"
@@ -1170,11 +1176,13 @@ components:
                 $ref: "#/components/schemas/ConformanceRequirementRow"
     ConformanceRequirementLink:
       type: object
-      required: [id, title]
+      required: [id, title, question]
       properties:
         id:
           type: string
         title:
+          type: string
+        question:
           type: string
     ConformanceTestEvidence:
       type: object
@@ -1208,6 +1216,7 @@ components:
         - section_url
         - level
         - title
+        - question
         - statement
         - roles
         - applicability
@@ -1236,6 +1245,11 @@ components:
           example: MUST
         title:
           type: string
+        question:
+          type: string
+          description: >-
+            The question a practitioner would ask that this requirement
+            answers. Requirement pages use it as their title and heading.
         statement:
           type: string
           description: >-
