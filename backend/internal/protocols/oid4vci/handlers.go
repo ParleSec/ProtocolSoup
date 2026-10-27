@@ -1161,12 +1161,15 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		return
 	}
 
+	// OpenID4VCI 1.0 Section 5.1.2: "Credential Issuers MUST interpret each
+	// scope value as a request to access the Credential Endpoint as defined in
+	// Section 8 for the issuance of a Credential type identified by that scope
+	// value." A code whose authorization named no Credential Configuration,
+	// such as one from a plain OpenID Connect login, authorizes no issuance.
 	authorizedCredentialConfigurationIDs := authCode.CredentialConfigurationIDs
 	if len(authorizedCredentialConfigurationIDs) == 0 {
-		authorizedCredentialConfigurationIDs = sortedCredentialConfigurationIDs(p.credentialConfigurations)
-	}
-	if len(authorizedCredentialConfigurationIDs) == 0 {
-		authorizedCredentialConfigurationIDs = []string{defaultCredentialConfigurationID}
+		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "authorization code was not issued for any credential_configuration_id")
+		return
 	}
 	authorizedCredentialConfigurations := make(map[string]struct{}, len(authorizedCredentialConfigurationIDs))
 	for _, credentialConfigurationID := range authorizedCredentialConfigurationIDs {

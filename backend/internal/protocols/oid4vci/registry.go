@@ -1,7 +1,6 @@
 package oid4vci
 
 import (
-	"sort"
 	"strings"
 )
 
@@ -321,25 +320,6 @@ func credentialFormatAdvertisedInIssuerMetadata(format string) bool {
 	default:
 		return false
 	}
-}
-
-func sortedCredentialConfigurationIDs(registry map[string]credentialConfiguration) []string {
-	ids := make([]string, 0, len(registry))
-	for configurationID := range registry {
-		trimmed := strings.TrimSpace(configurationID)
-		// Skip the backward-compatible alias and the default; the default leads.
-		if trimmed == "UniversityDegreeCredential" || trimmed == defaultCredentialConfigurationID {
-			continue
-		}
-		ids = append(ids, configurationID)
-	}
-	sort.Strings(ids)
-	// Lead with the default credential configuration (the mDL mso_mdoc),
-	// so that an authorization without an explicit selection leads with mdoc.
-	if _, ok := registry[defaultCredentialConfigurationID]; ok {
-		ids = append([]string{defaultCredentialConfigurationID}, ids...)
-	}
-	return ids
 }
 
 func normalizeCredentialConfigurationIDs(rawIDs []string, registry map[string]credentialConfiguration) []string {
