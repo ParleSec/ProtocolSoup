@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,7 +35,6 @@ func run(ctx context.Context, args []string) error {
 	counterparty := flags.String("counterparty", "", "conformance counterparty origin, when deployed")
 	commit := flags.String("commit", "", "commit the deployed apps must report on /health; defaults to what the main app reports")
 	only := flags.String("only", "", "comma-separated requirement IDs to capture; all registered when empty")
-	out := flags.String("out", "", "output path; defaults to <repo>/artifacts/vc-conformance/artefacts.json")
 	rpm := flags.Int("rpm", capture.DefaultRequestsPerMinute, "requests per minute against the deployed apps")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -42,22 +42,30 @@ func run(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
-	if strings.TrimSpace(*base) == "" {
-		return fmt.Errorf("-base is required")
+	baseURL, err := parseOrigin("-base", *base, true)
+	if err != nil {
+		return err
+	}
+	walletURL, err := parseOrigin("-wallet", *wallet, false)
+	if err != nil {
+		return err
+	}
+	counterpartyURL, err := parseOrigin("-counterparty", *counterparty, false)
+	if err != nil {
+		return err
 	}
 
-	outputPath := *out
-	if outputPath == "" {
-		backendDir, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("resolve backend directory: %w", err)
-		}
-		outputPath = filepath.Join(filepath.Dir(backendDir), "artifacts", "vc-conformance", "artefacts.json")
+	// The set always lands where the image build copies it from, as the
+	// conformance report does.
+	backendDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve backend directory: %w", err)
 	}
+	outputPath := filepath.Join(filepath.Dir(backendDir), "artifacts", "vc-conformance", "artefacts.json")
 
 	// Artefacts are only meaningful for the build that produced them, so the
 	// run refuses to start unless every app it talks to serves that build.
-	deployed, err := healthCommit(ctx, *base)
+	deployed, err := healthCommit(ctx, baseURL)
 	if err != nil {
 		return err
 	}
@@ -66,18 +74,18 @@ func run(ctx context.Context, args []string) error {
 		expected = deployed
 	}
 	if expected == "" {
-		return fmt.Errorf("%s/health reports no commit; set BUILD_COMMIT on the server or pass -commit", *base)
+		return fmt.Errorf("%s/health reports no commit; set BUILD_COMMIT on the server or pass -commit", baseURL)
 	}
 	if deployed != expected {
-		return fmt.Errorf("%s/health reports commit %q, want %q", *base, deployed, expected)
+		return fmt.Errorf("%s/health reports commit %q, want %q", baseURL, deployed, expected)
 	}
-	if strings.TrimSpace(*wallet) != "" {
-		walletCommit, err := healthCommit(ctx, *wallet)
+	if walletURL != "" {
+		walletCommit, err := healthCommit(ctx, walletURL)
 		if err != nil {
 			return err
 		}
 		if walletCommit != expected {
-			return fmt.Errorf("%s/health reports commit %q, want %q", *wallet, walletCommit, expected)
+			return fmt.Errorf("%s/health reports commit %q, want %q", walletURL, walletCommit, expected)
 		}
 	}
 
@@ -86,7 +94,7 @@ func run(ctx context.Context, args []string) error {
 		ids = strings.Split(*only, ",")
 	}
 	recorder := capture.NewRecorder(nil)
-	env := capture.NewEnv(*base, *wallet, *counterparty, recorder, *rpm)
+	env := capture.NewEnv(baseURL, walletURL, counterpartyURL, recorder, *rpm)
 	set, mismatches, err := capture.Run(ctx, env, recorder, expected, ids)
 	if err != nil {
 		return err
@@ -115,9 +123,30 @@ func run(ctx context.Context, args []string) error {
 	return nil
 }
 
+// parseOrigin accepts only a bare http or https origin, so every request the
+// run sends goes to the app the flag names and to nothing else.
+func parseOrigin(flagName, raw string, required bool) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if required {
+			return "", fmt.Errorf("%s is required", flagName)
+		}
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", flagName, err)
+	}
+	if (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil ||
+		strings.TrimRight(parsed.Path, "/") != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("%s must be an origin such as https://protocolsoup.com, got %q", flagName, raw)
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
+}
+
 // healthCommit reads the commit an app reports on /health.
 func healthCommit(ctx context.Context, origin string) (string, error) {
-	target := strings.TrimRight(origin, "/") + "/health"
+	target := origin + "/health"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return "", err
