@@ -38,10 +38,11 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
   (`credential_response_encryption`)
 - Sender-constrained access tokens (RFC 9449 DPoP), opt-in per request via a
   `DPoP` proof header at the token endpoint, enforced on the credential,
-  nonce, deferred_credential, and notification endpoints when a token is bound, with an
-  independent, off-by-default `DPoP-Nonce` challenge per role
-  (`SHOWCASE_DPOP_NONCE_REQUIRED` at the token endpoint,
-  `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` at resource endpoints). Replaying an
+  deferred_credential, and notification endpoints when a token is bound, with
+  an independent `DPoP-Nonce` challenge per role
+  (`SHOWCASE_DPOP_NONCE_REQUIRED` at the PAR and token endpoints, RFC 9449
+  §8; `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` at those resource endpoints,
+  §9). Both default to off and are on in the hosted deployment. Replaying an
   authorization code returns `invalid_grant` and revokes the previously issued
   access token so those resource endpoints reject it with `invalid_token`
   (RFC 6749 Section 4.1.2 SHOULD). The `authorization_code` grant issues a
@@ -53,9 +54,8 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
   When a refresh grant was issued with a DPoP-bound access token, refresh
   requests must present a DPoP proof. Client Attestation PoP `jti` values are
   committed only after DPoP validation so a `use_dpop_nonce` challenge can be
-  retried with the same attestation PoP.
-  `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` at the resource endpoints); this
-  issuer's RFC 8414 metadata advertises `dpop_signing_alg_values_supported`
+  retried with the same attestation PoP. This issuer's RFC 8414 metadata
+  advertises `dpop_signing_alg_values_supported`.
 - Deferred issuance with `transaction_id`
 - Batch credential issuance via the Credential Endpoint
   (`batch_credential_issuance.batch_size`, up to 20 JWT proofs in one request;

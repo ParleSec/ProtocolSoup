@@ -17,6 +17,7 @@ import { ParameterExplainer } from '../components/ParameterExplainer'
 import { ProtocolReferences } from '../components/ProtocolReferences'
 import { buildFlowExecutionPath } from '@/components/palette/runDispatch'
 import { getCatalogFlow, getFlowRouteId } from '../protocols/presentation/protocol-catalog-data'
+import { getFlowQuestion } from '../config/seo'
 
 interface FlowDetailProps {
   protocolId: string
@@ -220,7 +221,10 @@ export function FlowDetail({
             viewport: hiding a second copy with CSS still ships two <h1>s. */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div>
-            <h1 className="text-xl sm:text-2xl font-semibold text-white mb-1.5 sm:mb-2">{flow.name}</h1>
+            <p className="text-sm font-semibold text-surface-200 mb-1">{flow.name}</p>
+            <h1 className="text-xl sm:text-2xl font-semibold text-white mb-1.5 sm:mb-2">
+              {getFlowQuestion(protocolId, flowRouteId) ?? flow.name}
+            </h1>
             <p className="text-sm sm:text-base text-surface-400">{flow.description}</p>
           </div>
 

@@ -1,6 +1,8 @@
 import 'server-only'
 
 import { fetchBackendJSON } from '@/lib/protocols.server'
+import type { WireCapturedExchange } from '@/lookingglass/types'
+import { normalizeWireExchange } from '@/lookingglass/wire'
 
 /**
  * Server-side access to the normative requirement catalogue served by the
@@ -35,6 +37,7 @@ export interface ConformanceSpecsResponse {
 export interface ConformanceRequirementRow {
   id: string
   title: string
+  question: string
   section: string
   level: string
   roles: string[]
@@ -53,6 +56,7 @@ export interface ConformanceSpecResponse extends ConformanceSpecSummary {
 export interface ConformanceRequirementLink {
   id: string
   title: string
+  question: string
 }
 
 export interface ConformanceTestEvidence {
@@ -70,6 +74,7 @@ export interface ConformanceRequirementResponse {
   section_url: string
   level: string
   title: string
+  question: string
   statement: string
   roles: string[]
   applicability: 'applicable' | 'not_applicable' | 'deviation'
@@ -109,6 +114,61 @@ export function getConformanceRequirement(id: string): Promise<ConformanceRequir
     `/api/conformance/requirements/${encodeURIComponent(id)}`,
     REVALIDATE_SECONDS,
   )
+}
+
+/** Who sent an artefact's requests: never the hosted wallet for malformed ones. */
+export type ConformanceArtefactActor = 'conformance_client' | 'hosted_wallet' | 'counterparty'
+
+export type ConformanceArtefactOutcome = 'accepted' | 'rejected'
+
+export type ConformanceArtefactKind = 'passing' | 'failing'
+
+/** One scenario captured from the deployed server, every exchange in full. */
+export interface ConformanceArtefact {
+  scenario: string
+  actor: ConformanceArtefactActor
+  description: string
+  expected_outcome: ConformanceArtefactOutcome
+  outcome: ConformanceArtefactOutcome
+  exchanges: WireCapturedExchange[]
+}
+
+/**
+ * GET /api/conformance/requirements/{id}/artefacts. pending means captured
+ * but withheld until every token, code and nonce in it has expired.
+ */
+export interface ConformanceRequirementArtefacts {
+  id: string
+  status: 'published' | 'pending' | 'not_captured'
+  commit?: string
+  captured_at?: string
+  publish_after?: string
+  source_base_url?: string
+  passing?: ConformanceArtefact
+  failing?: ConformanceArtefact
+  unavailable?: Partial<Record<ConformanceArtefactKind, string>>
+}
+
+type RawArtefact = Omit<ConformanceArtefact, 'exchanges'> & { exchanges?: unknown[] }
+type RawRequirementArtefacts = Omit<ConformanceRequirementArtefacts, 'passing' | 'failing'> & {
+  passing?: RawArtefact
+  failing?: RawArtefact
+}
+
+function normalizeArtefact(raw?: RawArtefact): ConformanceArtefact | undefined {
+  if (!raw) return undefined
+  const exchanges = (raw.exchanges ?? [])
+    .map((exchange) => normalizeWireExchange(exchange))
+    .filter((exchange): exchange is WireCapturedExchange => exchange !== null)
+  return { ...raw, exchanges }
+}
+
+export async function getConformanceRequirementArtefacts(id: string): Promise<ConformanceRequirementArtefacts> {
+  const raw = await fetchBackendJSON<RawRequirementArtefacts>(
+    `/api/conformance/requirements/${encodeURIComponent(id)}/artefacts`,
+    REVALIDATE_SECONDS,
+  )
+  return { ...raw, passing: normalizeArtefact(raw.passing), failing: normalizeArtefact(raw.failing) }
 }
 
 export function getConformanceSitemap(): Promise<ConformanceSitemapEntry[]> {

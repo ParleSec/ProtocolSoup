@@ -31,8 +31,8 @@
 | `SHOWCASE_DATA_DIR` | No | `(none)` | Durable persistence root for wallet lineage and verifier session state |
 | `VC_LOOKING_GLASS` | No | `true` | Enable Looking Glass event capture |
 | `OAUTH2_REPLAY_REDIS_URL` | No | In-memory in development/tests | Shared Redis URL backing this issuer's RFC 9449 DPoP proof `jti` replay store (falls back to in-memory when unset; no other replay use in this image) |
-| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at `/oid4vci/token` |
-| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the same challenge, independently, at `/oid4vci/credential`, `/oid4vci/nonce`, and `/oid4vci/deferred_credential` |
+| `SHOWCASE_DPOP_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §8 nonce challenge at `/oid4vci/token` and `/oid4vci/par`. The hosted deployment sets it to `true` |
+| `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §9 resource-server nonce challenge, as a separate nonce space, at `/oid4vci/credential`, `/oid4vci/deferred_credential`, and `/oid4vci/notification`. The hosted deployment sets it to `true` |
 
 ### Storage And Volumes
 

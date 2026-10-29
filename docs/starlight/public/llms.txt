@@ -1,26 +1,50 @@
 # ProtocolSoup Documentation
 
-> Docs for the live ProtocolSoup execution platform. This host is documentation, not Looking Glass and not the wallet.
+> Docs for the live ProtocolSoup sandbox. This host serves documentation only. The protocols, the JSON API, and the MCP server run on https://protocolsoup.com; the wallet runs on https://wallet.protocolsoup.com.
 
-## Canonical properties
+None of the endpoints below needs authentication.
 
-- [Main site](https://protocolsoup.com)
-- [Documentation](https://docs.protocolsoup.com)
-- [Wallet harness](https://wallet.protocolsoup.com)
+## Explore the protocol catalog
 
-## Start here if you are an agent
+- To list the protocols ProtocolSoup implements, `GET https://protocolsoup.com/api/protocols`, or call the MCP tool `list_protocols` with `POST https://protocolsoup.com/mcp`.
+- To list the flows a protocol defines, `GET https://protocolsoup.com/api/protocols/{protocolId}/flows`, or call the MCP tool `list_protocol_flows`.
+- To read the ordered steps of one flow, call the MCP tool `describe_protocol_flow` with `protocolId` and `flowId`.
+
+## Decode a token
+
+- To decode a JWT and check its signature against the sandbox key set, call the MCP tool `decode_jwt` with `POST https://protocolsoup.com/mcp`, or `POST https://protocolsoup.com/api/lookingglass/decode` with the JSON body `{"token": "<compact JWT>"}`.
+
+## Call the MCP server
+
+- To find the MCP servers, `GET https://protocolsoup.com/.well-known/ai-catalog.json`.
+- To read the Server Card, `GET https://protocolsoup.com/mcp/server-card`.
+- To call a tool, `POST https://protocolsoup.com/mcp` with the headers and `_meta` shown in [Calling a tool](https://docs.protocolsoup.com/protocols/mcp/).
+
+## Read discovery metadata
+
+- To read the OpenID Connect discovery document, `GET https://protocolsoup.com/.well-known/openid-configuration`.
+- To fetch the OpenID Provider signing keys, `GET https://protocolsoup.com/oidc/.well-known/jwks.json`.
+- To read OAuth 2.0 Authorization Server metadata, `GET https://protocolsoup.com/.well-known/oauth-authorization-server` or `GET https://protocolsoup.com/.well-known/oauth-authorization-server/oauth2`.
+- To read the OID4VCI Credential Issuer metadata, `GET https://protocolsoup.com/.well-known/openid-credential-issuer/oid4vci`, and its signing keys, `GET https://protocolsoup.com/oid4vci/.well-known/jwks.json`.
+- To list the HTTP APIs, `GET https://protocolsoup.com/.well-known/api-catalog`.
+- To list the agent skills and their `sha256` digests, `GET https://protocolsoup.com/.well-known/agent-skills/index.json`.
+
+## Look up normative requirements
+
+- To list the specifications in the conformance registry, `GET https://protocolsoup.com/api/conformance/specs`.
+- To read one specification or requirement, `GET https://protocolsoup.com/api/conformance/specs/{specId}` or `GET https://protocolsoup.com/api/conformance/requirements/{requirementId}`.
+- To read the passing and failing exchanges captured from production for one requirement, `GET https://protocolsoup.com/api/conformance/requirements/{requirementId}/artefacts`.
+
+## Drive the wallet
+
+- To issue, import, resolve, and present credentials, call `POST https://wallet.protocolsoup.com/api/issue`, `/api/import`, `/api/resolve`, and `/api/present` on the wallet origin, then `GET https://wallet.protocolsoup.com/api/session` to read the store.
+- [Wallet request bodies](https://wallet.protocolsoup.com/llms-full.txt)
+
+## Related
 
 - [Apex llms.txt](https://protocolsoup.com/llms.txt)
 - [Wallet llms.txt](https://wallet.protocolsoup.com/llms.txt)
-- [Wallet agent skill](https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md)
 - [Agent discovery](https://docs.protocolsoup.com/deploy/agent-discovery/)
-- [API catalog](https://protocolsoup.com/.well-known/api-catalog)
-- [Agent skills index](https://protocolsoup.com/.well-known/agent-skills/index.json)
-
-The wallet is a separate origin. Its HTTP JSON API is the headless interface (issue, import, resolve, present, session, submit). QR and deeplinks are human handoffs. Apex MCP at https://protocolsoup.com/mcp is read-only catalog/decode and does not drive the wallet.
-
-## Human guides
-
 - [Start here](https://docs.protocolsoup.com/start-here/overview/)
 - [Looking Glass](https://docs.protocolsoup.com/using/looking-glass/)
 - [Wallet runtime](https://docs.protocolsoup.com/deploy/services/wallet/)

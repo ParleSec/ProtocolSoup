@@ -2242,6 +2242,51 @@ func TestNotificationRejectsConflictingTerminalEvent(t *testing.T) {
 	_ = deleted.Body.Close()
 }
 
+// TestAuthorizationCodeWithoutCredentialAuthorizationIsRefused checks that a
+// code from a plain OpenID Connect login, which named no Credential
+// Configuration, cannot be redeemed for an issuance access token.
+func TestAuthorizationCodeWithoutCredentialAuthorizationIsRefused(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+	clientID := "oidc-login-client"
+	redirectURI := "https://app.example/callback"
+	env.IDP.RegisterClient(&models.Client{
+		ID:           clientID,
+		Public:       true,
+		RedirectURIs: []string{redirectURI},
+		GrantTypes:   []string{"authorization_code"},
+		Scopes:       []string{"openid", "profile"},
+	})
+	authCode, err := env.IDP.CreateAuthorizationCode(
+		clientID, "alice", redirectURI, "openid profile", "", "", "", "", "", time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.PostForm(env.Server.URL+"/oid4vci/token", url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {authCode.Code},
+		"client_id":    {clientID},
+		"redirect_uri": {redirectURI},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	assertStatus(t, resp, http.StatusBadRequest)
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["error"] != "invalid_grant" {
+		t.Fatalf("error = %v, want invalid_grant", payload["error"])
+	}
+	if _, issued := payload["access_token"]; issued {
+		t.Fatalf("token endpoint issued an access token for an unscoped code: %v", payload)
+	}
+}
+
 func TestAuthorizationCodeRedemptionIsAtomic(t *testing.T) {
 	env := newTestEnvironment(t)
 	defer env.Server.Close()
@@ -2258,6 +2303,9 @@ func TestAuthorizationCodeRedemptionIsAtomic(t *testing.T) {
 		clientID, "alice", redirectURI, "vc:issue", "", "", "", "", "", time.Now(),
 	)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.IDP.BindCredentialConfigurationIDs(authCode.Code, []string{defaultCredentialConfigurationID}); err != nil {
 		t.Fatal(err)
 	}
 

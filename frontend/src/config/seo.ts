@@ -294,6 +294,80 @@ export const PAGE_SEO: Record<string, PageSEO> = {
 }
 
 /**
+ * The question each protocol and flow page answers. Pages use it as their
+ * <title> and <h1>, so a search for the question lands on the page that
+ * answers it; the protocol or flow name stays as the subheading.
+ */
+const PROTOCOL_QUESTIONS: Record<string, string> = {
+  oauth2: 'How does OAuth 2.0 delegate access to an API?',
+  oidc: 'How does OpenID Connect add sign-in to OAuth 2.0?',
+  oid4vci: 'How does a wallet get a verifiable credential with OID4VCI?',
+  oid4vp: 'How does a verifier request a verifiable presentation with OID4VP?',
+  saml: 'How does SAML 2.0 single sign-on work between an IdP and an SP?',
+  spiffe: 'How do SPIFFE and SPIRE give workloads a verifiable identity?',
+  scim: 'How does SCIM 2.0 provision users and groups between systems?',
+  ssf: 'How do the Shared Signals Framework, CAEP and RISC deliver security events?',
+  agentauth: 'How does an AI agent register itself and get an access token?',
+  mcp: 'How does an MCP client discover a server and call its tools?',
+}
+
+const FLOW_QUESTIONS: Record<string, string> = {
+  'oauth2/authorization-code': 'How does the OAuth 2.0 authorization code grant work?',
+  'oauth2/authorization-code-pkce': 'How does PKCE protect the OAuth 2.0 authorization code?',
+  'oauth2/client-credentials': 'How does a service get an OAuth 2.0 token with client credentials?',
+  'oauth2/refresh-token': 'How does a client use an OAuth 2.0 refresh token?',
+  'oauth2/implicit': 'How did the OAuth 2.0 implicit grant work, and why is it legacy?',
+  'oauth2/device-code': 'How does the OAuth 2.0 device authorization grant work?',
+  'oauth2/token-introspection': 'How does a resource server introspect an OAuth 2.0 token?',
+  'oauth2/token-revocation': 'How does a client revoke an OAuth 2.0 token?',
+  'oidc/oidc-authorization-code': 'How does OpenID Connect sign a user in with the authorization code flow?',
+  'oidc/interaction-code': 'What happens end to end in an OpenID Connect sign-in with discovery and PKCE?',
+  'oidc/oidc-implicit': 'How did the OpenID Connect implicit flow work, and why is it legacy?',
+  'oidc/hybrid': 'How does the OpenID Connect hybrid flow return tokens from both endpoints?',
+  'oidc/userinfo': 'How does a client read claims from the OpenID Connect UserInfo endpoint?',
+  'oidc/discovery': 'How does a client discover an OpenID Provider\'s endpoints and keys?',
+  'oid4vci/oid4vci-pre-authorized': 'How does OID4VCI issue a credential with a pre-authorized code?',
+  'oid4vci/oid4vci-pre-authorized-tx-code': 'How does an OID4VCI tx_code protect a pre-authorized credential offer?',
+  'oid4vci/oid4vci-deferred-issuance': 'How does a wallet collect a deferred OID4VCI credential?',
+  'oid4vp/oid4vp-direct-post': 'How does a wallet answer an OID4VP DCQL request with direct_post?',
+  'oid4vp/oid4vp-direct-post-jwt': 'How does a wallet return an encrypted OID4VP response with direct_post.jwt?',
+  'saml/sp-initiated-sso': 'How does SP-initiated SAML single sign-on work?',
+  'saml/idp-initiated-sso': 'How does IdP-initiated SAML single sign-on work?',
+  'saml/single-logout': 'How does SAML single logout end sessions across service providers?',
+  'saml/idp-initiated-logout': 'How does an IdP start SAML single logout?',
+  'saml/metadata': 'How do a SAML IdP and SP exchange metadata to establish trust?',
+  'spiffe/x509-svid-issuance': 'How does a workload get an X.509-SVID from SPIRE?',
+  'spiffe/jwt-svid-issuance': 'How does a workload get a JWT-SVID from SPIRE?',
+  'spiffe/mtls-handshake': 'How do two workloads authenticate each other with X.509-SVIDs?',
+  'spiffe/certificate-rotation': 'How does SPIRE rotate a workload\'s X.509-SVID before it expires?',
+  'scim/user-lifecycle': 'How does SCIM 2.0 create, update and deactivate a user?',
+  'scim/group-management': 'How does SCIM 2.0 manage groups and their members?',
+  'scim/filter-queries': 'How do SCIM 2.0 filter queries find users and groups?',
+  'scim/schema-discovery': 'How does a SCIM 2.0 client discover a service provider\'s schemas?',
+  'scim/bulk-operations': 'How does SCIM 2.0 apply many changes in one bulk request?',
+  'ssf/ssf-stream-configuration': 'How does an SSF receiver configure an event stream with a transmitter?',
+  'ssf/ssf-push-delivery': 'How does an SSF transmitter push security event tokens to a receiver?',
+  'ssf/ssf-poll-delivery': 'How does an SSF receiver poll a transmitter for security event tokens?',
+  'ssf/caep-session-revoked': 'How does a CAEP session-revoked event end a user\'s session?',
+  'ssf/caep-credential-change': 'How does a CAEP credential-change event reach relying parties?',
+  'ssf/risc-account-disabled': 'How does a RISC account-disabled event reach relying parties?',
+  'ssf/risc-credential-compromise': 'How does a RISC credential-compromise event reach relying parties?',
+  'agentauth/anonymous-registration': 'How does an AI agent register anonymously and get a token?',
+  'agentauth/claim-ceremony': 'How does a person claim ownership of a registered AI agent?',
+  'mcp/mcp-tool-call': 'How does an MCP client discover a server and call one of its tools?',
+}
+
+/** The question a protocol page answers, or undefined for an unknown protocol. */
+export function getProtocolQuestion(protocolId: string): string | undefined {
+  return PROTOCOL_QUESTIONS[protocolId]
+}
+
+/** The question a flow page answers, keyed by protocol and catalog flow route id. */
+export function getFlowQuestion(protocolId: string, flowId: string): string | undefined {
+  return FLOW_QUESTIONS[`${protocolId}/${flowId}`]
+}
+
+/**
  * Flow-specific SEO data generator
  * Creates optimized titles and descriptions for protocol flow pages
  */
@@ -353,7 +427,7 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
   const keywords = flowKeywords[flowId] || [`${protocolId} ${flowId}`, flowName.toLowerCase()]
 
   return {
-    title: `${flowName} · ${protocolName}`,
+    title: getFlowQuestion(protocolId, flowId) ?? `${flowName} · ${protocolName}`,
     description: `Execute the ${flowName} flow in Looking Glass. Inspect each HTTP hop, token, and validation decision for ${protocolName}.`,
     keywords: [
       ...keywords,
@@ -370,7 +444,12 @@ export function getFlowSEO(protocolId: string, flowId: string, flowName: string)
  */
 export function getProtocolSEO(protocolId: string): PageSEO {
   const key = `/protocol/${protocolId}`
-  return PAGE_SEO[key] || {
+  const question = getProtocolQuestion(protocolId)
+  const seo = PAGE_SEO[key]
+  if (seo && question) {
+    return { ...seo, title: question }
+  }
+  return seo || {
     title: `${protocolId.toUpperCase()} Reference`,
     description: `Execute ${protocolId.toUpperCase()} flows against live infrastructure, with request inspection and spec-linked reference.`,
     keywords: [protocolId, 'authentication', 'identity protocol'],

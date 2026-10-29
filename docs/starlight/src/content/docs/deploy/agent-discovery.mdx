@@ -30,6 +30,8 @@ by the application and needs no operator action.
 | Link headers | every page response | Frontend + backend edge | [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) |
 | Markdown representation | every page, via `Accept` | Frontend | Markdown for Agents |
 | Normative requirement pages | `/spec/{spec}`, `/spec/{spec}/{requirement}` | Frontend, from backend `/api/conformance/*` | [Normative requirements](#normative-requirement-pages) |
+| `llms.txt` | `/llms.txt` | Frontend | [llms.txt](https://llmstxt.org/), see [below](#llmstxt) |
+| `llms-full.txt` | `/llms-full.txt` | Frontend | [llms.txt](https://llmstxt.org/) |
 | Wallet `llms.txt` | `https://wallet.protocolsoup.com/llms.txt` | Wallet harness | [llms.txt](https://llmstxt.org/) |
 | Wallet API catalog | `https://wallet.protocolsoup.com/.well-known/api-catalog` | Wallet harness | RFC 9727 |
 | Wallet agent skill | `https://wallet.protocolsoup.com/.well-known/agent-skills/use-wallet-harness/SKILL.md` | Wallet harness | Agent Skills Discovery RFC v0.2.0 |
@@ -45,6 +47,31 @@ An allowlist-style fetcher that only follows URLs seen in a prior search or
 fetch will not discover the wallet origin unless an indexed page names those
 URLs. They are linked from this page, the docs homepage, [Start Here](/start-here/overview/),
 the GitHub README, `protocolsoup.com`, and each host's `/llms.txt`.
+
+### llms.txt
+
+The apex and docs `llms.txt` files are written as tasks, not as a sitemap. Each
+line names one thing an agent can do and the HTTP method and path that does it,
+for example:
+
+```txt
+- To decode a JWT and check its signature against the sandbox key set, call the MCP tool `decode_jwt` with `POST /mcp`, or `POST /api/lookingglass/decode` with the JSON body `{"token": "<compact JWT>"}`.
+- To read the OpenID Connect discovery document, `GET /.well-known/openid-configuration`.
+```
+
+The tasks cover the protocol catalog (`/api/protocols`), token decoding, the
+MCP server and its tools, the OpenID Connect, OAuth 2.0, and OID4VCI metadata
+and key sets, the conformance registry (`/api/conformance/*`), markdown
+negotiation, and the wallet's `/api/*` endpoints on its own origin. Every path
+listed is mounted and answers without authentication. The apex file is
+generated in `frontend/src/app/(infrastructure)/llms.txt/route.ts` and
+revalidates every five minutes, so its protocol guides and indexable
+[normative requirement](#normative-requirement-pages) indexes follow the live
+registry. The docs file is static, in `docs/starlight/public/llms.txt`. The
+wallet generates its own `llms.txt`.
+
+A task added to either file must name an endpoint that is mounted on that
+origin; removing an endpoint removes its task in the same change.
 
 ### Link headers
 
@@ -115,7 +142,9 @@ worth the dependency weight.
 Each requirement in the conformance registry
 (`backend/internal/conformance/vc-requirements.yaml`) has a server-rendered
 page at `/spec/{spec}/{requirement}` (for example `/spec/oid4vp/vp-001`), and
-each specification has an index at `/spec/{spec}`. A page carries the
+each specification has an index at `/spec/{spec}`. A page is titled with the
+question the requirement answers (the registry's `question` field, for
+example "What must a DPoP proof's htu claim match?"), and carries the
 requirement statement, the specification section it comes from with a link to
 that section, the BCP 14 level and roles, and ProtocolSoup's self-test verdict
 for the build serving the page, with links to the exact test functions and
@@ -138,6 +167,18 @@ that only restates its registry row. The same pages answer
 `Accept: text/markdown` like every other page. The JSON behind them is
 documented under the `Conformance` tag of the gateway contract in the
 [API reference](/api/reference/).
+
+Each requirement page also shows exchanges captured from production: a
+passing exchange, where the deployed server does what the requirement says,
+and a failing one, where it refuses a request that breaks it. After each
+deploy, CI runs `cmd/conformance-capture` against protocolsoup.com and the
+hosted wallet and redeploys the same commit with the result
+(`CONFORMANCE_ARTEFACTS`). Every request and response is shown in full, with
+the sender named: malformed requests come from ProtocolSoup's conformance
+client, never from the hosted wallet. A set is only shown for the build that
+captured it, and only once every token, code and nonce in it has expired;
+until then the page says when it publishes. A kind that cannot be captured
+from production says why.
 
 ```bash
 curl -s https://protocolsoup.com/api/conformance/specs | jq '.specs[] | {id, requirement_count, indexable}'

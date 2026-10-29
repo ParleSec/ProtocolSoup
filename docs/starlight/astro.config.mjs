@@ -18,9 +18,14 @@ export default defineConfig({
       favicon: '/favicon.svg',
       customCss: [
         '@fontsource-variable/inter',
+        '@fontsource-variable/inter/wght-italic.css',
         '@fontsource-variable/jetbrains-mono',
+        '@fontsource-variable/jetbrains-mono/wght-italic.css',
         './src/styles/custom.css',
       ],
+      components: {
+        Head: './src/components/Head.astro',
+      },
       head: [
         { tag: 'meta', attrs: { name: 'theme-color', content: '#a855f7' } },
         {

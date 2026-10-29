@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ExplainerSource supplies human-authored explainer markdown for a
@@ -30,6 +31,10 @@ type Catalogue struct {
 	bySpec     map[string][]Requirement     // canonical spec ID -> requirements in spec order
 	byLowerID  map[string]Requirement       // lowercase requirement ID -> requirement
 	resultByID map[string]RequirementResult // canonical requirement ID -> report result
+
+	artefacts     *ArtefactSet                    // captured production exchanges, if loaded
+	artefactsByID map[string]RequirementArtefacts // uppercase requirement ID -> artefacts
+	now           func() time.Time                // clock for publish_after; time.Now outside tests
 }
 
 // LoadReport reads a conformance report written by cmd/conformance-report.

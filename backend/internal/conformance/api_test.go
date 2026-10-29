@@ -148,7 +148,7 @@ func TestRequirementRouteValidReport(t *testing.T) {
 		t.Fatal("response body leaked test output")
 	}
 	siblings := body["siblings"].([]any)
-	if len(siblings) != 1 || siblings[0].(map[string]any)["id"] != "AL-003" {
+	if len(siblings) != 1 || siblings[0].(map[string]any)["id"] != "AL-003" || siblings[0].(map[string]any)["question"] != "What about three?" {
 		t.Fatalf("siblings = %+v", siblings)
 	}
 	if body["previous"].(map[string]any)["id"] != "AL-001" || body["next"].(map[string]any)["id"] != "AL-003" {
@@ -183,7 +183,7 @@ func TestRequirementRouteInvalidReportOmitsVerdictAndSourceLinks(t *testing.T) {
 	if _, present := test["line"]; present {
 		t.Fatal("line must be omitted when no valid report supplies it")
 	}
-	if body["statement"] == "" || body["title"] != "Two" {
+	if body["statement"] == "" || body["title"] != "Two" || body["question"] != "What about two?" {
 		t.Fatalf("registry fields must still render: %+v", body)
 	}
 }

@@ -3,10 +3,7 @@ package core
 import (
 	"bufio"
 	"bytes"
-	"crypto/sha256"
 	"crypto/tls"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
@@ -16,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
@@ -510,41 +506,13 @@ func cloneHeader(header http.Header) map[string][]string {
 }
 
 func buildRawRequest(r *http.Request, headers map[string][]string, capture *bodyCapture) []byte {
-	requestURI := requestURL(r)
-	var buf bytes.Buffer
-	buf.WriteString(r.Method)
-	buf.WriteString(" ")
-	buf.WriteString(requestURI)
-	buf.WriteString(" ")
-	buf.WriteString(r.Proto)
-	buf.WriteString("\r\n")
-	if err := http.Header(headers).Write(&buf); err != nil {
-		return buf.Bytes()
-	}
-	buf.WriteString("\r\n")
 	body, _, _ := capture.snapshot()
-	buf.Write(body)
-	return buf.Bytes()
+	return lookingglass.RawRequest(r.Method, requestURL(r), r.Proto, headers, body)
 }
 
 func buildRawResponse(proto string, status int, statusText string, headers map[string][]string, capture *bodyCapture) []byte {
-	if statusText == "" {
-		statusText = http.StatusText(status)
-	}
-	var buf bytes.Buffer
-	buf.WriteString(proto)
-	buf.WriteString(" ")
-	buf.WriteString(strconv.Itoa(status))
-	buf.WriteString(" ")
-	buf.WriteString(statusText)
-	buf.WriteString("\r\n")
-	if err := http.Header(headers).Write(&buf); err != nil {
-		return buf.Bytes()
-	}
-	buf.WriteString("\r\n")
 	body, _, _ := capture.snapshot()
-	buf.Write(body)
-	return buf.Bytes()
+	return lookingglass.RawResponse(proto, status, statusText, headers, body)
 }
 
 func payloadFromCapture(capture *bodyCapture, contentType string) *lookingglass.CapturedPayload {
@@ -555,7 +523,7 @@ func payloadFromCapture(capture *bodyCapture, contentType string) *lookingglass.
 	if total == 0 && len(body) == 0 && !truncated {
 		return nil
 	}
-	return encodePayload(body, total, truncated, contentType)
+	return lookingglass.EncodePayload(body, total, truncated, contentType)
 }
 
 func rawPayload(raw []byte, limit int64, contentType string) *lookingglass.CapturedPayload {
@@ -568,23 +536,7 @@ func rawPayload(raw []byte, limit int64, contentType string) *lookingglass.Captu
 		raw = raw[:limit]
 		truncated = true
 	}
-	return encodePayload(raw, total, truncated, contentType)
-}
-
-func encodePayload(data []byte, total int64, truncated bool, contentType string) *lookingglass.CapturedPayload {
-	encoding := "utf-8"
-	encoded := string(data)
-	if !utf8.Valid(data) {
-		encoding = "base64"
-		encoded = base64.StdEncoding.EncodeToString(data)
-	}
-	return &lookingglass.CapturedPayload{
-		Encoding:    encoding,
-		Data:        encoded,
-		Size:        total,
-		Truncated:   truncated,
-		ContentType: contentType,
-	}
+	return lookingglass.EncodePayload(raw, total, truncated, contentType)
 }
 
 func buildTLSInfo(state *tls.ConnectionState) *lookingglass.TLSInfo {
@@ -617,7 +569,7 @@ func buildTLSInfo(state *tls.ConnectionState) *lookingglass.TLSInfo {
 	var clientCert *lookingglass.CertificateInfo
 	clientChain := make([]lookingglass.CertificateInfo, 0, len(chainCerts))
 	for _, cert := range chainCerts {
-		info := certificateInfoFromX509(cert)
+		info := lookingglass.CertificateInfoFromX509(cert)
 		if info == nil {
 			continue
 		}
@@ -641,35 +593,3 @@ func buildTLSInfo(state *tls.ConnectionState) *lookingglass.TLSInfo {
 	}
 }
 
-func certificateInfoFromX509(cert *x509.Certificate) *lookingglass.CertificateInfo {
-	if cert == nil {
-		return nil
-	}
-
-	thumbprint := ""
-	if len(cert.Raw) > 0 {
-		sum := sha256.Sum256(cert.Raw)
-		thumbprint = base64.RawURLEncoding.EncodeToString(sum[:])
-	}
-
-	spiffeID := ""
-	for _, uri := range cert.URIs {
-		if uri == nil {
-			continue
-		}
-		if uri.Scheme == "spiffe" {
-			spiffeID = uri.String()
-			break
-		}
-	}
-
-	return &lookingglass.CertificateInfo{
-		Subject:      cert.Subject.String(),
-		Issuer:       cert.Issuer.String(),
-		SPIFFEID:     spiffeID,
-		Thumbprint:   thumbprint,
-		NotBefore:    cert.NotBefore,
-		NotAfter:     cert.NotAfter,
-		SerialNumber: cert.SerialNumber.String(),
-	}
-}

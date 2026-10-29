@@ -2057,6 +2057,11 @@ func createOID4VCITestAuthorizationCode(t *testing.T, idp *mockidp.MockIdP, clie
 	if err != nil {
 		t.Fatalf("create authorization code: %v", err)
 	}
+	// A code from the OID4VCI PAR always carries the configurations it
+	// authorized; the token endpoint refuses one that carries none.
+	if err := idp.BindCredentialConfigurationIDs(authCode.Code, []string{defaultCredentialConfigurationID}); err != nil {
+		t.Fatalf("bind credential configuration ids: %v", err)
+	}
 	return authCode
 }
 

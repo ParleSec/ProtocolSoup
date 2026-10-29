@@ -752,6 +752,101 @@ jobs:
         if: success()
         run: echo "✅ Wallet harness deployment + smoke checks successful!"
 
+  # Job 11b: Capture requirement-page artefacts from the deployed build.
+  # The verdict report is baked into the image before deploy, but captured
+  # exchanges only exist once the build is live, so this job captures them
+  # against production and redeploys the same commit with them baked in.
+  # Each Fly machine then serves them from its image; no volume or ssh write.
+  capture-artefacts:
+    name: Capture Conformance Artefacts
+    runs-on: ubuntu-latest
+    needs: [deploy, deploy-wallet]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: backend/go.sum
+
+      - name: Wait for both apps to serve this commit
+        run: |
+          for origin in https://protocolsoup.com https://wallet.protocolsoup.com; do
+            for attempt in $(seq 1 30); do
+              commit="$(curl -fsS "${origin}/health" | jq -r '.commit // empty' || true)"
+              if [ "$commit" = "$GITHUB_SHA" ]; then
+                echo "${origin} serves ${commit}"
+                continue 2
+              fi
+              echo "${origin} reports '${commit}', waiting for ${GITHUB_SHA} (${attempt}/30)"
+              sleep 10
+            done
+            echo "${origin} never reported ${GITHUB_SHA}"
+            exit 1
+          done
+
+      # The rebuilt image needs the report too, for the same commit.
+      - name: Generate VC conformance report
+        working-directory: backend
+        run: go run ./cmd/conformance-report
+        continue-on-error: true
+
+      # Writes artifacts/vc-conformance/artefacts.json even when a scenario
+      # does not behave conformantly; that outcome is published as it
+      # happened, and the job fails at the end so it is seen.
+      - name: Capture artefacts from production
+        id: capture
+        working-directory: backend
+        run: |
+          set +e
+          go run ./cmd/conformance-capture \
+            -base https://protocolsoup.com \
+            -wallet https://wallet.protocolsoup.com \
+            -commit "$GITHUB_SHA"
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          test -s ../artifacts/vc-conformance/artefacts.json
+
+      - name: Set up Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@1.6
+
+      - name: Redeploy this commit with the artefacts
+        run: >-
+          .github/scripts/fly-deploy-or-migrate-host.sh
+          --app protocolsoup
+          --
+          --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Check the artefacts are served for this commit
+        run: |
+          for attempt in $(seq 1 30); do
+            body="$(curl -fsS "https://protocolsoup.com/api/conformance/requirements/dp-001/artefacts" || true)"
+            if echo "$body" | jq -e --arg c "$GITHUB_SHA" '.commit == $c and (.status == "pending" or .status == "published")' > /dev/null 2>&1; then
+              echo "$body" | jq '{id, status, commit, publish_after}'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Artefacts for ${GITHUB_SHA} are not being served"
+          echo "$body"
+          exit 1
+
+      - name: Fail if a scenario did not behave conformantly
+        if: steps.capture.outputs.exit_code != '0'
+        run: |
+          echo "conformance-capture exited ${{ steps.capture.outputs.exit_code }}; see the capture step for the mismatches"
+          exit 1
+
   # Job 12: Lighthouse Performance Test (runs after deploy)
   lighthouse:
     name: Lighthouse Performance Audit
