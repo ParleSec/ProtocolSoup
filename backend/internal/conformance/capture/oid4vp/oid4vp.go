@@ -5,15 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture"
 	"github.com/google/uuid"
 )
-
-// requestObjectLifetime is how long the verifier keeps a request session.
-const requestObjectLifetime = 5 * time.Minute
 
 func init() {
 	capture.Register("VP-008", capture.Entry{
@@ -71,7 +67,7 @@ func postRequestURI(ctx context.Context, env *capture.Env) (string, error) {
 	if requestURI == "" {
 		return "", fmt.Errorf("request creation returned no request_uri")
 	}
-	env.NoteExpiry(requestObjectLifetime)
+	env.NoteExpiry(capture.RequestObjectLifetime)
 	return requestURI, nil
 }
 

@@ -29,15 +29,15 @@ func init() {
 // finalVPFormatsSupported checks the verifier's default vp_formats_supported
 // against OID4VP 1.0 Section 11.1 and Appendix B.
 func finalVPFormatsSupported(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	_, requestURI, err := createRequest(ctx, env, requestOptions{responseMode: "direct_post", vct: env.BaseURL + "/credentials/university_degree"})
+	_, requestURI, err := capture.CreateRequest(ctx, env, capture.RequestOptions{ResponseMode: "direct_post", Credential: capture.SDJWTQuery(env.BaseURL + "/credentials/university_degree")})
 	if err != nil {
 		return "", err
 	}
-	object, err := fetchRequestObject(ctx, env, requestURI)
+	object, err := capture.FetchRequestObject(ctx, env, requestURI)
 	if err != nil {
 		return "", err
 	}
-	metadata, _ := object.claims["client_metadata"].(map[string]any)
+	metadata, _ := object.Claims["client_metadata"].(map[string]any)
 	formats, _ := metadata["vp_formats_supported"].(map[string]any)
 	if len(formats) == 0 {
 		return "", fmt.Errorf("request object client_metadata has no vp_formats_supported")

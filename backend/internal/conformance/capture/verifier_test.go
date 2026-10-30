@@ -1,18 +1,16 @@
-package oid4vp
+package capture
 
 import (
 	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture"
 )
 
 // The VP-006 passing scenario relies on the verifier selecting the request by
-// the kid in the JWE protected header, so encryptResponse must put it there.
+// the kid in the JWE protected header, so EncryptResponse must put it there.
 func TestEncryptResponseCopiesKidIntoProtectedHeader(t *testing.T) {
-	key, err := capture.NewHolderKey()
+	key, err := NewHolderKey()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,13 +19,13 @@ func TestEncryptResponseCopiesKidIntoProtectedHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	jwk["kid"] = "verifier-ephemeral"
-	object := &requestObject{claims: map[string]any{
+	object := &RequestObject{Claims: map[string]any{
 		"client_metadata": map[string]any{
 			"jwks": map[string]any{"keys": []any{jwk}},
 			"encrypted_response_enc_values_supported": []any{"A256GCM"},
 		},
 	}}
-	compact, err := encryptResponse(object, map[string]any{"state": "s"})
+	compact, err := EncryptResponse(object, map[string]any{"state": "s"})
 	if err != nil {
 		t.Fatal(err)
 	}
