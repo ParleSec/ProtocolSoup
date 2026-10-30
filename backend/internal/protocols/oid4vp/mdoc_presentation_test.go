@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	intcose "github.com/ParleSec/ProtocolSoup/internal/cose"
 	"github.com/ParleSec/ProtocolSoup/internal/mdoc"
+	"github.com/fxamacker/cbor/v2"
 )
 
 const mdocDCQLQuery = `{
@@ -456,6 +458,73 @@ func TestEvaluateMdocPresentationRequiresHandover(t *testing.T) {
 	}
 	if !containsPolicyCode(result, "mdoc_handover_unavailable") {
 		t.Fatalf("expected mdoc_handover_unavailable reason, got %v", result.Policy.ReasonCodes)
+	}
+}
+
+// TestEvaluateMdocPresentationReportsUndecodableDeviceResponse proves that a
+// vp_token keyed by an mso_mdoc Credential Query is refused on the mdoc path
+// with the DeviceResponse decode error, here an unsupported ISO/IEC 18013-5
+// DeviceResponse version, rather than being evaluated as a JSON-LD VP.
+func TestEvaluateMdocPresentationReportsUndecodableDeviceResponse(t *testing.T) {
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("device key: %v", err)
+	}
+	issuerSigned, pki := issueMdocForVerifier(t, deviceKey)
+
+	p := NewPlugin()
+	p.mdocTrustAnchors = pki.TrustAnchors()
+
+	handover := realHandover(t, "verifier-client-1", "nonce-xyz", "https://verifier.example/response", nil)
+	var keyed map[string][]string
+	if err := json.Unmarshal([]byte(buildMdocVPToken(t, deviceKey, issuerSigned, handover)), &keyed); err != nil {
+		t.Fatalf("parse vp_token: %v", err)
+	}
+	wire, err := base64.RawURLEncoding.DecodeString(keyed["mdl"][0])
+	if err != nil {
+		t.Fatalf("decode DeviceResponse: %v", err)
+	}
+	var fields map[string]cbor.RawMessage
+	if err := cbor.Unmarshal(wire, &fields); err != nil {
+		t.Fatalf("unmarshal DeviceResponse: %v", err)
+	}
+	if fields["version"], err = cbor.Marshal("2.0"); err != nil {
+		t.Fatalf("marshal version: %v", err)
+	}
+	altered, err := cbor.Marshal(fields)
+	if err != nil {
+		t.Fatalf("marshal DeviceResponse: %v", err)
+	}
+	vpToken, err := json.Marshal(map[string][]string{"mdl": {base64.RawURLEncoding.EncodeToString(altered)}})
+	if err != nil {
+		t.Fatalf("marshal vp_token: %v", err)
+	}
+
+	session := &requestSession{
+		ID:          "req-6",
+		ClientID:    "verifier-client-1",
+		Nonce:       "nonce-xyz",
+		ResponseURI: "https://verifier.example/response",
+		DCQLQuery:   mdocDCQLQuery,
+	}
+	result := p.evaluateVPToken(session, string(vpToken))
+	if result.Policy.Allowed {
+		t.Fatal("expected a version 2.0 DeviceResponse to be refused")
+	}
+	if !containsPolicyCode(result, "vp_token_invalid") {
+		t.Fatalf("expected vp_token_invalid, got %v", result.Policy.ReasonCodes)
+	}
+	found := false
+	for _, reason := range result.Policy.Reasons {
+		if strings.Contains(reason, `unsupported DeviceResponse version "2.0"`) {
+			found = true
+		}
+		if strings.Contains(reason, "proof") {
+			t.Fatalf("an mso_mdoc vp_token must not be evaluated as a JSON-LD VP, got %v", result.Policy.Reasons)
+		}
+	}
+	if !found {
+		t.Fatalf("expected the DeviceResponse version error, got %v", result.Policy.Reasons)
 	}
 }
 

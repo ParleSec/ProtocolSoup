@@ -160,6 +160,70 @@ func extractMdocPresentations(vpToken string) ([]mdocPresentation, bool) {
 	return []mdocPresentation{{DCQLID: "", Raw: raw, Response: response}}, true
 }
 
+// dcqlKeyedForMdoc reports whether vpToken is a DCQL-keyed object whose every
+// key names an mso_mdoc Credential Query in dcqlQuery. OID4VP 1.0 Section 8.1:
+// vp_token "is a JSON-encoded object containing entries where the key is the
+// id value used for a Credential Query in the DCQL query", so the query names
+// the format each Presentation is verified as, even when its DeviceResponse
+// does not decode.
+func dcqlKeyedForMdoc(dcqlQuery, vpToken string) bool {
+	trimmed := strings.TrimSpace(vpToken)
+	if !strings.HasPrefix(trimmed, "{") {
+		return false
+	}
+	var keyed map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &keyed); err != nil || len(keyed) == 0 {
+		return false
+	}
+	formats := make(map[string]string)
+	for _, requirement := range vc.ParseDCQLCredentialRequirements(dcqlQuery) {
+		formats[strings.TrimSpace(requirement.ID)] = strings.TrimSpace(requirement.Format)
+	}
+	for id := range keyed {
+		if !strings.EqualFold(formats[id], credentialFormatMsoMdoc) {
+			return false
+		}
+	}
+	return true
+}
+
+// mdocDecodeError explains why vpToken yielded no mdoc presentation: the
+// first entry that is not base64url, does not decode as a DeviceResponse, or
+// carries no documents.
+func mdocDecodeError(vpToken string) error {
+	trimmed := strings.TrimSpace(vpToken)
+	entries := map[string][]string{"": {trimmed}}
+	if strings.HasPrefix(trimmed, "{") {
+		var keyed map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(trimmed), &keyed); err != nil {
+			return fmt.Errorf("parse vp_token: %w", err)
+		}
+		entries = make(map[string][]string, len(keyed))
+		for id, rawValue := range keyed {
+			entries[id] = decodeVPTokenEntry(rawValue)
+		}
+	}
+	for id, encodedEntries := range entries {
+		if len(encodedEntries) == 0 {
+			return fmt.Errorf("vp_token entry %q carries no presentation", id)
+		}
+		for _, encoded := range encodedEntries {
+			raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(encoded))
+			if err != nil {
+				return fmt.Errorf("vp_token entry %q is not base64url: %w", id, err)
+			}
+			response, err := mdoc.DecodeDeviceResponse(raw)
+			if err != nil {
+				return fmt.Errorf("vp_token entry %q: %w", id, err)
+			}
+			if len(response.Documents) == 0 {
+				return fmt.Errorf("vp_token entry %q: DeviceResponse carries no documents", id)
+			}
+		}
+	}
+	return fmt.Errorf("vp_token carries no presentation")
+}
+
 // decodeVPTokenEntry normalizes a single DCQL vp_token value, which OID4VP
 // allows as either a single string or an array of strings.
 func decodeVPTokenEntry(rawValue json.RawMessage) []string {
