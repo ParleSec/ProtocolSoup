@@ -3,10 +3,12 @@
 package scenarios
 
 import (
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/iso18013"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oid4vci"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oid4vcihaip"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oid4vp"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/rfc9449"
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/rfc9901"
 )
 
 // pending lists the requirements whose scenarios are not written yet. It
@@ -24,18 +26,6 @@ var pending = []string{
 	"CI-010",
 	"CI-011",
 	"CI-013",
-	"MDOC-001",
-	"MDOC-002",
-	"MDOC-003",
-	"MDOC-004",
-	"MDOC-005",
-	"MDOC-006",
-	"SDJWT-001",
-	"SDJWT-000",
-	"SDJWT-002",
-	"SDJWT-003",
-	"SDJWT-004",
-	"SDJWT-005",
 	"CW-001",
 	"CW-006",
 	"CW-010",

@@ -900,8 +900,10 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 	// carried either bare or inside the OID4VP 1.0 DCQL-keyed object. This is
 	// checked before the JSON-LD '{' branch because the DCQL-keyed mdoc vp_token
 	// is also a JSON object; the discriminator only matches when a DeviceResponse
-	// actually decodes, so JSON-LD VPs are unaffected.
-	if looksLikeMdocDeviceResponse(vpToken) {
+	// actually decodes, so JSON-LD VPs are unaffected. A keyed token whose
+	// Credential Queries all ask for mso_mdoc is verified as mdoc even when its
+	// DeviceResponse does not decode, so the refusal names the mdoc failure.
+	if looksLikeMdocDeviceResponse(vpToken) || dcqlKeyedForMdoc(session.DCQLQuery, vpToken) {
 		return p.evaluateMdocPresentation(session, vpToken, result)
 	}
 	if strings.HasPrefix(strings.TrimSpace(vpToken), "{") {
@@ -1555,6 +1557,33 @@ type presentedCredentialEnvelope struct {
 
 type dcqlCredentialRequirement = vc.DCQLCredentialRequirement
 
+// parsePresentedCredential parses a presented credential with the handler
+// for its declared format, so a malformed credential is refused with that
+// format's own error rather than whichever format was tried last. Without a
+// declared format, the registry detects one.
+func parsePresentedCredential(registry *vc.CredentialFormatRegistry, declaredFormat, rawCredential string) (*vc.ParsedCredential, error) {
+	declaredFormat = strings.TrimSpace(declaredFormat)
+	if declaredFormat == "" {
+		parsed, err := registry.ParseAnyCredential(rawCredential)
+		if err != nil {
+			return nil, newVerifierPolicyError("credential_malformed", "presented credential parse failed", err)
+		}
+		return parsed, nil
+	}
+	handler, ok := registry.Lookup(declaredFormat)
+	if !ok {
+		return nil, newVerifierPolicyError("credential_format_mismatch", "presented credential format is unsupported", nil)
+	}
+	parsed, err := handler.ParseCredential(rawCredential)
+	if err == nil {
+		return parsed, nil
+	}
+	if other, otherErr := registry.ParseAnyCredential(rawCredential); otherErr == nil && strings.TrimSpace(other.Format) != declaredFormat {
+		return nil, newVerifierPolicyError("credential_format_mismatch", "presented credential format does not match actual credential format", nil)
+	}
+	return nil, newVerifierPolicyError("credential_malformed", fmt.Sprintf("presented %s credential parse failed", declaredFormat), err)
+}
+
 func (p *Plugin) validatePresentedCredentials(
 	vpClaims jwt.MapClaims,
 	walletSubject string,
@@ -1593,9 +1622,9 @@ func (p *Plugin) validatePresentedCredentialEnvelopes(
 			continue
 		}
 
-		parsedCredential, err := registry.ParseAnyCredential(rawCredential)
+		parsedCredential, err := parsePresentedCredential(registry, presented.Format, rawCredential)
 		if err != nil {
-			return nil, newVerifierPolicyError("credential_malformed", "presented credential parse failed", err)
+			return nil, err
 		}
 		credentialFormat := firstNonEmpty(strings.TrimSpace(presented.Format), strings.TrimSpace(parsedCredential.Format))
 		if credentialFormat == "" {

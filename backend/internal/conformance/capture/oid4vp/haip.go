@@ -23,10 +23,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// universityDegreeVCT is the vct the issuer's University Degree SD-JWT VC
-// carries and the HAIP requests below ask for.
-const universityDegreeVCT = "https://protocolsoup.com/credentials/university_degree"
-
 // untrustedIssuerHost names the conformance client's own issuer. The .invalid
 // top-level domain is reserved (RFC 2606), so it can never be a real issuer.
 const untrustedIssuerHost = "issuer.conformance-client.invalid"
@@ -62,15 +58,15 @@ func init() {
 // leafOnlyX5C checks a HAIP request object's x5c header against HAIP 1.0
 // Section 5.
 func leafOnlyX5C(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	_, requestURI, err := createRequest(ctx, env, requestOptions{haip: true, responseMode: "direct_post.jwt", vct: universityDegreeVCT})
+	_, requestURI, err := capture.CreateRequest(ctx, env, capture.RequestOptions{HAIP: true, ResponseMode: "direct_post.jwt", Credential: capture.SDJWTQuery(capture.UniversityDegreeVCT)})
 	if err != nil {
 		return "", err
 	}
-	object, err := fetchRequestObject(ctx, env, requestURI)
+	object, err := capture.FetchRequestObject(ctx, env, requestURI)
 	if err != nil {
 		return "", err
 	}
-	rawChain, _ := object.header["x5c"].([]any)
+	rawChain, _ := object.Header["x5c"].([]any)
 	if len(rawChain) == 0 {
 		return "", fmt.Errorf("request object header has no x5c")
 	}
@@ -99,10 +95,10 @@ func leafOnlyX5C(ctx context.Context, env *capture.Env) (conformance.ArtefactOut
 	}
 	leaf := chain[0]
 	digest := sha256.Sum256(leaf.Raw)
-	if want := "x509_hash:" + base64.RawURLEncoding.EncodeToString(digest[:]); object.claim("client_id") != want {
-		return "", fmt.Errorf("client_id is %q, want the leaf hash %q", object.claim("client_id"), want)
+	if want := "x509_hash:" + base64.RawURLEncoding.EncodeToString(digest[:]); object.Claim("client_id") != want {
+		return "", fmt.Errorf("client_id is %q, want the leaf hash %q", object.Claim("client_id"), want)
 	}
-	if _, err := jwt.Parse(object.compact, func(*jwt.Token) (any, error) { return leaf.PublicKey, nil }); err != nil {
+	if _, err := jwt.Parse(object.Compact, func(*jwt.Token) (any, error) { return leaf.PublicKey, nil }); err != nil {
 		return "", fmt.Errorf("request object signature does not verify with the x5c leaf key: %w", err)
 	}
 	return conformance.OutcomeAccepted, nil
@@ -115,30 +111,30 @@ func selfMadeIssuerCA(ctx context.Context, env *capture.Env) (conformance.Artefa
 	if err != nil {
 		return "", err
 	}
-	requestID, requestURI, err := createRequest(ctx, env, requestOptions{haip: true, responseMode: "direct_post.jwt", vct: h.vct})
+	requestID, requestURI, err := capture.CreateRequest(ctx, env, capture.RequestOptions{HAIP: true, ResponseMode: "direct_post.jwt", Credential: capture.SDJWTQuery(h.VCT)})
 	if err != nil {
 		return "", err
 	}
-	object, err := fetchRequestObject(ctx, env, requestURI)
+	object, err := capture.FetchRequestObject(ctx, env, requestURI)
 	if err != nil {
 		return "", err
 	}
-	vpToken, err := h.present(object.claim("client_id"), object.claim("nonce"))
+	vpToken, err := h.Present(object.Claim("client_id"), object.Claim("nonce"))
 	if err != nil {
 		return "", err
 	}
-	response, err := encryptResponse(object, map[string]any{"vp_token": json.RawMessage(vpToken), "state": object.claim("state")})
+	response, err := capture.EncryptResponse(object, map[string]any{"vp_token": json.RawMessage(vpToken), "state": object.Claim("state")})
 	if err != nil {
 		return "", err
 	}
-	resp, err := postResponse(ctx, env, object, url.Values{"response": {response}})
+	resp, err := capture.PostResponse(ctx, env, object, url.Values{"response": {response}})
 	if err != nil {
 		return "", err
 	}
 	if resp.Status != http.StatusOK {
 		return "", fmt.Errorf("response_uri answered %d %s", resp.Status, capture.Truncate(resp.Body))
 	}
-	decision, err := fetchResult(ctx, env, requestID)
+	decision, err := capture.FetchResult(ctx, env, requestID)
 	if err != nil {
 		return "", err
 	}
@@ -161,7 +157,7 @@ func selfMadeIssuerCA(ctx context.Context, env *capture.Env) (conformance.Artefa
 
 // untrustedIssuerHolder mints an SD-JWT VC under a CA the conformance client
 // generates on the spot, bound to a fresh holder key.
-func untrustedIssuerHolder() (*holder, error) {
+func untrustedIssuerHolder() (*capture.SDJWTHolder, error) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -217,7 +213,7 @@ func untrustedIssuerHolder() (*holder, error) {
 	issuerJWT := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
 		"iss":     "https://" + untrustedIssuerHost,
 		"sub":     "did:example:conformance-client:" + uuid.NewString(),
-		"vct":     universityDegreeVCT,
+		"vct":     capture.UniversityDegreeVCT,
 		"iat":     now.Unix(),
 		"exp":     now.Add(time.Hour).Unix(),
 		"cnf":     map[string]any{"jwk": holderJWK},
@@ -231,7 +227,7 @@ func untrustedIssuerHolder() (*holder, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &holder{key: holderKey, credential: signed + "~" + disclosure + "~", vct: universityDegreeVCT}, nil
+	return &capture.SDJWTHolder{Key: holderKey, Credential: signed + "~" + disclosure + "~", VCT: capture.UniversityDegreeVCT}, nil
 }
 
 // newDisclosure builds an object-property disclosure and its digest (SD-JWT

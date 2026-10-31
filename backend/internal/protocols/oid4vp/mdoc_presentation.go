@@ -128,7 +128,7 @@ func looksLikeMdocDeviceResponse(vpToken string) bool {
 func (p *Plugin) evaluateMdocPresentation(session *requestSession, vpToken string, result *models.OID4VPVerificationResult) *models.OID4VPVerificationResult {
 	presentations, ok := extractMdocPresentations(vpToken)
 	if !ok {
-		addPolicyReason(result, "vp_token_invalid", "mso_mdoc vp_token did not contain a decodable DeviceResponse")
+		addPolicyReason(result, "vp_token_invalid", fmt.Sprintf("mso_mdoc vp_token did not contain a decodable DeviceResponse: %v", mdocDecodeError(vpToken)))
 		finalizePolicyDecision(result)
 		return result
 	}

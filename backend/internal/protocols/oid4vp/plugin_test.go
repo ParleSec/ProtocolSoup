@@ -1695,6 +1695,22 @@ func TestDirectPostPolicyRejectsUncommittedSDJWTDisclosure(t *testing.T) {
 	if !containsVPReasonCode(reasonCodes, "disclosure_invalid") {
 		t.Fatalf("expected disclosure_invalid reason code, got %v", reasonCodes)
 	}
+	// The credential is parsed as the dc+sd-jwt it was presented as, so its
+	// refusal carries the SD-JWT error, not another format's.
+	reasons, _ := policyObj["reasons"].([]interface{})
+	namesSDJWTParse := false
+	for _, reason := range reasons {
+		text := asVPString(reason)
+		if strings.Contains(text, "mdoc") {
+			t.Fatalf("an SD-JWT presentation must not be refused with an mdoc error, got %v", reasons)
+		}
+		if strings.Contains(text, "presented dc+sd-jwt credential parse failed") {
+			namesSDJWTParse = true
+		}
+	}
+	if !namesSDJWTParse {
+		t.Fatalf("expected the dc+sd-jwt parse failure, got %v", reasons)
+	}
 }
 
 // TestDirectPostPolicyDeniesStaleKBJWTIat proves a KB-JWT whose iat is further

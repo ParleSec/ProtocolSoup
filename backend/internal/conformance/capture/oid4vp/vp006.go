@@ -34,31 +34,31 @@ func init() {
 // encryptedResponseSelectedByKid answers a direct_post.jwt request with an
 // encrypted response that carries no outer state (OID4VP 1.0 Section 8.3).
 func encryptedResponseSelectedByKid(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	h, err := issuedHolder(ctx, env)
+	h, err := capture.IssueSDJWTHolder(ctx, env)
 	if err != nil {
 		return "", err
 	}
-	requestID, requestURI, err := createRequest(ctx, env, requestOptions{responseMode: "direct_post.jwt", vct: h.vct})
+	requestID, requestURI, err := capture.CreateRequest(ctx, env, capture.RequestOptions{ResponseMode: "direct_post.jwt", Credential: capture.SDJWTQuery(h.VCT)})
 	if err != nil {
 		return "", err
 	}
-	object, err := fetchRequestObject(ctx, env, requestURI)
+	object, err := capture.FetchRequestObject(ctx, env, requestURI)
 	if err != nil {
 		return "", err
 	}
-	state := object.claim("state")
+	state := object.Claim("state")
 	if state == "" {
 		return "", fmt.Errorf("request object carries no state")
 	}
-	vpToken, err := h.present(object.claim("client_id"), object.claim("nonce"))
+	vpToken, err := h.Present(object.Claim("client_id"), object.Claim("nonce"))
 	if err != nil {
 		return "", err
 	}
-	response, err := encryptResponse(object, map[string]any{"vp_token": json.RawMessage(vpToken), "state": state})
+	response, err := capture.EncryptResponse(object, map[string]any{"vp_token": json.RawMessage(vpToken), "state": state})
 	if err != nil {
 		return "", err
 	}
-	resp, err := postResponse(ctx, env, object, url.Values{"response": {response}})
+	resp, err := capture.PostResponse(ctx, env, object, url.Values{"response": {response}})
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +69,7 @@ func encryptedResponseSelectedByKid(ctx context.Context, env *capture.Env) (conf
 	default:
 		return "", fmt.Errorf("response_uri answered %d %s", resp.Status, capture.Truncate(resp.Body))
 	}
-	decision, err := fetchResult(ctx, env, requestID)
+	decision, err := capture.FetchResult(ctx, env, requestID)
 	if err != nil {
 		return "", err
 	}
@@ -82,26 +82,26 @@ func encryptedResponseSelectedByKid(ctx context.Context, env *capture.Env) (conf
 // requestIDWithoutState posts a presentation correlated only by request_id
 // to a redirect-invoked direct_post request.
 func requestIDWithoutState(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	h, err := issuedHolder(ctx, env)
+	h, err := capture.IssueSDJWTHolder(ctx, env)
 	if err != nil {
 		return "", err
 	}
-	requestID, requestURI, err := createRequest(ctx, env, requestOptions{responseMode: "direct_post", vct: h.vct})
+	requestID, requestURI, err := capture.CreateRequest(ctx, env, capture.RequestOptions{ResponseMode: "direct_post", Credential: capture.SDJWTQuery(h.VCT)})
 	if err != nil {
 		return "", err
 	}
-	object, err := fetchRequestObject(ctx, env, requestURI)
+	object, err := capture.FetchRequestObject(ctx, env, requestURI)
 	if err != nil {
 		return "", err
 	}
-	if object.claim("state") == "" {
+	if object.Claim("state") == "" {
 		return "", fmt.Errorf("request object carries no state")
 	}
-	vpToken, err := h.present(object.claim("client_id"), object.claim("nonce"))
+	vpToken, err := h.Present(object.Claim("client_id"), object.Claim("nonce"))
 	if err != nil {
 		return "", err
 	}
-	responseURI := object.claim("response_uri")
+	responseURI := object.Claim("response_uri")
 	if responseURI == "" {
 		return "", fmt.Errorf("request object has no response_uri")
 	}
