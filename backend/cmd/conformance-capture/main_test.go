@@ -1,35 +1,29 @@
 package main
 
-import "testing"
+import (
+	"testing"
 
-func TestParseOriginAcceptsOnlyBareOrigins(t *testing.T) {
-	for raw, want := range map[string]string{
-		"https://protocolsoup.com":  "https://protocolsoup.com",
-		"https://protocolsoup.com/": "https://protocolsoup.com",
-		" http://localhost:8181 ":   "http://localhost:8181",
+	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture"
+)
+
+func TestResolveOriginsOffersOnlyProductionOrLocalhost(t *testing.T) {
+	production, err := resolveOrigins("production", false, 8080, 0, 0)
+	if err != nil || production != capture.ProductionOrigins() {
+		t.Fatalf("production = %+v, %v", production, err)
+	}
+	local, err := resolveOrigins("local", true, 8181, 8282, 8383)
+	want := capture.Origins{Base: "http://localhost:8181", Wallet: "http://localhost:8282", Counterparty: "http://localhost:8383"}
+	if err != nil || local != want {
+		t.Fatalf("local = %+v, %v", local, err)
+	}
+	for name, call := range map[string]func() (capture.Origins, error){
+		"missing target":          func() (capture.Origins, error) { return resolveOrigins("", false, 8080, 0, 0) },
+		"unknown target":          func() (capture.Origins, error) { return resolveOrigins("https://example.com", false, 8080, 0, 0) },
+		"ports with production":   func() (capture.Origins, error) { return resolveOrigins("production", true, 9000, 0, 0) },
+		"out-of-range local port": func() (capture.Origins, error) { return resolveOrigins("local", true, 70000, 0, 0) },
 	} {
-		got, err := parseOrigin("-base", raw, true)
-		if err != nil || got != want {
-			t.Fatalf("parseOrigin(%q) = %q, %v; want %q", raw, got, err, want)
+		if origins, err := call(); err == nil {
+			t.Fatalf("%s: got %+v; want an error", name, origins)
 		}
-	}
-	for _, raw := range []string{
-		"protocolsoup.com",
-		"ftp://protocolsoup.com",
-		"https://protocolsoup.com/api",
-		"https://protocolsoup.com?x=1",
-		"https://protocolsoup.com#health",
-		"https://user@protocolsoup.com",
-		"file:///etc/passwd",
-	} {
-		if got, err := parseOrigin("-base", raw, true); err == nil {
-			t.Fatalf("parseOrigin(%q) = %q; want an error", raw, got)
-		}
-	}
-	if _, err := parseOrigin("-base", "", true); err == nil {
-		t.Fatal("an empty required origin must be refused")
-	}
-	if got, err := parseOrigin("-wallet", "", false); err != nil || got != "" {
-		t.Fatalf("an empty optional origin = %q, %v; want empty", got, err)
 	}
 }

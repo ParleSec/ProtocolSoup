@@ -858,9 +858,7 @@ jobs:
         run: |
           set +e
           go run ./cmd/conformance-capture \
-            -base https://protocolsoup.com \
-            -wallet https://wallet.protocolsoup.com \
-            -counterparty https://protocolsoup-counterparty.fly.dev \
+            -target production \
             -commit "$GITHUB_SHA"
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           test -s ../artifacts/vc-conformance/artefacts.json
