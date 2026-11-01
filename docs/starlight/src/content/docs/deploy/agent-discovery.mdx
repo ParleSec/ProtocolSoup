@@ -175,7 +175,11 @@ deploy, CI runs `cmd/conformance-capture` against protocolsoup.com and the
 hosted wallet and redeploys the same commit with the result
 (`CONFORMANCE_ARTEFACTS`). Every request and response is shown in full, with
 the sender named: malformed requests come from ProtocolSoup's conformance
-client, never from the hosted wallet. A set is only shown for the build that
+client, never from the hosted wallet. To show the hosted wallet refusing an
+invalid message, CI points it at the conformance counterparty, a separate app
+(`cmd/conformance-counterparty`) that serves one deliberately invalid
+request object, metadata document or response per requirement and labels
+every response as such. A set is only shown for the build that
 captured it, and only once every token, code and nonce in it has expired;
 until then the page says when it publishes. A kind that cannot be captured
 from production says why.

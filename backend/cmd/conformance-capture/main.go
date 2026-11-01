@@ -79,13 +79,16 @@ func run(ctx context.Context, args []string) error {
 	if deployed != expected {
 		return fmt.Errorf("%s/health reports commit %q, want %q", baseURL, deployed, expected)
 	}
-	if walletURL != "" {
-		walletCommit, err := healthCommit(ctx, walletURL)
+	for _, origin := range []string{walletURL, counterpartyURL} {
+		if origin == "" {
+			continue
+		}
+		originCommit, err := healthCommit(ctx, origin)
 		if err != nil {
 			return err
 		}
-		if walletCommit != expected {
-			return fmt.Errorf("%s/health reports commit %q, want %q", walletURL, walletCommit, expected)
+		if originCommit != expected {
+			return fmt.Errorf("%s/health reports commit %q, want %q", origin, originCommit, expected)
 		}
 	}
 
