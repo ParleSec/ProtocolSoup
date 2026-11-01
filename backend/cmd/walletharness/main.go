@@ -105,8 +105,11 @@ type walletMaterial struct {
 	CredentialFormat          string
 	CredentialConfigurationID string
 	Credentials               map[string]walletCredentialMaterial
-	CreatedAt                 time.Time
-	LastAccess                time.Time
+	// Refresh holds, per credential ID, what refreshing that Credential
+	// needs when its issuance returned a refresh_token (credential_refresh.go).
+	Refresh    map[string]*credentialRefresh
+	CreatedAt  time.Time
+	LastAccess time.Time
 }
 
 type walletCredentialMaterial struct {
@@ -620,10 +623,12 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 		return
 	}
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), apiWalletRequest{
-		RequestURI: req.RequestURI,
-		OpenID4VP:  req.OpenID4VP,
-		RequestJWT: req.RequestJWT,
-		RequestID:  req.RequestID,
+		RequestURI:       req.RequestURI,
+		RequestURIMethod: req.RequestURIMethod,
+		ClientID:         req.ClientID,
+		OpenID4VP:        req.OpenID4VP,
+		RequestJWT:       req.RequestJWT,
+		RequestID:        req.RequestID,
 	})
 	if err != nil {
 		respond(http.StatusBadRequest, presentationRequestError(err))

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,17 +40,30 @@ func TestClassifyOID4VCIProtocolHop(t *testing.T) {
 	}
 }
 
-func TestCaptureHTTPBodyRecordsNothingOfAnOversizedBody(t *testing.T) {
-	small := io.NopCloser(strings.NewReader(`{"ok":true}`))
-	body, recorded := captureHTTPBody(&small, "application/json")
-	if decoded, _ := body.(map[string]interface{}); !recorded || decoded["ok"] != true {
-		t.Fatalf("small body: recorded=%v body=%#v", recorded, body)
+// TestCaptureHTTPBodyRecordsExactBytes proves bodies are recorded as sent:
+// JSON member order and repeated form fields are kept, and bytes that are not
+// UTF-8 are base64 rather than altered.
+func TestCaptureHTTPBodyRecordsExactBytes(t *testing.T) {
+	for _, sent := range []string{`{"z":1,"a":{"y":true,"b":null}}`, "scope=a&scope=b&state=s"} {
+		reader := io.NopCloser(strings.NewReader(sent))
+		body, encoding, recorded := captureHTTPBody(&reader)
+		if !recorded || encoding != "" || body != sent {
+			t.Fatalf("recorded %q (encoding %q, recorded %v), want exactly %q", body, encoding, recorded, sent)
+		}
 	}
+	binary := []byte{0xa2, 0x61, 0x76, 0xff}
+	reader := io.NopCloser(strings.NewReader(string(binary)))
+	body, encoding, recorded := captureHTTPBody(&reader)
+	if !recorded || encoding != "base64" || body != base64.StdEncoding.EncodeToString(binary) {
+		t.Fatalf("binary body: recorded %q (encoding %q)", body, encoding)
+	}
+}
 
+func TestCaptureHTTPBodyRecordsNothingOfAnOversizedBody(t *testing.T) {
 	oversized := strings.Repeat("a", maxTranscriptBodyBytes+10)
 	reader := io.NopCloser(strings.NewReader(oversized))
-	body, recorded = captureHTTPBody(&reader, "text/plain")
-	if recorded || body != nil {
+	body, _, recorded := captureHTTPBody(&reader)
+	if recorded || body != "" {
 		t.Fatalf("an oversized body must not be recorded, even in part: recorded=%v", recorded)
 	}
 	rest, err := io.ReadAll(reader)
@@ -121,10 +135,40 @@ func TestSubmitToVerifierRecordsAuthorizationResponse(t *testing.T) {
 		t.Fatalf("want one hop, got %d", len(hops))
 	}
 	hop := hops[0]
-	form, _ := hop.RequestBody.(map[string]string)
-	response, _ := hop.ResponseBody.(map[string]interface{})
 	if hop.Step != "Authorization Response" || hop.RFCReference != "OpenID4VP 1.0 Section 8.2" || hop.Actor != "wallet→verifier" ||
-		form["vp_token"] != "vp-token-value" || form["state"] != "state-123" || response["status"] != "received" {
+		hop.RequestBody != "state=state-123&vp_token=vp-token-value" || hop.ResponseBody != `{"status":"received"}` {
+		t.Fatalf("unexpected hop %+v", hop)
+	}
+}
+
+// TestAPIResolveHonoursRequestURIMethodPost proves /api/resolve passes
+// request_uri_method through: the request object is retrieved by POST with a
+// wallet_nonce (OID4VP 1.0 Section 5.10), not by GET.
+func TestAPIResolveHonoursRequestURIMethodPost(t *testing.T) {
+	requestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("not a request object"))
+	}))
+	defer requestServer.Close()
+	host, _ := url.Parse(requestServer.URL)
+	server := &walletHarnessServer{httpClient: requestServer.Client(), targetHost: host.Host}
+
+	request := httptest.NewRequest(http.MethodPost, "https://wallet.example/api/resolve",
+		strings.NewReader(fmt.Sprintf(`{"request_uri":%q,"request_uri_method":"post"}`, requestServer.URL)))
+	recorder := httptest.NewRecorder()
+	server.handleAPIResolve(recorder, request)
+
+	var response struct {
+		Exchanges []protocolHop `json:"_protocol_exchanges"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.Exchanges) != 1 {
+		t.Fatalf("want the request_uri hop, got %d hops; body=%s", len(response.Exchanges), recorder.Body.String())
+	}
+	hop := response.Exchanges[0]
+	if hop.Method != http.MethodPost || hop.RFCReference != "OpenID4VP 1.0 Section 5.10" || !strings.HasPrefix(hop.RequestBody, "wallet_nonce=") {
 		t.Fatalf("unexpected hop %+v", hop)
 	}
 }

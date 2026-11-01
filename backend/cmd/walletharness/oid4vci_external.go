@@ -137,6 +137,9 @@ type externalIssuerImportResult struct {
 	SelectedCredentialConfigurationID string
 	SelectedCredentialFormat          string
 	IssuanceRequirements              map[string]interface{}
+	// Refresh is set when the Token Response carried a refresh_token; the
+	// caller files it under the credential it binds.
+	Refresh *credentialRefresh
 }
 
 type pendingOID4VCIAuthState struct {
@@ -408,6 +411,7 @@ func (s *walletHarnessServer) handleAPIImport(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, response)
 		return
 	}
+	rememberCredentialRefresh(wallet, importResult.Refresh)
 	if err := s.notifyCredentialAccepted(ctx, importResult.IssuedCredential, req.LookingGlassSessionID); err != nil {
 		log.Printf("wallet harness: credential notification failed after import: %v", err)
 	}
@@ -566,6 +570,13 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 	); err != nil {
 		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
 		return
+	}
+	if importResult.Refresh != nil {
+		importResult.Refresh.ClientID = pending.ClientID
+		if importResult.Refresh.HAIPSession == nil {
+			importResult.Refresh.ClientSecret = pending.ClientSecret
+		}
+		rememberCredentialRefresh(wallet, importResult.Refresh)
 	}
 	if err := s.notifyCredentialAccepted(r.Context(), importResult.IssuedCredential, pending.LookingGlassSessionID); err != nil {
 		log.Printf("wallet harness: credential notification failed after authorization-code import: %v", err)
@@ -945,6 +956,9 @@ func (s *walletHarnessServer) startExternalAuthorizationCodeImport(
 	configurationMetadata := map[string]interface{}{}
 	if issuerMetadata != nil && issuerMetadata.CredentialConfigurationsSupported != nil {
 		configurationMetadata = issuerMetadata.CredentialConfigurationsSupported[selectedConfigurationID]
+	}
+	if err := refuseUnbackedKeyAttestationLevels(selectedConfigurationID, configurationMetadata); err != nil {
+		return nil, err
 	}
 	useHAIP := s.shouldUseHAIPIssuancePath(selectedConfigurationID, configurationMetadata, authorizationServerMetadata)
 	usePAR := s.shouldUsePAR(authorizationServerMetadata, selectedConfigurationID, configurationMetadata)
@@ -1417,6 +1431,16 @@ func (s *walletHarnessServer) completeExternalCredentialImport(
 		TokenEndpoint:               valueOrEmpty(authorizationServerMetadata, func(metadata *resolvedAuthorizationServerMetadata) string { return metadata.TokenEndpoint }),
 		CredentialEndpoint:          issuerMetadata.CredentialEndpoint,
 		NonceEndpoint:               issuerMetadata.NonceEndpoint,
+		Refresh: s.newCredentialRefresh(
+			tokenPayload,
+			issuerMetadata,
+			authorizationServerMetadata,
+			selectedConfigurationID,
+			credentialFormatHint,
+			jwtProofRequired,
+			haipSession,
+			input.WalletBaseURL,
+		),
 	}
 	if resolvedOffer != nil {
 		result.CredentialOffer = resolvedOffer.RawOffer
@@ -1655,8 +1679,25 @@ func (s *walletHarnessServer) resolveExternalAuthorizationServerMetadata(
 			if tokenEndpoint == "" {
 				continue
 			}
-			issuer := strings.TrimSpace(asString(payload["issuer"]))
-			if issuer != "" && !sameURLIdentifier(issuer, candidate) {
+			// RFC 8414 Section 2 makes issuer REQUIRED, and Section 3.3: "The
+			// "issuer" value returned MUST be identical to the authorization
+			// server's issuer identifier value into which the well-known URI
+			// string was inserted ... If these values are not identical, the
+			// data contained in the response MUST NOT be used." Compared as
+			// received, with no normalization.
+			issuer, _ := payload["issuer"].(string)
+			if issuer == "" {
+				return nil, &walletAPIError{
+					Status: http.StatusBadRequest,
+					Code:   "discovery_issuer_mismatch",
+					Description: fmt.Sprintf(
+						"authorization server metadata from %q has no issuer, so it cannot be identical to %q (RFC 8414 §2, §3.3); stopping",
+						candidateURL,
+						candidate,
+					),
+				}
+			}
+			if !sameURLIdentifier(issuer, candidate) {
 				return nil, &walletAPIError{
 					Status: http.StatusBadRequest,
 					Code:   "discovery_issuer_mismatch",
@@ -1716,6 +1757,9 @@ func (s *walletHarnessServer) exchangeExternalPreAuthorizedToken(
 		form.Set("tx_code", strings.TrimSpace(txCode))
 	}
 
+	if err := refuseUnbackedKeyAttestationLevels(credentialConfigurationID, configurationMetadata); err != nil {
+		return nil, nil, err
+	}
 	haipIssuance := s.shouldUseHAIPIssuancePath(credentialConfigurationID, configurationMetadata, asMetadata)
 	if haipIssuance {
 		if !s.haipIssuanceEnabled() {
@@ -1798,10 +1842,11 @@ func (s *walletHarnessServer) exchangeExternalAuthorizationCodeToken(
 	if strings.TrimSpace(codeVerifier) != "" {
 		form.Set("code_verifier", strings.TrimSpace(codeVerifier))
 	}
-	if strings.TrimSpace(clientSecret) != "" {
-		form.Set("client_secret", strings.TrimSpace(clientSecret))
-	}
 
+	// RFC 6749 Section 2.3.1: "The client MUST NOT use more than one
+	// authentication method in each request." The attested path authenticates
+	// with the client attestation, as its PAR did (HAIP 1.0 Section 4.3), so
+	// a client_secret is sent only on the unattested path.
 	if useHAIP || (haipSession != nil && s.haipIssuanceEnabled()) {
 		if haipSession == nil {
 			return nil, fmt.Errorf("haip issuance session is required for attested authorization_code token exchange")
@@ -1814,6 +1859,9 @@ func (s *walletHarnessServer) exchangeExternalAuthorizationCodeToken(
 			PopAudience:           popAudience,
 			ChallengeEndpoint:     challengeEndpoint,
 		})
+	}
+	if strings.TrimSpace(clientSecret) != "" {
+		form.Set("client_secret", strings.TrimSpace(clientSecret))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))

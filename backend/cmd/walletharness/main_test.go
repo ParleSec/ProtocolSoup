@@ -1999,8 +1999,6 @@ func TestHAIPAttestationJWTBuildersUseExpectedHeaders(t *testing.T) {
 		keyAttesterKey,
 		encodeCertificateChain(keyAttesterChain),
 		[]intcrypto.JWK{holderJWK},
-		[]string{"iso_18045_moderate"},
-		[]string{"iso_18045_moderate"},
 		"test-c-nonce",
 	)
 	if err != nil {
@@ -2073,8 +2071,6 @@ func TestPreferHAIPBootstrapConfigurationID(t *testing.T) {
 }
 
 func TestHAIPBatchProofsShareSingleKeyAttestation(t *testing.T) {
-	t.Setenv("WALLET_KEY_ATTESTATION_KEY_STORAGE", "iso_18045_moderate")
-	t.Setenv("WALLET_KEY_ATTESTATION_USER_AUTHENTICATION", "iso_18045_moderate")
 	keyAttesterKey, keyAttesterChain := createECDSACertificateChain(t, []string{"key-attestation.example"}, "Key Attester")
 	keySet, err := intcrypto.NewKeySet()
 	if err != nil {
@@ -2134,9 +2130,12 @@ func TestHAIPBatchProofsShareSingleKeyAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode key attestation jwt: %v", err)
 	}
-	keyStorage := stringSliceFromValue(decodedAttestation.Payload["key_storage"])
-	if len(keyStorage) != 1 || keyStorage[0] != "iso_18045_moderate" {
-		t.Fatalf("key_storage = %#v, want [iso_18045_moderate]", keyStorage)
+	// OID4VCI 1.0 Appendix D.2: the software wallet backs no attack-potential
+	// level, so its key attestation asserts none.
+	for _, claim := range []string{"key_storage", "user_authentication"} {
+		if value, present := decodedAttestation.Payload[claim]; present {
+			t.Fatalf("key attestation asserts %s %v, which the software wallet cannot back", claim, value)
+		}
 	}
 	attestedKeys, ok := decodedAttestation.Payload["attested_keys"].([]interface{})
 	if !ok || len(attestedKeys) != 2 {

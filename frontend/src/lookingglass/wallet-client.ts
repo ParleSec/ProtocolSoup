@@ -64,7 +64,7 @@ export const LOOKING_GLASS_HAIP_ATTESTATION_FAILURE_GUIDANCE =
   'HAIP key-attested configurations require client attestation and key attestation (HAIP 1.0 Sections 4.4.1 and 4.5.1; OID4VCI 1.0 Appendix D/E). Wallet import returned HTTP 400 because WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON and WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON (each with an x5c chain) are missing. That rejection is the HAIP issuance gate, not a demo failure. Choose general instead of HAIP to issue without attestation, or configure those JWKs on a self-hosted wallet.'
 
 export const LOOKING_GLASS_KEY_STORAGE_FAILURE_GUIDANCE =
-  'The issuer rejected the Key Attestation JWT because key_storage or user_authentication does not meet key_attestations_required (OID4VCI 1.0 Appendix D.2). The levels an issuer demands are in that configuration\'s proof_types_supported.jwt.key_attestations_required. A wallet must not claim a level its key storage cannot meet, so set WALLET_KEY_ATTESTATION_KEY_STORAGE and WALLET_KEY_ATTESTATION_USER_AUTHENTICATION only to levels this deployment really provides, or choose a configuration that does not demand them. ProtocolSoup\'s own HAIP configurations require a key attestation at no particular level. This is the issuer\'s invalid_proof, not missing attestation JWKs.'
+  'The issuer rejected the Key Attestation JWT because key_storage or user_authentication does not meet key_attestations_required (OID4VCI 1.0 Appendix D.2). The levels an issuer demands are in that configuration\'s proof_types_supported.jwt.key_attestations_required. This wallet\'s key attestations assert no level: its software keys have had no ISO/IEC 18045 vulnerability analysis, so it can back none. Choose a configuration whose key_attestations_required names no level. ProtocolSoup\'s own HAIP configurations require a key attestation at no particular level. This is the issuer\'s invalid_proof, not missing attestation JWKs.'
 
 export const LOOKING_GLASS_X509_HASH_GUIDANCE =
   'x509_hash is HAIP\'s signed-request Client Identifier Prefix (OpenID4VP 1.0 Section 5.9.3; HAIP 1.0 Section 5). The request object is a signed JWT; the wallet validates the x5c chain against its verifier trust store. Roots carried in x5c are never self-trusted. HAIP presentation also requires DCQL and an encrypted response (direct_post.jwt). Client and key attestation are OID4VCI issuance requirements and are not part of this presentation profile. The hosted Looking Glass wallet already trusts the showcase verifier CA via WALLET_VERIFIER_X509_TRUST_ANCHOR_PEM.'
@@ -265,16 +265,22 @@ export type WalletImportResponse = {
   [key: string]: unknown
 }
 
+/**
+ * One outbound hop as the wallet sent and received it. Bodies are the exact
+ * bytes: UTF-8 text as is, otherwise base64 with *_body_encoding "base64".
+ */
 export type WalletProtocolExchange = {
   step?: string
   rfc_reference?: string
   method?: string
   url?: string
   request_headers?: Record<string, string>
-  request_body?: unknown
+  request_body?: string
+  request_body_encoding?: string
   response_status?: number
   response_headers?: Record<string, string>
-  response_body?: unknown
+  response_body?: string
+  response_body_encoding?: string
   duration_ms?: number
   actor?: string
   extra?: Record<string, unknown>

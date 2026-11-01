@@ -12,21 +12,27 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
+// protocolHop is one outbound HTTP exchange as the wallet sent and received
+// it. Bodies are the exact bytes on the wire: UTF-8 text as is, anything else
+// base64 with its *_body_encoding set to "base64".
 type protocolHop struct {
-	Step            string                 `json:"step"`
-	RFCReference    string                 `json:"rfc_reference,omitempty"`
-	Method          string                 `json:"method"`
-	URL             string                 `json:"url"`
-	RequestHeaders  map[string]string      `json:"request_headers,omitempty"`
-	RequestBody     interface{}            `json:"request_body,omitempty"`
-	ResponseStatus  int                    `json:"response_status"`
-	ResponseHeaders map[string]string      `json:"response_headers,omitempty"`
-	ResponseBody    interface{}            `json:"response_body,omitempty"`
-	DurationMS      int64                  `json:"duration_ms"`
-	Actor           string                 `json:"actor,omitempty"`
-	Extra           map[string]interface{} `json:"extra,omitempty"`
+	Step                 string                 `json:"step"`
+	RFCReference         string                 `json:"rfc_reference,omitempty"`
+	Method               string                 `json:"method"`
+	URL                  string                 `json:"url"`
+	RequestHeaders       map[string]string      `json:"request_headers,omitempty"`
+	RequestBody          string                 `json:"request_body,omitempty"`
+	RequestBodyEncoding  string                 `json:"request_body_encoding,omitempty"`
+	ResponseStatus       int                    `json:"response_status"`
+	ResponseHeaders      map[string]string      `json:"response_headers,omitempty"`
+	ResponseBody         string                 `json:"response_body,omitempty"`
+	ResponseBodyEncoding string                 `json:"response_body_encoding,omitempty"`
+	DurationMS           int64                  `json:"duration_ms"`
+	Actor                string                 `json:"actor,omitempty"`
+	Extra                map[string]interface{} `json:"extra,omitempty"`
 }
 
 type protocolTranscript struct {
@@ -159,7 +165,7 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 	}
 	extra := map[string]interface{}{}
 	requestHeaders := flattenHeader(req.Header)
-	requestBody, requestRecorded := captureHTTPBody(&req.Body, req.Header.Get("Content-Type"))
+	requestBody, requestEncoding, requestRecorded := captureHTTPBody(&req.Body)
 	if !requestRecorded {
 		extra["request_body_not_recorded"] = fmt.Sprintf("request body exceeds %d bytes", maxTranscriptBodyBytes)
 	}
@@ -170,20 +176,21 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 	if err != nil {
 		extra["error"] = err.Error()
 		transcript.addHop(protocolHop{
-			Step:           step,
-			RFCReference:   rfc,
-			Method:         req.Method,
-			URL:            requestURLString(req),
-			RequestHeaders: requestHeaders,
-			RequestBody:    requestBody,
-			DurationMS:     durationMS,
-			Actor:          actor,
-			Extra:          extra,
+			Step:                step,
+			RFCReference:        rfc,
+			Method:              req.Method,
+			URL:                 requestURLString(req),
+			RequestHeaders:      requestHeaders,
+			RequestBody:         requestBody,
+			RequestBodyEncoding: requestEncoding,
+			DurationMS:          durationMS,
+			Actor:               actor,
+			Extra:               extra,
 		})
 		return nil, err
 	}
 
-	responseBody, responseRecorded := captureHTTPBody(&resp.Body, resp.Header.Get("Content-Type"))
+	responseBody, responseEncoding, responseRecorded := captureHTTPBody(&resp.Body)
 	if !responseRecorded {
 		extra["response_body_not_recorded"] = fmt.Sprintf("response body exceeds %d bytes", maxTranscriptBodyBytes)
 	}
@@ -191,18 +198,20 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 		extra = nil
 	}
 	transcript.addHop(protocolHop{
-		Step:            step,
-		RFCReference:    rfc,
-		Method:          req.Method,
-		URL:             requestURLString(req),
-		RequestHeaders:  requestHeaders,
-		RequestBody:     requestBody,
-		ResponseStatus:  resp.StatusCode,
-		ResponseHeaders: flattenHeader(resp.Header),
-		ResponseBody:    responseBody,
-		DurationMS:      durationMS,
-		Actor:           actor,
-		Extra:           extra,
+		Step:                 step,
+		RFCReference:         rfc,
+		Method:               req.Method,
+		URL:                  requestURLString(req),
+		RequestHeaders:       requestHeaders,
+		RequestBody:          requestBody,
+		RequestBodyEncoding:  requestEncoding,
+		ResponseStatus:       resp.StatusCode,
+		ResponseHeaders:      flattenHeader(resp.Header),
+		ResponseBody:         responseBody,
+		ResponseBodyEncoding: responseEncoding,
+		DurationMS:           durationMS,
+		Actor:                actor,
+		Extra:                extra,
 	})
 	transcript.addEvent("http_exchange", step, map[string]interface{}{
 		"method":          req.Method,
@@ -274,13 +283,15 @@ func flattenHeader(header http.Header) map[string]string {
 	return out
 }
 
-// captureHTTPBody decodes a copy of the body for the transcript and leaves the
-// body readable in full for the caller. It buffers at most
-// maxTranscriptBodyBytes; recorded is false when the body is larger, and then
-// nothing of it is recorded.
-func captureHTTPBody(bodyPtr *io.ReadCloser, contentType string) (body interface{}, recorded bool) {
+// captureHTTPBody copies the body's exact bytes for the transcript and leaves
+// the body readable in full for the caller. Nothing is decoded or re-encoded,
+// so JSON member order and repeated form fields survive as sent. Valid UTF-8
+// is returned as text; anything else is base64 with encoding "base64". It
+// buffers at most maxTranscriptBodyBytes; recorded is false when the body is
+// larger, and then nothing of it is recorded.
+func captureHTTPBody(bodyPtr *io.ReadCloser) (body string, encoding string, recorded bool) {
 	if bodyPtr == nil || *bodyPtr == nil || *bodyPtr == http.NoBody {
-		return nil, true
+		return "", "", true
 	}
 	original := *bodyPtr
 	raw, err := io.ReadAll(io.LimitReader(original, maxTranscriptBodyBytes+1))
@@ -289,29 +300,15 @@ func captureHTTPBody(bodyPtr *io.ReadCloser, contentType string) (body interface
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(raw), original), original}
 	if len(raw) > maxTranscriptBodyBytes {
-		return nil, false
+		return "", "", false
 	}
 	if err != nil || len(raw) == 0 {
-		return nil, true
+		return "", "", true
 	}
-	trimmedType := strings.ToLower(strings.TrimSpace(contentType))
-	if strings.Contains(trimmedType, "application/json") || json.Valid(raw) {
-		var decoded interface{}
-		if err := json.Unmarshal(raw, &decoded); err == nil {
-			return decoded, true
-		}
+	if !utf8.Valid(raw) {
+		return base64.StdEncoding.EncodeToString(raw), "base64", true
 	}
-	if strings.Contains(trimmedType, "application/x-www-form-urlencoded") {
-		values, err := url.ParseQuery(string(raw))
-		if err == nil {
-			form := make(map[string]string, len(values))
-			for key, list := range values {
-				form[key] = strings.Join(list, ",")
-			}
-			return form, true
-		}
-	}
-	return string(raw), true
+	return string(raw), "", true
 }
 
 // decodeProofJWTForTranscript returns the compact JWT plus decoded header/payload

@@ -1417,8 +1417,8 @@ requirements:
       - docs/packages/wallet.md
     tests:
       - package: ./cmd/walletharness
-        file: backend/cmd/walletharness/oid4vci_client_test.go
-        name: TestIso18045ModerateNotClaimedWhenEnvUnset
+        file: backend/cmd/walletharness/main_test.go
+        name: TestGetOrCreateWalletPrunesExpiredEntries
     notes: >-
       Session-scoped in-memory credential storage is retained until the
       HashiCorp platform vault initiative. Cross-protocol security limitation
@@ -1548,7 +1548,10 @@ requirements:
     tests:
       - package: ./cmd/walletharness
         file: backend/cmd/walletharness/oid4vci_client_test.go
-        name: TestIso18045ModerateNotClaimedWhenEnvUnset
+        name: TestRefuseUnbackedKeyAttestationLevels
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestHAIPBatchProofsShareSingleKeyAttestation
       - package: ./cmd/walletharness
         file: backend/cmd/walletharness/oid4vci_client_test.go
         name: TestConfigurationRequiresKeyAttestationFromMetadata
@@ -1579,16 +1582,17 @@ requirements:
   - id: CW-089
     specification: oid4vci
     section: "14.5"
-    level: MUST
+    level: MAY
     title: Fresh Access Token via Refresh Token to refresh Credentials
     question: "How does a wallet refresh its credentials when it holds a refresh token?"
     statement: >-
-      When a Refresh Token is issued, the Wallet obtains a fresh Access Token
-      per RFC 6749 Section 6 to refresh Credentials without End-User
-      interaction; otherwise the Wallet restarts issuance.
+      If the Credential Issuer issued a Refresh Token to the Wallet, the
+      Wallet would obtain a fresh Access Token by making a request to the
+      Token Endpoint, as defined in Section 6 of [RFC6749].
     roles: [wallet]
     applicability: applicable
     implementation:
+      - backend/cmd/walletharness/credential_refresh.go
       - backend/cmd/walletharness/oid4vci_client.go
     tests:
       - package: ./cmd/walletharness
@@ -1596,4 +1600,7 @@ requirements:
         name: TestExchangeRefreshTokenRequiresInputs
       - package: ./cmd/walletharness
         file: backend/cmd/walletharness/oid4vci_client_test.go
-        name: TestExchangeRefreshTokenRedeemsGrant
+        name: TestExchangeRefreshTokenAuthenticatesAsTheOriginalGrant
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_external_test.go
+        name: TestAPIRefreshReissuesCredentialWithRefreshToken
