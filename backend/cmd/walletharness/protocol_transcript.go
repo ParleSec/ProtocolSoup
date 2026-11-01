@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -35,6 +36,60 @@ type protocolTranscript struct {
 }
 
 type protocolTranscriptContextKey struct{}
+
+// maxTranscriptBodyBytes bounds how much of one body the transcript buffers.
+// It matches the wallet's request object limit, so recording a hop never
+// reads more of an untrusted response than the wallet itself would. A larger
+// body is not recorded at all rather than recorded in part.
+const maxTranscriptBodyBytes = maxRequestObjectBytes
+
+// protocolStep labels the hops doHTTP records under a context.
+type protocolStep struct {
+	Step         string
+	RFCReference string
+	Actor        string
+}
+
+type protocolStepContextKey struct{}
+
+// withProtocolStep labels the hops doHTTP records under ctx. Unlabelled hops
+// are classified as wallet-to-issuer OID4VCI exchanges.
+func withProtocolStep(ctx context.Context, step protocolStep) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, protocolStepContextKey{}, step)
+}
+
+// recordProtocolExchanges attaches a fresh transcript to r, so every hop the
+// wallet makes while handling it is recorded, and returns a writer that adds
+// those hops to the JSON response, error responses included.
+func recordProtocolExchanges(w http.ResponseWriter, r *http.Request) (*http.Request, func(int, interface{})) {
+	transcript := &protocolTranscript{}
+	r = r.WithContext(withProtocolTranscript(r.Context(), transcript))
+	return r, func(status int, payload interface{}) {
+		writeJSONWithTranscript(w, status, payload, transcript)
+	}
+}
+
+// writeJSONWithTranscript writes payload as writeJSON does, adding the hops
+// the transcript recorded as _protocol_exchanges when there are any.
+func writeJSONWithTranscript(w http.ResponseWriter, status int, payload interface{}, transcript *protocolTranscript) {
+	if hops, _ := transcript.snapshot(); len(hops) > 0 {
+		switch body := payload.(type) {
+		case map[string]interface{}:
+			body["_protocol_exchanges"] = hops
+		case map[string]string:
+			withHops := make(map[string]interface{}, len(body)+1)
+			for key, value := range body {
+				withHops[key] = value
+			}
+			withHops["_protocol_exchanges"] = hops
+			payload = withHops
+		}
+	}
+	writeJSON(w, status, payload)
+}
 
 func withProtocolTranscript(ctx context.Context, transcript *protocolTranscript) context.Context {
 	if ctx == nil {
@@ -85,7 +140,9 @@ func (t *protocolTranscript) snapshot() (hops []protocolHop, events []walletLife
 
 // doHTTP executes an outbound request and, when a protocol transcript is attached
 // to ctx, records the real hop (method/URL/bodies) for Looking Glass glass-box
-// playback. Looking Glass must show OID4VCI protocol stages, not wallet API calls.
+// playback. Looking Glass must show protocol stages, not wallet API calls, so
+// each hop carries the step a withProtocolStep label names, or its OID4VCI
+// classification.
 func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*http.Response, error) {
 	if req == nil {
 		return nil, http.ErrNotSupported
@@ -96,13 +153,22 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 	}
 
 	step, rfc := classifyOID4VCIProtocolHop(req.Method, req.URL)
+	actor := "wallet→issuer"
+	if labelled, ok := ctx.Value(protocolStepContextKey{}).(protocolStep); ok {
+		step, rfc, actor = labelled.Step, labelled.RFCReference, labelled.Actor
+	}
+	extra := map[string]interface{}{}
 	requestHeaders := flattenHeader(req.Header)
-	requestBody := captureHTTPBody(&req.Body, req.Header.Get("Content-Type"))
+	requestBody, requestRecorded := captureHTTPBody(&req.Body, req.Header.Get("Content-Type"))
+	if !requestRecorded {
+		extra["request_body_not_recorded"] = fmt.Sprintf("request body exceeds %d bytes", maxTranscriptBodyBytes)
+	}
 
 	started := time.Now()
 	resp, err := s.httpClient.Do(req)
 	durationMS := time.Since(started).Milliseconds()
 	if err != nil {
+		extra["error"] = err.Error()
 		transcript.addHop(protocolHop{
 			Step:           step,
 			RFCReference:   rfc,
@@ -111,13 +177,19 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 			RequestHeaders: requestHeaders,
 			RequestBody:    requestBody,
 			DurationMS:     durationMS,
-			Actor:          "wallet→issuer",
-			Extra:          map[string]interface{}{"error": err.Error()},
+			Actor:          actor,
+			Extra:          extra,
 		})
 		return nil, err
 	}
 
-	responseBody := captureHTTPBody(&resp.Body, resp.Header.Get("Content-Type"))
+	responseBody, responseRecorded := captureHTTPBody(&resp.Body, resp.Header.Get("Content-Type"))
+	if !responseRecorded {
+		extra["response_body_not_recorded"] = fmt.Sprintf("response body exceeds %d bytes", maxTranscriptBodyBytes)
+	}
+	if len(extra) == 0 {
+		extra = nil
+	}
 	transcript.addHop(protocolHop{
 		Step:            step,
 		RFCReference:    rfc,
@@ -129,7 +201,8 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 		ResponseHeaders: flattenHeader(resp.Header),
 		ResponseBody:    responseBody,
 		DurationMS:      durationMS,
-		Actor:           "wallet→issuer",
+		Actor:           actor,
+		Extra:           extra,
 	})
 	transcript.addEvent("http_exchange", step, map[string]interface{}{
 		"method":          req.Method,
@@ -153,6 +226,10 @@ func classifyOID4VCIProtocolHop(method string, parsed *url.URL) (step string, rf
 		return "Fetch Authorization Server Metadata", "RFC 8414 Section 3"
 	case strings.Contains(path, "credential-offer"):
 		return "Fetch Credential Offer", "OpenID4VCI 1.0 Section 4.1.3"
+	case strings.Contains(path, "/oid4vci/offers/"):
+		// ProtocolSoup's issuer API for creating an offer; OpenID4VCI defines
+		// no such endpoint, so the hop cites none.
+		return "Create Credential Offer", ""
 	case strings.HasSuffix(path, "/token") || strings.Contains(path, "/oid4vci/token"):
 		return "Token Request", "OpenID4VCI 1.0 Section 6"
 	case strings.Contains(path, "/nonce"):
@@ -197,21 +274,31 @@ func flattenHeader(header http.Header) map[string]string {
 	return out
 }
 
-func captureHTTPBody(bodyPtr *io.ReadCloser, contentType string) interface{} {
+// captureHTTPBody decodes a copy of the body for the transcript and leaves the
+// body readable in full for the caller. It buffers at most
+// maxTranscriptBodyBytes; recorded is false when the body is larger, and then
+// nothing of it is recorded.
+func captureHTTPBody(bodyPtr *io.ReadCloser, contentType string) (body interface{}, recorded bool) {
 	if bodyPtr == nil || *bodyPtr == nil || *bodyPtr == http.NoBody {
-		return nil
+		return nil, true
 	}
-	raw, err := io.ReadAll(*bodyPtr)
-	_ = (*bodyPtr).Close()
-	*bodyPtr = io.NopCloser(bytes.NewReader(raw))
+	original := *bodyPtr
+	raw, err := io.ReadAll(io.LimitReader(original, maxTranscriptBodyBytes+1))
+	*bodyPtr = struct {
+		io.Reader
+		io.Closer
+	}{io.MultiReader(bytes.NewReader(raw), original), original}
+	if len(raw) > maxTranscriptBodyBytes {
+		return nil, false
+	}
 	if err != nil || len(raw) == 0 {
-		return nil
+		return nil, true
 	}
 	trimmedType := strings.ToLower(strings.TrimSpace(contentType))
 	if strings.Contains(trimmedType, "application/json") || json.Valid(raw) {
 		var decoded interface{}
 		if err := json.Unmarshal(raw, &decoded); err == nil {
-			return decoded
+			return decoded, true
 		}
 	}
 	if strings.Contains(trimmedType, "application/x-www-form-urlencoded") {
@@ -221,10 +308,10 @@ func captureHTTPBody(bodyPtr *io.ReadCloser, contentType string) interface{} {
 			for key, list := range values {
 				form[key] = strings.Join(list, ",")
 			}
-			return form
+			return form, true
 		}
 	}
-	return string(raw)
+	return string(raw), true
 }
 
 // decodeProofJWTForTranscript returns the compact JWT plus decoded header/payload

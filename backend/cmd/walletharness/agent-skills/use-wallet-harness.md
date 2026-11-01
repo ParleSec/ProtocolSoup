@@ -89,6 +89,8 @@ Resolve then present (wallet UI path):
     POST {{ORIGIN}}/api/present
     {"request_id": "...", "approve_external_trust": false}
 
+`/api/resolve`, `/api/preview`, `/api/present`, and `/submit` return `_protocol_exchanges`: the wallet's own record of each HTTP hop it made for the call, such as the request object retrieval and the Authorization Response POST to `response_uri`. Error responses carry them too, so a refusal includes the exchange that caused it.
+
 ## Errors
 
 API errors are JSON objects with a stable `error` token and a prose `error_description`. They are not RFC 9457 Problem Details. Common tokens: `invalid_request`, `method_not_allowed`, `server_error`, `wallet_submission_failed`. This origin does not currently send `Retry-After` or advertise a published rate-limit.

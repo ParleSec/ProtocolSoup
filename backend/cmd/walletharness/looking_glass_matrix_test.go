@@ -350,6 +350,9 @@ func (env *lookingGlassMatrixEnv) submitLookingGlassVP(t *testing.T, tc lookingG
 					baseSubmit["vp_token"] = vpToken
 				}
 			}
+			if step == "submit_response" {
+				requireAuthorizationResponseHop(t, submitted)
+			}
 		}
 		return
 	}
@@ -362,6 +365,23 @@ func (env *lookingGlassMatrixEnv) submitLookingGlassVP(t *testing.T, tc lookingG
 	if status != http.StatusOK {
 		t.Fatalf("wallet submit status %d: %v", status, submitted)
 	}
+	requireAuthorizationResponseHop(t, submitted)
+}
+
+// requireAuthorizationResponseHop checks that the wallet returned its own
+// record of the Authorization Response it POSTed to the verifier.
+func requireAuthorizationResponseHop(t *testing.T, submitted map[string]interface{}) {
+	t.Helper()
+	hops, _ := submitted["_protocol_exchanges"].([]interface{})
+	for _, raw := range hops {
+		hop, _ := raw.(map[string]interface{})
+		status, _ := hop["response_status"].(float64)
+		if hop["step"] == "Authorization Response" && hop["actor"] == "wallet→verifier" &&
+			hop["method"] == http.MethodPost && int(status) == http.StatusOK {
+			return
+		}
+	}
+	t.Fatalf("wallet response has no recorded Authorization Response hop: %v", hops)
 }
 
 func (env *lookingGlassMatrixEnv) postJSON(t *testing.T, endpoint string, payload map[string]interface{}) (int, map[string]interface{}) {

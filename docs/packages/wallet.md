@@ -117,6 +117,7 @@ wallet-driven authorization-code / HAIP issuance path is exercised.
   - Supports `mode=stepwise` with steps: `bootstrap`, `issue_credential`, `build_presentation`, `submit_response`
   - For `direct_post.jwt`, encrypts the Authorization Response to the verifier's ephemeral ECDH-ES key from `client_metadata.jwks` (OID4VP 1.0 Section 8.3); the HTTP form contains only `response`
 - `POST /api/resolve`, `POST /api/present`, `POST /api/preview`, `GET /api/session`
+- `/api/resolve`, `/api/preview`, `/api/present`, and `/submit` return `_protocol_exchanges`, on error responses as well as successes: every HTTP hop the wallet made for the call, such as the request object retrieval, DID and verifier attestation issuer lookups, any issuance the call ran, and the Authorization Response to `response_uri`. A body larger than 1 MiB is not recorded, and the hop's `extra` says so.
 - `POST /api/issue` — OID4VCI bootstrap against the configured issuer
 - `POST /api/import` — import from an external credential offer (pre-authorized or authorization_code), start wallet-initiated issuance from `credential_issuer` (optional `credential_configuration_id`), or HAIP authorize + DPoP GET of a protected resource (`discovery_url`, `resource_endpoint`, `scope`, optional `wallet_base_url`)
 - `GET /api/oid4vci/callback` — authorization-code redirect callback
