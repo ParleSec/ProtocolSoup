@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,9 +29,10 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("conformance-capture", flag.ContinueOnError)
-	base := flags.String("base", "", "main app origin, e.g. https://protocolsoup.com (required)")
-	wallet := flags.String("wallet", "", "hosted wallet origin, e.g. https://wallet.protocolsoup.com")
-	counterparty := flags.String("counterparty", "", "conformance counterparty origin, when deployed")
+	target := flags.String("target", "", `"production" for ProtocolSoup's deployed apps, or "local" for servers on localhost (required)`)
+	port := flags.Int("port", 8080, "local main app port (-target local)")
+	walletPort := flags.Int("wallet-port", 0, "local wallet harness port, 0 when not running (-target local)")
+	counterpartyPort := flags.Int("counterparty-port", 0, "local conformance counterparty port, 0 when not running (-target local)")
 	commit := flags.String("commit", "", "commit the deployed apps must report on /health; defaults to what the main app reports")
 	only := flags.String("only", "", "comma-separated requirement IDs to capture; all registered when empty")
 	rpm := flags.Int("rpm", capture.DefaultRequestsPerMinute, "requests per minute against the deployed apps")
@@ -42,18 +42,15 @@ func run(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected arguments: %v", flags.Args())
 	}
-	baseURL, err := parseOrigin("-base", *base, true)
+	portsSet := false
+	flags.Visit(func(f *flag.Flag) {
+		portsSet = portsSet || f.Name == "port" || f.Name == "wallet-port" || f.Name == "counterparty-port"
+	})
+	origins, err := resolveOrigins(*target, portsSet, *port, *walletPort, *counterpartyPort)
 	if err != nil {
 		return err
 	}
-	walletURL, err := parseOrigin("-wallet", *wallet, false)
-	if err != nil {
-		return err
-	}
-	counterpartyURL, err := parseOrigin("-counterparty", *counterparty, false)
-	if err != nil {
-		return err
-	}
+	baseURL, walletURL, counterpartyURL := origins.Base, origins.Wallet, origins.Counterparty
 
 	// The set always lands where the image build copies it from, as the
 	// conformance report does.
@@ -79,13 +76,16 @@ func run(ctx context.Context, args []string) error {
 	if deployed != expected {
 		return fmt.Errorf("%s/health reports commit %q, want %q", baseURL, deployed, expected)
 	}
-	if walletURL != "" {
-		walletCommit, err := healthCommit(ctx, walletURL)
+	for _, origin := range []string{walletURL, counterpartyURL} {
+		if origin == "" {
+			continue
+		}
+		originCommit, err := healthCommit(ctx, origin)
 		if err != nil {
 			return err
 		}
-		if walletCommit != expected {
-			return fmt.Errorf("%s/health reports commit %q, want %q", walletURL, walletCommit, expected)
+		if originCommit != expected {
+			return fmt.Errorf("%s/health reports commit %q, want %q", origin, originCommit, expected)
 		}
 	}
 
@@ -123,25 +123,24 @@ func run(ctx context.Context, args []string) error {
 	return nil
 }
 
-// parseOrigin accepts only a bare http or https origin, so every request the
-// run sends goes to the app the flag names and to nothing else.
-func parseOrigin(flagName, raw string, required bool) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		if required {
-			return "", fmt.Errorf("%s is required", flagName)
+// resolveOrigins picks the apps a run talks to. The run never takes an
+// origin as text: -target selects ProtocolSoup's production origins or
+// localhost, and local ports are numbers, so every request goes to one of
+// those apps and to nothing else.
+func resolveOrigins(target string, portsSet bool, port, walletPort, counterpartyPort int) (capture.Origins, error) {
+	switch target {
+	case "production":
+		if portsSet {
+			return capture.Origins{}, fmt.Errorf("-port, -wallet-port and -counterparty-port apply only to -target local")
 		}
-		return "", nil
+		return capture.ProductionOrigins(), nil
+	case "local":
+		return capture.LocalOrigins(port, walletPort, counterpartyPort)
+	case "":
+		return capture.Origins{}, fmt.Errorf(`-target is required: "production" or "local"`)
+	default:
+		return capture.Origins{}, fmt.Errorf(`-target must be "production" or "local", got %q`, target)
 	}
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", flagName, err)
-	}
-	if (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil ||
-		strings.TrimRight(parsed.Path, "/") != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("%s must be an origin such as https://protocolsoup.com, got %q", flagName, raw)
-	}
-	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 // healthCommit reads the commit an app reports on /health.

@@ -61,6 +61,13 @@ Exactly one of `offer`, `credential`, `credential_issuer`, or `discovery_url`+`r
 
 A successful import returns the stored credential plus `_protocol_exchanges` (wallet-to-issuer HTTP hops) and `_looking_glass_events`. An `authorization_code` grant includes `authorization_url`; the issuer then redirects to `GET {{ORIGIN}}/api/oid4vci/callback`.
 
+Refresh a held Credential with the Refresh Token its issuance returned (OpenID4VCI 1.0 Section 14.5):
+
+    POST {{ORIGIN}}/api/refresh
+    {"credential_id": "optional; defaults to the active credential"}
+
+Without a Refresh Token for that Credential the wallet answers 400; reissue it with `/api/import` instead.
+
 HAIP configurations require attester JWKs on this process. Without them import returns HTTP 400 with `error` `invalid_request` explaining that the configuration requires HAIP attestation material.
 
 ## Present a credential (OID4VP)
@@ -88,6 +95,8 @@ Resolve then present (wallet UI path):
 
     POST {{ORIGIN}}/api/present
     {"request_id": "...", "approve_external_trust": false}
+
+`/api/resolve`, `/api/preview`, `/api/present`, and `/submit` return `_protocol_exchanges`: the wallet's own record of each HTTP hop it made for the call, such as the request object retrieval and the Authorization Response POST to `response_uri`. Error responses carry them too, so a refusal includes the exchange that caused it.
 
 ## Errors
 

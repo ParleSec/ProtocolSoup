@@ -19,6 +19,14 @@ Documentation for all ProtocolSoup container images available on GitHub Containe
 | [protocolsoup-frontend](https://ghcr.io/parlesec/protocolsoup-frontend) | Next.js App Router UI | [frontend.md](frontend.md) |
 | [protocolsoup-wallet](https://ghcr.io/parlesec/protocolsoup-wallet) | OID4VP harness + OID4VCI wallet reference client | [wallet.md](wallet.md) |
 
+## Conformance Infrastructure
+
+Not published to GHCR and not part of a ProtocolSoup deployment.
+
+| Service | Description | Docs |
+|---------|-------------|------|
+| `protocolsoup-counterparty` (Fly app) | Serves deliberately invalid protocol messages for conformance capture | [conformance-counterparty.md](conformance-counterparty.md) |
+
 ## VC Protocol Modules
 
 The federation and VC images expose these module-level protocol docs.

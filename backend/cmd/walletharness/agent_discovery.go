@@ -36,6 +36,7 @@ func (s *walletHarnessServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/session", s.handleAPISession)
 	mux.HandleFunc("/api/issue", s.handleAPIIssue)
 	mux.HandleFunc("/api/import", s.handleAPIImport)
+	mux.HandleFunc("/api/refresh", s.handleAPIRefresh)
 	mux.HandleFunc("/api/oid4vci/callback", s.handleAPIOID4VCICallback)
 	mux.HandleFunc("/api/preview", s.handleAPIPreview)
 	mux.HandleFunc("/api/present", s.handleAPIPresent)
@@ -281,7 +282,7 @@ func walletLLMsTxt(origin, site string) string {
 		"- Issue mdoc (`mso_mdoc`) and SD-JWT VC credentials from a live issuer.",
 		"- Present those credentials to a live verifier (`direct_post` / `direct_post.jwt`, including HAIP).",
 		"- Looking Glass on " + site + " creates issuer/verifier traffic; this wallet performs the holder-side hops.",
-		"- Headless interface: HTTP JSON (`/api/issue`, `/api/import`, `/api/resolve`, `/api/present`, `/api/session`, `/submit`). QR and deeplinks are human handoffs.",
+		"- Headless interface: HTTP JSON (`/api/issue`, `/api/import`, `/api/refresh`, `/api/resolve`, `/api/present`, `/api/session`, `/submit`). QR and deeplinks are human handoffs.",
 		"",
 		"## Start here",
 		"",

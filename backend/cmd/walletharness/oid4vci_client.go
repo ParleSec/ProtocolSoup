@@ -267,25 +267,40 @@ func clientAttestationIssuer() string {
 	return "https://wallet.protocolsoup.com/attester"
 }
 
-func keyAttestationClaimsFromEnv() (keyStorage []string, userAuthentication []string) {
-	if raw := strings.TrimSpace(os.Getenv("WALLET_KEY_ATTESTATION_KEY_STORAGE")); raw != "" {
-		keyStorage = splitCommaSeparated(raw)
+// refuseUnbackedKeyAttestationLevels stops issuance for a configuration whose
+// key_attestations_required names key_storage or user_authentication levels.
+// OID4VCI 1.0 Appendix D.2 defines each level as an assertion: iso_18045_basic,
+// for example, "MUST be used when key storage or user authentication is
+// resistant to attack with attack potential "Basic", equivalent to VAN.2
+// according to [ISO.18045]". The hosted wallet's keys are software keys that
+// have had no such vulnerability analysis, so its key attestations assert no
+// level, and a level the Issuer demands is one it cannot back.
+func refuseUnbackedKeyAttestationLevels(configurationID string, configuration map[string]interface{}) error {
+	proofTypes, _ := configuration["proof_types_supported"].(map[string]interface{})
+	jwtProof, _ := proofTypes["jwt"].(map[string]interface{})
+	required, _ := jwtProof["key_attestations_required"].(map[string]interface{})
+	keyStorage := stringSliceFromValue(required["key_storage"])
+	userAuthentication := stringSliceFromValue(required["user_authentication"])
+	if len(keyStorage) == 0 && len(userAuthentication) == 0 {
+		return nil
 	}
-	if raw := strings.TrimSpace(os.Getenv("WALLET_KEY_ATTESTATION_USER_AUTHENTICATION")); raw != "" {
-		userAuthentication = splitCommaSeparated(raw)
+	demanded := make([]string, 0, 2)
+	if len(keyStorage) > 0 {
+		demanded = append(demanded, fmt.Sprintf("key_storage %q", keyStorage))
 	}
-	return keyStorage, userAuthentication
-}
-
-func splitCommaSeparated(raw string) []string {
-	parts := strings.Split(raw, ",")
-	values := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if trimmed := strings.TrimSpace(part); trimmed != "" {
-			values = append(values, trimmed)
-		}
+	if len(userAuthentication) > 0 {
+		demanded = append(demanded, fmt.Sprintf("user_authentication %q", userAuthentication))
 	}
-	return values
+	return &walletAPIError{
+		Status: http.StatusBadRequest,
+		Code:   "invalid_request",
+		Description: fmt.Sprintf(
+			"credential configuration %q requires a key attestation asserting %s (OpenID4VCI 1.0 Section 12.2.4); "+
+				"the hosted wallet holds software keys with no ISO/IEC 18045 vulnerability analysis, so it can back no "+
+				"Appendix D.2 level and does not claim one; stopping",
+			configurationID, strings.Join(demanded, " and "),
+		),
+	}
 }
 
 func authorizationServerIssuer(asMetadata *resolvedAuthorizationServerMetadata, fallback string) string {
@@ -1162,41 +1177,53 @@ func (s *walletHarnessServer) pollDeferredCredentialAt(
 	return nil, fmt.Errorf("deferred credential not ready after %d retries", deferredMaxRetries)
 }
 
-// exchangeRefreshToken redeems a refresh_token grant (RFC 6749 §6 / OID4VCI
-// §14.5) at the Authorization Server token endpoint, preserving DPoP and
-// client attestation when the original issuance used them.
+// exchangeRefreshToken redeems refresh.RefreshToken at the Authorization
+// Server's Token Endpoint (RFC 6749 Section 6; OpenID4VCI 1.0 Section 14.5),
+// authenticating as the original grant did: with the same client attestation
+// and DPoP key on the HAIP path, otherwise with the same client_id and, if one
+// was used, client_secret.
 func (s *walletHarnessServer) exchangeRefreshToken(
 	ctx context.Context,
-	tokenEndpoint string,
-	refreshToken string,
-	session *haipIssuanceSession,
-	popAudience string,
+	refresh *credentialRefresh,
 	lookingGlassSessionID string,
 ) (map[string]interface{}, error) {
-	refreshToken = strings.TrimSpace(refreshToken)
-	tokenEndpoint = strings.TrimSpace(tokenEndpoint)
-	if refreshToken == "" {
+	if refresh == nil || strings.TrimSpace(refresh.RefreshToken) == "" {
 		return nil, fmt.Errorf("refresh_token is required")
 	}
+	asMetadata := refresh.AuthorizationServerMetadata
+	tokenEndpoint := strings.TrimSpace(valueOrEmpty(asMetadata, func(metadata *resolvedAuthorizationServerMetadata) string { return metadata.TokenEndpoint }))
 	if tokenEndpoint == "" {
 		return nil, fmt.Errorf("token endpoint is required")
 	}
+	validatedEndpoint, err := s.validateExternalURL(tokenEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("validate token endpoint: %w", err)
+	}
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
-	form.Set("refresh_token", refreshToken)
-
-	if session != nil && s.haipIssuanceEnabled() {
-		attestationJWT, popJWT, err := s.buildClientAttestationHeaderPair(ctx, session, popAudience, "", lookingGlassSessionID)
-		if err != nil {
-			return nil, err
-		}
-		if clientID := strings.TrimSpace(s.haipAttestedClientID); clientID != "" {
-			form.Set("client_id", clientID)
-		}
-		return s.postHAIPFormWithDPoP(ctx, tokenEndpoint, form, session, attestationJWT, popJWT, popAudience, "", lookingGlassSessionID, false)
+	form.Set("refresh_token", refresh.RefreshToken)
+	if clientID := strings.TrimSpace(refresh.ClientID); clientID != "" {
+		form.Set("client_id", clientID)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
+	if refresh.HAIPSession != nil {
+		if !s.haipIssuanceEnabled() {
+			return nil, fmt.Errorf("refresh requires the haip attestation material the original issuance used")
+		}
+		return s.exchangeHAIPPreAuthorizedToken(ctx, haipTokenExchangeInput{
+			TokenEndpoint:         validatedEndpoint,
+			Form:                  form,
+			LookingGlassSessionID: lookingGlassSessionID,
+			Session:               refresh.HAIPSession,
+			PopAudience:           popAudienceForAS(asMetadata, ""),
+			ChallengeEndpoint:     asMetadata.ChallengeEndpoint,
+		})
+	}
+	if clientSecret := strings.TrimSpace(refresh.ClientSecret); clientSecret != "" {
+		form.Set("client_secret", clientSecret)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, validatedEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("build refresh token request: %w", err)
 	}

@@ -36,8 +36,6 @@
 | `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` | No | `(empty)` | Attester private JWK (+ `x5c`) used to mint Appendix D `key_attestation` JWTs for HAIP credential proofs |
 | `WALLET_OID4VCI_ATTESTED_CLIENT_ID` | No | `protocolsoup-wallet` | Attested `client_id` / client attestation JWT `sub` / client attestation PoP JWT `iss` when HAIP attestation material is configured |
 | `WALLET_CLIENT_ATTESTATION_ISSUER` | No | `https://wallet.protocolsoup.com/attester` | `iss` claim on client attestation JWTs |
-| `WALLET_KEY_ATTESTATION_KEY_STORAGE` | No | `(empty)` | Comma-separated `key_storage` attack-potential levels asserted in key attestation (for example `iso_18045_moderate`). Omitted unless set honestly for the deployment |
-| `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` | No | `(empty)` | Comma-separated `user_authentication` attack-potential levels asserted in key attestation. Omitted unless set honestly for the deployment |
 
 ### Storage And Volumes
 
@@ -87,7 +85,8 @@ The wallet runs a unified, metadata-driven OID4VCI client shared by automatic bo
 - **Holder binding:** JWT `sub` is optional on SD-JWT VC. The wallet stores an issued JWT/SD-JWT when RFC 7800 `cnf` is present (HAIP requires `cnf.jwk` when cryptographic holder binding is used) or when `sub` / `credentialSubject.id` is present. It does not reject a HAIP `dc+sd-jwt` solely for a missing `sub`.
 - **Issuer key resolution:** JWT and SD-JWT issuer signatures are verified against `jwks_uri` advertised in Credential Issuer Metadata and RFC 8414 Authorization Server metadata. The ProtocolSoup OID4VCI Authorization Server advertises `jwks_uri` as `{issuer}/.well-known/jwks.json`. The wallet stops at the first non-empty JWK set and does not probe SD-JWT VC Issuer Metadata (`/.well-known/jwt-vc-issuer`) — that resource is not a JWK Set. Speculative ProtocolSoup JWKS paths (`/.well-known/jwks.json`, `/api/.well-known/jwks.json`, `/oidc/.well-known/jwks.json`) run only when no advertised `jwks_uri` yielded keys.
 - **Metadata discovery:** Credential Issuer Metadata uses OID4VCI §12.2.2 well-known insertion and preserves a trailing slash on the issuer path; OAuth Authorization Server metadata follows RFC 8414 §3.1 (`oauth-authorization-server` only — no `openid-configuration` fallback) and strips it. Concurrent GETs to the same discovery URL are single-flighted so overlapping imports cannot race issuer discovery. Identifiers are compared exactly, with no normalization: metadata `credential_issuer` against the offer (OID4VCI §12.2.4), Authorization Server `issuer` (RFC 8414 §3.3) and the RFC 9207 `iss` response parameter. A Credential Offer's `authorization_server` hint must name one of the metadata's `authorization_servers` or the import stops (OID4VCI §4.1.1); it narrows the choice only when several are listed.
-- **Key attestation honesty:** the software wallet does not assert `iso_18045_moderate` (or other attack-potential levels) unless `WALLET_KEY_ATTESTATION_KEY_STORAGE` / `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` are set to values the deployment can actually support.
+- **Key attestation levels:** the wallet's key attestations assert no `key_storage` or `user_authentication`. OpenID4VCI 1.0 Appendix D.2 defines each value as an assertion that key storage or user authentication resists an ISO/IEC 18045 attack potential, and this software wallet's keys have had no such vulnerability analysis, so it backs no level and no setting makes it claim one. When a configuration's `key_attestations_required` names `key_storage` or `user_authentication` values, the wallet stops before the Token Request with a 400 that names them.
+- **Credential refresh:** when a Token Response carries a `refresh_token`, the wallet keeps it with the Credential, with the issuer and Authorization Server metadata and the original client authentication (on the HAIP path, the same client attestation and DPoP key). `POST /api/refresh` redeems it (`grant_type=refresh_token`, RFC 6749 §6), requests the Credential again without the End-User, replaces the old Credential, and keeps a rotated `refresh_token` (OID4VCI §14.5).
 
 Looking Glass OID4VCI pre-authorized executors create the issuer offer, then
 delegate redemption to this wallet via `POST /api/import` (with
@@ -117,7 +116,9 @@ wallet-driven authorization-code / HAIP issuance path is exercised.
   - Supports `mode=stepwise` with steps: `bootstrap`, `issue_credential`, `build_presentation`, `submit_response`
   - For `direct_post.jwt`, encrypts the Authorization Response to the verifier's ephemeral ECDH-ES key from `client_metadata.jwks` (OID4VP 1.0 Section 8.3); the HTTP form contains only `response`
 - `POST /api/resolve`, `POST /api/present`, `POST /api/preview`, `GET /api/session`
+- `/api/resolve`, `/api/preview`, `/api/present`, and `/submit` return `_protocol_exchanges`, on error responses as well as successes: every HTTP hop the wallet made for the call, such as the request object retrieval, DID and verifier attestation issuer lookups, any issuance the call ran, and the Authorization Response to `response_uri`. A body larger than 1 MiB is not recorded, and the hop's `extra` says so.
 - `POST /api/issue` — OID4VCI bootstrap against the configured issuer
+- `POST /api/refresh` — refresh a held Credential with its Refresh Token (`credential_id` optional, default the active one); answers 400 when the wallet holds no Refresh Token for it
 - `POST /api/import` — import from an external credential offer (pre-authorized or authorization_code), start wallet-initiated issuance from `credential_issuer` (optional `credential_configuration_id`), or HAIP authorize + DPoP GET of a protected resource (`discovery_url`, `resource_endpoint`, `scope`, optional `wallet_base_url`)
 - `GET /api/oid4vci/callback` — authorization-code redirect callback
 - `GET /llms.txt`, `GET /llms-full.txt`, `GET /.well-known/api-catalog`, `GET /.well-known/agent-skills/use-wallet-harness/SKILL.md` — agent discovery (not protocol endpoints). Indexed from [docs.protocolsoup.com/llms.txt](https://docs.protocolsoup.com/llms.txt) and the repository README. Headless interface is the HTTP JSON API above; QR/deeplinks are human handoffs. Not an MCP server.
@@ -153,7 +154,6 @@ services:
 - Leave `WALLET_ALLOW_EXTERNAL_VERIFIERS=true` only when this wallet should fetch third-party `request_uri` / issuer endpoints; the URL policy still refuses non-public destinations. Advisory [GHSA-q7jr-2q6f-gw44](https://github.com/ParleSec/ProtocolSoup/security/advisories/GHSA-q7jr-2q6f-gw44) covers pre-patch `request_uri` SSRF (`v2.0.0`–`v4.1.0`).
 - Place wallet and VC services on private networks; expose only required ingress.
 - Rotate and monitor upstream credentials and trust boundaries at the VC target.
-- Do not set `WALLET_KEY_ATTESTATION_*` to hardware or ISO 18045 levels unless the deployment truly meets them.
 
 ## Troubleshooting
 

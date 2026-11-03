@@ -107,8 +107,6 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON` | `(unset)` | Attester private JWK (+ `x5c`) used to mint OID4VCI Appendix D `key_attestation` JWTs for HAIP credential proofs. |
 | `WALLET_OID4VCI_ATTESTED_CLIENT_ID` | `protocolsoup-wallet` | Attested `client_id` / attestation JWT `sub` when HAIP attestation material is configured. |
 | `WALLET_CLIENT_ATTESTATION_ISSUER` | `https://wallet.protocolsoup.com/attester` | `iss` claim on client attestation JWTs. |
-| `WALLET_KEY_ATTESTATION_KEY_STORAGE` | `(unset)` | Comma-separated `key_storage` attack-potential levels asserted in key attestation (for example `iso_18045_moderate`). Omit unless the claim is honest for this software wallet. |
-| `WALLET_KEY_ATTESTATION_USER_AUTHENTICATION` | `(unset)` | Comma-separated `user_authentication` attack-potential levels asserted in key attestation. Omit unless honest. |
 
 ## OID4VP Verifier (VC And Federation Services)
 

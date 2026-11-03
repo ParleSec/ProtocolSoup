@@ -252,12 +252,15 @@ func buildClientAttestationPoPJWT(instanceKey *ecdsa.PrivateKey, clientID string
 	return token.SignedString(instanceKey)
 }
 
+// buildKeyAttestationJWT builds an OID4VCI 1.0 Appendix D.1 key attestation
+// for attestedKeys. It carries no key_storage or user_authentication: each
+// Appendix D.2 value asserts an ISO/IEC 18045 attack-potential resistance, and
+// the hosted wallet's software keys have none it can back (see
+// refuseUnbackedKeyAttestationLevels).
 func buildKeyAttestationJWT(
 	attesterKey *ecdsa.PrivateKey,
 	x5c []string,
 	attestedKeys []intcrypto.JWK,
-	keyStorage []string,
-	userAuthentication []string,
 	nonce string,
 ) (string, error) {
 	if attesterKey == nil {
@@ -266,12 +269,6 @@ func buildKeyAttestationJWT(
 	claims := jwt.MapClaims{
 		"iat":           time.Now().UTC().Unix(),
 		"attested_keys": attestedKeys,
-	}
-	if len(keyStorage) > 0 {
-		claims["key_storage"] = keyStorage
-	}
-	if len(userAuthentication) > 0 {
-		claims["user_authentication"] = userAuthentication
 	}
 	if strings.TrimSpace(nonce) != "" {
 		claims["nonce"] = strings.TrimSpace(nonce)
@@ -513,13 +510,10 @@ func (s *walletHarnessServer) createHAIPCredentialProofJWTs(
 	for _, holder := range holders {
 		attestedKeys = append(attestedKeys, holder.jwk)
 	}
-	keyStorage, userAuthentication := keyAttestationClaimsFromEnv()
 	keyAttestationJWT, err := buildKeyAttestationJWT(
 		s.haipKeyAttestation.PrivateKey,
 		s.haipKeyAttestation.X5C,
 		attestedKeys,
-		keyStorage,
-		userAuthentication,
 		cNonce,
 	)
 	if err != nil {

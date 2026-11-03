@@ -752,7 +752,56 @@ jobs:
         if: success()
         run: echo "✅ Wallet harness deployment + smoke checks successful!"
 
-  # Job 11b: Capture requirement-page artefacts from the deployed build.
+  # Job 11b: Deploy the conformance counterparty to Fly.io (only on master
+  # branch). It serves the deliberately invalid protocol messages the capture
+  # points the hosted wallet at. It runs after the wallet job rather than
+  # beside it: a third job waiting in the deploy-production group would
+  # cancel the one already pending.
+  deploy-counterparty:
+    name: Deploy Conformance Counterparty to Fly.io
+    runs-on: ubuntu-latest
+    needs: [deploy-wallet]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@1.6
+
+      - name: Stage counterparty source revision
+        run: >-
+          flyctl secrets set
+          --app protocolsoup-counterparty
+          --stage
+          BUILD_COMMIT="${GITHUB_SHA}"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_COUNTERPARTY_API_TOKEN }}
+
+      # One Machine, so the scenario state of an exchange stays on the
+      # Machine that serves the rest of it.
+      - name: Deploy counterparty to Fly.io
+        run: >-
+          flyctl deploy
+          --app protocolsoup-counterparty
+          --config fly.counterparty.toml
+          --remote-only
+          --ha=false
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_COUNTERPARTY_API_TOKEN }}
+
+      - name: Smoke test counterparty health
+        run: |
+          curl -fsS "https://protocolsoup-counterparty.fly.dev/health" \
+            | jq -e --arg c "$GITHUB_SHA" '.status == "ok" and .commit == $c' > /dev/null
+
+  # Job 11c: Capture requirement-page artefacts from the deployed build.
   # The verdict report is baked into the image before deploy, but captured
   # exchanges only exist once the build is live, so this job captures them
   # against production and redeploys the same commit with them baked in.
@@ -760,7 +809,7 @@ jobs:
   capture-artefacts:
     name: Capture Conformance Artefacts
     runs-on: ubuntu-latest
-    needs: [deploy, deploy-wallet]
+    needs: [deploy, deploy-wallet, deploy-counterparty]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: read
@@ -778,9 +827,9 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: backend/go.sum
 
-      - name: Wait for both apps to serve this commit
+      - name: Wait for every app to serve this commit
         run: |
-          for origin in https://protocolsoup.com https://wallet.protocolsoup.com; do
+          for origin in https://protocolsoup.com https://wallet.protocolsoup.com https://protocolsoup-counterparty.fly.dev; do
             for attempt in $(seq 1 30); do
               commit="$(curl -fsS "${origin}/health" | jq -r '.commit // empty' || true)"
               if [ "$commit" = "$GITHUB_SHA" ]; then
@@ -809,8 +858,7 @@ jobs:
         run: |
           set +e
           go run ./cmd/conformance-capture \
-            -base https://protocolsoup.com \
-            -wallet https://wallet.protocolsoup.com \
+            -target production \
             -commit "$GITHUB_SHA"
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
           test -s ../artifacts/vc-conformance/artefacts.json

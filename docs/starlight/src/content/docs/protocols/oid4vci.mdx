@@ -160,8 +160,9 @@ The hosted wallet reference client drives client attestation, key attestation,
 DPoP, and credential-response encryption together when HAIP attestation
 material is configured (`WALLET_CLIENT_ATTESTATION_ATTESTER_JWK_JSON` and
 `WALLET_CLIENT_ATTESTATION_KEY_ATTESTATION_JWK_JSON`, plus related
-`WALLET_OID4VCI_ATTESTED_CLIENT_ID` / `WALLET_CLIENT_ATTESTATION_ISSUER` /
-`WALLET_KEY_ATTESTATION_*` settings). Looking Glass pre-authorized executors
+`WALLET_OID4VCI_ATTESTED_CLIENT_ID` / `WALLET_CLIENT_ATTESTATION_ISSUER`
+settings). Its key attestations assert no `key_storage` or
+`user_authentication` level, since a software wallet can back none. Looking Glass pre-authorized executors
 delegate redemption to that wallet path via `/api/import` rather than minting
 attestation and DPoP proofs in the browser. Issuer-initiated Looking Glass
 observes a real wallet conversation via `status_uri`. The unattested Final

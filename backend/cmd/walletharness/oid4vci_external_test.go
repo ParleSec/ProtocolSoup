@@ -1081,3 +1081,221 @@ func signedCredentialJWT(t *testing.T, issuer string, method jwt.SigningMethod, 
 	}
 	return signed
 }
+
+// TestAuthorizationServerMetadataWithoutIssuerIsNotUsed proves RFC 8414
+// Section 3.3 is applied when issuer is absent, not only when it differs.
+func TestAuthorizationServerMetadataWithoutIssuerIsNotUsed(t *testing.T) {
+	t.Parallel()
+
+	var metadata map[string]interface{}
+	mux := http.NewServeMux()
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+	mux.HandleFunc("/.well-known/oauth-authorization-server/as", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(metadata)
+	})
+	host, _ := url.Parse(testServer.URL)
+	server := &walletHarnessServer{httpClient: testServer.Client(), targetHost: host.Host}
+	authorizationServer := testServer.URL + "/as"
+	issuerMetadata := &resolvedExternalIssuerMetadata{
+		CredentialIssuer:     testServer.URL + "/issuer",
+		AuthorizationServers: []string{authorizationServer},
+	}
+
+	for name, issuer := range map[string]interface{}{"missing": nil, "different": authorizationServer + "/"} {
+		metadata = map[string]interface{}{"token_endpoint": authorizationServer + "/token"}
+		if issuer != nil {
+			metadata["issuer"] = issuer
+		}
+		_, err := server.resolveExternalAuthorizationServerMetadata(context.Background(), issuerMetadata, "")
+		if err == nil || !strings.Contains(err.Error(), "3.3") {
+			t.Fatalf("%s issuer: got %v, want the metadata refused under RFC 8414 Section 3.3", name, err)
+		}
+	}
+
+	metadata = map[string]interface{}{"issuer": authorizationServer, "token_endpoint": authorizationServer + "/token"}
+	resolved, err := server.resolveExternalAuthorizationServerMetadata(context.Background(), issuerMetadata, "")
+	if err != nil || resolved.Issuer != authorizationServer {
+		t.Fatalf("identical issuer: resolved=%+v err=%v", resolved, err)
+	}
+}
+
+// TestAPIRefreshReissuesCredentialWithRefreshToken drives OpenID4VCI 1.0
+// Section 14.5 end to end: an authorization_code issuance returns a
+// refresh_token, and /api/refresh redeems it for a fresh Access Token, requests
+// the Credential again without the End-User, replaces the old Credential and
+// keeps the rotated refresh_token (RFC 6749 Section 6).
+func TestAPIRefreshReissuesCredentialWithRefreshToken(t *testing.T) {
+	t.Parallel()
+
+	const credentialConfigurationID = "UniversityDegreeCredential"
+	const walletBaseURL = "https://wallet.example"
+	const walletSubject = "did:example:wallet:holder"
+
+	issuerKeySet, err := intcrypto.NewKeySet()
+	if err != nil {
+		t.Fatalf("NewKeySet: %v", err)
+	}
+	mux := http.NewServeMux()
+	testServer := httptest.NewServer(mux)
+	defer testServer.Close()
+	credentialIssuer := testServer.URL + "/issuer"
+
+	mux.HandleFunc("/.well-known/openid-credential-issuer/issuer", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"credential_issuer":     credentialIssuer,
+			"authorization_servers": []string{credentialIssuer},
+			"credential_endpoint":   credentialIssuer + "/credential",
+			"nonce_endpoint":        credentialIssuer + "/nonce",
+			"jwks_uri":              testServer.URL + "/.well-known/jwks.json",
+			"credential_configurations_supported": map[string]interface{}{
+				credentialConfigurationID: map[string]interface{}{
+					"format": "jwt_vc_json",
+					"proof_types_supported": map[string]interface{}{
+						"jwt": map[string]interface{}{"proof_signing_alg_values_supported": []string{"ES256", "RS256", "EdDSA"}},
+					},
+				},
+			},
+		})
+	})
+	mux.HandleFunc("/.well-known/oauth-authorization-server/issuer", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                           credentialIssuer,
+			"authorization_endpoint":           credentialIssuer + "/authorize",
+			"token_endpoint":                   credentialIssuer + "/token",
+			"code_challenge_methods_supported": []string{"S256"},
+		})
+	})
+	mux.HandleFunc("/.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(issuerKeySet.PublicJWKS())
+	})
+	mux.HandleFunc("/issuer/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if r.FormValue("client_id") != "public-app" {
+			http.Error(w, "unexpected client_id", http.StatusBadRequest)
+			return
+		}
+		switch {
+		case r.FormValue("grant_type") == "authorization_code" && r.FormValue("code") == "auth-code":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"access_token": "auth-access-token", "refresh_token": "refresh-1"})
+		case r.FormValue("grant_type") == "refresh_token" && r.FormValue("refresh_token") == "refresh-1":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"access_token": "refreshed-access-token", "refresh_token": "refresh-2"})
+		default:
+			http.Error(w, `{"error":"invalid_grant"}`, http.StatusBadRequest)
+		}
+	})
+	mux.HandleFunc("/issuer/nonce", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"c_nonce": "c-nonce"})
+	})
+	mux.HandleFunc("/issuer/credential", func(w http.ResponseWriter, r *http.Request) {
+		accessToken := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if accessToken != "auth-access-token" && accessToken != "refreshed-access-token" {
+			http.Error(w, "unexpected Authorization header", http.StatusUnauthorized)
+			return
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+			"iss": credentialIssuer,
+			"sub": walletSubject,
+			"jti": "credential-for-" + accessToken,
+			"exp": time.Now().Add(5 * time.Minute).Unix(),
+			"vc": map[string]interface{}{
+				"type":              []string{"VerifiableCredential", "UniversityDegreeCredential"},
+				"credentialSubject": map[string]interface{}{"id": walletSubject},
+			},
+		})
+		token.Header["typ"] = "vc+jwt"
+		token.Header["kid"] = issuerKeySet.RSAKeyID()
+		credential, err := token.SignedString(issuerKeySet.RSAPrivateKey())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"credentials": []map[string]interface{}{{"credential": credential}}})
+	})
+
+	server := &walletHarnessServer{
+		httpClient:        testServer.Client(),
+		issuerBaseURL:     testServer.URL,
+		oid4vciClientID:   "public-app",
+		walletSessionTTL:  10 * time.Minute,
+		wallets:           make(map[string]*walletMaterial),
+		oid4vciAuthStates: make(map[string]*pendingOID4VCIAuthState),
+	}
+	wallet, err := server.getOrCreateWallet("web:refresh-session", walletSubject, walletBaseURL)
+	if err != nil {
+		t.Fatalf("getOrCreateWallet: %v", err)
+	}
+	authOffer := `{"credential_issuer":"` + credentialIssuer + `","credential_configuration_ids":["` + credentialConfigurationID + `"],"grants":{"authorization_code":{"issuer_state":"issuer-state"}}}`
+	if _, err := server.issueFromExternalIssuer(context.Background(), wallet, externalIssuerImportRequest{
+		OfferInput:       authOffer,
+		WalletBaseURL:    walletBaseURL,
+		CredentialFormat: "jwt_vc_json",
+	}); err != nil {
+		t.Fatalf("issueFromExternalIssuer: %v", err)
+	}
+	var state string
+	server.mu.Lock()
+	for pendingState := range server.oid4vciAuthStates {
+		state = pendingState
+	}
+	server.mu.Unlock()
+	callback := httptest.NewRequest(http.MethodGet, walletBaseURL+"/api/oid4vci/callback?code=auth-code&state="+url.QueryEscape(state), nil)
+	callback.Host = "wallet.example"
+	callbackRecorder := httptest.NewRecorder()
+	server.handleAPIOID4VCICallback(callbackRecorder, callback)
+	if location := callbackRecorder.Header().Get("Location"); !strings.Contains(location, "oid4vci_status=success") {
+		t.Fatalf("authorization_code import did not succeed: %s", location)
+	}
+	firstCredentialID := wallet.CredentialID
+	if wallet.Refresh[firstCredentialID] == nil || wallet.Refresh[firstCredentialID].RefreshToken != "refresh-1" {
+		t.Fatalf("refresh_token was not kept for credential %q: %#v", firstCredentialID, wallet.Refresh)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, walletBaseURL+"/api/refresh", strings.NewReader(`{"wallet_subject":"`+walletSubject+`"}`))
+	request.Header.Set("X-Wallet-Session", "refresh-session")
+	recorder := httptest.NewRecorder()
+	server.handleAPIRefresh(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("refresh status %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		PreviousCredentialID string        `json:"previous_credential_id"`
+		CredentialID         string        `json:"credential_id"`
+		Rotated              bool          `json:"refresh_token_rotated"`
+		Exchanges            []protocolHop `json:"_protocol_exchanges"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
+	if response.PreviousCredentialID != firstCredentialID || response.CredentialID == firstCredentialID || !response.Rotated {
+		t.Fatalf("unexpected refresh response %+v", response)
+	}
+	if _, kept := wallet.Credentials[firstCredentialID]; kept {
+		t.Fatal("the refreshed Credential must replace the old one")
+	}
+	if wallet.Refresh[response.CredentialID] == nil || wallet.Refresh[response.CredentialID].RefreshToken != "refresh-2" {
+		t.Fatal("RFC 6749 Section 6: the rotated refresh_token must replace the old one")
+	}
+	var sawRefreshGrant, sawCredentialRequest bool
+	for _, hop := range response.Exchanges {
+		if hop.Step == "Token Request" && strings.Contains(hop.RequestBody, "grant_type=refresh_token") &&
+			strings.Contains(hop.RequestBody, "refresh_token=refresh-1") {
+			sawRefreshGrant = true
+		}
+		if hop.Step == "Credential Request" && hop.RequestHeaders["Authorization"] == "Bearer refreshed-access-token" {
+			sawCredentialRequest = true
+		}
+	}
+	if !sawRefreshGrant || !sawCredentialRequest {
+		t.Fatalf("refresh hops missing (refresh grant %v, credential request %v): %+v", sawRefreshGrant, sawCredentialRequest, response.Exchanges)
+	}
+
+	noRefresh := httptest.NewRequest(http.MethodPost, walletBaseURL+"/api/refresh", strings.NewReader(`{"wallet_subject":"did:example:wallet:other"}`))
+	noRefresh.Header.Set("X-Wallet-Session", "refresh-session")
+	noRefreshRecorder := httptest.NewRecorder()
+	server.handleAPIRefresh(noRefreshRecorder, noRefresh)
+	if noRefreshRecorder.Code != http.StatusBadRequest || !strings.Contains(noRefreshRecorder.Body.String(), "Section 14.5") {
+		t.Fatalf("a credential without a Refresh Token: %d %s", noRefreshRecorder.Code, noRefreshRecorder.Body.String())
+	}
+}

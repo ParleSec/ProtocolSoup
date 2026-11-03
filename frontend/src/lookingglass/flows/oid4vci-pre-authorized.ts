@@ -409,18 +409,13 @@ export class OID4VCIPreAuthorizedExecutor extends FlowExecutorBase {
         method,
         url,
         headers: hop.request_headers || {},
-        body:
-          hop.request_body === undefined || hop.request_body === null
-            ? undefined
-            : typeof hop.request_body === 'string'
-              ? hop.request_body
-              : (hop.request_body as Record<string, string>),
+        body: hop.request_body || undefined,
       },
       response: {
         status,
         statusText: status ? String(status) : 'error',
         headers: hop.response_headers || {},
-        body: hop.response_body ?? hop.extra ?? null,
+        body: hop.response_body || hop.extra || null,
         duration,
       },
     })

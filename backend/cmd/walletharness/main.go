@@ -105,8 +105,11 @@ type walletMaterial struct {
 	CredentialFormat          string
 	CredentialConfigurationID string
 	Credentials               map[string]walletCredentialMaterial
-	CreatedAt                 time.Time
-	LastAccess                time.Time
+	// Refresh holds, per credential ID, what refreshing that Credential
+	// needs when its issuance returned a refresh_token (credential_refresh.go).
+	Refresh    map[string]*credentialRefresh
+	CreatedAt  time.Time
+	LastAccess time.Time
 }
 
 type walletCredentialMaterial struct {
@@ -606,26 +609,29 @@ func (s *walletHarnessServer) handleWalletDIDDocument(w http.ResponseWriter, r *
 }
 
 func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Request) {
+	r, respond := recordProtocolExchanges(w, r)
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		respond(http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
 	var req apiResolveRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
 		return
 	}
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), apiWalletRequest{
-		RequestURI: req.RequestURI,
-		OpenID4VP:  req.OpenID4VP,
-		RequestJWT: req.RequestJWT,
-		RequestID:  req.RequestID,
+		RequestURI:       req.RequestURI,
+		RequestURIMethod: req.RequestURIMethod,
+		ClientID:         req.ClientID,
+		OpenID4VP:        req.OpenID4VP,
+		RequestJWT:       req.RequestJWT,
+		RequestID:        req.RequestID,
 	})
 	if err != nil {
-		writePresentationRequestError(w, err)
+		respond(http.StatusBadRequest, presentationRequestError(err))
 		return
 	}
 	matchSummary := walletRequestMatchSummary{}
@@ -681,7 +687,7 @@ func (s *walletHarnessServer) handleAPIResolve(w http.ResponseWriter, r *http.Re
 		resolveResponse["inferred_credential_format"] = inferredFormat
 		resolveResponse["inferred_credential_configuration_id"] = inferredConfigID
 	}
-	writeJSON(w, http.StatusOK, resolveResponse)
+	respond(http.StatusOK, resolveResponse)
 }
 
 func (s *walletHarnessServer) handleAPISession(w http.ResponseWriter, r *http.Request) {
@@ -828,13 +834,14 @@ func (s *walletHarnessServer) handleAPIIssue(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Request) {
+	r, respond := recordProtocolExchanges(w, r)
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		respond(http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
 	var req apiWalletRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -844,7 +851,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 
 	scopeKey, _, err := s.resolveAPIScopeKey(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -856,7 +863,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 	}
 	wallet, err := s.getOrCreateWallet(scopeKey, subject, requestBaseURL(r))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		respond(http.StatusInternalServerError, map[string]string{
 			"error":             "server_error",
 			"error_description": err.Error(),
 		})
@@ -865,11 +872,11 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
 	if err != nil {
-		writePresentationRequestError(w, err)
+		respond(http.StatusBadRequest, presentationRequestError(err))
 		return
 	}
 	if err := s.ensurePresentationRequestTrust(trust, false, false); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -889,7 +896,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		// Returning 502 makes Cloudflare replace the useful JSON error with its
 		// generic error page, which the cross-origin Looking Glass client reports
 		// only as “Failed to fetch”.
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+		respond(http.StatusUnprocessableEntity, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -898,7 +905,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 
 	matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 	if matchSummary.QueryType != "" && !matchSummary.Matched {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		respond(http.StatusBadRequest, map[string]interface{}{
 			"error":              "invalid_request",
 			"error_description":  "wallet does not have a credential that satisfies the presentation request",
 			"credential_matches": matchSummary,
@@ -906,7 +913,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if matchSummary.QueryType != "" && !matchedActiveCredential {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		respond(http.StatusBadRequest, map[string]interface{}{
 			"error":              "invalid_request",
 			"error_description":  "wallet could not activate a credential that satisfies the presentation request",
 			"credential_matches": matchSummary,
@@ -917,7 +924,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 	disclosureClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
 	presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, disclosureClaims, exactDisclosureSelection)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -925,7 +932,7 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 	}
 	vpToken, vpFormat, err := s.createVPToken(wallet, requestContext, presentedCredential)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		respond(http.StatusInternalServerError, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": fmt.Sprintf("create vp_token: %v", err),
 		})
@@ -1001,17 +1008,18 @@ func (s *walletHarnessServer) handleAPIPreview(w http.ResponseWriter, r *http.Re
 		previewResponse["vp_header"] = vpHeader
 		previewResponse["vp_payload"] = vpPayload
 	}
-	writeJSON(w, http.StatusOK, previewResponse)
+	respond(http.StatusOK, previewResponse)
 }
 
 func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Request) {
+	r, respond := recordProtocolExchanges(w, r)
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		respond(http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
 	var req apiWalletRequest
 	if err := decodeJSONBody(r, &req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -1021,7 +1029,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 
 	scopeKey, _, err := s.resolveAPIScopeKey(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -1033,7 +1041,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 	}
 	wallet, err := s.getOrCreateWallet(scopeKey, subject, requestBaseURL(r))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		respond(http.StatusInternalServerError, map[string]string{
 			"error":             "server_error",
 			"error_description": err.Error(),
 		})
@@ -1042,11 +1050,11 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 
 	envelope, requestContext, trust, err := s.resolveWalletPresentationContext(r.Context(), req)
 	if err != nil {
-		writePresentationRequestError(w, err)
+		respond(http.StatusBadRequest, presentationRequestError(err))
 		return
 	}
 	if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -1065,7 +1073,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		// Credential-selection failures are client-actionable. Do not return a
 		// 502 here: Cloudflare replaces it with a generic error page, causing the
 		// Looking Glass caller to lose the diagnostic as “Failed to fetch”.
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+		respond(http.StatusUnprocessableEntity, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -1074,7 +1082,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 
 	matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 	if matchSummary.QueryType != "" && !matchSummary.Matched {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		respond(http.StatusBadRequest, map[string]interface{}{
 			"error":              "invalid_request",
 			"error_description":  "wallet does not have a credential that satisfies the presentation request",
 			"credential_matches": matchSummary,
@@ -1082,7 +1090,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if matchSummary.QueryType != "" && !matchedActiveCredential {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		respond(http.StatusBadRequest, map[string]interface{}{
 			"error":              "invalid_request",
 			"error_description":  "wallet could not activate a credential that satisfies the presentation request",
 			"credential_matches": matchSummary,
@@ -1093,7 +1101,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 	disclosureClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
 	presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, disclosureClaims, exactDisclosureSelection)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -1101,7 +1109,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 	}
 	vpToken, _, err := s.createVPToken(wallet, requestContext, presentedCredential)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		respond(http.StatusInternalServerError, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": fmt.Sprintf("create vp_token: %v", err),
 		})
@@ -1131,7 +1139,7 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 
 	upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, strings.TrimSpace(req.LookingGlassSessionID))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		respond(http.StatusBadGateway, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -1170,18 +1178,19 @@ func (s *walletHarnessServer) handleAPIPresent(w http.ResponseWriter, r *http.Re
 			log.Printf("ignoring unsafe verifier redirect_uri: %v", err)
 		}
 	}
-	writeJSON(w, upstreamStatus, presentResponse)
+	respond(upstreamStatus, presentResponse)
 }
 
 func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Request) {
+	r, respond := recordProtocolExchanges(w, r)
 	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
+		respond(http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
 
 	var req walletSubmitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": fmt.Sprintf("invalid JSON body: %v", err),
 		})
@@ -1209,7 +1218,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 
 	scopeKey, err := s.resolveWalletScopeKey(req)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -1225,7 +1234,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	}
 	wallet, err := s.getOrCreateWallet(scopeKey, subject, requestBaseURL(r))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
+		respond(http.StatusInternalServerError, map[string]string{
 			"error":             "server_error",
 			"error_description": err.Error(),
 		})
@@ -1233,12 +1242,12 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	}
 	switch req.Mode {
 	case "stepwise":
-		s.handleStepwiseSubmit(w, r, req, wallet)
+		s.handleStepwiseSubmit(respond, r, req, wallet)
 		return
 	case "one_click":
 		// continue to one-click mode below
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": fmt.Sprintf("unsupported mode %q", req.Mode),
 		})
@@ -1246,7 +1255,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 	}
 
 	if req.RequestID == "" || req.Request == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": "request_id and request are required for one_click mode",
 		})
@@ -1258,11 +1267,11 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		RequestJWT: req.Request,
 	})
 	if err != nil {
-		writePresentationRequestError(w, err)
+		respond(http.StatusBadRequest, presentationRequestError(err))
 		return
 	}
 	if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": err.Error(),
 		})
@@ -1281,7 +1290,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		// Credential-selection failures are client-actionable. Do not return a
 		// 502 here: Cloudflare replaces it with a generic error page, causing the
 		// Looking Glass caller to lose the diagnostic as “Failed to fetch”.
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+		respond(http.StatusUnprocessableEntity, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -1290,7 +1299,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 
 	matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 	if matchSummary.QueryType != "" && !matchSummary.Matched {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		respond(http.StatusBadRequest, map[string]interface{}{
 			"error":              "invalid_request",
 			"error_description":  "wallet does not have a credential that satisfies the presentation request",
 			"credential_matches": matchSummary,
@@ -1298,7 +1307,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if matchSummary.QueryType != "" && !matchedActiveCredential {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+		respond(http.StatusBadRequest, map[string]interface{}{
 			"error":              "invalid_request",
 			"error_description":  "wallet could not activate a credential that satisfies the presentation request",
 			"credential_matches": matchSummary,
@@ -1312,7 +1321,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		selectedClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
 		presentedCredential, selectedDisclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, selectedClaims, exactDisclosureSelection)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			respond(http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
 				"error_description": err.Error(),
 			})
@@ -1321,7 +1330,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 		disclosureClaims = selectedDisclosureClaims
 		vpToken, _, err = s.createVPToken(wallet, requestContext, presentedCredential)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
+			respond(http.StatusInternalServerError, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": fmt.Sprintf("create vp_token: %v", err),
 			})
@@ -1339,7 +1348,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 
 	upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, req.LookingGlassSessionID)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
+		respond(http.StatusBadGateway, map[string]string{
 			"error":             "wallet_submission_failed",
 			"error_description": err.Error(),
 		})
@@ -1378,7 +1387,7 @@ func (s *walletHarnessServer) handleSubmit(w http.ResponseWriter, r *http.Reques
 			log.Printf("ignoring unsafe verifier redirect_uri: %v", err)
 		}
 	}
-	writeJSON(w, upstreamStatus, presentResponse)
+	respond(upstreamStatus, presentResponse)
 }
 
 func decodeJSONBody(r *http.Request, target interface{}) error {
@@ -1397,15 +1406,17 @@ func decodeJSONBody(r *http.Request, target interface{}) error {
 	return nil
 }
 
-func writePresentationRequestError(w http.ResponseWriter, err error) {
+// presentationRequestError is the 400 body for a presentation request the
+// wallet could not resolve.
+func presentationRequestError(err error) map[string]string {
 	errorCode := "invalid_request"
 	if errors.Is(err, errInvalidTransactionData) {
 		errorCode = "invalid_transaction_data"
 	}
-	writeJSON(w, http.StatusBadRequest, map[string]string{
+	return map[string]string{
 		"error":             errorCode,
 		"error_description": err.Error(),
-	})
+	}
 }
 
 func (s *walletHarnessServer) resolveAPIScopeKey(w http.ResponseWriter, r *http.Request) (string, string, error) {
@@ -1472,7 +1483,7 @@ func (s *walletHarnessServer) resolveWalletPresentationContext(
 	if err != nil {
 		return nil, nil, trustEvaluation{}, err
 	}
-	trust := s.evaluateTrust(requestContext, envelope.DecodedPayload)
+	trust := s.evaluateTrust(ctx, requestContext, envelope.DecodedPayload)
 	keyType, err := s.verifyRequestObjectSignature(ctx, envelope, requestContext, trust)
 	if err != nil {
 		trust.RequestObjectVerification = &requestObjectVerificationResult{
@@ -1718,7 +1729,11 @@ func (s *walletHarnessServer) fetchRequestObject(ctx context.Context, requestURI
 		return "", "", fmt.Errorf("request_uri_method %q is not supported", method)
 	}
 	req.Header.Set("Accept", "application/oauth-authz-req+jwt")
-	resp, err := s.httpClient.Do(req)
+	step := protocolStep{Step: "Fetch Request Object", RFCReference: "RFC 9101 Section 5.2.3", Actor: "wallet→verifier"}
+	if normalizedMethod == "post" {
+		step.RFCReference = "OpenID4VP 1.0 Section 5.10"
+	}
+	resp, err := s.doHTTP(withProtocolStep(ctx, step), req)
 	if err != nil {
 		return "", "", fmt.Errorf("request_uri %s failed: %w", strings.ToUpper(normalizedMethod), err)
 	}
@@ -1769,7 +1784,7 @@ func requireRequestObjectWalletNonce(requestJWT string, walletNonce string) erro
 	return nil
 }
 
-func (s *walletHarnessServer) evaluateTrust(requestContext *resolvedRequestContext, requestPayload map[string]interface{}) trustEvaluation {
+func (s *walletHarnessServer) evaluateTrust(ctx context.Context, requestContext *resolvedRequestContext, requestPayload map[string]interface{}) trustEvaluation {
 	clientIDScheme := inferClientIDScheme(requestContext.ClientID, requestPayload)
 	trust := trustEvaluation{
 		TrustedTarget:          requestContext.Trusted,
@@ -1779,7 +1794,7 @@ func (s *walletHarnessServer) evaluateTrust(requestContext *resolvedRequestConte
 	}
 	didWebID := extractDidWebIdentifier(requestContext.ClientID)
 	if didWebID != "" {
-		resolution := s.resolveDIDWeb(context.Background(), didWebID)
+		resolution := s.resolveDIDWeb(ctx, didWebID)
 		trust.DidWeb = &resolution
 	}
 	return trust
@@ -1899,7 +1914,11 @@ func (s *walletHarnessServer) resolveDIDWeb(ctx context.Context, did string) did
 		return result
 	}
 	req.Header.Set("Accept", "application/did+json, application/json")
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doHTTP(withProtocolStep(ctx, protocolStep{
+		Step:         "Resolve Verifier DID Document",
+		RFCReference: "OpenID4VP 1.0 Section 5.9.3",
+		Actor:        "wallet→verifier",
+	}), req)
 	if err != nil {
 		result.Error = fmt.Sprintf("fetch did:web document: %v", err)
 		return result
@@ -2168,7 +2187,15 @@ func (s *walletHarnessServer) resolveVerifierAttestationIssuerJWKS(ctx context.C
 			if err != nil {
 				continue
 			}
-			payload, err := s.fetchJSONDocument(ctx, normalizedMetadataURL, "application/json", "")
+			metadataStep := protocolStep{
+				Step:         "Fetch Verifier Attestation Issuer Metadata",
+				RFCReference: "RFC 8414 Section 3",
+				Actor:        "wallet→attestation issuer",
+			}
+			if wellKnownName == "openid-configuration" {
+				metadataStep.RFCReference = "OpenID Connect Discovery 1.0 Section 4"
+			}
+			payload, err := s.fetchJSONDocument(withProtocolStep(ctx, metadataStep), normalizedMetadataURL, "application/json", "")
 			if err != nil {
 				continue
 			}
@@ -2193,7 +2220,11 @@ func (s *walletHarnessServer) resolveVerifierAttestationIssuerJWKS(ctx context.C
 			attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", candidateJWKSURI, err))
 			continue
 		}
-		jwks, err := s.fetchJWKS(ctx, normalizedJWKSURI, "")
+		jwks, err := s.fetchJWKS(withProtocolStep(ctx, protocolStep{
+			Step:         "Fetch Verifier Attestation Issuer JWKS",
+			RFCReference: "OpenID4VP 1.0 Section 12",
+			Actor:        "wallet→attestation issuer",
+		}), normalizedJWKSURI, "")
 		if err != nil {
 			attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", normalizedJWKSURI, err))
 			continue
@@ -2605,7 +2636,7 @@ func normalizeDisclosureClaims(raw []string) []string {
 	return claims
 }
 
-func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *http.Request, req walletSubmitRequest, wallet *walletMaterial) {
+func (s *walletHarnessServer) handleStepwiseSubmit(respond func(int, interface{}), r *http.Request, req walletSubmitRequest, wallet *walletMaterial) {
 	step := strings.TrimSpace(req.Step)
 	if step == "" {
 		step = "bootstrap"
@@ -2617,7 +2648,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		if kid, err := walletActiveKeyID(wallet); err == nil {
 			walletKeyID = kid
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		respond(http.StatusOK, map[string]interface{}{
 			"mode":                        "stepwise",
 			"step":                        "bootstrap",
 			"wallet_subject":              wallet.Subject,
@@ -2639,13 +2670,13 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			LookingGlassSessionID: req.LookingGlassSessionID,
 		}, nil))
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
+			respond(http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
 			})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		respond(http.StatusOK, map[string]interface{}{
 			"mode":                        "stepwise",
 			"step":                        "issue_credential",
 			"wallet_subject":              wallet.Subject,
@@ -2660,7 +2691,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 
 	case "build_presentation":
 		if req.RequestID == "" || req.Request == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			respond(http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
 				"error_description": "request_id and request are required for build_presentation",
 			})
@@ -2671,11 +2702,11 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			RequestJWT: req.Request,
 		})
 		if err != nil {
-			writePresentationRequestError(w, err)
+			respond(http.StatusBadRequest, presentationRequestError(err))
 			return
 		}
 		if err := s.ensurePresentationRequestTrust(trust, false, false); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			respond(http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
 				"error_description": err.Error(),
 			})
@@ -2690,7 +2721,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		}, envelope)
 		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, buildCredOpts)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
+			respond(http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
 			})
@@ -2698,7 +2729,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		}
 		matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 		if matchSummary.QueryType != "" && !matchSummary.Matched {
-			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			respond(http.StatusBadRequest, map[string]interface{}{
 				"error":              "invalid_request",
 				"error_description":  "wallet does not have a credential that satisfies the presentation request",
 				"credential_matches": matchSummary,
@@ -2706,7 +2737,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			return
 		}
 		if matchSummary.QueryType != "" && !matchedActiveCredential {
-			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			respond(http.StatusBadRequest, map[string]interface{}{
 				"error":              "invalid_request",
 				"error_description":  "wallet could not activate a credential that satisfies the presentation request",
 				"credential_matches": matchSummary,
@@ -2716,7 +2747,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		disclosureClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
 		presentedCredential, disclosureClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, disclosureClaims, exactDisclosureSelection)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			respond(http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
 				"error_description": err.Error(),
 			})
@@ -2724,7 +2755,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		}
 		vpToken, vpFormat, err := s.createVPToken(wallet, requestContext, presentedCredential)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{
+			respond(http.StatusInternalServerError, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": fmt.Sprintf("create vp_token: %v", err),
 			})
@@ -2743,7 +2774,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			"credential_id":  wallet.CredentialID,
 			"holder_binding": wallet.Subject,
 		}))
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+		respond(http.StatusOK, map[string]interface{}{
 			"mode":                        "stepwise",
 			"step":                        "build_presentation",
 			"request_id":                  requestContext.RequestID,
@@ -2764,7 +2795,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 
 	case "submit_response":
 		if req.RequestID == "" || req.Request == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			respond(http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
 				"error_description": "request_id and request are required for submit_response",
 			})
@@ -2775,11 +2806,11 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			RequestJWT: req.Request,
 		})
 		if err != nil {
-			writePresentationRequestError(w, err)
+			respond(http.StatusBadRequest, presentationRequestError(err))
 			return
 		}
 		if err := s.ensurePresentationRequestTrust(trust, true, req.ApproveExternalTrust); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{
+			respond(http.StatusBadRequest, map[string]string{
 				"error":             "invalid_request",
 				"error_description": err.Error(),
 			})
@@ -2794,7 +2825,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		}, envelope)
 		credentialSource, err := s.ensureWalletCredential(r.Context(), wallet, submitCredOpts)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
+			respond(http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
 			})
@@ -2802,7 +2833,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		}
 		matchSummary, matchedActiveCredential := ensureWalletMatchesPresentationRequest(wallet, envelope, requestContext)
 		if matchSummary.QueryType != "" && !matchSummary.Matched {
-			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			respond(http.StatusBadRequest, map[string]interface{}{
 				"error":              "invalid_request",
 				"error_description":  "wallet does not have a credential that satisfies the presentation request",
 				"credential_matches": matchSummary,
@@ -2810,7 +2841,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			return
 		}
 		if matchSummary.QueryType != "" && !matchedActiveCredential {
-			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			respond(http.StatusBadRequest, map[string]interface{}{
 				"error":              "invalid_request",
 				"error_description":  "wallet could not activate a credential that satisfies the presentation request",
 				"credential_matches": matchSummary,
@@ -2823,7 +2854,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			selectedClaims, exactDisclosureSelection := resolvePresentationDisclosureClaims(req.DisclosureClaims, requestContext.DCQLQuery)
 			presentedCredential, selectedClaims, err := filterSDJWTDisclosures(wallet.CredentialJWT, selectedClaims, exactDisclosureSelection)
 			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{
+				respond(http.StatusBadRequest, map[string]string{
 					"error":             "invalid_request",
 					"error_description": err.Error(),
 				})
@@ -2832,7 +2863,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 			disclosureClaims = selectedClaims
 			vpToken, _, err = s.createVPToken(wallet, requestContext, presentedCredential)
 			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{
+				respond(http.StatusInternalServerError, map[string]string{
 					"error":             "wallet_submission_failed",
 					"error_description": fmt.Sprintf("create vp_token: %v", err),
 				})
@@ -2842,7 +2873,7 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 		var submitLGEvents []walletLifecycleEvent
 		upstreamStatus, upstreamBody, err := s.submitToVerifier(r.Context(), wallet, requestContext, vpToken, req.LookingGlassSessionID)
 		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{
+			respond(http.StatusBadGateway, map[string]string{
 				"error":             "wallet_submission_failed",
 				"error_description": err.Error(),
 			})
@@ -2880,11 +2911,11 @@ func (s *walletHarnessServer) handleStepwiseSubmit(w http.ResponseWriter, r *htt
 				log.Printf("ignoring unsafe verifier redirect_uri: %v", err)
 			}
 		}
-		writeJSON(w, upstreamStatus, presentResponse)
+		respond(upstreamStatus, presentResponse)
 		return
 
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{
+		respond(http.StatusBadRequest, map[string]string{
 			"error":             "invalid_request",
 			"error_description": fmt.Sprintf("unsupported step %q", step),
 		})
@@ -3534,7 +3565,7 @@ func (s *walletHarnessServer) submitToVerifier(
 			if err != nil {
 				return 0, nil, fmt.Errorf("create direct_post.jwt response: %w", err)
 			}
-			encryptedResponse, err := s.encryptForVerifier(responseJWT)
+			encryptedResponse, err := s.encryptForVerifier(ctx, responseJWT)
 			if err != nil {
 				return 0, nil, fmt.Errorf("encrypt direct_post.jwt response: %w", err)
 			}
@@ -3559,7 +3590,11 @@ func (s *walletHarnessServer) submitToVerifier(
 		upstreamReq.Header.Set("X-Looking-Glass-Session", lookingGlassSessionID)
 	}
 
-	upstreamResp, err := s.httpClient.Do(upstreamReq)
+	responseStep := protocolStep{Step: "Authorization Response", RFCReference: "OpenID4VP 1.0 Section 8.2", Actor: "wallet→verifier"}
+	if requestContext.ResponseMode == "direct_post.jwt" {
+		responseStep.RFCReference = "OpenID4VP 1.0 Section 8.3.1"
+	}
+	upstreamResp, err := s.doHTTP(withProtocolStep(ctx, responseStep), upstreamReq)
 	if err != nil {
 		return 0, nil, fmt.Errorf("upstream request failed: %w", err)
 	}
@@ -4027,7 +4062,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 		if strings.TrimSpace(options.LookingGlassSessionID) != "" {
 			req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
 		}
-		resp, err := s.httpClient.Do(req)
+		resp, err := s.doHTTP(ctx, req)
 		if err != nil {
 			return nil, fmt.Errorf("offer request failed: %w", err)
 		}
@@ -4107,7 +4142,7 @@ func (s *walletHarnessServer) issueCredentialForWallet(ctx context.Context, wall
 			if strings.TrimSpace(options.LookingGlassSessionID) != "" {
 				req.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(options.LookingGlassSessionID))
 			}
-			resp, err := s.httpClient.Do(req)
+			resp, err := s.doHTTP(ctx, req)
 			if err != nil {
 				return nil, fmt.Errorf("token request failed: %w", err)
 			}
@@ -4332,7 +4367,7 @@ func (s *walletHarnessServer) resolveCredentialConfigurationForIssue(
 	if strings.TrimSpace(lookingGlassSessionID) != "" {
 		metadataReq.Header.Set("X-Looking-Glass-Session", strings.TrimSpace(lookingGlassSessionID))
 	}
-	metadataResp, err := s.httpClient.Do(metadataReq)
+	metadataResp, err := s.doHTTP(ctx, metadataReq)
 	if err != nil {
 		return "", "", fmt.Errorf("issuer metadata request failed: %w", err)
 	}
@@ -4697,8 +4732,8 @@ func (s *walletHarnessServer) createDirectPostResponseJWT(wallet *walletMaterial
 	return walletSignToken(wallet, claims, map[string]interface{}{"typ": "oauth-authz-resp+jwt"})
 }
 
-func (s *walletHarnessServer) encryptForVerifier(innerJWT string) (string, error) {
-	verifierJWK, err := s.fetchVerifierRSAJWK(context.Background())
+func (s *walletHarnessServer) encryptForVerifier(ctx context.Context, innerJWT string) (string, error) {
+	verifierJWK, err := s.fetchVerifierRSAJWK(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -4735,7 +4770,11 @@ func (s *walletHarnessServer) fetchVerifierRSAJWK(ctx context.Context) (intcrypt
 		return intcrypto.JWK{}, fmt.Errorf("build jwks request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doHTTP(withProtocolStep(ctx, protocolStep{
+		Step:         "Fetch Verifier JWKS",
+		RFCReference: "RFC 7517 Section 5",
+		Actor:        "wallet→verifier",
+	}), req)
 	if err != nil {
 		return intcrypto.JWK{}, fmt.Errorf("fetch verifier jwks: %w", err)
 	}

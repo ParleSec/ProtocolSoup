@@ -6,10 +6,10 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -321,25 +321,35 @@ func TestCredentialResponseEncryptionJWERoundTrip(t *testing.T) {
 	}
 }
 
-func TestIso18045ModerateNotClaimedWhenEnvUnset(t *testing.T) {
-	t.Setenv("WALLET_KEY_ATTESTATION_KEY_STORAGE", "")
-	t.Setenv("WALLET_KEY_ATTESTATION_USER_AUTHENTICATION", "")
-	keyStorage, userAuth := keyAttestationClaimsFromEnv()
-	if len(keyStorage) != 0 || len(userAuth) != 0 {
-		t.Fatalf("expected empty attestation claims when env unset, got %v / %v", keyStorage, userAuth)
+func TestRefuseUnbackedKeyAttestationLevels(t *testing.T) {
+	configuration := func(required map[string]interface{}) map[string]interface{} {
+		return map[string]interface{}{
+			"proof_types_supported": map[string]interface{}{
+				"jwt": map[string]interface{}{
+					"proof_signing_alg_values_supported": []interface{}{"ES256"},
+					"key_attestations_required":          required,
+				},
+			},
+		}
 	}
-	_ = os.Setenv("WALLET_KEY_ATTESTATION_KEY_STORAGE", "iso_18045_moderate")
-	_ = os.Setenv("WALLET_KEY_ATTESTATION_USER_AUTHENTICATION", "iso_18045_moderate")
-	t.Cleanup(func() {
-		_ = os.Unsetenv("WALLET_KEY_ATTESTATION_KEY_STORAGE")
-		_ = os.Unsetenv("WALLET_KEY_ATTESTATION_USER_AUTHENTICATION")
-	})
-	keyStorage, userAuth = keyAttestationClaimsFromEnv()
-	if len(keyStorage) != 1 || keyStorage[0] != "iso_18045_moderate" {
-		t.Fatalf("unexpected key_storage %v", keyStorage)
+	// An empty object asks for a key attestation "without additional
+	// constraints" (OID4VCI 1.0 Section 12.2.4), which the wallet can give.
+	if err := refuseUnbackedKeyAttestationLevels("Unconstrained", configuration(map[string]interface{}{})); err != nil {
+		t.Fatalf("unconstrained key_attestations_required refused: %v", err)
 	}
-	if len(userAuth) != 1 || userAuth[0] != "iso_18045_moderate" {
-		t.Fatalf("unexpected user_authentication %v", userAuth)
+	if err := refuseUnbackedKeyAttestationLevels("NoAttestation", map[string]interface{}{}); err != nil {
+		t.Fatalf("configuration without key_attestations_required refused: %v", err)
+	}
+	for name, required := range map[string]map[string]interface{}{
+		"key_storage":         {"key_storage": []interface{}{"iso_18045_basic"}},
+		"user_authentication": {"user_authentication": []interface{}{"iso_18045_high"}},
+	} {
+		err := refuseUnbackedKeyAttestationLevels("Leveled", configuration(required))
+		var apiErr *walletAPIError
+		if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || !strings.Contains(apiErr.Description, name) ||
+			!strings.Contains(apiErr.Description, "can back no Appendix D.2 level") {
+			t.Fatalf("%s demand: got %v, want a 400 naming the unbacked level", name, err)
+		}
 	}
 }
 
@@ -437,9 +447,9 @@ func TestShouldUseHAIPIssuancePathForExternalAttestedAS(t *testing.T) {
 	t.Parallel()
 	server := &walletHarnessServer{}
 	asMetadata := &resolvedAuthorizationServerMetadata{
-		TokenEndpointAuthMethodsSupported:   []string{"attest_jwt_client_auth"},
-		RequirePushedAuthorizationRequests:  true,
-		DPoPSigningAlgValuesSupported:       []string{"ES256"},
+		TokenEndpointAuthMethodsSupported:  []string{"attest_jwt_client_auth"},
+		RequirePushedAuthorizationRequests: true,
+		DPoPSigningAlgValuesSupported:      []string{"ES256"},
 	}
 	if !server.shouldUseHAIPIssuancePath("org.iso.18013.5.1.mDL", nil, asMetadata) {
 		t.Fatal("expected HAIP path for attested PAR AS regardless of configuration id naming")
@@ -465,36 +475,44 @@ func TestGenerateEphemeralEncryptionKeyIsP256(t *testing.T) {
 func TestExchangeRefreshTokenRequiresInputs(t *testing.T) {
 	t.Parallel()
 	server := &walletHarnessServer{httpClient: http.DefaultClient}
-	if _, err := server.exchangeRefreshToken(context.Background(), "", "rt", nil, "", ""); err == nil {
+	withoutEndpoint := &credentialRefresh{RefreshToken: "rt", AuthorizationServerMetadata: &resolvedAuthorizationServerMetadata{}}
+	if _, err := server.exchangeRefreshToken(context.Background(), withoutEndpoint, ""); err == nil {
 		t.Fatal("expected missing token endpoint error")
 	}
-	if _, err := server.exchangeRefreshToken(context.Background(), "https://as.example/token", "", nil, "", ""); err == nil {
+	withoutToken := &credentialRefresh{AuthorizationServerMetadata: &resolvedAuthorizationServerMetadata{TokenEndpoint: "https://as.example/token"}}
+	if _, err := server.exchangeRefreshToken(context.Background(), withoutToken, ""); err == nil {
 		t.Fatal("expected missing refresh_token error")
 	}
 }
 
-func TestExchangeRefreshTokenRedeemsGrant(t *testing.T) {
+// TestExchangeRefreshTokenAuthenticatesAsTheOriginalGrant proves the
+// refresh_token grant carries the client_id and client_secret of the grant
+// that issued the token (RFC 6749 Section 6).
+func TestExchangeRefreshTokenAuthenticatesAsTheOriginalGrant(t *testing.T) {
 	t.Parallel()
-	var sawGrant string
+	var form url.Values
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		sawGrant = r.Form.Get("grant_type")
-		if r.Form.Get("refresh_token") != "refresh-abc" {
-			http.Error(w, "bad refresh", http.StatusBadRequest)
-			return
-		}
+		form = r.PostForm
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"access-xyz","token_type":"Bearer","expires_in":3600}`))
 	}))
 	defer upstream.Close()
 
-	server := &walletHarnessServer{httpClient: upstream.Client()}
-	payload, err := server.exchangeRefreshToken(context.Background(), upstream.URL, "refresh-abc", nil, "", "")
+	host, _ := url.Parse(upstream.URL)
+	server := &walletHarnessServer{httpClient: upstream.Client(), targetHost: host.Host}
+	payload, err := server.exchangeRefreshToken(context.Background(), &credentialRefresh{
+		RefreshToken:                "refresh-abc",
+		ClientID:                    "public-app",
+		ClientSecret:                "app-secret",
+		AuthorizationServerMetadata: &resolvedAuthorizationServerMetadata{TokenEndpoint: upstream.URL + "/token"},
+	}, "")
 	if err != nil {
 		t.Fatalf("exchangeRefreshToken: %v", err)
 	}
-	if sawGrant != "refresh_token" {
-		t.Fatalf("grant_type = %q", sawGrant)
+	if form.Get("grant_type") != "refresh_token" || form.Get("refresh_token") != "refresh-abc" ||
+		form.Get("client_id") != "public-app" || form.Get("client_secret") != "app-secret" {
+		t.Fatalf("refresh form = %v", form)
 	}
 	if asString(payload["access_token"]) != "access-xyz" {
 		t.Fatalf("access_token = %#v", payload["access_token"])
