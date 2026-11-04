@@ -9,34 +9,21 @@ import (
 )
 
 // TestEveryRequirementHasAnEntry keeps the scenario catalogue and the
-// registry in step: every requirement is demonstrated, explained as
-// unavailable, or listed in pending, never two of those and never silently
-// missing; and nothing is registered for a requirement the registry lacks.
+// registry in step: every requirement is demonstrated or explained as
+// unavailable, never both and never silently missing; and nothing is
+// registered for a requirement the registry lacks.
 func TestEveryRequirementHasAnEntry(t *testing.T) {
 	registry, err := conformance.Embedded()
 	if err != nil {
 		t.Fatalf("embedded registry: %v", err)
 	}
 	entries := capture.Entries()
-	isPending := map[string]bool{}
-	for _, id := range pending {
-		if isPending[id] {
-			t.Errorf("%s is listed twice in pending", id)
-		}
-		isPending[id] = true
-	}
 	known := map[string]bool{}
 	for _, req := range registry.Requirements {
 		known[req.ID] = true
 		entry, registered := entries[req.ID]
-		switch {
-		case registered && isPending[req.ID]:
-			t.Errorf("%s is registered and still listed in pending; remove it from pending", req.ID)
-			continue
-		case !registered && !isPending[req.ID]:
-			t.Errorf("%s has no capture entry; register scenarios or an unavailable reason, or list it in pending", req.ID)
-			continue
-		case !registered:
+		if !registered {
+			t.Errorf("%s has no capture entry; register scenarios or an unavailable reason", req.ID)
 			continue
 		}
 		for _, kind := range []conformance.ArtefactKind{conformance.KindPassing, conformance.KindFailing} {
@@ -62,11 +49,6 @@ func TestEveryRequirementHasAnEntry(t *testing.T) {
 	for id := range entries {
 		if !known[id] {
 			t.Errorf("capture entry %s is not a registry requirement", id)
-		}
-	}
-	for id := range isPending {
-		if !known[id] {
-			t.Errorf("pending lists %s, which is not a registry requirement", id)
 		}
 	}
 }
