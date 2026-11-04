@@ -94,11 +94,24 @@ func (e *Env) Setup(ctx context.Context, req *http.Request) (*Response, error) {
 	return e.send(ctx, e.unrecorded, req)
 }
 
+// Pace waits for n of the run's request slots without sending anything, so a
+// request that makes another party send several requests of its own on the
+// client's behalf, such as a call that has the hosted wallet run an issuance
+// against the main app, stays within the main app's rate limit as well.
+func (e *Env) Pace(ctx context.Context, n int) error {
+	for ; n > 0; n-- {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-e.pace:
+		}
+	}
+	return nil
+}
+
 func (e *Env) send(ctx context.Context, client *http.Client, req *http.Request) (*Response, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-e.pace:
+	if err := e.Pace(ctx, 1); err != nil {
+		return nil, err
 	}
 	resp, err := client.Do(req.WithContext(ctx))
 	if err != nil {
