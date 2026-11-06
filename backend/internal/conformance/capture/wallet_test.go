@@ -83,3 +83,47 @@ func TestCallWalletNeedsAWallet(t *testing.T) {
 		t.Fatal("a run without a wallet must refuse wallet calls")
 	}
 }
+
+// TestWalletSetupCallIsNotRecorded proves a preparation call reaches the
+// wallet without it or its hops joining the artefact.
+func TestWalletSetupCallIsNotRecorded(t *testing.T) {
+	calls := 0
+	wallet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"credential_id":       "c1",
+			"_protocol_exchanges": []map[string]any{{"step": "Token Request", "method": "POST", "url": "https://issuer.example/token", "response_status": 200}},
+		})
+	}))
+	defer wallet.Close()
+	recorder := NewRecorder(nil)
+	env := NewEnv("http://unused.localhost", wallet.URL, "", recorder, 6000)
+	result, err := CallWallet(context.Background(), env, WalletCall{Path: "/api/import", Session: NewWalletSession(), Setup: true})
+	if err != nil || calls != 1 || len(result.Hops) != 1 {
+		t.Fatalf("setup call: calls=%d hops=%d err=%v", calls, len(result.Hops), err)
+	}
+	if recorded := recorder.Take(); len(recorded) != 0 {
+		t.Fatalf("a setup call recorded %d exchanges", len(recorded))
+	}
+}
+
+// TestCompletedHopSkipsDPoPNonceChallenges proves the hop that carries an
+// endpoint's answer is found behind an RFC 9449 challenge, and that an
+// ordinary 401 is not mistaken for one.
+func TestCompletedHopSkipsDPoPNonceChallenges(t *testing.T) {
+	result := &WalletResult{Hops: []WalletHop{
+		{Step: "Token Request", ResponseStatus: 400, ResponseBody: `{"error":"use_dpop_nonce"}`},
+		{Step: "Token Request", ResponseStatus: 200, ResponseBody: `{"access_token":"t"}`},
+		{Step: "Credential Request", ResponseStatus: 401, ResponseHeaders: map[string]string{"Www-Authenticate": `DPoP error="use_dpop_nonce"`}},
+		{Step: "Credential Request", ResponseStatus: 401, ResponseBody: `{"error":"invalid_token"}`},
+	}}
+	if hop := result.CompletedHop("Token Request"); hop == nil || hop.ResponseStatus != 200 {
+		t.Fatalf("Token Request: %+v", hop)
+	}
+	if hop := result.CompletedHop("Credential Request"); hop == nil || hop.ResponseBody != `{"error":"invalid_token"}` {
+		t.Fatalf("an ordinary 401 is the endpoint's answer: %+v", hop)
+	}
+	if result.CompletedHop("Nonce Request") != nil {
+		t.Fatal("a step with no hop has no completed hop")
+	}
+}

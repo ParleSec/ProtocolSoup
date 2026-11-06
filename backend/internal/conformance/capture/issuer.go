@@ -154,6 +154,14 @@ type Offer struct {
 	Code            string
 	TxCode          string
 	ConfigurationID string
+	// URI is the credential_offer_uri the issuer serves the offer at.
+	URI string
+}
+
+// Link is the openid-credential-offer:// link that hands the offer to a
+// wallet by reference (OpenID4VCI 1.0 Section 4.1.3).
+func (o *Offer) Link() string {
+	return "openid-credential-offer://?credential_offer_uri=" + url.QueryEscape(o.URI)
 }
 
 // CreatePreAuthorizedOffer has the issuer create a pre-authorized offer.
@@ -189,6 +197,7 @@ func CreatePreAuthorizedOffer(ctx context.Context, env *Env, opts OfferOptions) 
 	if offer.Code == "" {
 		return nil, fmt.Errorf("offer response has no pre_authorized_code")
 	}
+	offer.URI, _ = body["credential_offer_uri"].(string)
 	if opts.TxCode {
 		if offer.TxCode, _ = body["tx_code_oob_value"].(string); offer.TxCode == "" {
 			return nil, fmt.Errorf("offer response has no tx_code_oob_value")

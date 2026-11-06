@@ -170,23 +170,35 @@ func refusalText(result *capture.WalletResult) string {
 	return text
 }
 
-// requireHop returns the wallet's first hop labelled step, or an error when
-// the wallet recorded none.
+// requireHop returns the wallet's first hop labelled step that carries the
+// endpoint's own answer, or an error when the wallet recorded none. The
+// hosted wallet's requests are DPoP-bound, so an endpoint may first answer
+// with an RFC 9449 nonce challenge, which the wallet retries; that challenge
+// hop is not the endpoint's answer.
 func requireHop(result *capture.WalletResult, step string) (*capture.WalletHop, error) {
-	hop := result.Hop(step)
+	hop := result.CompletedHop(step)
 	if hop == nil {
-		return nil, fmt.Errorf("the wallet recorded no %q hop", step)
+		return nil, fmt.Errorf("the wallet recorded no completed %q hop", step)
 	}
 	return hop, nil
 }
 
-// requestJSON decodes a hop's request body as a JSON object.
+// requestJSON decodes a hop's request as a JSON object. When the wallet sent
+// the body as a JWE, as the hosted wallet does for Credential Requests, the
+// object is the plaintext the wallet recorded it encrypted.
 func requestJSON(hop *capture.WalletHop) (map[string]any, error) {
+	if hop.RequestPlaintext != "" {
+		return hopJSON(hop.RequestPlaintext, "", hop.Step+" request plaintext")
+	}
 	return hopJSON(hop.RequestBody, hop.RequestBodyEncoding, hop.Step+" request")
 }
 
-// responseJSON decodes a hop's response body as a JSON object.
+// responseJSON decodes a hop's response as a JSON object, from the plaintext
+// the wallet recorded it decrypted when the body is a JWE.
 func responseJSON(hop *capture.WalletHop) (map[string]any, error) {
+	if hop.ResponsePlaintext != "" {
+		return hopJSON(hop.ResponsePlaintext, "", hop.Step+" response plaintext")
+	}
 	return hopJSON(hop.ResponseBody, hop.ResponseBodyEncoding, hop.Step+" response")
 }
 

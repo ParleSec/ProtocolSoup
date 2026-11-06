@@ -58,14 +58,14 @@ func init() {
 	})
 	capture.Register("CI-013", capture.Entry{
 		Passing: &capture.Scenario{
-			Name:        "jwk-only-anonymous-proof",
-			Description: "The conformance client hands the hosted wallet a pre-authorized Credential Offer from the production issuer. The wallet redeems the code at /oid4vci/token without a client_id, and every proof in its Credential Request names its key with jwk alone, with no kid or x5c, and carries no iss or cnf.",
+			Name:        "single-jwk-key-reference",
+			Description: "The conformance client hands the hosted wallet a pre-authorized Credential Offer from the production issuer. Every proof in the wallet's Credential Request names its key with jwk alone, with no kid or x5c, and carries no cnf. The proof's iss follows the Token Request: when the wallet redeemed the code as a client, as the hosted wallet does with its client attestation, iss is that client_id; when it redeemed the code without a client_id, iss is omitted.",
 			Actor:       conformance.ActorHostedWallet,
 			Expected:    conformance.OutcomeAccepted,
 			Run:         anonymousProofKeyReference,
 		},
 		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindFailing: "The hosted wallet names its proof key only by jwk and omits iss on anonymous pre-authorized access, so it never sends a proof that breaks this rule.",
+			conformance.KindFailing: "The hosted wallet names its proof key only by jwk and sets iss to its client_id only when its Token Request carried one, so it never sends a proof that breaks this rule.",
 		},
 	})
 	capture.Register("CW-001", capture.Entry{
@@ -318,7 +318,11 @@ func acceptedNotification(ctx context.Context, env *capture.Env) (conformance.Ar
 }
 
 // anonymousProofKeyReference is CI-013 passing: jwk alone names the key, and
-// an anonymous Token Request leaves iss out of the proof.
+// iss follows the Token Request. OpenID4VCI 1.0 Appendix F.1: "The value of
+// this claim MUST be the client_id of the Client making the Credential
+// request. This claim MUST be omitted if the access token authorizing the
+// issuance call was obtained from a Pre-Authorized Code Flow through
+// anonymous access to the token endpoint."
 func anonymousProofKeyReference(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 	result, _, err := issuedImport(ctx, env, capture.OfferOptions{})
 	if err != nil {
@@ -332,9 +336,7 @@ func anonymousProofKeyReference(ctx context.Context, env *capture.Env) (conforma
 	if err != nil {
 		return "", err
 	}
-	if form.Has("client_id") {
-		return "", fmt.Errorf("the Token Request carries client_id %q, so the access is not anonymous", form.Get("client_id"))
-	}
+	clientID := form.Get("client_id")
 	proofs, err := credentialRequestProofs(result)
 	if err != nil {
 		return "", err
@@ -343,10 +345,15 @@ func anonymousProofKeyReference(ctx context.Context, env *capture.Env) (conforma
 		if refs := p.keyReferences(); len(refs) != 1 || refs[0] != "jwk" {
 			return "", fmt.Errorf("proofs.jwt[%d] header key references are %v, want jwk alone", i, refs)
 		}
-		for _, claim := range []string{"iss", "cnf"} {
-			if _, present := p.Claims[claim]; present {
-				return "", fmt.Errorf("proofs.jwt[%d] carries %s on anonymous access", i, claim)
-			}
+		if _, present := p.Claims["cnf"]; present {
+			return "", fmt.Errorf("proofs.jwt[%d] carries cnf", i)
+		}
+		iss, present := p.Claims["iss"]
+		switch {
+		case clientID == "" && present:
+			return "", fmt.Errorf("proofs.jwt[%d] carries iss %v although the Token Request had no client_id", i, iss)
+		case clientID != "" && iss != clientID:
+			return "", fmt.Errorf("proofs.jwt[%d] iss is %v, want the Token Request's client_id %q", i, iss, clientID)
 		}
 	}
 	return conformance.OutcomeAccepted, nil

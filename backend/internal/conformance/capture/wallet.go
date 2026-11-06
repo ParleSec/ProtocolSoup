@@ -43,6 +43,10 @@ type WalletCall struct {
 	// fresh value per scenario keeps one scenario's Credentials from changing
 	// which hops another makes.
 	Session string
+	// Setup marks preparation the artefact is not about, such as having the
+	// wallet obtain the Credential a later call presents. The call is still
+	// a real request to the wallet; neither it nor its hops are recorded.
+	Setup bool
 }
 
 // WalletResult is what the wallet answered, with its recorded hops.
@@ -57,13 +61,17 @@ type WalletResult struct {
 // (cmd/walletharness protocolHop). Bodies are the exact bytes on the wire,
 // base64 when *_body_encoding is "base64".
 type WalletHop struct {
-	Step                 string            `json:"step"`
-	RFCReference         string            `json:"rfc_reference"`
-	Method               string            `json:"method"`
-	URL                  string            `json:"url"`
-	RequestHeaders       map[string]string `json:"request_headers"`
-	RequestBody          string            `json:"request_body"`
-	RequestBodyEncoding  string            `json:"request_body_encoding"`
+	Step                string            `json:"step"`
+	RFCReference        string            `json:"rfc_reference"`
+	Method              string            `json:"method"`
+	URL                 string            `json:"url"`
+	RequestHeaders      map[string]string `json:"request_headers"`
+	RequestBody         string            `json:"request_body"`
+	RequestBodyEncoding string            `json:"request_body_encoding"`
+	// RequestPlaintext and ResponsePlaintext are what the wallet encrypted
+	// into, and decrypted from, a body that is a JWE on the wire.
+	RequestPlaintext     string            `json:"request_plaintext"`
+	ResponsePlaintext    string            `json:"response_plaintext"`
 	ResponseStatus       int               `json:"response_status"`
 	ResponseHeaders      map[string]string `json:"response_headers"`
 	ResponseBody         string            `json:"response_body"`
@@ -95,6 +103,38 @@ func (r *WalletResult) Hop(step string) *WalletHop {
 	return nil
 }
 
+// DPoPNonceChallenge reports whether the hop was answered with an RFC 9449
+// nonce challenge rather than the endpoint's own answer: the use_dpop_nonce
+// error from an authorization server (Section 8) or in a resource server's
+// WWW-Authenticate header (Section 9). The wallet retries such a request, so
+// the hop that follows carries the endpoint's answer.
+func (h *WalletHop) DPoPNonceChallenge() bool {
+	if h.ResponseStatus != http.StatusBadRequest && h.ResponseStatus != http.StatusUnauthorized {
+		return false
+	}
+	for name, value := range h.ResponseHeaders {
+		if strings.EqualFold(name, "WWW-Authenticate") && strings.Contains(value, "use_dpop_nonce") {
+			return true
+		}
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal([]byte(h.ResponseBody), &body) == nil && body.Error == "use_dpop_nonce"
+}
+
+// CompletedHop returns the first hop labelled step that is not a DPoP nonce
+// challenge, or nil. The production wallet's requests are DPoP-bound, so
+// each endpoint may answer the first attempt with a challenge.
+func (r *WalletResult) CompletedHop(step string) *WalletHop {
+	for i := range r.Hops {
+		if r.Hops[i].Step == step && !r.Hops[i].DPoPNonceChallenge() {
+			return &r.Hops[i]
+		}
+	}
+	return nil
+}
+
 // NewWalletSession returns a fresh session identifier for X-Wallet-Session.
 func NewWalletSession() string {
 	return "conformance-" + uuid.NewString()
@@ -119,7 +159,11 @@ func CallWallet(ctx context.Context, env *Env, call WalletCall) (*WalletResult, 
 	if err := env.Pace(ctx, walletFanOut); err != nil {
 		return nil, err
 	}
-	resp, err := env.Do(ctx, req)
+	send := env.Do
+	if call.Setup {
+		send = env.Setup
+	}
+	resp, err := send(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +184,9 @@ func CallWallet(ctx context.Context, env *Env, call WalletCall) (*WalletResult, 
 	// Whatever the wallet obtained stays in its session store until the
 	// session expires.
 	env.NoteExpiry(WalletSessionLifetime)
-	env.recorder.Append(walletExchanges(result.Hops))
+	if !call.Setup {
+		env.recorder.Append(walletExchanges(result.Hops))
+	}
 	return result, nil
 }
 

@@ -89,7 +89,7 @@ func init() {
 	capture.Register("VP-003", capture.Entry{
 		Passing: &capture.Scenario{
 			Name:        "extra-parameters-presented",
-			Description: "The conformance client asks the hosted wallet to present to a counterparty request_uri whose valid, ES256-signed request object also carries an unregistered x_protocolsoup_extension parameter, the removed client_id_scheme parameter naming redirect_uri, and the removed presentation_definition parameter. The wallet verifies the request by its decentralized_identifier prefix, presents a University Degree Credential chosen by dcql_query, and posts an Authorization Response without a presentation_submission.",
+			Description: "The hosted wallet first obtains a University Degree Credential from the production issuer, which is not shown. The conformance client then asks it to present to a counterparty request_uri whose valid, ES256-signed request object also carries an unregistered x_protocolsoup_extension parameter, the removed client_id_scheme parameter naming redirect_uri, and the removed presentation_definition parameter. The wallet verifies the request by its decentralized_identifier prefix, presents the Credential dcql_query asks for, and posts an Authorization Response without a presentation_submission.",
 			Actor:       conformance.ActorHostedWallet,
 			Expected:    conformance.OutcomeAccepted,
 			Run:         presentWithUnrecognisedParameters,
@@ -358,7 +358,29 @@ func presentWithUnrecognisedParameters(ctx context.Context, env *capture.Env) (c
 	if err != nil {
 		return "", err
 	}
-	result, err := callWallet(ctx, env, "/api/present", map[string]any{"request_uri": requestURI, "approve_external_trust": true})
+	// The counterparty's query asks for the University Degree Credential by
+	// its vct, so the wallet must hold that one. Left to choose for itself,
+	// the hosted wallet fetches the HAIP configuration, whose vct differs.
+	session := capture.NewWalletSession()
+	offer, err := capture.CreatePreAuthorizedOffer(ctx, env, capture.OfferOptions{})
+	if err != nil {
+		return "", err
+	}
+	if offer.URI == "" {
+		return "", fmt.Errorf("offer response has no credential_offer_uri")
+	}
+	imported, err := capture.CallWallet(ctx, env, capture.WalletCall{
+		Path: "/api/import", Body: map[string]any{"offer": offer.Link()}, Session: session, Setup: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if imported.Status != http.StatusOK {
+		return "", fmt.Errorf("the wallet could not obtain the Credential to present: %s %s", capture.WalletStatusText(imported.Status), describe(imported))
+	}
+	result, err := capture.CallWallet(ctx, env, capture.WalletCall{
+		Path: "/api/present", Body: map[string]any{"request_uri": requestURI, "approve_external_trust": true}, Session: session,
+	})
 	if err != nil || result.Status != http.StatusOK {
 		return outcomeOf(result, err)
 	}
