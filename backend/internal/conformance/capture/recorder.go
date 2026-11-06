@@ -86,6 +86,18 @@ func (r *Recorder) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+// Append adds exchanges another party recorded, such as the hosted wallet's
+// own record of its hops, to the current artefact after the exchanges
+// recorded so far.
+func (r *Recorder) Append(exchanges []lookingglass.CapturedExchange) {
+	if len(exchanges) == 0 {
+		return
+	}
+	r.mu.Lock()
+	r.exchanges = append(r.exchanges, exchanges...)
+	r.mu.Unlock()
+}
+
 // Take returns the exchanges recorded since the last call and clears them.
 func (r *Recorder) Take() []lookingglass.CapturedExchange {
 	r.mu.Lock()

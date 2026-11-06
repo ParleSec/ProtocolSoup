@@ -33,6 +33,7 @@ func run(ctx context.Context, args []string) error {
 	port := flags.Int("port", 8080, "local main app port (-target local)")
 	walletPort := flags.Int("wallet-port", 0, "local wallet harness port, 0 when not running (-target local)")
 	counterpartyPort := flags.Int("counterparty-port", 0, "local conformance counterparty port, 0 when not running (-target local)")
+	productionCounterparty := flags.Bool("production-counterparty", false, "use the deployed conformance counterparty with local servers (-target local)")
 	commit := flags.String("commit", "", "commit the deployed apps must report on /health; defaults to what the main app reports")
 	only := flags.String("only", "", "comma-separated requirement IDs to capture; all registered when empty")
 	rpm := flags.Int("rpm", capture.DefaultRequestsPerMinute, "requests per minute against the deployed apps")
@@ -44,9 +45,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	portsSet := false
 	flags.Visit(func(f *flag.Flag) {
-		portsSet = portsSet || f.Name == "port" || f.Name == "wallet-port" || f.Name == "counterparty-port"
+		portsSet = portsSet || f.Name == "port" || f.Name == "wallet-port" || f.Name == "counterparty-port" || f.Name == "production-counterparty"
 	})
-	origins, err := resolveOrigins(*target, portsSet, *port, *walletPort, *counterpartyPort)
+	origins, err := resolveOrigins(*target, portsSet, *port, *walletPort, *counterpartyPort, *productionCounterparty)
 	if err != nil {
 		return err
 	}
@@ -78,6 +79,16 @@ func run(ctx context.Context, args []string) error {
 	}
 	for _, origin := range []string{walletURL, counterpartyURL} {
 		if origin == "" {
+			continue
+		}
+		// A local run may use the deployed counterparty, which serves
+		// production's commit rather than the local build's. Its routes are
+		// what the local scenarios are written against, and a local set is
+		// never published, so only its reachability matters there.
+		if *target == "local" && origin == capture.ProductionCounterpartyURL {
+			if _, err := healthCommit(ctx, origin); err != nil {
+				return err
+			}
 			continue
 		}
 		originCommit, err := healthCommit(ctx, origin)
@@ -127,15 +138,15 @@ func run(ctx context.Context, args []string) error {
 // origin as text: -target selects ProtocolSoup's production origins or
 // localhost, and local ports are numbers, so every request goes to one of
 // those apps and to nothing else.
-func resolveOrigins(target string, portsSet bool, port, walletPort, counterpartyPort int) (capture.Origins, error) {
+func resolveOrigins(target string, portsSet bool, port, walletPort, counterpartyPort int, productionCounterparty bool) (capture.Origins, error) {
 	switch target {
 	case "production":
 		if portsSet {
-			return capture.Origins{}, fmt.Errorf("-port, -wallet-port and -counterparty-port apply only to -target local")
+			return capture.Origins{}, fmt.Errorf("-port, -wallet-port, -counterparty-port and -production-counterparty apply only to -target local")
 		}
 		return capture.ProductionOrigins(), nil
 	case "local":
-		return capture.LocalOrigins(port, walletPort, counterpartyPort)
+		return capture.LocalOrigins(port, walletPort, counterpartyPort, productionCounterparty)
 	case "":
 		return capture.Origins{}, fmt.Errorf(`-target is required: "production" or "local"`)
 	default:

@@ -16,11 +16,12 @@ import (
 
 // RunLive captures every scenario registered in the calling test binary
 // against the local server on CAPTURE_PORT (plus the wallet on
-// CAPTURE_WALLET_PORT and the counterparty on CAPTURE_COUNTERPARTY_PORT when
+// CAPTURE_WALLET_PORT and the counterparty on CAPTURE_COUNTERPARTY_PORT, or
+// the deployed counterparty with CAPTURE_PRODUCTION_COUNTERPARTY=true, when
 // set), optionally limited by CAPTURE_ONLY, and fails the test on any
 // mismatch. Like the conformance-capture command, it reaches only localhost
-// ports. Without CAPTURE_PORT it skips, so ordinary test runs never reach a
-// network server. A scenario package calls it from a TestLive, which runs
+// ports and ProtocolSoup's own deployed apps. Without CAPTURE_PORT it skips,
+// so ordinary test runs never reach a network server. A scenario package calls it from a TestLive, which runs
 // only that package's scenarios because only they are registered in its test
 // binary.
 func RunLive(t *testing.T) {
@@ -28,7 +29,12 @@ func RunLive(t *testing.T) {
 	if strings.TrimSpace(os.Getenv("CAPTURE_PORT")) == "" {
 		t.Skip("set CAPTURE_PORT to the port of a local server to capture live")
 	}
-	origins, err := capture.LocalOrigins(portFromEnv(t, "CAPTURE_PORT"), portFromEnv(t, "CAPTURE_WALLET_PORT"), portFromEnv(t, "CAPTURE_COUNTERPARTY_PORT"))
+	origins, err := capture.LocalOrigins(
+		portFromEnv(t, "CAPTURE_PORT"),
+		portFromEnv(t, "CAPTURE_WALLET_PORT"),
+		portFromEnv(t, "CAPTURE_COUNTERPARTY_PORT"),
+		strings.EqualFold(strings.TrimSpace(os.Getenv("CAPTURE_PRODUCTION_COUNTERPARTY")), "true"),
+	)
 	if err != nil {
 		t.Fatalf("capture origins: %v", err)
 	}

@@ -69,7 +69,7 @@ Pre-authorized codes are single use and last 15 minutes; access tokens last 5 mi
 cd backend && COUNTERPARTY_LISTEN_ADDR=:8282 COUNTERPARTY_BASE_URL=http://localhost:8282 BUILD_COMMIT=localcapture go run ./cmd/conformance-counterparty
 ```
 
-The hosted wallet refuses non-public hosts, so local capture of the wallet rows needs the wallet harness started locally as well.
+The hosted wallet reaches only public https hosts other than its own issuer, so a local wallet cannot be pointed at a local counterparty. Local capture of the wallet rows runs a local main app and wallet against the deployed counterparty: `go run ./cmd/conformance-capture -target local -port 8080 -wallet-port 8081 -production-counterparty`, or `CAPTURE_PORT=8080 CAPTURE_WALLET_PORT=8081 CAPTURE_PRODUCTION_COUNTERPARTY=true go test ./internal/conformance/capture/<package> -run TestLive`.
 
 ## Versioning And Tags
 

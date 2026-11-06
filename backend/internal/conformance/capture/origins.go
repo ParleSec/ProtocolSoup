@@ -33,12 +33,21 @@ func ProductionOrigins() Origins {
 
 // LocalOrigins are http://localhost origins on the given ports. basePort is
 // required; walletPort and counterpartyPort are 0 when that app is not
-// running.
-func LocalOrigins(basePort, walletPort, counterpartyPort int) (Origins, error) {
+// running. productionCounterparty uses the deployed counterparty instead of
+// a local one: the hosted wallet reaches only public https hosts other than
+// its own issuer, so a local wallet can be shown refusing the counterparty's
+// messages only against the deployed counterparty.
+func LocalOrigins(basePort, walletPort, counterpartyPort int, productionCounterparty bool) (Origins, error) {
 	if basePort == 0 {
 		return Origins{}, fmt.Errorf("the main app port is required")
 	}
+	if productionCounterparty && counterpartyPort != 0 {
+		return Origins{}, fmt.Errorf("choose either a local counterparty port or the production counterparty")
+	}
 	var origins Origins
+	if productionCounterparty {
+		origins.Counterparty = ProductionCounterpartyURL
+	}
 	for _, port := range []struct {
 		name   string
 		number int

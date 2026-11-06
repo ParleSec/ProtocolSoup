@@ -179,7 +179,9 @@ client, never from the hosted wallet. To show the hosted wallet refusing an
 invalid message, CI points it at the conformance counterparty, a separate app
 (`cmd/conformance-counterparty`) that serves one deliberately invalid
 request object, metadata document or response per requirement and labels
-every response as such. A set is only shown for the build that
+every response as such. For those rows the artefact holds the conformance
+client's call to the wallet's API, then the wallet's own record of each
+request it sent and received, marked as recorded by the hosted wallet. A set is only shown for the build that
 captured it, and only once every token, code and nonce in it has expired;
 until then the page says when it publishes. A kind that cannot be captured
 from production says why.

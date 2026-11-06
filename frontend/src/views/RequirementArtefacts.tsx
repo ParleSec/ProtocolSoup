@@ -73,11 +73,33 @@ function WireText({ payload }: { payload?: WireCapturedPayload }) {
   )
 }
 
+/**
+ * A message the hosted wallet recorded itself: headers and body as it sent
+ * or received them. The wallet keeps no reconstructed raw message, so the
+ * parts are shown separately rather than assembled into one.
+ */
+function MessageParts({ message }: { message: WireCapturedExchange['request'] }) {
+  const headers = Object.entries(message.headers ?? {}).flatMap(([name, values]) =>
+    values.map((value) => `${name}: ${value}`),
+  )
+  return (
+    <div className="space-y-1">
+      {headers.length > 0 && (
+        <pre className="rounded-lg border border-white/10 bg-surface-950 p-3 text-xs leading-relaxed text-surface-100 overflow-x-auto whitespace-pre">
+          {headers.join('\n')}
+        </pre>
+      )}
+      <WireText payload={message.body} />
+    </div>
+  )
+}
+
 function ExchangeView({ exchange, index }: { exchange: WireCapturedExchange; index: number }) {
-  const { request, response, tls } = exchange
+  const { request, response, tls, meta } = exchange
   const tlsLine = tls?.version
     ? [tls.version, tls.cipherSuite, tls.negotiatedProtocol].filter(Boolean).join(' · ')
     : ''
+  const recordedByWallet = meta.captureSource === 'hosted_wallet'
   return (
     <li className="space-y-2">
       <p className="text-sm text-surface-200 break-all">
@@ -86,15 +108,20 @@ function ExchangeView({ exchange, index }: { exchange: WireCapturedExchange; ind
         <span aria-hidden="true">{' → '}</span>
         <span className="font-semibold">{response.status}</span> {response.statusText}
       </p>
+      {recordedByWallet && (
+        <p className="text-xs text-surface-400">
+          Recorded by the hosted wallet: its own record of a request it sent, returned in the response above.
+        </p>
+      )}
       {tlsLine && <p className="text-xs text-surface-400">TLS: {tlsLine}</p>}
       <div className="grid gap-2 lg:grid-cols-2">
         <div className="min-w-0 space-y-1">
           <h4 className="text-xs uppercase tracking-wider text-surface-400">Request</h4>
-          <WireText payload={request.raw} />
+          {request.raw ? <WireText payload={request.raw} /> : <MessageParts message={request} />}
         </div>
         <div className="min-w-0 space-y-1">
           <h4 className="text-xs uppercase tracking-wider text-surface-400">Response</h4>
-          <WireText payload={response.raw} />
+          {response.raw ? <WireText payload={response.raw} /> : <MessageParts message={response} />}
         </div>
       </div>
     </li>
