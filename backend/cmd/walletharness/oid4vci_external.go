@@ -1023,6 +1023,7 @@ func (s *walletHarnessServer) startExternalAuthorizationCodeImport(
 			Scope:                 scopeFromCredentialConfiguration(configurationMetadata, authorizationServerMetadata),
 			IssuerState:           issuerState,
 			ConfigurationID:       selectedConfigurationID,
+			IssuerMetadata:        issuerMetadata,
 			LookingGlassSessionID: input.LookingGlassSessionID,
 			Session:               haipSession,
 			PopAudience:           popAudience,
@@ -1057,6 +1058,7 @@ func (s *walletHarnessServer) startExternalAuthorizationCodeImport(
 			state,
 			selectedConfigurationID,
 			resolvedOffer,
+			issuerMetadata,
 			authorizationServerMetadata,
 			configurationMetadata,
 			codeChallenge,
@@ -1463,6 +1465,7 @@ func buildExternalAuthorizationURL(
 	state string,
 	selectedConfigurationID string,
 	resolvedOffer *resolvedCredentialOfferInput,
+	issuerMetadata *resolvedExternalIssuerMetadata,
 	authorizationServerMetadata *resolvedAuthorizationServerMetadata,
 	configurationMetadata map[string]interface{},
 	codeChallenge string,
@@ -1487,12 +1490,7 @@ func buildExternalAuthorizationURL(
 	if scope := scopeFromCredentialConfiguration(configurationMetadata, authorizationServerMetadata); scope != "" {
 		query.Set("scope", scope)
 	}
-	authorizationDetails := []map[string]interface{}{
-		{
-			"type":                        "openid_credential",
-			"credential_configuration_id": strings.TrimSpace(selectedConfigurationID),
-		},
-	}
+	authorizationDetails := openIDCredentialAuthorizationDetails(selectedConfigurationID, issuerMetadata)
 	if rawAuthorizationDetails, err := json.Marshal(authorizationDetails); err == nil {
 		query.Set("authorization_details", string(rawAuthorizationDetails))
 	}

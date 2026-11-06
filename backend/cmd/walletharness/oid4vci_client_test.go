@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -792,6 +793,20 @@ func TestPushAuthorizationRequestFetchesChallengeEndpoint(t *testing.T) {
 		_, _ = w.Write([]byte(`{"attestation_challenge":"` + expectedChallenge + `"}`))
 	})
 	mux.HandleFunc("/par", func(w http.ResponseWriter, r *http.Request) {
+		// OpenID4VCI 1.0 Section 5.1.1: with authorization_servers in the
+		// issuer metadata, locations MUST be the Credential Issuer Identifier.
+		_ = r.ParseForm()
+		var details []struct {
+			Type      string   `json:"type"`
+			ID        string   `json:"credential_configuration_id"`
+			Locations []string `json:"locations"`
+		}
+		if err := json.Unmarshal([]byte(r.PostForm.Get("authorization_details")), &details); err != nil ||
+			len(details) != 1 || details[0].Type != "openid_credential" || details[0].ID != "UniversityDegreeCredentialSDJWTHAIP" ||
+			len(details[0].Locations) != 1 || details[0].Locations[0] != "https://issuer.example/oid4vci" {
+			http.Error(w, `{"error":"invalid_request","error_description":"locations must contain the Credential Issuer identifier"}`, http.StatusBadRequest)
+			return
+		}
 		popHeader := strings.TrimSpace(r.Header.Get(headerOAuthClientAttestationPoP))
 		if popHeader == "" {
 			http.Error(w, "missing pop", http.StatusBadRequest)
@@ -839,11 +854,16 @@ func TestPushAuthorizationRequestFetchesChallengeEndpoint(t *testing.T) {
 	}
 
 	requestURI, err := server.pushAuthorizationRequest(context.Background(), pushAuthorizationRequestInput{
-		PAREndpoint:       upstream.URL + "/par",
-		ClientID:          clientID,
-		RedirectURI:       "https://wallet.example/api/oid4vci/callback",
-		State:             "state-1",
-		CodeChallenge:     "challenge",
+		PAREndpoint:     upstream.URL + "/par",
+		ClientID:        clientID,
+		RedirectURI:     "https://wallet.example/api/oid4vci/callback",
+		State:           "state-1",
+		CodeChallenge:   "challenge",
+		ConfigurationID: "UniversityDegreeCredentialSDJWTHAIP",
+		IssuerMetadata: &resolvedExternalIssuerMetadata{
+			CredentialIssuer:     "https://issuer.example/oid4vci",
+			AuthorizationServers: []string{"https://as.example/oid4vci"},
+		},
 		Session:           session,
 		PopAudience:       attestationAudience,
 		ChallengeEndpoint: upstream.URL + "/challenge",
@@ -882,5 +902,120 @@ func TestBuildClientAttestationPoPJWTIncludesChallengeClaim(t *testing.T) {
 	}
 	if asString(decoded.Payload["challenge"]) != "server-challenge" {
 		t.Fatalf("challenge claim = %#v", decoded.Payload["challenge"])
+	}
+}
+
+// TestAuthorizationDetailsLocationsFollowIssuerMetadata proves the
+// authorization detail names the Credential Issuer in locations exactly when
+// the issuer metadata has authorization_servers (OpenID4VCI 1.0 Section 5.1.1).
+func TestAuthorizationDetailsLocationsFollowIssuerMetadata(t *testing.T) {
+	t.Parallel()
+	withServers := openIDCredentialAuthorizationDetails("Degree", &resolvedExternalIssuerMetadata{
+		CredentialIssuer:     "https://issuer.example/oid4vci",
+		AuthorizationServers: []string{"https://as.example"},
+	})
+	locations, _ := withServers[0]["locations"].([]string)
+	if len(locations) != 1 || locations[0] != "https://issuer.example/oid4vci" {
+		t.Fatalf("locations = %v, want the Credential Issuer Identifier", withServers[0]["locations"])
+	}
+	without := openIDCredentialAuthorizationDetails("Degree", &resolvedExternalIssuerMetadata{CredentialIssuer: "https://issuer.example/oid4vci"})
+	if _, present := without[0]["locations"]; present {
+		t.Fatalf("locations must be absent when the metadata has no authorization_servers: %v", without[0])
+	}
+}
+
+// TestEncryptedCredentialRequestRecordsItsPlaintext drives the real
+// Credential Request path against an issuer that requires request and
+// response encryption (OpenID4VCI 1.0 Sections 8.2 and 10). The recorded hop
+// keeps both JWEs as sent and also carries the request the wallet encrypted
+// and the response it decrypted.
+func TestEncryptedCredentialRequestRecordsItsPlaintext(t *testing.T) {
+	t.Parallel()
+	issuerKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	issuerJWK := intcrypto.JWKFromECPublicKey(&issuerKey.PublicKey, "issuer-req-enc")
+	issuerJWK.Alg = string(jose.ECDH_ES)
+	issuerJWK.Use = "enc"
+	const issuedResponse = `{"credentials":[{"credential":"issued-credential"}],"notification_id":"n-1"}`
+
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		object, err := jose.ParseEncrypted(string(raw), []jose.KeyAlgorithm{jose.ECDH_ES}, []jose.ContentEncryption{jose.A128GCM, jose.A256GCM})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		plaintext, err := object.Decrypt(issuerKey)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var request struct {
+			Encryption struct {
+				JWK intcrypto.JWK `json:"jwk"`
+				Enc string        `json:"enc"`
+			} `json:"credential_response_encryption"`
+		}
+		if err := json.Unmarshal(plaintext, &request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		walletKey, err := intcrypto.ParseECPublicKeyFromJWK(request.Encryption.JWK)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		encrypter, err := jose.NewEncrypter(jose.ContentEncryption(request.Encryption.Enc), jose.Recipient{Algorithm: jose.ECDH_ES, Key: walletKey}, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		encrypted, _ := encrypter.Encrypt([]byte(issuedResponse))
+		compact, _ := encrypted.CompactSerialize()
+		w.Header().Set("Content-Type", "application/jwt")
+		_, _ = w.Write([]byte(compact))
+	}))
+	defer issuer.Close()
+
+	server := &walletHarnessServer{httpClient: issuer.Client()}
+	transcript := &protocolTranscript{}
+	ctx := withProtocolTranscript(context.Background(), transcript)
+	payload, err := server.requestCredentialWithLifecycle(ctx, issuer.URL+"/credential", credentialRequestBuildInput{
+		CredentialConfigurationID: "UniversityDegreeCredentialSDJWT",
+		ProofJWTs:                 []string{"proof-one", "proof-two"},
+		Encryption:                &credentialResponseEncryptionSupport{AlgValuesSupported: []string{"ECDH-ES"}, EncValuesSupported: []string{"A256GCM"}, EncryptionRequired: true},
+		RequestEncryption:         &credentialRequestEncryptionSupport{EncValuesSupported: []string{"A256GCM"}, EncryptionRequired: true, Keys: []intcrypto.JWK{issuerJWK}},
+	}, "access-token", "Bearer", nil, "")
+	if err != nil {
+		t.Fatalf("requestCredentialWithLifecycle: %v", err)
+	}
+	if payload["notification_id"] != "n-1" {
+		t.Fatalf("decrypted payload = %v", payload)
+	}
+
+	hops, _ := transcript.snapshot()
+	if len(hops) != 1 {
+		t.Fatalf("want one hop, got %d", len(hops))
+	}
+	hop := hops[0]
+	if strings.Count(hop.RequestBody, ".") != 4 || strings.Count(hop.ResponseBody, ".") != 4 {
+		t.Fatalf("the wire bodies must stay compact JWEs: %q / %q", hop.RequestBody, hop.ResponseBody)
+	}
+	var sent struct {
+		ConfigurationID string `json:"credential_configuration_id"`
+		Proofs          struct {
+			JWT []string `json:"jwt"`
+		} `json:"proofs"`
+	}
+	if err := json.Unmarshal([]byte(hop.RequestPlaintext), &sent); err != nil {
+		t.Fatalf("request_plaintext is not the JSON the wallet encrypted: %v: %q", err, hop.RequestPlaintext)
+	}
+	if sent.ConfigurationID != "UniversityDegreeCredentialSDJWT" || len(sent.Proofs.JWT) != 2 || sent.Proofs.JWT[0] != "proof-one" {
+		t.Fatalf("request_plaintext = %s", hop.RequestPlaintext)
+	}
+	if hop.ResponsePlaintext != issuedResponse {
+		t.Fatalf("response_plaintext = %q, want the exact bytes decrypted", hop.ResponsePlaintext)
 	}
 }

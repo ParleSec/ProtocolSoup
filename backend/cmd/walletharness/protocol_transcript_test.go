@@ -172,3 +172,37 @@ func TestAPIResolveHonoursRequestURIMethodPost(t *testing.T) {
 		t.Fatalf("unexpected hop %+v", hop)
 	}
 }
+
+// TestTranscriptRecordsPlaintextOfEncryptedBodies proves a hop whose bodies
+// are JWEs keeps them as sent and also shows what the wallet encrypted and
+// decrypted.
+func TestTranscriptRecordsPlaintextOfEncryptedBodies(t *testing.T) {
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/jwt")
+		_, _ = w.Write([]byte("response.jwe.as.sent.x"))
+	}))
+	defer issuer.Close()
+	server := &walletHarnessServer{httpClient: issuer.Client()}
+	transcript := &protocolTranscript{}
+	ctx := withProtocolTranscript(context.Background(), transcript)
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, issuer.URL+"/credential", strings.NewReader("request.jwe.as.sent.x"))
+	resp, err := server.doHTTP(withRequestPlaintext(ctx, []byte(`{"proofs":{"jwt":["p"]}}`)), req)
+	if err != nil {
+		t.Fatalf("doHTTP: %v", err)
+	}
+	_ = resp.Body.Close()
+	recordResponsePlaintext(ctx, []byte(`{"credentials":[{"credential":"c"}]}`))
+
+	hops, _ := transcript.snapshot()
+	if len(hops) != 1 {
+		t.Fatalf("want one hop, got %d", len(hops))
+	}
+	hop := hops[0]
+	if hop.RequestBody != "request.jwe.as.sent.x" || hop.ResponseBody != "response.jwe.as.sent.x" {
+		t.Fatalf("the wire bodies must stay as sent: %q %q", hop.RequestBody, hop.ResponseBody)
+	}
+	if hop.RequestPlaintext != `{"proofs":{"jwt":["p"]}}` || hop.ResponsePlaintext != `{"credentials":[{"credential":"c"}]}` {
+		t.Fatalf("plaintext not recorded: %q %q", hop.RequestPlaintext, hop.ResponsePlaintext)
+	}
+}
