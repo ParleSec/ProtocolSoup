@@ -88,3 +88,31 @@ func TestEveryRowHasExactlyOneSourcePerKind(t *testing.T) {
 		}
 	}
 }
+
+// TestEncryptedHopIsReadFromItsPlaintext proves a hop whose bodies are JWEs,
+// as the hosted wallet's Credential Requests are, is read from the plaintext
+// the wallet recorded, and a plain hop from its body.
+func TestEncryptedHopIsReadFromItsPlaintext(t *testing.T) {
+	encrypted := &capture.WalletHop{
+		Step:              stepCredential,
+		RequestBody:       "eyJhbGciOiJFQ0RILUVTIn0.a.b.c.d",
+		RequestPlaintext:  `{"credential_configuration_id":"X","proofs":{"jwt":["p"]}}`,
+		ResponseBody:      "eyJhbGciOiJFQ0RILUVTIn0.a.b.c.d",
+		ResponsePlaintext: `{"credentials":[{"credential":"c"}],"notification_id":"n"}`,
+	}
+	request, err := requestJSON(encrypted)
+	if err != nil || request["credential_configuration_id"] != "X" {
+		t.Fatalf("request = %v, %v", request, err)
+	}
+	response, err := responseJSON(encrypted)
+	if err != nil || response["notification_id"] != "n" {
+		t.Fatalf("response = %v, %v", response, err)
+	}
+	plain := &capture.WalletHop{Step: stepCredential, RequestBody: `{"credential_configuration_id":"Y"}`}
+	if request, err := requestJSON(plain); err != nil || request["credential_configuration_id"] != "Y" {
+		t.Fatalf("plain request = %v, %v", request, err)
+	}
+	if _, err := requestJSON(&capture.WalletHop{Step: stepCredential, RequestBody: "eyJ.a.b.c.d"}); err == nil {
+		t.Fatal("a JWE body with no recorded plaintext must be an error, not an empty object")
+	}
+}

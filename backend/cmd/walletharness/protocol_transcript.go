@@ -19,13 +19,19 @@ import (
 // it. Bodies are the exact bytes on the wire: UTF-8 text as is, anything else
 // base64 with its *_body_encoding set to "base64".
 type protocolHop struct {
-	Step                 string                 `json:"step"`
-	RFCReference         string                 `json:"rfc_reference,omitempty"`
-	Method               string                 `json:"method"`
-	URL                  string                 `json:"url"`
-	RequestHeaders       map[string]string      `json:"request_headers,omitempty"`
-	RequestBody          string                 `json:"request_body,omitempty"`
-	RequestBodyEncoding  string                 `json:"request_body_encoding,omitempty"`
+	Step                string            `json:"step"`
+	RFCReference        string            `json:"rfc_reference,omitempty"`
+	Method              string            `json:"method"`
+	URL                 string            `json:"url"`
+	RequestHeaders      map[string]string `json:"request_headers,omitempty"`
+	RequestBody         string            `json:"request_body,omitempty"`
+	RequestBodyEncoding string            `json:"request_body_encoding,omitempty"`
+	// RequestPlaintext is the exact bytes the wallet encrypted into
+	// RequestBody, and ResponsePlaintext the exact bytes it decrypted from
+	// ResponseBody, when that body is a JWE. The bodies stay as sent on the
+	// wire; these show what was inside them.
+	RequestPlaintext     string                 `json:"request_plaintext,omitempty"`
+	ResponsePlaintext    string                 `json:"response_plaintext,omitempty"`
 	ResponseStatus       int                    `json:"response_status"`
 	ResponseHeaders      map[string]string      `json:"response_headers,omitempty"`
 	ResponseBody         string                 `json:"response_body,omitempty"`
@@ -57,6 +63,31 @@ type protocolStep struct {
 }
 
 type protocolStepContextKey struct{}
+
+type requestPlaintextContextKey struct{}
+
+// withRequestPlaintext tells doHTTP what the wallet encrypted into the body
+// of the requests sent under ctx, so the recorded hop can show it.
+func withRequestPlaintext(ctx context.Context, plaintext []byte) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, requestPlaintextContextKey{}, string(plaintext))
+}
+
+// recordResponsePlaintext notes, on the hop recorded last, what the wallet
+// decrypted from its response body.
+func recordResponsePlaintext(ctx context.Context, plaintext []byte) {
+	transcript := protocolTranscriptFrom(ctx)
+	if transcript == nil {
+		return
+	}
+	transcript.mu.Lock()
+	defer transcript.mu.Unlock()
+	if last := len(transcript.hops) - 1; last >= 0 {
+		transcript.hops[last].ResponsePlaintext = string(plaintext)
+	}
+}
 
 // withProtocolStep labels the hops doHTTP records under ctx. Unlabelled hops
 // are classified as wallet-to-issuer OID4VCI exchanges.
@@ -164,6 +195,7 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 		step, rfc, actor = labelled.Step, labelled.RFCReference, labelled.Actor
 	}
 	extra := map[string]interface{}{}
+	requestPlaintext, _ := ctx.Value(requestPlaintextContextKey{}).(string)
 	requestHeaders := flattenHeader(req.Header)
 	requestBody, requestEncoding, requestRecorded := captureHTTPBody(&req.Body)
 	if !requestRecorded {
@@ -183,6 +215,7 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 			RequestHeaders:      requestHeaders,
 			RequestBody:         requestBody,
 			RequestBodyEncoding: requestEncoding,
+			RequestPlaintext:    requestPlaintext,
 			DurationMS:          durationMS,
 			Actor:               actor,
 			Extra:               extra,
@@ -205,6 +238,7 @@ func (s *walletHarnessServer) doHTTP(ctx context.Context, req *http.Request) (*h
 		RequestHeaders:       requestHeaders,
 		RequestBody:          requestBody,
 		RequestBodyEncoding:  requestEncoding,
+		RequestPlaintext:     requestPlaintext,
 		ResponseStatus:       resp.StatusCode,
 		ResponseHeaders:      flattenHeader(resp.Header),
 		ResponseBody:         responseBody,

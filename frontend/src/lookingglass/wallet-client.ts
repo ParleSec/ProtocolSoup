@@ -277,10 +277,14 @@ export type WalletProtocolExchange = {
   request_headers?: Record<string, string>
   request_body?: string
   request_body_encoding?: string
+  /** What the wallet encrypted into request_body, when that is a JWE. */
+  request_plaintext?: string
   response_status?: number
   response_headers?: Record<string, string>
   response_body?: string
   response_body_encoding?: string
+  /** What the wallet decrypted from response_body, when that is a JWE. */
+  response_plaintext?: string
   duration_ms?: number
   actor?: string
   extra?: Record<string, unknown>

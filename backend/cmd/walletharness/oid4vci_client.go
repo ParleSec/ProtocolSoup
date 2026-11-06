@@ -437,7 +437,34 @@ func buildCredentialResponseEncryptionObject(
 	}, privateKey, nil
 }
 
+// decryptRecordedCredentialResponse decrypts an encrypted Credential Response
+// and notes its plaintext on the hop that carried it.
+func decryptRecordedCredentialResponse(ctx context.Context, compact string, privateKey *ecdsa.PrivateKey) (map[string]interface{}, error) {
+	plaintext, err := decryptCredentialResponsePlaintext(compact, privateKey)
+	if err != nil {
+		return nil, err
+	}
+	recordResponsePlaintext(ctx, plaintext)
+	var payload map[string]interface{}
+	if err := json.Unmarshal(plaintext, &payload); err != nil {
+		return nil, fmt.Errorf("decode decrypted credential response: %w", err)
+	}
+	return payload, nil
+}
+
 func decryptCredentialResponseJWT(compact string, privateKey *ecdsa.PrivateKey) (map[string]interface{}, error) {
+	plaintext, err := decryptCredentialResponsePlaintext(compact, privateKey)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(plaintext, &payload); err != nil {
+		return nil, fmt.Errorf("decode decrypted credential response: %w", err)
+	}
+	return payload, nil
+}
+
+func decryptCredentialResponsePlaintext(compact string, privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("credential response encryption private key is required")
 	}
@@ -457,11 +484,7 @@ func decryptCredentialResponseJWT(compact string, privateKey *ecdsa.PrivateKey) 
 	if err != nil {
 		return nil, fmt.Errorf("decrypt credential response: %w", err)
 	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(plaintext, &payload); err != nil {
-		return nil, fmt.Errorf("decode decrypted credential response: %w", err)
-	}
-	return payload, nil
+	return plaintext, nil
 }
 
 // shouldEncryptCredentialRequest reports whether the Credential / Deferred
@@ -622,6 +645,22 @@ func buildAuthorizationURLFromPAR(
 	return authorizationURL.String(), nil
 }
 
+// openIDCredentialAuthorizationDetails builds the authorization_details for
+// one Credential Configuration. OpenID4VCI 1.0 Section 5.1.1: "If the
+// Credential Issuer metadata contains an authorization_servers parameter, the
+// authorization detail's locations common data field MUST be set to the
+// Credential Issuer Identifier value."
+func openIDCredentialAuthorizationDetails(configurationID string, issuerMetadata *resolvedExternalIssuerMetadata) []map[string]interface{} {
+	detail := map[string]interface{}{
+		"type":                        "openid_credential",
+		"credential_configuration_id": strings.TrimSpace(configurationID),
+	}
+	if issuerMetadata != nil && len(issuerMetadata.AuthorizationServers) > 0 {
+		detail["locations"] = []string{issuerMetadata.CredentialIssuer}
+	}
+	return []map[string]interface{}{detail}
+}
+
 type pushAuthorizationRequestInput struct {
 	PAREndpoint           string
 	AuthorizationEndpoint string
@@ -632,6 +671,9 @@ type pushAuthorizationRequestInput struct {
 	Scope                 string
 	IssuerState           string
 	ConfigurationID       string
+	// IssuerMetadata is the Credential Issuer metadata the configuration
+	// came from; it decides the authorization detail's locations.
+	IssuerMetadata        *resolvedExternalIssuerMetadata
 	LookingGlassSessionID string
 	Session               *haipIssuanceSession
 	PopAudience           string
@@ -684,12 +726,7 @@ func (s *walletHarnessServer) pushAuthorizationRequest(
 		form.Set("issuer_state", issuerState)
 	}
 	if configurationID := strings.TrimSpace(input.ConfigurationID); configurationID != "" {
-		authorizationDetails := []map[string]interface{}{
-			{
-				"type":                        "openid_credential",
-				"credential_configuration_id": configurationID,
-			},
-		}
+		authorizationDetails := openIDCredentialAuthorizationDetails(configurationID, input.IssuerMetadata)
 		if rawAuthorizationDetails, marshalErr := json.Marshal(authorizationDetails); marshalErr == nil {
 			form.Set("authorization_details", string(rawAuthorizationDetails))
 		}
@@ -1045,6 +1082,7 @@ func (s *walletHarnessServer) requestCredentialWithLifecycle(
 		if encErr != nil {
 			return nil, encErr
 		}
+		ctx = withRequestPlaintext(ctx, rawBody)
 		rawBody = []byte(compact)
 		contentType = "application/jwt"
 	} else if built.EncryptionRequested {
@@ -1078,7 +1116,7 @@ func (s *walletHarnessServer) requestCredentialWithLifecycle(
 		if built.ResponsePrivateKey == nil {
 			return nil, fmt.Errorf("received encrypted credential response without a response decryption key")
 		}
-		return decryptCredentialResponseJWT(encrypted, built.ResponsePrivateKey)
+		return decryptRecordedCredentialResponse(ctx, encrypted, built.ResponsePrivateKey)
 	}
 	return payload, nil
 }
@@ -1120,6 +1158,7 @@ func (s *walletHarnessServer) pollDeferredCredentialAt(
 		}
 		rawBody, _ := json.Marshal(requestBody)
 		contentType := "application/json"
+		requestCtx := ctx
 		if shouldEncryptCredentialRequest(requestEncryption, responseKey != nil) {
 			if requestEncryption == nil || !requestEncryption.advertised() {
 				return nil, fmt.Errorf("deferred credential response encryption requires credential request encryption (OID4VCI §8.2 / §9), but issuer metadata has no credential_request_encryption jwks")
@@ -1128,6 +1167,7 @@ func (s *walletHarnessServer) pollDeferredCredentialAt(
 			if encErr != nil {
 				return nil, encErr
 			}
+			requestCtx = withRequestPlaintext(ctx, rawBody)
 			rawBody = []byte(compact)
 			contentType = "application/jwt"
 		} else if responseKey != nil {
@@ -1139,7 +1179,7 @@ func (s *walletHarnessServer) pollDeferredCredentialAt(
 		}
 		// Use the same DPoP nonce-retry path as the credential endpoint:
 		// deferred_credential may independently return HTTP 401 use_dpop_nonce.
-		payload, reqErr := s.doDPoPJSONRequest(ctx, dpopAuthenticatedRequestInput{
+		payload, reqErr := s.doDPoPJSONRequest(requestCtx, dpopAuthenticatedRequestInput{
 			Method:                http.MethodPost,
 			URL:                   deferredURL,
 			BodyBytes:             rawBody,
@@ -1159,7 +1199,7 @@ func (s *walletHarnessServer) pollDeferredCredentialAt(
 			if responseKey == nil {
 				return nil, fmt.Errorf("received encrypted deferred response without a response decryption key")
 			}
-			return decryptCredentialResponseJWT(encrypted, responseKey)
+			return decryptRecordedCredentialResponse(ctx, encrypted, responseKey)
 		}
 		if _, credErr := credentialResponseValues(payload); credErr == nil {
 			return payload, nil
