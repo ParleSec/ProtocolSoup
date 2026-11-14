@@ -353,9 +353,14 @@ func TestPreAuthorizedGrantExchangeIsAtomic(t *testing.T) {
 	offer := decodeJSONMap(t, offerResp)
 	code := asString(t, offer["pre_authorized_code"])
 
-	statuses := make(chan int, 2)
-	for range 2 {
+	// Enough contenders, released together, that several are inside the
+	// token handler at once. Two rarely overlap.
+	const contenders = 8
+	start := make(chan struct{})
+	statuses := make(chan int, contenders)
+	for range contenders {
 		go func() {
+			<-start
 			resp, err := http.PostForm(server.URL+"/oid4vci/token", url.Values{
 				"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
 				"pre-authorized_code": {code},
@@ -368,10 +373,13 @@ func TestPreAuthorizedGrantExchangeIsAtomic(t *testing.T) {
 			statuses <- resp.StatusCode
 		}()
 	}
-	counts := map[int]int{<-statuses: 1}
-	counts[<-statuses]++
-	if counts[http.StatusOK] != 1 || counts[http.StatusBadRequest] != 1 {
-		t.Fatalf("concurrent exchange statuses = %#v, want one 200 and one 400", counts)
+	close(start)
+	counts := map[int]int{}
+	for range contenders {
+		counts[<-statuses]++
+	}
+	if counts[http.StatusOK] != 1 || counts[http.StatusBadRequest] != contenders-1 {
+		t.Fatalf("concurrent exchange statuses = %#v, want one 200 and %d 400", counts, contenders-1)
 	}
 }
 

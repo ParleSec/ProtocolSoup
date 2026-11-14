@@ -927,12 +927,16 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 	p.mu.RLock()
 	offerID, ok := p.offersByPreAuthCode[preAuthorizedCode]
 	record := p.offers[offerID]
+	// Exchanged is the one field written after an offer is stored, so it is
+	// read under the lock that guards that write. This is an early answer
+	// only: the exchange itself is decided under the write lock below.
+	exchanged := record != nil && record.Exchanged
 	p.mu.RUnlock()
 	if !ok || record == nil {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "unknown pre-authorized code")
 		return
 	}
-	if record.Exchanged {
+	if exchanged {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "pre-authorized code has already been exchanged")
 		return
 	}
