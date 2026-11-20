@@ -624,9 +624,12 @@ func TestImportDirectCredentialValidatesIssuerJWKS(t *testing.T) {
 	}
 }
 
-func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
-	t.Parallel()
-
+// startAuthorizationCodeImport runs an authorization_code import against a
+// test issuer up to the wallet's authorization redirect and returns the
+// wallet, with its pending state, ready for the callback. The issuer accepts
+// the code "auth-code".
+func startAuthorizationCodeImport(t *testing.T) (*walletHarnessServer, *walletMaterial, string) {
+	t.Helper()
 	const credentialConfigurationID = "UniversityDegreeCredential"
 	const walletBaseURL = "https://wallet.example"
 
@@ -637,7 +640,7 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 
 	mux := http.NewServeMux()
 	testServer := httptest.NewServer(mux)
-	defer testServer.Close()
+	t.Cleanup(testServer.Close)
 
 	credentialIssuer := testServer.URL + "/issuer"
 	mux.HandleFunc("/.well-known/openid-credential-issuer/issuer", func(w http.ResponseWriter, r *http.Request) {
@@ -786,8 +789,14 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 		state = pendingState
 	}
 	server.mu.Unlock()
+	return server, wallet, state
+}
 
-	callbackRequest := httptest.NewRequest(http.MethodGet, walletBaseURL+"/api/oid4vci/callback?code=auth-code&state="+url.QueryEscape(state), nil)
+func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
+	t.Parallel()
+	server, wallet, state := startAuthorizationCodeImport(t)
+
+	callbackRequest := httptest.NewRequest(http.MethodGet, "https://wallet.example/api/oid4vci/callback?code=auth-code&state="+url.QueryEscape(state), nil)
 	callbackRequest.Host = "wallet.example"
 	callbackRecorder := httptest.NewRecorder()
 
@@ -811,6 +820,57 @@ func TestAuthorizationCodeImportRedirectAndCallback(t *testing.T) {
 	}
 	if strings.TrimSpace(wallet.CredentialJWT) == "" {
 		t.Fatalf("expected wallet credential after callback")
+	}
+}
+
+// TestOID4VCICallbackAnswersJSONWithItsHops proves a user agent that asks for
+// JSON gets the imported Credential and every hop the callback made, in
+// order, instead of the browser redirect; and that a refusal is a 400 with
+// the wallet's reason.
+func TestOID4VCICallbackAnswersJSONWithItsHops(t *testing.T) {
+	t.Parallel()
+	server, wallet, state := startAuthorizationCodeImport(t)
+
+	callbackRequest := httptest.NewRequest(http.MethodGet, "https://wallet.example/api/oid4vci/callback?code=auth-code&state="+url.QueryEscape(state), nil)
+	callbackRequest.Host = "wallet.example"
+	callbackRequest.Header.Set("Accept", "application/json")
+	callbackRecorder := httptest.NewRecorder()
+	server.handleAPIOID4VCICallback(callbackRecorder, callbackRequest)
+
+	if callbackRecorder.Code != http.StatusOK {
+		t.Fatalf("callback status %d: %s", callbackRecorder.Code, callbackRecorder.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(callbackRecorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("callback body is not JSON: %v: %s", err, callbackRecorder.Body.String())
+	}
+	if body["status"] != "success" || body["credential_jwt"] != wallet.CredentialJWT || body["credential_id"] != wallet.CredentialID {
+		t.Fatalf("callback body does not carry the imported credential: %v", body)
+	}
+	hops, _ := body["_protocol_exchanges"].([]interface{})
+	var steps []string
+	for _, raw := range hops {
+		hop, _ := raw.(map[string]interface{})
+		steps = append(steps, asString(hop["step"]))
+	}
+	want := []string{"Token Request", "Nonce Request", "Credential Request"}
+	if len(steps) < len(want) || strings.Join(steps[:len(want)], ",") != strings.Join(want, ",") {
+		t.Fatalf("callback hops = %v, want them to start with %v", steps, want)
+	}
+	tokenHop, _ := hops[0].(map[string]interface{})
+	if !strings.Contains(asString(tokenHop["request_body"]), "code=auth-code") {
+		t.Fatalf("the Token Request hop does not carry the redeemed code: %v", tokenHop["request_body"])
+	}
+
+	// The state was consumed, so the same Authorization Response is refused.
+	again := httptest.NewRecorder()
+	server.handleAPIOID4VCICallback(again, callbackRequest)
+	if again.Code != http.StatusBadRequest {
+		t.Fatalf("replayed callback status %d, want 400: %s", again.Code, again.Body.String())
+	}
+	var refusal map[string]interface{}
+	if err := json.Unmarshal(again.Body.Bytes(), &refusal); err != nil || refusal["error"] != "wallet_import_failed" || asString(refusal["error_description"]) == "" {
+		t.Fatalf("replayed callback body = %s", again.Body.String())
 	}
 }
 

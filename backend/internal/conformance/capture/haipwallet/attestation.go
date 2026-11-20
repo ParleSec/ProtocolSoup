@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"fmt"
-	"net/http"
 	"net/url"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance"
@@ -26,35 +25,16 @@ const (
 	typDPoP                 = "dpop+jwt"
 )
 
-// pushedAuthorization imports an authorization_code offer for the HAIP
-// configuration and returns the PAR hop the authorization server accepted,
-// together with the wallet's answer.
-func pushedAuthorization(ctx context.Context, env *capture.Env) (*capture.WalletResult, *capture.WalletHop, error) {
-	link, err := authorizationCodeOfferLink(ctx, env, haipConfigurationID)
-	if err != nil {
-		return nil, nil, err
-	}
-	result, err := importCredential(ctx, env, map[string]any{"offer": link})
-	if err != nil {
-		return nil, nil, err
-	}
-	if result.Status != http.StatusOK || result.Body["authorization_required"] != true {
-		return nil, nil, fmt.Errorf("wallet /api/import answered %s: %s", capture.WalletStatusText(result.Status), walletError(result))
-	}
-	par, err := completedHop(result, stepPAR)
-	if err != nil {
-		return nil, nil, err
-	}
-	return result, par, nil
-}
-
-// parWithPKCES256 checks the HAIP 1.0 Section 4 PKCE and PAR provisions on
-// the recorded PAR request and the authorization URL built from it.
+// parWithPKCES256 checks the HAIP 1.0 Section 4 FAPI 2.0 provisions: PKCE
+// S256 and PAR on the recorded PAR request and the authorization URL built
+// from it, then the iss value on the Authorization Response the End-User
+// brings back.
 func parWithPKCES256(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	result, par, err := pushedAuthorization(ctx, env)
+	authorization, err := PushedAuthorization(ctx, env)
 	if err != nil {
 		return "", err
 	}
+	result, par := authorization.Import, authorization.PAR
 	form, err := hopForm(par)
 	if err != nil {
 		return "", err
@@ -78,6 +58,22 @@ func parWithPKCES256(ctx context.Context, env *capture.Env) (conformance.Artefac
 	query := authorizationURL.Query()
 	if len(query) != 2 || query.Get("request_uri") != requestURI || query.Get("client_id") != form.Get("client_id") {
 		return "", fmt.Errorf("authorization_url query is %q; RFC 9126 Section 4 allows only client_id and request_uri", authorizationURL.RawQuery)
+	}
+	// RFC 9207 Section 2: the Authorization Response carries iss, "the issuer
+	// identifier of the authorization server that created the authorization
+	// response". The wallet requires it on its HAIP path, so a completed
+	// import shows it validated the value the capture sees here.
+	asMetadata, _ := result.Body["authorization_server_metadata"].(map[string]any)
+	issuer, _ := asMetadata["issuer"].(string)
+	if issuer == "" {
+		return "", fmt.Errorf("the wallet's import answer names no authorization server issuer")
+	}
+	_, response, err := authorization.Complete(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	if got := response.Get("iss"); got != issuer {
+		return "", fmt.Errorf("the Authorization Response carries iss %q, not the authorization server's issuer %q", got, issuer)
 	}
 	return conformance.OutcomeAccepted, nil
 }
@@ -173,21 +169,22 @@ func readClientAuthentication(hop *capture.WalletHop) (*clientAuthentication, er
 }
 
 // sameClientAuthentication compares the client authentication of the PAR
-// request and of a Token Request (HAIP 1.0 Section 4.3).
+// request and of the Token Request that redeems its code (HAIP 1.0 Section
+// 4.3).
 func sameClientAuthentication(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	_, par, err := pushedAuthorization(ctx, env)
+	authorization, err := PushedAuthorization(ctx, env)
 	if err != nil {
 		return "", err
 	}
-	parAuth, err := readClientAuthentication(par)
+	parAuth, err := readClientAuthentication(authorization.PAR)
 	if err != nil {
 		return "", err
 	}
-	tokenResult, err := preAuthorizedHAIPImport(ctx, env)
+	callback, _, err := authorization.Complete(ctx, env)
 	if err != nil {
 		return "", err
 	}
-	token, err := completedHop(tokenResult, stepToken)
+	token, err := completedHop(callback, stepToken)
 	if err != nil {
 		return "", err
 	}
@@ -214,11 +211,11 @@ func sameClientAuthentication(ctx context.Context, env *capture.Env) (conformanc
 func walletAttestation(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 	var attestations []*clientAuthentication
 	for range 2 {
-		_, par, err := pushedAuthorization(ctx, env)
+		authorization, err := PushedAuthorization(ctx, env)
 		if err != nil {
 			return "", err
 		}
-		auth, err := readClientAuthentication(par)
+		auth, err := readClientAuthentication(authorization.PAR)
 		if err != nil {
 			return "", err
 		}

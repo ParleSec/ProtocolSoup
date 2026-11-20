@@ -3,9 +3,13 @@
 // PKCE S256 with PAR, DPoP with DPoP-Nonce handling, client attestation at
 // the PAR and Token Endpoints, the Wallet Attestation itself, key
 // attestations without unproven assurance levels, and encrypted Credential
-// Responses. Passing cases run the wallet's HAIP path against the issuer;
-// failing cases point it at the conformance counterparty, which it refuses
-// before any attested request.
+// Responses. It also captures the two OpenID4VCI rows only the
+// authorization_code issuance can show, credential_identifiers (Section 6.2)
+// and the Refresh Token (Section 14.5), because the issuer runs that grant
+// on its HAIP path. Passing cases run the wallet's HAIP path against the
+// issuer, with the conformance client playing the End-User at the Mock IdP;
+// failing cases point the wallet at the conformance counterparty, whose
+// invalid metadata or answer it refuses.
 package haipwallet
 
 import (
@@ -54,12 +58,43 @@ func init() {
 			Run:      counterpartyUnnegotiatedAlgorithm,
 		},
 	})
+	capture.Register("CW-044", capture.Entry{
+		Passing: &capture.Scenario{
+			Name: "authorization-code-credential-identifier",
+			Description: "The conformance client has the issuer create an authorization_code offer for the " + haipConfigurationID + " configuration, asks the hosted wallet to import it, " +
+				"signs in at the Mock IdP as the End-User and delivers the Authorization Response to the wallet's callback. The wallet's Token Request carries the authorization_details it pushed, " +
+				"so the Token Response returns authorization_details with credential_identifiers; the wallet's Credential Request names one of those identifiers, with no credential_configuration_id, " +
+				"under the Access Token of that response. The End-User's login is not recorded; the callback request and every hop the wallet made to redeem the code are.",
+			Actor:    conformance.ActorHostedWallet,
+			Expected: conformance.OutcomeAccepted,
+			Run:      credentialIdentifiersUsed,
+		},
+		Unavailable: map[conformance.ArtefactKind]string{
+			conformance.KindFailing: "When a Token Response returns credential_identifiers the hosted wallet requests by credential_identifier, so it never sends a Credential Request that ignores them.",
+		},
+	})
+	capture.Register("CW-089", capture.Entry{
+		Passing: &capture.Scenario{
+			Name: "refresh-token-renews-access-token",
+			Description: "The conformance client has the issuer create an authorization_code offer for the " + haipConfigurationID + " configuration, asks the hosted wallet to import it, signs in at the Mock IdP as the End-User " +
+				"and delivers the Authorization Response to the wallet's callback, whose Token Response carries a refresh_token. It then asks the wallet to refresh the Credential: the wallet presents that refresh_token " +
+				"at the Token Endpoint with grant_type refresh_token, under the same client attestation and DPoP key, obtains a fresh Access Token and requests the Credential again with it. " +
+				"The refresh_token appears in full: the issuer redeems it only with client attestation under the same Client Instance Key and a DPoP proof from the same key, so nobody but this wallet instance can use it.",
+			Actor:    conformance.ActorHostedWallet,
+			Expected: conformance.OutcomeAccepted,
+			Run:      refreshedWithRefreshToken,
+		},
+		Unavailable: map[conformance.ArtefactKind]string{
+			conformance.KindFailing: "The hosted wallet keeps every refresh_token a Token Response carries and redeems it at the Token Endpoint on /api/refresh, so it never discards a Refresh Token or refreshes without one.",
+		},
+	})
 	capture.Register("CW-H003", capture.Entry{
 		Passing: &capture.Scenario{
 			Name: "haip-par-with-pkce-s256",
 			Description: "The conformance client has the issuer create an authorization_code offer for the " + haipConfigurationID + " configuration and asks the hosted wallet to import it. " +
 				"The wallet pushes its Authorization Request to the issuer's PAR endpoint with code_challenge_method=S256 and returns an authorization URL carrying only client_id and request_uri. " +
-				"The iss check on the Authorization Response happens on the wallet's browser callback, which this capture does not drive.",
+				"The conformance client then signs in at the Mock IdP as the End-User and delivers the Authorization Response to the wallet's callback: it carries iss equal to the authorization server's issuer, " +
+				"and the wallet, which requires that value on its HAIP path, redeems the code and stores the Credential.",
 			Actor:    conformance.ActorHostedWallet,
 			Expected: conformance.OutcomeAccepted,
 			Run:      parWithPKCES256,
@@ -83,17 +118,23 @@ func init() {
 			Expected: conformance.OutcomeAccepted,
 			Run:      dpopNonceHandled,
 		},
-		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindFailing: "The conformance counterparty serves no use_dpop_nonce challenge, so no exchange can show the hosted wallet refusing a challenge that lacks the DPoP-Nonce header.",
+		Failing: &capture.Scenario{
+			Name: "counterparty-use-dpop-nonce-without-dpop-nonce-header",
+			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-h004 offer. Its authorization server metadata advertises DPoP and attest_jwt_client_auth, so the wallet sends an attested, DPoP-bound Token Request. " +
+				"The counterparty answers 400 use_dpop_nonce without the DPoP-Nonce header that RFC 9449 Section 8 has the authorization server include to supply the nonce. " +
+				"With no nonce to put in a proof, the wallet refuses, naming the missing header, and sends no second Token Request.",
+			Actor:    conformance.ActorCounterparty,
+			Expected: conformance.OutcomeRejected,
+			Run:      counterpartyChallengeWithoutNonce,
 		},
 	})
 	capture.Register("CW-H010", capture.Entry{
 		Passing: &capture.Scenario{
 			Name: "haip-same-client-authentication-at-par-and-token",
 			Description: "The conformance client asks the hosted wallet to import an authorization_code offer for the " + haipConfigurationID + " configuration, which records the wallet's PAR request, " +
-				"then to import a pre-authorized offer for the same configuration, which records its Token Request. The capture checks that both carry OAuth-Client-Attestation, OAuth-Client-Attestation-PoP and DPoP headers, " +
-				"that the attestations share one sub, that client_id equals that sub in both, and that neither adds a second authentication method. " +
-				"The Token Request of the authorization_code flow itself runs on the wallet's browser callback, which records no hops, so the pre-authorized Token Request stands in for it.",
+				"then signs in at the Mock IdP as the End-User and delivers the Authorization Response to the wallet's callback, which records the Token Request that redeems the code. " +
+				"The capture checks that both requests carry OAuth-Client-Attestation, OAuth-Client-Attestation-PoP and DPoP headers, that the attestations share one sub, " +
+				"that client_id equals that sub in both, and that neither adds a second authentication method.",
 			Actor:    conformance.ActorHostedWallet,
 			Expected: conformance.OutcomeAccepted,
 			Run:      sameClientAuthentication,
@@ -138,13 +179,19 @@ func init() {
 }
 
 // importCredential makes one /api/import call to the hosted wallet in a
-// fresh session. A wallet without HAIP attestation material cannot run the
-// HAIP path, which is an error for this package's scenarios, not an outcome.
+// fresh session.
 func importCredential(ctx context.Context, env *capture.Env, body map[string]any) (*capture.WalletResult, error) {
+	return importCredentialIn(ctx, env, capture.NewWalletSession(), body)
+}
+
+// importCredentialIn makes one /api/import call to the hosted wallet in
+// session. A wallet without HAIP attestation material cannot run the HAIP
+// path, which is an error for this package's scenarios, not an outcome.
+func importCredentialIn(ctx context.Context, env *capture.Env, session string, body map[string]any) (*capture.WalletResult, error) {
 	result, err := capture.CallWallet(ctx, env, capture.WalletCall{
 		Path:    "/api/import",
 		Body:    body,
-		Session: capture.NewWalletSession(),
+		Session: session,
 	})
 	if err != nil {
 		return nil, err

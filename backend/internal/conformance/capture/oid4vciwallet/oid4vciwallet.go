@@ -144,12 +144,6 @@ func init() {
 			Run:         credentialIssuerTrailingSlash,
 		},
 	})
-	capture.Register("CW-044", capture.Entry{
-		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindPassing: "The production issuer returns credential_identifiers only for an authorization_details request, which the hosted wallet sends only in the authorization_code flow; that flow needs an End-User login at the Mock IdP, and the wallet's authorization callback records none of its Token or Credential Requests.",
-			conformance.KindFailing: "When a Token Response returns credential_identifiers the hosted wallet requests by credential_identifier, so it never sends a Credential Request that ignores them.",
-		},
-	})
 	capture.Register("CW-065", capture.Entry{
 		Passing: &capture.Scenario{
 			Name:        "proof-typ-alg-aud-iat-nonce",
@@ -184,12 +178,6 @@ func init() {
 		},
 		Unavailable: map[conformance.ArtefactKind]string{
 			conformance.KindFailing: "The hosted wallet waits interval seconds and presents the Access Token it used at the Credential Endpoint, so it sends no Deferred Credential Request that could show otherwise.",
-		},
-	})
-	capture.Register("CW-089", capture.Entry{
-		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindPassing: "The production issuer returns a refresh_token on the authorization_code grant only, which needs an End-User login at the Mock IdP that the capture cannot perform, and the hosted wallet's authorization callback records none of its hops, so no recorded exchange shows a Credential refreshed with a Refresh Token.",
-			conformance.KindFailing: "The hosted wallet keeps every refresh_token a Token Response carries and redeems it at the Token Endpoint on /api/refresh, so it never discards a Refresh Token or refreshes without one.",
 		},
 	})
 	capture.Register("CW-100", capture.Entry{

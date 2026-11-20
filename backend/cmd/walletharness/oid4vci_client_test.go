@@ -630,6 +630,50 @@ func TestDoDPoPJSONRequestRefreshesClientAttestationPoPOnNonceRetry(t *testing.T
 	}
 }
 
+// TestDoDPoPJSONRequestRefusesUseDPoPNonceWithoutNonceHeader answers the
+// first DPoP-bound request with RFC 9449 Section 8's use_dpop_nonce error but
+// no DPoP-Nonce header, and checks the wallet makes no second attempt and
+// names the missing header.
+func TestDoDPoPJSONRequestRefusesUseDPoPNonceWithoutNonceHeader(t *testing.T) {
+	t.Parallel()
+	session, err := (&walletHarnessServer{}).newHAIPIssuanceSession()
+	if err != nil {
+		t.Fatalf("newHAIPIssuanceSession: %v", err)
+	}
+	var attempt int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt++
+		if strings.TrimSpace(r.Header.Get("DPoP")) == "" {
+			http.Error(w, "missing dpop", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"use_dpop_nonce","error_description":"Authorization server requires nonce in DPoP proof"}`))
+	}))
+	defer upstream.Close()
+
+	server := &walletHarnessServer{httpClient: upstream.Client()}
+	_, err = server.doDPoPJSONRequest(context.Background(), dpopAuthenticatedRequestInput{
+		Method:      http.MethodPost,
+		URL:         upstream.URL,
+		BodyBytes:   []byte("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Apre-authorized_code"),
+		ContentType: "application/x-www-form-urlencoded",
+		Accept:      "application/json",
+		Session:     session,
+		IncludeDPoP: true,
+	})
+	if err == nil {
+		t.Fatal("a use_dpop_nonce challenge without DPoP-Nonce must fail the request")
+	}
+	if !strings.Contains(err.Error(), "use_dpop_nonce without DPoP-Nonce header") {
+		t.Fatalf("error must name the missing header: %v", err)
+	}
+	if attempt != 1 {
+		t.Fatalf("attempt = %d, want 1: nothing supplied a nonce to retry with", attempt)
+	}
+}
+
 func TestDoDPoPJSONRequestAcceptsDeferred202AfterNonceRetry(t *testing.T) {
 	t.Parallel()
 	session, err := (&walletHarnessServer{}).newHAIPIssuanceSession()

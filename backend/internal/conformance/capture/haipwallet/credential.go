@@ -202,6 +202,37 @@ func isNonceChallenge(hop *capture.WalletHop) bool {
 	return false
 }
 
+// counterpartyChallengeWithoutNonce imports the counterparty's cw-h004 offer,
+// whose Token Endpoint answers the wallet's DPoP-bound Token Request with
+// use_dpop_nonce and no DPoP-Nonce header. The wallet must send exactly one
+// Token Request, carrying a DPoP proof, and stop: a repeat could carry no
+// nonce the server supplied (RFC 9449 Section 8).
+func counterpartyChallengeWithoutNonce(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+	link, err := counterpartyOfferLink(env, "cw-h004")
+	if err != nil {
+		return "", err
+	}
+	result, err := importCredential(ctx, env, map[string]any{"offer": link})
+	if err != nil {
+		return "", err
+	}
+	tokens := hopsOf(result, stepToken)
+	if len(tokens) == 0 {
+		return "", fmt.Errorf("the wallet sent no Token Request: %s", walletError(result))
+	}
+	if len(tokens) > 1 {
+		return "", fmt.Errorf("the wallet sent %d Token Requests after a use_dpop_nonce challenge that supplied no DPoP-Nonce to retry with", len(tokens))
+	}
+	token := &tokens[0]
+	if hopHeader(token.RequestHeaders, "DPoP") == "" {
+		return "", fmt.Errorf("the Token Request carries no DPoP proof, so the counterparty issued no nonce challenge: %s", walletError(result))
+	}
+	if !isNonceChallenge(token) || hopHeader(token.ResponseHeaders, "DPoP-Nonce") != "" {
+		return "", fmt.Errorf("the counterparty answered the Token Request with %d rather than use_dpop_nonce without a DPoP-Nonce header", token.ResponseStatus)
+	}
+	return refused(result, "use_dpop_nonce without DPoP-Nonce header")
+}
+
 // keyAttestationWithoutLevels reads the proof the wallet built for its
 // encrypted Credential Request and checks HAIP 1.0 Section 4.5.1: a key
 // attestation covering the proof key, asserting no key_storage or

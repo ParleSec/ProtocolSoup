@@ -35,9 +35,11 @@ const walletFanOut = 10
 
 // WalletCall is one call to the hosted wallet's API.
 type WalletCall struct {
-	// Path is the wallet route, such as /api/present.
+	// Path is the wallet route, such as /api/present, with any query.
 	Path string
-	// Body is the JSON request body.
+	// Method is the HTTP method; empty means POST.
+	Method string
+	// Body is the JSON request body of a POST.
 	Body map[string]any
 	// Session isolates the wallet's credential store for this scenario. A
 	// fresh value per scenario keeps one scenario's Credentials from changing
@@ -103,6 +105,17 @@ func (r *WalletResult) Hop(step string) *WalletHop {
 	return nil
 }
 
+// RequestHeader reads a recorded request header by name, whatever case the
+// wallet recorded it in.
+func (h *WalletHop) RequestHeader(name string) string {
+	for key, value := range h.RequestHeaders {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
+}
+
 // DPoPNonceChallenge reports whether the hop was answered with an RFC 9449
 // nonce challenge rather than the endpoint's own answer: the use_dpop_nonce
 // error from an authorization server (Section 8) or in a resource server's
@@ -148,7 +161,13 @@ func CallWallet(ctx context.Context, env *Env, call WalletCall) (*WalletResult, 
 	if env.WalletURL == "" {
 		return nil, fmt.Errorf("this run has no hosted wallet")
 	}
-	req, err := NewJSON(env.WalletURL+call.Path, call.Body)
+	var req *http.Request
+	var err error
+	if call.Method == "" || call.Method == http.MethodPost {
+		req, err = NewJSON(env.WalletURL+call.Path, call.Body)
+	} else {
+		req, err = http.NewRequest(call.Method, env.WalletURL+call.Path, nil)
+	}
 	if err != nil {
 		return nil, err
 	}

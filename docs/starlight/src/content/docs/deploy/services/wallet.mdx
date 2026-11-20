@@ -20,7 +20,7 @@ Use the wallet service to run wallet-side OID4VCI issuance (bootstrap or externa
 | Authorize | `GET /authorize` (OID4VP wallet authorization endpoint → SPA consent; auto-issues the request-inferred credential when the store has no DCQL match) |
 | Submit | `POST /submit` |
 | Issue / import | `POST /api/issue`, `POST /api/import` |
-| OID4VCI callback | `GET /api/oid4vci/callback` |
+| OID4VCI callback | `GET /api/oid4vci/callback` (answers JSON, with `_protocol_exchanges`, when `Accept` asks for `application/json` and not `text/html`) |
 
 ## Configuration
 

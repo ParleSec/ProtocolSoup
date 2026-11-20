@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture"
+	"github.com/ParleSec/ProtocolSoup/internal/conformance/capture/haipwallet"
 )
 
 // parClientID and parRedirectURI name the conformance client in its pushed
@@ -25,6 +28,16 @@ const (
 
 func init() {
 	capture.Register("CI-019", capture.Entry{
+		Passing: &capture.Scenario{
+			Name: "attested-par-redeemed",
+			Description: "The conformance client has the issuer create an authorization_code offer for the " + haipSDJWTConfigurationID + " configuration and asks the hosted wallet to import it. " +
+				"The wallet's pushed authorization request carries OAuth-Client-Attestation and OAuth-Client-Attestation-PoP headers, an S256 code_challenge and the exact redirect_uri, and the issuer answers 201 with a request_uri and its expires_in. " +
+				"The conformance client then signs in at the Mock IdP as the End-User: the authorization server honours the request_uri for that client_id, delivers the Authorization Response to that redirect_uri, " +
+				"and the wallet redeems the code. The Authorization Server Metadata the wallet fetched advertises attest_jwt_client_auth and the attestation signing algorithm.",
+			Actor:    conformance.ActorHostedWallet,
+			Expected: conformance.OutcomeAccepted,
+			Run:      attestedPARRedeemed,
+		},
 		Failing: &capture.Scenario{
 			Name: "par-without-client-attestation",
 			Description: "The conformance client pushes an authorization request to the pushed_authorization_request_endpoint the issuer's Authorization Server Metadata names, with response_type code, an HTTPS redirect_uri, " +
@@ -33,10 +46,62 @@ func init() {
 			Expected: conformance.OutcomeRejected,
 			Run:      parWithoutAttestation,
 		},
-		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindPassing: "The conformance client holds no client attestation signed by an attester the issuer trusts, so it cannot send an authenticated pushed authorization request.",
-		},
 	})
+}
+
+// attestedPARRedeemed runs the hosted wallet's attested pushed authorization
+// request and checks what the requirement names on it: client attestation,
+// PKCE S256, the redirect_uri, the short-lived request_uri, the metadata
+// that advertises the authentication, and that the authorization server
+// then redeems the request_uri for exactly that client and redirect URI.
+func attestedPARRedeemed(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+	authorization, err := haipwallet.PushedAuthorization(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	par := authorization.PAR
+	for _, header := range []string{"OAuth-Client-Attestation", "OAuth-Client-Attestation-PoP"} {
+		if par.RequestHeader(header) == "" {
+			return "", fmt.Errorf("the PAR request carries no %s header", header)
+		}
+	}
+	form, err := url.ParseQuery(par.RequestBody)
+	if err != nil {
+		return "", fmt.Errorf("parse the PAR form: %w", err)
+	}
+	if form.Get("code_challenge_method") != "S256" || len(form.Get("code_challenge")) != 43 {
+		return "", fmt.Errorf("the PAR request is not S256 PKCE-bound: code_challenge_method %q, code_challenge %q", form.Get("code_challenge_method"), form.Get("code_challenge"))
+	}
+	redirectURI := form.Get("redirect_uri")
+	if !strings.HasPrefix(redirectURI, env.WalletURL+"/") {
+		return "", fmt.Errorf("the PAR request's redirect_uri %q is not at the wallet", redirectURI)
+	}
+	if par.ResponseStatus != http.StatusCreated {
+		return "", fmt.Errorf("the PAR endpoint answered %d, not 201", par.ResponseStatus)
+	}
+	var parResponse struct {
+		RequestURI string  `json:"request_uri"`
+		ExpiresIn  float64 `json:"expires_in"`
+	}
+	if err := json.Unmarshal([]byte(par.ResponseBody), &parResponse); err != nil || parResponse.RequestURI == "" || parResponse.ExpiresIn <= 0 {
+		return "", fmt.Errorf("the PAR response carries no request_uri with a positive expires_in: %s", capture.Truncate([]byte(par.ResponseBody)))
+	}
+	asMetadata, _ := authorization.Import.Body["authorization_server_metadata"].(map[string]any)
+	methods, _ := asMetadata["token_endpoint_auth_methods_supported"].([]any)
+	algorithms, _ := asMetadata["client_attestation_signing_alg_values_supported"].([]any)
+	if !slices.Contains(methods, any("attest_jwt_client_auth")) || len(algorithms) == 0 {
+		return "", fmt.Errorf("the Authorization Server Metadata does not advertise attest_jwt_client_auth with its signing algorithms: %v", asMetadata)
+	}
+	// Completing the authorization proves the request_uri was redeemed for
+	// the pushed client_id and delivered to the pushed redirect_uri.
+	_, response, err := authorization.Complete(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	if response.Get("code") == "" {
+		return "", fmt.Errorf("the Authorization Response delivered to %s carries no code", redirectURI)
+	}
+	return conformance.OutcomeAccepted, nil
 }
 
 // parWithoutAttestation sends a PAR request that is complete apart from

@@ -59,9 +59,10 @@ Every scenario named `<id>` is identified by `https://<host>/scenarios/<id>`. Re
 | CW-024 | issuer metadata | `credential_issuer` has a trailing slash the identifier lacks |
 | CW-072 | offer, issuer and AS metadata, token, `POST /scenarios/cw-072/credential` | The Credential Response is encrypted with `ECDH-ES+A256KW`, not the negotiated `ECDH-ES` |
 | CW-H003 | issuer and AS metadata | The authorization server requires PAR but offers only the `plain` PKCE method |
+| CW-H004 | offer, issuer and AS metadata, `POST /scenarios/cw-h004/token` | The AS metadata advertises DPoP and `attest_jwt_client_auth`; the Token Endpoint answers a DPoP-bound Token Request with `400 use_dpop_nonce` and no `DPoP-Nonce` header |
 | CW-H014 | offer, issuer and AS metadata | `key_attestations_required` demands `iso_18045_high` levels a software wallet cannot back |
 
-Pre-authorized codes are single use and last 15 minutes; access tokens last 5 minutes. No scenario issues a Credential, so the counterparty holds no credential-signing key.
+Pre-authorized codes are single use and last 15 minutes; access tokens last 5 minutes. `cw-h004` never redeems its code, since its Token Endpoint only challenges. No scenario issues a Credential, so the counterparty holds no credential-signing key.
 
 ## Local Use
 
