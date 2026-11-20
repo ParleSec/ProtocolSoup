@@ -59,7 +59,7 @@ Redeem an offer (Looking Glass pre-authorized path):
 
 Exactly one of `offer`, `credential`, `credential_issuer`, or `discovery_url`+`resource_endpoint`+`scope`.
 
-A successful import returns the stored credential plus `_protocol_exchanges` (wallet-to-issuer HTTP hops) and `_looking_glass_events`. An `authorization_code` grant includes `authorization_url`; the issuer then redirects to `GET {{ORIGIN}}/api/oid4vci/callback`.
+A successful import returns the stored credential plus `_protocol_exchanges` (wallet-to-issuer HTTP hops) and `_looking_glass_events`. An `authorization_code` grant includes `authorization_url`; after the End-User authorizes, the authorization server redirects to `GET {{ORIGIN}}/api/oid4vci/callback`. Deliver that redirect yourself with `Accept: application/json` to receive the stored credential and the `_protocol_exchanges` of the Token and Credential Requests instead of the browser redirect.
 
 Refresh a held Credential with the Refresh Token its issuance returned (OpenID4VCI 1.0 Section 14.5):
 

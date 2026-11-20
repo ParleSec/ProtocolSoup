@@ -457,6 +457,14 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method_not_allowed"})
 		return
 	}
+	// Every hop the callback makes is recorded, as /api/import records its
+	// own, so a user agent that asks for JSON gets the Token and Credential
+	// Requests the authorization code was redeemed with.
+	transcript := &protocolTranscript{}
+	r = r.WithContext(withProtocolTranscript(r.Context(), transcript))
+	fail := func(message string) {
+		s.finishOID4VCICallback(w, r, transcript, "error", message, nil)
+	}
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -464,33 +472,32 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 	pending, consumeErr := consumePendingOID4VCIAuthState(s.oid4vciAuthStates, state, now)
 	s.mu.Unlock()
 	if consumeErr != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", consumeErr.Error())
+		fail(consumeErr.Error())
 		return
 	}
 	if upstreamError := strings.TrimSpace(r.URL.Query().Get("error")); upstreamError != "" {
-		message := firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("error_description")), upstreamError)
-		s.redirectOID4VCICallbackResult(w, r, "error", message)
+		fail(firstNonEmpty(strings.TrimSpace(r.URL.Query().Get("error_description")), upstreamError))
 		return
 	}
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if code == "" {
-		s.redirectOID4VCICallbackResult(w, r, "error", "authorization response is missing code")
+		fail("authorization response is missing code")
 		return
 	}
 	requireIss := pending.UseHAIP ||
 		(pending.AuthorizationServerMetadata != nil && pending.AuthorizationServerMetadata.AuthorizationResponseIssSupported)
 	if err := validateAuthorizationResponseIss(pending.ExpectedIss, r.URL.Query().Get("iss"), requireIss); err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		fail(err.Error())
 		return
 	}
 	if err := validateExactRedirectURI(pending.RedirectURI, ""); err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		fail(err.Error())
 		return
 	}
 
 	wallet, err := s.getOrCreateWallet(pending.ScopeKey, pending.WalletSubject, strings.TrimSpace(pending.WalletBaseURL))
 	if err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		fail(err.Error())
 		return
 	}
 
@@ -509,7 +516,7 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		pending.UseHAIP,
 	)
 	if err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		fail(err.Error())
 		return
 	}
 
@@ -517,7 +524,7 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		accessToken := strings.TrimSpace(asString(tokenPayload["access_token"]))
 		tokenType := firstNonEmpty(strings.TrimSpace(asString(tokenPayload["token_type"])), "Bearer")
 		if accessToken == "" {
-			s.redirectOID4VCICallbackResult(w, r, "error", "token response missing access_token")
+			fail("token response missing access_token")
 			return
 		}
 		if err := s.fetchProtectedResource(
@@ -528,10 +535,10 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 			pending.HAIPSession,
 			pending.LookingGlassSessionID,
 		); err != nil {
-			s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+			fail(err.Error())
 			return
 		}
-		s.redirectOID4VCICallbackResult(w, r, "success", "protected resource request completed")
+		s.finishOID4VCICallback(w, r, transcript, "success", "protected resource request completed", nil)
 		return
 	}
 
@@ -555,11 +562,11 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		pending.HAIPSession,
 	)
 	if err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		fail(err.Error())
 		return
 	}
 	if importResult == nil || importResult.IssuedCredential == nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", "authorization flow did not return a credential")
+		fail("authorization flow did not return a credential")
 		return
 	}
 	if err := s.bindCredential(
@@ -568,7 +575,7 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 		importResult.IssuedCredential.CredentialConfigID,
 		importResult.IssuedCredential.CredentialFormat,
 	); err != nil {
-		s.redirectOID4VCICallbackResult(w, r, "error", err.Error())
+		fail(err.Error())
 		return
 	}
 	if importResult.Refresh != nil {
@@ -581,18 +588,62 @@ func (s *walletHarnessServer) handleAPIOID4VCICallback(w http.ResponseWriter, r 
 	if err := s.notifyCredentialAccepted(r.Context(), importResult.IssuedCredential, pending.LookingGlassSessionID); err != nil {
 		log.Printf("wallet harness: credential notification failed after authorization-code import: %v", err)
 	}
-	s.redirectOID4VCICallbackResult(w, r, "success", "credential imported")
+	s.finishOID4VCICallback(w, r, transcript, "success", "credential imported", map[string]interface{}{
+		"wallet_subject":              wallet.Subject,
+		"wallet_scope":                wallet.ScopeKey,
+		"wallet_did_method":           wallet.DIDMethod,
+		"credential_source":           importResult.credentialSource(),
+		"credential_id":               wallet.CredentialID,
+		"credential_format":           wallet.CredentialFormat,
+		"credential_configuration_id": wallet.CredentialConfigurationID,
+		"credential_jwt":              wallet.CredentialJWT,
+		"credential_summary":          summarizeCredential(wallet.CredentialJWT),
+		"credentials":                 walletCredentialEntries(wallet),
+	})
 }
 
-func (s *walletHarnessServer) redirectOID4VCICallbackResult(w http.ResponseWriter, r *http.Request, status string, message string) {
+// finishOID4VCICallback answers the user agent that delivered the
+// Authorization Response. A browser, which arrives from the authorization
+// server's redirect, is sent on to the wallet app with the outcome in the
+// query. A user agent that asks for application/json instead, such as an
+// agent or the conformance client driving the flow itself, is answered in
+// place: the result fields on success, error and error_description on
+// failure, and in both cases the hops the wallet made to redeem the code.
+func (s *walletHarnessServer) finishOID4VCICallback(w http.ResponseWriter, r *http.Request, transcript *protocolTranscript, status string, message string, result map[string]interface{}) {
+	status = firstNonEmpty(strings.TrimSpace(status), "error")
+	message = strings.TrimSpace(message)
+	if acceptsJSONOnly(r) {
+		payload := map[string]interface{}{"status": status, "message": message}
+		httpStatus := http.StatusOK
+		if status != "success" {
+			httpStatus = http.StatusBadRequest
+			payload = map[string]interface{}{"error": "wallet_import_failed", "error_description": message}
+		}
+		for key, value := range result {
+			payload[key] = value
+		}
+		if _, events := transcript.snapshot(); len(events) > 0 {
+			payload["_looking_glass_events"] = events
+		}
+		writeJSONWithTranscript(w, httpStatus, payload, transcript)
+		return
+	}
 	redirectURL := &url.URL{Path: oid4vciCallbackAppPath(r)}
 	query := redirectURL.Query()
-	query.Set("oid4vci_status", firstNonEmpty(strings.TrimSpace(status), "error"))
-	if strings.TrimSpace(message) != "" {
-		query.Set("oid4vci_message", strings.TrimSpace(message))
+	query.Set("oid4vci_status", status)
+	if message != "" {
+		query.Set("oid4vci_message", message)
 	}
 	redirectURL.RawQuery = query.Encode()
 	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
+}
+
+// acceptsJSONOnly reports whether the request's Accept header asks for JSON
+// and not for HTML. A browser following a redirect sends text/html among its
+// types; an API client that wants the result as data sends application/json.
+func acceptsJSONOnly(r *http.Request) bool {
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "application/json") && !strings.Contains(accept, "text/html")
 }
 
 func oid4vciCallbackAppPath(r *http.Request) string {
