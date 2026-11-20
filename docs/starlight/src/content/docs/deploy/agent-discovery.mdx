@@ -181,7 +181,12 @@ invalid message, CI points it at the conformance counterparty, a separate app
 request object, metadata document or response per requirement and labels
 every response as such. For those rows the artefact holds the conformance
 client's call to the wallet's API, then the wallet's own record of each
-request it sent and received, marked as recorded by the hosted wallet. A set is only shown for the build that
+request it sent and received, marked as recorded by the hosted wallet. Where
+a row needs the wallet's authorization_code issuance, the conformance client
+also plays the End-User: it signs in at the Mock IdP as a demo user and
+delivers the Authorization Response to the wallet's callback. The login
+itself is not recorded; the callback request and the wallet's Token and
+Credential Requests are. A set is only shown for the build that
 captured it, and only once every token, code and nonce in it has expired;
 until then the page says when it publishes. A kind that cannot be captured
 from production says why.

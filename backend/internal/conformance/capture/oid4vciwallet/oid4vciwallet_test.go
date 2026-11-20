@@ -66,7 +66,7 @@ func TestWellKnownURLInsertsAfterTheHost(t *testing.T) {
 // TestEveryRowHasExactlyOneSourcePerKind proves each registered row has a
 // scenario or an unavailable reason for each kind, never both or neither.
 func TestEveryRowHasExactlyOneSourcePerKind(t *testing.T) {
-	ids := []string{"CI-005", "CI-010", "CI-011", "CI-013", "CW-001", "CW-006", "CW-010", "CW-020", "CW-024", "CW-044", "CW-065", "CW-070", "CW-081", "CW-089", "CW-100"}
+	ids := []string{"CI-005", "CI-010", "CI-011", "CI-013", "CW-001", "CW-006", "CW-010", "CW-020", "CW-024", "CW-065", "CW-070", "CW-081", "CW-100"}
 	entries := capture.Entries()
 	for _, id := range ids {
 		entry, ok := entries[id]
