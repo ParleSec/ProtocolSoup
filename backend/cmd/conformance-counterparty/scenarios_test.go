@@ -186,6 +186,14 @@ func TestIssuerMetadataBreaksOneRuleEach(t *testing.T) {
 		len(as["code_challenge_methods_supported"].([]interface{})) != 1 || as["code_challenge_methods_supported"].([]interface{})[0] != "plain" {
 		t.Fatalf("cw-h003 authorization server metadata = %v", as)
 	}
+	resp, body = get(t, server.URL+"/.well-known/oauth-authorization-server/scenarios/cw-h004")
+	as = decodeJSON(t, body)
+	algs, _ := as["dpop_signing_alg_values_supported"].([]interface{})
+	methods, _ := as["token_endpoint_auth_methods_supported"].([]interface{})
+	if resp.StatusCode != http.StatusOK || as["token_endpoint"] != base+"cw-h004/token" ||
+		len(algs) != 1 || algs[0] != "ES256" || len(methods) != 1 || methods[0] != "attest_jwt_client_auth" {
+		t.Fatalf("cw-h004 authorization server metadata must advertise DPoP and attest_jwt_client_auth: %v", as)
+	}
 
 	offer := func(scenario string) map[string]interface{} {
 		_, body := get(t, server.URL+"/scenarios/"+scenario+"/credential-offer")
@@ -214,6 +222,45 @@ func redeemOffer(t *testing.T, serverURL, scenario string) string {
 		t.Fatalf("%s: a pre-authorized code must redeem once", scenario)
 	}
 	return decodeJSON(t, body)["access_token"].(string)
+}
+
+// TestCWH004ChallengesWithoutADPoPNonceHeader sends the DPoP-bound Token
+// Request a wallet would and checks the answer is RFC 9449 Section 8's
+// use_dpop_nonce error with no DPoP-Nonce header, that the code stays live
+// for the retry no wallet can make, and that a request without a DPoP proof
+// is refused rather than challenged.
+func TestCWH004ChallengesWithoutADPoPNonceHeader(t *testing.T) {
+	server := newTestServer(t)
+	_, body := get(t, server.URL+"/scenarios/cw-h004/credential-offer")
+	offer := decodeJSON(t, body)
+	if offer["credential_issuer"] != "http://counterparty.test/scenarios/cw-h004" {
+		t.Fatalf("cw-h004 offer credential_issuer = %v", offer["credential_issuer"])
+	}
+	code := offer["grants"].(map[string]interface{})["urn:ietf:params:oauth:grant-type:pre-authorized_code"].(map[string]interface{})["pre-authorized_code"].(string)
+	form := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:pre-authorized_code"}, "pre-authorized_code": {code}}
+	tokenURL := server.URL + "/scenarios/cw-h004/token"
+	dpop := http.Header{"DPoP": {"eyJ0eXAiOiJkcG9wK2p3dCJ9.e30.unverified"}}
+
+	resp, body := postForm(t, tokenURL, form, nil)
+	if resp.StatusCode != http.StatusBadRequest || decodeJSON(t, body)["error"] != "invalid_request" {
+		t.Fatalf("a Token Request without a DPoP proof must be refused, not challenged: %d %s", resp.StatusCode, body)
+	}
+	unknown := url.Values{"grant_type": form["grant_type"], "pre-authorized_code": {"unknown"}}
+	if resp, body := postForm(t, tokenURL, unknown, dpop); resp.StatusCode != http.StatusBadRequest || decodeJSON(t, body)["error"] != "invalid_grant" {
+		t.Fatalf("an unknown code must be refused: %d %s", resp.StatusCode, body)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		resp, body := postForm(t, tokenURL, form, dpop)
+		if resp.StatusCode != http.StatusBadRequest || decodeJSON(t, body)["error"] != "use_dpop_nonce" {
+			t.Fatalf("attempt %d: %d %s, want 400 use_dpop_nonce", attempt, resp.StatusCode, body)
+		}
+		if _, present := resp.Header["Dpop-Nonce"]; present {
+			t.Fatalf("attempt %d: the challenge must carry no DPoP-Nonce header, got %q", attempt, resp.Header.Get("DPoP-Nonce"))
+		}
+		if resp.Header.Get("X-Conformance-Counterparty") != notice {
+			t.Fatalf("attempt %d: missing the counterparty notice header", attempt)
+		}
+	}
 }
 
 func TestCI010CredentialEndpointAnswersAnEmptyCredentialsArray(t *testing.T) {

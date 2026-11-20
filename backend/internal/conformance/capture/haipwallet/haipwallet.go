@@ -8,8 +8,8 @@
 // and the Refresh Token (Section 14.5), because the issuer runs that grant
 // on its HAIP path. Passing cases run the wallet's HAIP path against the
 // issuer, with the conformance client playing the End-User at the Mock IdP;
-// failing cases point the wallet at the conformance counterparty, which it
-// refuses before any attested request.
+// failing cases point the wallet at the conformance counterparty, whose
+// invalid metadata or answer it refuses.
 package haipwallet
 
 import (
@@ -118,8 +118,14 @@ func init() {
 			Expected: conformance.OutcomeAccepted,
 			Run:      dpopNonceHandled,
 		},
-		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindFailing: "The conformance counterparty serves no use_dpop_nonce challenge, so no exchange can show the hosted wallet refusing a challenge that lacks the DPoP-Nonce header.",
+		Failing: &capture.Scenario{
+			Name: "counterparty-use-dpop-nonce-without-dpop-nonce-header",
+			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-h004 offer. Its authorization server metadata advertises DPoP and attest_jwt_client_auth, so the wallet sends an attested, DPoP-bound Token Request. " +
+				"The counterparty answers 400 use_dpop_nonce without the DPoP-Nonce header that RFC 9449 Section 8 has the authorization server include to supply the nonce. " +
+				"With no nonce to put in a proof, the wallet refuses, naming the missing header, and sends no second Token Request.",
+			Actor:    conformance.ActorCounterparty,
+			Expected: conformance.OutcomeRejected,
+			Run:      counterpartyChallengeWithoutNonce,
 		},
 	})
 	capture.Register("CW-H010", capture.Entry{

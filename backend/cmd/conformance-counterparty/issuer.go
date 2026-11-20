@@ -56,6 +56,11 @@ var issuerScenarios = map[string]func(c *counterparty, metadata map[string]inter
 	// CW-H003: an authorization server that requires PAR but offers only the
 	// plain PKCE method (see its authorization server metadata).
 	"cw-h003": nil,
+	// CW-H004: an authorization server that advertises DPoP and attestation-
+	// based client authentication, whose Token Endpoint challenges the
+	// wallet's DPoP proof with use_dpop_nonce but supplies no DPoP-Nonce
+	// header (see handleCWH004Token).
+	"cw-h004": nil,
 	// CW-H014: a configuration whose key_attestations_required demands ISO/IEC
 	// 18045 levels a software wallet cannot back.
 	"cw-h014": func(c *counterparty, metadata map[string]interface{}) {
@@ -75,7 +80,7 @@ var issuerScenarios = map[string]func(c *counterparty, metadata map[string]inter
 
 // preAuthorizedScenarios run a pre-authorized_code grant whose code the
 // counterparty's Token Endpoint redeems.
-var preAuthorizedScenarios = map[string]bool{"ci-010": true, "cw-072": true, "cw-h014": true}
+var preAuthorizedScenarios = map[string]bool{"ci-010": true, "cw-072": true, "cw-h004": true, "cw-h014": true}
 
 func (c *counterparty) registerIssuerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /.well-known/openid-credential-issuer/scenarios/{scenario}", c.handleIssuerMetadata)
@@ -123,6 +128,17 @@ func (c *counterparty) handleAuthorizationServerMetadata(w http.ResponseWriter, 
 	scenario := r.PathValue("scenario")
 	issuer := c.scenarioURL(scenario)
 	switch {
+	case scenario == "cw-h004":
+		// HAIP 1.0 Section 4: the wallet "MUST support DPoP as defined in
+		// [RFC9449]" and authenticates with attestation-based client
+		// authentication, so advertising both puts it on its attested DPoP
+		// path for the Token Request.
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"issuer":                                issuer,
+			"token_endpoint":                        issuer + "/token",
+			"dpop_signing_alg_values_supported":     []string{"ES256"},
+			"token_endpoint_auth_methods_supported": []string{"attest_jwt_client_auth"},
+		})
 	case preAuthorizedScenarios[scenario]:
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"issuer":         issuer,
@@ -191,6 +207,10 @@ func (c *counterparty) handleToken(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported_grant_type"})
 		return
 	}
+	if scenario == "cw-h004" {
+		c.handleCWH004Token(w, r)
+		return
+	}
 	if !c.redeem(scenario, r.PostForm.Get("pre-authorized_code")) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant", "error_description": "pre-authorized_code is unknown, used or expired"})
 		return
@@ -199,6 +219,38 @@ func (c *counterparty) handleToken(w http.ResponseWriter, r *http.Request) {
 		"access_token": c.issue(scenario, accessTokenLifetime),
 		"token_type":   "Bearer",
 		"expires_in":   int(accessTokenLifetime.Seconds()),
+	})
+}
+
+// handleCWH004Token answers a DPoP-bound Token Request for a live cw-h004
+// pre-authorized code with the RFC 9449 Section 8 nonce challenge, minus the
+// header that carries the nonce. Section 8: "the authorization server
+// responds to requests that do not include a nonce with an HTTP 400 (Bad
+// Request) error response per Section 5.2 of [RFC6749] using use_dpop_nonce
+// as the error code value. The authorization server includes a DPoP-Nonce
+// HTTP header in the response supplying a nonce value to be used when
+// sending the subsequent request." Without that header the wallet has no
+// nonce to put in a proof, so a wallet that handles DPoP-Nonce stops here
+// instead of repeating the request. The code is never consumed: a real
+// nonce challenge leaves the grant for the retry, and no retry can follow.
+func (c *counterparty) handleCWH004Token(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimSpace(r.Header.Get("DPoP")) == "" {
+		// RFC 9449 Section 5: "the client MUST provide a valid DPoP proof
+		// JWT in a DPoP header when making an access token request to the
+		// authorization server's token endpoint".
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_request",
+			"error_description": "a DPoP proof JWT in the DPoP header is required (RFC 9449 Section 5)",
+		})
+		return
+	}
+	if !c.holds("cw-h004", r.PostForm.Get("pre-authorized_code")) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_grant", "error_description": "pre-authorized_code is unknown or expired"})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{
+		"error":             "use_dpop_nonce",
+		"error_description": "Authorization server requires nonce in DPoP proof",
 	})
 }
 

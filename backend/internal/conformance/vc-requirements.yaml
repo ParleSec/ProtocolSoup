@@ -1475,6 +1475,9 @@ requirements:
       - package: ./cmd/walletharness
         file: backend/cmd/walletharness/oid4vci_client_test.go
         name: TestDoDPoPJSONRequestRefreshesClientAttestationPoPOnNonceRetry
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestDoDPoPJSONRequestRefusesUseDPoPNonceWithoutNonceHeader
 
   - id: CW-H010
     specification: haip

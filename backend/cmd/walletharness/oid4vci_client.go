@@ -921,9 +921,13 @@ func (s *walletHarnessServer) doDPoPJSONRequest(
 	if !isUseDPoPNonceChallenge(status, payload, headers, body) {
 		return nil, fmt.Errorf("request to %s returned %d: %s", input.URL, status, oneLine(string(body)))
 	}
+	// RFC 9449 Section 8: "The authorization server includes a DPoP-Nonce
+	// HTTP header in the response supplying a nonce value to be used when
+	// sending the subsequent request." A challenge without it supplies no
+	// nonce to retry with, so the request is not repeated.
 	nonce := strings.TrimSpace(headers.Get(dpop.NonceHeaderName))
 	if nonce == "" {
-		return nil, fmt.Errorf("request returned use_dpop_nonce without %s header", dpop.NonceHeaderName)
+		return nil, fmt.Errorf("request to %s returned use_dpop_nonce without %s header", input.URL, dpop.NonceHeaderName)
 	}
 	// DPoP nonce retry is a new HTTP request. Client attestation PoP jti is
 	// single-use (OAuth2-ATCA), so mint a fresh PoP while keeping the Client
