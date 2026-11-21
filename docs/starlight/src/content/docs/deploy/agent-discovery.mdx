@@ -170,7 +170,8 @@ documented under the `Conformance` tag of the gateway contract in the
 
 Each requirement page also shows exchanges captured from production: a
 passing exchange, where the deployed server does what the requirement says,
-and a failing one, where it refuses a request that breaks it. After each
+and one failing exchange per way of breaking it, where a request that
+breaks it is refused. After each
 deploy, CI runs `cmd/conformance-capture` against protocolsoup.com and the
 hosted wallet and redeploys the same commit with the result
 (`CONFORMANCE_ARTEFACTS`). Every request and response is shown in full, with
@@ -186,7 +187,9 @@ a row needs the wallet's authorization_code issuance, the conformance client
 also plays the End-User: it signs in at the Mock IdP as a demo user and
 delivers the Authorization Response to the wallet's callback. The login
 itself is not recorded; the callback request and the wallet's Token and
-Credential Requests are. A set is only shown for the build that
+Credential Requests are. Where the wallet encrypted a Credential Request or
+decrypted a Credential Response, the exchange shows the JWE as sent and,
+beside it, the plaintext the wallet encrypted or decrypted. A set is only shown for the build that
 captured it, and only once every token, code and nonce in it has expired;
 until then the page says when it publishes. A kind that cannot be captured
 from production says why.

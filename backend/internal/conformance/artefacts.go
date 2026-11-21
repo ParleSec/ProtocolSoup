@@ -11,7 +11,9 @@ import (
 )
 
 // ArtefactSchemaVersion is the artefacts.json format this build reads.
-const ArtefactSchemaVersion = 1
+// Version 2 made failing a list, one artefact per way a requirement was
+// broken and refused.
+const ArtefactSchemaVersion = 2
 
 // ArtefactActor names who sent the requests in an artefact. The hosted wallet
 // only ever behaves as a conformant wallet; malformed requests come from the
@@ -51,13 +53,14 @@ type Artefact struct {
 	Exchanges   []lookingglass.CapturedExchange `json:"exchanges"`
 }
 
-// RequirementArtefacts holds a requirement's passing and failing artefacts.
-// Unavailable gives the reason, per kind, that one could not be captured from
-// production; a kind is never silently missing.
+// RequirementArtefacts holds a requirement's passing artefact and its failing
+// artefacts, one per way the requirement was broken and refused. Unavailable
+// gives the reason, per kind, that none could be captured from production; a
+// kind is never silently missing.
 type RequirementArtefacts struct {
 	ID          string                  `json:"id"`
 	Passing     *Artefact               `json:"passing,omitempty"`
-	Failing     *Artefact               `json:"failing,omitempty"`
+	Failing     []Artefact              `json:"failing,omitempty"`
 	Unavailable map[ArtefactKind]string `json:"unavailable,omitempty"`
 }
 
@@ -133,7 +136,7 @@ type RequirementArtefactsResponse struct {
 	PublishAfter  string                  `json:"publish_after,omitempty"`
 	SourceBaseURL string                  `json:"source_base_url,omitempty"`
 	Passing       *Artefact               `json:"passing,omitempty"`
-	Failing       *Artefact               `json:"failing,omitempty"`
+	Failing       []Artefact              `json:"failing,omitempty"`
 	Unavailable   map[ArtefactKind]string `json:"unavailable,omitempty"`
 }
 

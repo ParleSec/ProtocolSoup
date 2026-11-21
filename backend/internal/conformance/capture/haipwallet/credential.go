@@ -121,6 +121,34 @@ func counterpartyUnnegotiatedAlgorithm(ctx context.Context, env *capture.Env) (c
 	return refused(result, "parse encrypted credential response", `"ECDH-ES+A256KW"`)
 }
 
+// counterpartyPlaintextResponse imports the counterparty's cw-072-plaintext
+// offer, whose Credential Endpoint answers the wallet's encrypted Credential
+// Request, which asked for an encrypted response, in plaintext
+// application/json. OpenID4VCI 1.0 Section 10: "When encryption of a message
+// was required but the received message is unencrypted, it SHOULD be
+// rejected."
+func counterpartyPlaintextResponse(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+	link, err := counterpartyOfferLink(env, "cw-072-plaintext")
+	if err != nil {
+		return "", err
+	}
+	result, err := importCredential(ctx, env, map[string]any{"offer": link})
+	if err != nil {
+		return "", err
+	}
+	credential, err := completedHop(result, stepCredential)
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, walletError(result))
+	}
+	if !strings.HasPrefix(strings.ToLower(hopHeader(credential.RequestHeaders, "Content-Type")), "application/jwt") {
+		return "", fmt.Errorf("the wallet sent its Credential Request as %q, not an encrypted application/jwt", hopHeader(credential.RequestHeaders, "Content-Type"))
+	}
+	if !strings.HasPrefix(strings.ToLower(hopHeader(credential.ResponseHeaders, "Content-Type")), "application/json") {
+		return "", fmt.Errorf("the counterparty answered with %q rather than plaintext application/json", hopHeader(credential.ResponseHeaders, "Content-Type"))
+	}
+	return refused(result, "unencrypted application/json")
+}
+
 // dpopNonceHandled checks that every Token and Credential Request carried a
 // DPoP proof, and that each use_dpop_nonce challenge was answered by a
 // repeat whose proof carries the DPoP-Nonce value (RFC 9449 Sections 8 and
@@ -233,47 +261,83 @@ func counterpartyChallengeWithoutNonce(ctx context.Context, env *capture.Env) (c
 	return refused(result, "use_dpop_nonce without DPoP-Nonce header")
 }
 
-// keyAttestationWithoutLevels reads the proof the wallet built for its
-// encrypted Credential Request and checks HAIP 1.0 Section 4.5.1: a key
-// attestation covering the proof key, asserting no key_storage or
-// user_authentication level.
-func keyAttestationWithoutLevels(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+// walletKeyAttestation is the key attestation the wallet sent with the proof
+// of an encrypted Credential Request, read from the wallet's own Build
+// Credential Proof JWT record, with the proof's header.
+type walletKeyAttestation struct {
+	Compact     string
+	Header      map[string]any
+	Claims      map[string]any
+	ProofHeader map[string]any
+}
+
+// importedKeyAttestation runs a HAIP pre-authorized import and returns the
+// key attestation its proof carried, checked to be a key-attestation+jwt
+// whose attested_keys include the proof key.
+func importedKeyAttestation(ctx context.Context, env *capture.Env) (*walletKeyAttestation, error) {
 	result, err := preAuthorizedHAIPImport(ctx, env)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	event := lookingGlassEvent(result, stepProofBuilt)
 	if event == nil {
-		return "", fmt.Errorf("the wallet recorded no %q event, so the proof it sent cannot be read", stepProofBuilt)
+		return nil, fmt.Errorf("the wallet recorded no %q event, so the proof it sent cannot be read", stepProofBuilt)
 	}
 	proof, _ := event["proof"].(map[string]any)
 	compact, _ := proof["raw"].(string)
 	proofHeader, _, err := capture.JWTParts(compact)
 	if err != nil {
-		return "", fmt.Errorf("proof JWT: %w", err)
+		return nil, fmt.Errorf("proof JWT: %w", err)
 	}
 	keyAttestation, _ := proofHeader["key_attestation"].(string)
 	if keyAttestation == "" {
-		return "", fmt.Errorf("the proof carries no key_attestation header")
+		return nil, fmt.Errorf("the proof carries no key_attestation header")
 	}
 	header, claims, err := capture.JWTParts(keyAttestation)
 	if err != nil {
-		return "", fmt.Errorf("key attestation: %w", err)
+		return nil, fmt.Errorf("key attestation: %w", err)
 	}
 	if header["typ"] != typKeyAttestation {
-		return "", fmt.Errorf("key attestation typ is %v, want %s", header["typ"], typKeyAttestation)
+		return nil, fmt.Errorf("key attestation typ is %v, want %s", header["typ"], typKeyAttestation)
 	}
 	attestedKeys, _ := claims["attested_keys"].([]any)
 	if len(attestedKeys) == 0 {
-		return "", fmt.Errorf("key attestation has no attested_keys")
+		return nil, fmt.Errorf("key attestation has no attested_keys")
 	}
 	proofKey, _ := proofHeader["jwk"].(map[string]any)
 	if !attestsKey(attestedKeys, proofKey) {
-		return "", fmt.Errorf("key attestation attested_keys do not include the proof jwk")
+		return nil, fmt.Errorf("key attestation attested_keys do not include the proof jwk")
+	}
+	return &walletKeyAttestation{Compact: keyAttestation, Header: header, Claims: claims, ProofHeader: proofHeader}, nil
+}
+
+// keyAttestationChain checks HAIP 1.0 Section 4.5.1 on the wallet's key
+// attestation: the wallet supports key attestations, and the attestation's
+// x5c holds the key that verifies its signature, excludes the trust anchor
+// and is not self-signed.
+func keyAttestationChain(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+	attestation, err := importedKeyAttestation(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	if err := verifySignedUnderX5C("the key attestation", attestation.Header, attestation.Compact); err != nil {
+		return "", err
+	}
+	return conformance.OutcomeAccepted, nil
+}
+
+// keyAttestationWithoutLevels checks OpenID4VCI 1.0 Appendix D.2 on the
+// wallet's key attestation: each key_storage and user_authentication value is
+// an assertion of ISO/IEC 18045 attack-potential resistance, and the hosted
+// wallet's software keys can back none, so the attestation carries neither.
+func keyAttestationWithoutLevels(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+	attestation, err := importedKeyAttestation(ctx, env)
+	if err != nil {
+		return "", err
 	}
 	for _, claim := range []string{"key_storage", "user_authentication"} {
-		if _, present := claims[claim]; present {
-			return "", fmt.Errorf("key attestation claims %s %v, which the hosted wallet's software keys cannot back", claim, claims[claim])
+		if _, present := attestation.Claims[claim]; present {
+			return "", fmt.Errorf("key attestation claims %s %v, which the hosted wallet's software keys cannot back", claim, attestation.Claims[claim])
 		}
 	}
 	return conformance.OutcomeAccepted, nil
@@ -294,10 +358,10 @@ func attestsKey(attestedKeys []any, key map[string]any) bool {
 	return false
 }
 
-// counterpartyDemandsLevels imports the counterparty's cw-h014 offer, whose
+// counterpartyDemandsLevels imports the counterparty's cw-101 offer, whose
 // configuration demands iso_18045_high key_storage and user_authentication.
 func counterpartyDemandsLevels(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
-	link, err := counterpartyOfferLink(env, "cw-h014")
+	link, err := counterpartyOfferLink(env, "cw-101")
 	if err != nil {
 		return "", err
 	}

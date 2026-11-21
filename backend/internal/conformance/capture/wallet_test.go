@@ -39,7 +39,10 @@ func TestCallWalletAddsTheWalletsOwnHopsAfterTheCall(t *testing.T) {
 				"url":                   "https://issuer.example/credential",
 				"request_body":          base64.StdEncoding.EncodeToString(binary),
 				"request_body_encoding": "base64",
+				"request_plaintext":     `{"credential_identifier":"c1"}`,
 				"response_status":       401,
+				"response_body":         "eyJhbGciOiJFQ0RILUVTIn0..a.b.c",
+				"response_plaintext":    `{"error":"invalid_token"}`,
 			}},
 		})
 	}))
@@ -71,6 +74,13 @@ func TestCallWalletAddsTheWalletsOwnHopsAfterTheCall(t *testing.T) {
 	if second.Request.Body == nil || second.Request.Body.Encoding != "base64" ||
 		second.Request.Body.Data != base64.StdEncoding.EncodeToString(binary) || second.Response.Status != 401 {
 		t.Fatalf("binary hop body not kept: %+v", second.Request.Body)
+	}
+	if second.Request.Plaintext == nil || second.Request.Plaintext.Data != `{"credential_identifier":"c1"}` ||
+		second.Response.Plaintext == nil || second.Response.Plaintext.Data != `{"error":"invalid_token"}` {
+		t.Fatalf("the plaintext the wallet recorded beside its JWE bodies was not lifted: %+v %+v", second.Request.Plaintext, second.Response.Plaintext)
+	}
+	if first.Request.Plaintext != nil || first.Response.Plaintext != nil {
+		t.Fatal("a hop without a JWE body must carry no plaintext")
 	}
 	if env.PublishAfter().IsZero() {
 		t.Fatal("a wallet call must delay publication for the wallet session's lifetime")

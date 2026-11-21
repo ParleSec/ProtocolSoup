@@ -21,13 +21,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         encryptedResponseSelectedByKid,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "request-id-without-state",
 			Description: "The conformance client fetches a direct_post request object from the request_uri, then POSTs a valid presentation to /oid4vp/response with the verifier's request_id in place of the state the request object carried. A request_id must not stand in for state on a redirect-invoked request.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         requestIDWithoutState,
-		},
+		}},
 	})
 }
 

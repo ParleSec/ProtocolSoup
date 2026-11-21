@@ -74,16 +74,19 @@ func TestEveryRowHasExactlyOneSourcePerKind(t *testing.T) {
 			t.Errorf("%s is not registered", id)
 			continue
 		}
-		for kind, scenario := range map[conformance.ArtefactKind]*capture.Scenario{conformance.KindPassing: entry.Passing, conformance.KindFailing: entry.Failing} {
+		for _, kind := range []conformance.ArtefactKind{conformance.KindPassing, conformance.KindFailing} {
+			scenarios := entry.Scenarios(kind)
 			_, unavailable := entry.Unavailable[kind]
-			if (scenario == nil) == !unavailable {
+			if (len(scenarios) == 0) == !unavailable {
 				t.Errorf("%s %s: want exactly one of a scenario or an unavailable reason", id, kind)
 			}
-			if scenario != nil && kind == conformance.KindPassing && scenario.Expected != conformance.OutcomeAccepted {
-				t.Errorf("%s passing expects %s", id, scenario.Expected)
-			}
-			if scenario != nil && kind == conformance.KindFailing && scenario.Expected != conformance.OutcomeRejected {
-				t.Errorf("%s failing expects %s", id, scenario.Expected)
+			for _, scenario := range scenarios {
+				if kind == conformance.KindPassing && scenario.Expected != conformance.OutcomeAccepted {
+					t.Errorf("%s passing expects %s", id, scenario.Expected)
+				}
+				if kind == conformance.KindFailing && scenario.Expected != conformance.OutcomeRejected {
+					t.Errorf("%s failing expects %s", id, scenario.Expected)
+				}
 			}
 		}
 	}

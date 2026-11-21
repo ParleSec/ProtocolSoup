@@ -36,13 +36,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         credentialsArray,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "empty-credentials-array",
 			Description: "The conformance client hands the hosted wallet an offer from the conformance counterparty, whose Credential Endpoint answers HTTP 200 with an empty credentials array. The wallet refuses the response instead of treating the issuance as complete.",
 			Actor:       conformance.ActorCounterparty,
 			Expected:    conformance.OutcomeRejected,
 			Run:         emptyCredentialsArray,
-		},
+		}},
 	})
 	capture.Register("CI-011", capture.Entry{
 		Passing: &capture.Scenario{
@@ -76,13 +76,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         offerByReference,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "offer-by-value-and-by-reference",
 			Description: "The conformance client fetches a real Credential Offer from the production issuer, then hands the hosted wallet a link carrying that offer as credential_offer and its URL as credential_offer_uri at once. The wallet refuses the link before fetching anything.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         offerByValueAndReference,
-		},
+		}},
 	})
 	capture.Register("CW-006", capture.Entry{
 		Passing: &capture.Scenario{
@@ -92,13 +92,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         txCodeSent,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "empty-tx-code-object-without-code",
 			Description: "The conformance client hands the hosted wallet an offer from the conformance counterparty whose pre-authorized grant carries an empty tx_code object, and supplies no Transaction Code. The wallet stops before any Token Request rather than send one without tx_code.",
 			Actor:       conformance.ActorCounterparty,
 			Expected:    conformance.OutcomeRejected,
 			Run:         emptyTxCodeObject,
-		},
+		}},
 	})
 	capture.Register("CW-010", capture.Entry{
 		Passing: &capture.Scenario{
@@ -108,13 +108,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         offerValidatedAgainstMetadata,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "unlisted-authorization-server-hint",
 			Description: "The conformance client hands the hosted wallet an offer from the conformance counterparty whose pre-authorized grant names an authorization_server that the issuer's metadata does not list. The wallet fetches the metadata, finds no match and stops.",
 			Actor:       conformance.ActorCounterparty,
 			Expected:    conformance.OutcomeRejected,
 			Run:         unlistedAuthorizationServer,
-		},
+		}},
 	})
 	capture.Register("CW-020", capture.Entry{
 		Passing: &capture.Scenario{
@@ -136,13 +136,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         credentialIssuerIdentical,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "credential-issuer-trailing-slash",
 			Description: "The conformance client gives the hosted wallet a conformance counterparty issuer identifier whose metadata names a credential_issuer differing from it only by a trailing slash. The wallet compares the two strings without normalisation and uses nothing from the metadata.",
 			Actor:       conformance.ActorCounterparty,
 			Expected:    conformance.OutcomeRejected,
 			Run:         credentialIssuerTrailingSlash,
-		},
+		}},
 	})
 	capture.Register("CW-065", capture.Entry{
 		Passing: &capture.Scenario{

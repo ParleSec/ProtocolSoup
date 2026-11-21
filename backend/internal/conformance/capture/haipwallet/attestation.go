@@ -245,44 +245,53 @@ func walletAttestation(ctx context.Context, env *capture.Env) (conformance.Artef
 	return conformance.OutcomeAccepted, nil
 }
 
-// verifyAttestationChain checks the attestation is ES256-signed under the
-// leaf of its x5c chain, and that the chain holds no self-signed certificate
-// (HAIP 1.0 Section 4.4.1: the chain is included "excluding the trust
-// anchor").
+// verifyAttestationChain checks the Client Attestation is ES256-signed under
+// the leaf of its x5c chain, and that the chain holds no self-signed
+// certificate (HAIP 1.0 Section 4.4.1: the chain is included "excluding the
+// trust anchor").
 func verifyAttestationChain(auth *clientAuthentication) error {
 	if auth.AttestationHeader["alg"] != "ES256" {
 		return fmt.Errorf("the Client Attestation JWT alg is %v, want ES256", auth.AttestationHeader["alg"])
 	}
-	chain, _ := auth.AttestationHeader["x5c"].([]any)
+	return verifySignedUnderX5C("the Client Attestation", auth.AttestationHeader, auth.Attestation)
+}
+
+// verifySignedUnderX5C checks a JWS against the rules HAIP 1.0 Sections 4.4.1
+// and 4.5.1 set for an attestation's x5c header: the key that verifies the
+// signature is in the chain, as its first certificate; the chain holds no
+// self-signed certificate, so no trust anchor; and each certificate is signed
+// by the next.
+func verifySignedUnderX5C(what string, header map[string]any, compact string) error {
+	chain, _ := header["x5c"].([]any)
 	if len(chain) == 0 {
-		return fmt.Errorf("the Client Attestation JWT has no x5c header")
+		return fmt.Errorf("%s JWT has no x5c header", what)
 	}
 	certificates := make([]*x509.Certificate, 0, len(chain))
 	for _, raw := range chain {
 		encoded, _ := raw.(string)
 		der, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
-			return fmt.Errorf("decode x5c entry: %w", err)
+			return fmt.Errorf("decode %s x5c entry: %w", what, err)
 		}
 		certificate, err := x509.ParseCertificate(der)
 		if err != nil {
-			return fmt.Errorf("parse x5c entry: %w", err)
+			return fmt.Errorf("parse %s x5c entry: %w", what, err)
 		}
 		if certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature) == nil {
-			return fmt.Errorf("the Client Attestation x5c includes the self-signed certificate %q, which HAIP excludes as the trust anchor", certificate.Subject.String())
+			return fmt.Errorf("%s x5c includes the self-signed certificate %q, which HAIP excludes as the trust anchor", what, certificate.Subject.String())
 		}
 		certificates = append(certificates, certificate)
 	}
 	for i := 0; i+1 < len(certificates); i++ {
 		if err := certificates[i].CheckSignatureFrom(certificates[i+1]); err != nil {
-			return fmt.Errorf("x5c entry %d is not signed by entry %d: %w", i, i+1, err)
+			return fmt.Errorf("%s x5c entry %d is not signed by entry %d: %w", what, i, i+1, err)
 		}
 	}
-	_, err := jwt.Parse(auth.Attestation, func(*jwt.Token) (any, error) {
+	_, err := jwt.Parse(compact, func(*jwt.Token) (any, error) {
 		return certificates[0].PublicKey, nil
-	}, jwt.WithValidMethods([]string{"ES256"}))
+	}, jwt.WithValidMethods([]string{"ES256", "ES384", "ES512"}))
 	if err != nil {
-		return fmt.Errorf("the Client Attestation signature does not verify under the x5c leaf key: %w", err)
+		return fmt.Errorf("%s signature does not verify under the x5c leaf key: %w", what, err)
 	}
 	return nil
 }

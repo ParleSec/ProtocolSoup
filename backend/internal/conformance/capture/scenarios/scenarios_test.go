@@ -27,22 +27,33 @@ func TestEveryRequirementHasAnEntry(t *testing.T) {
 			continue
 		}
 		for _, kind := range []conformance.ArtefactKind{conformance.KindPassing, conformance.KindFailing} {
-			scenario := entry.Passing
+			scenarios := entry.Scenarios(kind)
 			want := conformance.OutcomeAccepted
 			if kind == conformance.KindFailing {
-				scenario = entry.Failing
 				want = conformance.OutcomeRejected
 			}
 			reason := strings.TrimSpace(entry.Unavailable[kind])
 			switch {
-			case scenario == nil && reason == "":
+			case len(scenarios) == 0 && reason == "":
 				t.Errorf("%s %s has neither a scenario nor an unavailable reason", req.ID, kind)
-			case scenario != nil && reason != "":
+			case len(scenarios) > 0 && reason != "":
 				t.Errorf("%s %s has both a scenario and an unavailable reason", req.ID, kind)
-			case scenario != nil && scenario.Expected != want:
-				t.Errorf("%s %s scenario %q expects %s; a %s scenario expects %s", req.ID, kind, scenario.Name, scenario.Expected, kind, want)
-			case scenario != nil && (scenario.Name == "" || scenario.Description == "" || scenario.Actor == "" || scenario.Run == nil):
-				t.Errorf("%s %s scenario is missing a name, description, actor or Run", req.ID, kind)
+			}
+			names := map[string]bool{}
+			for _, scenario := range scenarios {
+				switch {
+				case scenario == nil:
+					t.Errorf("%s %s registers a nil scenario", req.ID, kind)
+				case scenario.Expected != want:
+					t.Errorf("%s %s scenario %q expects %s; a %s scenario expects %s", req.ID, kind, scenario.Name, scenario.Expected, kind, want)
+				case scenario.Name == "" || scenario.Description == "" || scenario.Actor == "" || scenario.Run == nil:
+					t.Errorf("%s %s scenario is missing a name, description, actor or Run", req.ID, kind)
+				case names[scenario.Name]:
+					t.Errorf("%s %s registers scenario %q twice", req.ID, kind, scenario.Name)
+				}
+				if scenario != nil {
+					names[scenario.Name] = true
+				}
 			}
 		}
 	}

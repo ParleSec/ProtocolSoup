@@ -26,7 +26,7 @@ func init() {
 				return batchRequest(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "batch-repeating-one-proof-key",
 			Description: "The conformance client sends the same kind of batch Credential Request, but both entries in proofs.jwt are the same proof, so both Credentials would be bound to one key.",
 			Actor:       conformance.ActorConformanceClient,
@@ -34,7 +34,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return batchRequest(ctx, env, true)
 			},
-		},
+		}},
 	})
 }
 

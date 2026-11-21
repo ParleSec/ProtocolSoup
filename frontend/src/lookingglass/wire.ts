@@ -40,6 +40,7 @@ function normalizeWireMessage(raw: unknown): WireCapturedExchange['request'] | n
     headers: normalizeWireHeaders(data.headers),
     body: normalizeWirePayload(data.body),
     raw: normalizeWirePayload(data.raw),
+    plaintext: normalizeWirePayload(data.plaintext),
     status: typeof data.status === 'number' ? data.status : undefined,
     statusText: data.status_text ? String(data.status_text) : undefined,
   }

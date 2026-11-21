@@ -221,17 +221,19 @@ func walletExchanges(hops []WalletHop) []lookingglass.CapturedExchange {
 		exchanges = append(exchanges, lookingglass.CapturedExchange{
 			ID: uuid.NewString(),
 			Request: lookingglass.CapturedMessage{
-				Method:  hop.Method,
-				URL:     hop.URL,
-				Host:    hostOf(hop.URL),
-				Headers: singleValued(hop.RequestHeaders),
-				Body:    requestBody,
+				Method:    hop.Method,
+				URL:       hop.URL,
+				Host:      hostOf(hop.URL),
+				Headers:   singleValued(hop.RequestHeaders),
+				Body:      requestBody,
+				Plaintext: hopPayload(hop.RequestPlaintext, "", "application/json"),
 			},
 			Response: lookingglass.CapturedMessage{
 				Status:     hop.ResponseStatus,
 				StatusText: http.StatusText(hop.ResponseStatus),
 				Headers:    singleValued(hop.ResponseHeaders),
 				Body:       responseBody,
+				Plaintext:  hopPayload(hop.ResponsePlaintext, "", "application/json"),
 			},
 			Timing: lookingglass.ExchangeTiming{DurationMicro: hop.DurationMS * 1000},
 			Meta: lookingglass.CaptureMeta{

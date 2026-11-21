@@ -23,7 +23,7 @@ func init() {
 				return notificationRequest(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "notification-id-from-another-token",
 			Description: "The conformance client sends /oid4vci/notification a credential_accepted event for a notification_id that the issuer returned to a different Access Token, presented with a second, valid Access Token.",
 			Actor:       conformance.ActorConformanceClient,
@@ -31,7 +31,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return notificationRequest(ctx, env, true)
 			},
-		},
+		}},
 	})
 
 	capture.Register("CI-016", capture.Entry{
@@ -44,7 +44,7 @@ func init() {
 				return deferredRedemption(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "deferred-transaction-redeemed-twice",
 			Description: "The conformance client obtains the Credentials for a transaction_id from /oid4vci/deferred_credential, then sends the same Deferred Credential Request again with the same Access Token.",
 			Actor:       conformance.ActorConformanceClient,
@@ -52,7 +52,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return deferredRedemption(ctx, env, true)
 			},
-		},
+		}},
 	})
 }
 

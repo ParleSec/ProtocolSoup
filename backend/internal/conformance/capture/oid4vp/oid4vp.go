@@ -22,7 +22,7 @@ func init() {
 				return walletNonceBinding(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "change-nonce",
 			Description: "The conformance client binds one wallet_nonce, then POSTs a different wallet_nonce to the same request_uri.",
 			Actor:       conformance.ActorConformanceClient,
@@ -30,7 +30,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return walletNonceBinding(ctx, env, true)
 			},
-		},
+		}},
 	})
 }
 

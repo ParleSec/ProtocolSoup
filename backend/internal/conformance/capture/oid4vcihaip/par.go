@@ -38,14 +38,14 @@ func init() {
 			Expected: conformance.OutcomeAccepted,
 			Run:      attestedPARRedeemed,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "par-without-client-attestation",
 			Description: "The conformance client pushes an authorization request to the pushed_authorization_request_endpoint the issuer's Authorization Server Metadata names, with response_type code, an HTTPS redirect_uri, " +
 				"an S256 code_challenge and authorization_details for the " + haipSDJWTConfigurationID + " configuration, but without the OAuth-Client-Attestation and OAuth-Client-Attestation-PoP headers.",
 			Actor:    conformance.ActorConformanceClient,
 			Expected: conformance.OutcomeRejected,
 			Run:      parWithoutAttestation,
-		},
+		}},
 	})
 }
 

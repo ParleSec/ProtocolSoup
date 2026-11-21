@@ -24,13 +24,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         issuedSDJWTEndsInTilde,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "final-tilde-omitted",
 			Description: "The conformance client removes the final tilde from an SD-JWT VC the issuer issued to it, so the value ends with its last Disclosure, and POSTs it as the vp_token of a direct_post response to /oid4vp/response, with no Key Binding JWT. The verifier parses the serialization before anything else, must find that the last element is neither empty nor a Key Binding JWT, and reports the failure in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         finalTildeOmitted,
-		},
+		}},
 	})
 
 	capture.Register("SDJWT-001", capture.Entry{
@@ -41,26 +41,26 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         issuedDigestsUnique,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "repeated-sd-digest",
 			Description: "The conformance client appends a second copy of the first digest to the _sd array in the payload of an SD-JWT VC the issuer issued to it. This changes signed content, so the issuer's signature no longer verifies either. It presents the result with a Key Binding JWT in a direct_post response to /oid4vp/response, and the verifier must report the repeated digest in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         repeatedSDDigest,
-		},
+		}},
 	})
 
 	capture.Register("SDJWT-002", capture.Entry{
 		Unavailable: map[conformance.ArtefactKind]string{
 			conformance.KindPassing: "The issuer writes _sd_alg into the payload it signs for every SD-JWT VC, and removing the claim breaks that signature, so no presentation the verifier allows relies on the default.",
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "no-sd-alg-with-sha-384-digests",
 			Description: "The conformance client removes _sd_alg from the payload of an SD-JWT VC the issuer issued to it and replaces each _sd digest with the sha-384 digest of the same Disclosure. This changes signed content, so the issuer's signature no longer verifies either. It presents the result with a Key Binding JWT in a direct_post response to /oid4vp/response. A verifier that applies the sha-256 default finds none of the Disclosures referenced by a digest, and must report that in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         noSDAlgWithSHA384Digests,
-		},
+		}},
 	})
 
 	capture.Register("SDJWT-003", capture.Entry{
@@ -71,13 +71,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         ordinaryClaimNames,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "disclosure-named-sd",
 			Description: "The conformance client appends its own Disclosure with the claim name _sd and an array of one digest as its value to an SD-JWT VC the issuer issued to it, and presents the result with a Key Binding JWT in a direct_post response to /oid4vp/response. No digest in the Issuer-signed JWT references the new Disclosure, because the issuer's signature covers the digests; the verifier decodes every presented Disclosure before matching digests and must reject this one for its claim name in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         disclosureNamedSD,
-		},
+		}},
 	})
 
 	capture.Register("SDJWT-004", capture.Entry{
@@ -88,13 +88,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         everyDisclosureReferenced,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "appended-uncommitted-disclosure",
 			Description: "The conformance client appends its own Disclosure, age_over_21 set to true, to an SD-JWT VC the issuer issued to it, and presents the result with a Key Binding JWT over the whole altered SD-JWT in a direct_post response to /oid4vp/response. The Issuer-signed JWT is unchanged and carries no digest for the new Disclosure, so the verifier must reject the SD-JWT in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         appendedUncommittedDisclosure,
-		},
+		}},
 	})
 
 	capture.Register("SDJWT-005", capture.Entry{
@@ -105,13 +105,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         disclosuresAtCommittedLevel,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "disclosure-collides-with-plaintext-claim",
 			Description: "The conformance client adds a plaintext claim to the payload of an SD-JWT VC the issuer issued to it, with the same name and value as one of its Disclosures. This changes signed content, so the issuer's signature no longer verifies either. It presents the result with a Key Binding JWT in a direct_post response to /oid4vp/response. The Disclosure's claim name already exists at the level of the _sd key, so the verifier must reject the SD-JWT in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         disclosureCollidesWithPlaintextClaim,
-		},
+		}},
 	})
 }
 

@@ -29,7 +29,7 @@ func init() {
 				return encryptedCredentialRequest(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "encrypted-request-with-unissued-c-nonce",
 			Description: "The conformance client sends the same encrypted Credential Request, but its jwt proof carries a c_nonce the issuer never issued. " +
 				"Once decrypted, the request has to pass the same proof checks as an application/json request.",
@@ -38,7 +38,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return encryptedCredentialRequest(ctx, env, true)
 			},
-		},
+		}},
 	})
 	capture.Register("CI-022", capture.Entry{
 		Passing: &capture.Scenario{
@@ -52,7 +52,7 @@ func init() {
 				return responseEncryptionRequest(ctx, env, true)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "plaintext-request-asks-for-encrypted-response",
 			Description: "The conformance client sends the same Credential Request, credential_response_encryption included, as plaintext application/json, so the response key in it is open to substitution.",
 			Actor:       conformance.ActorConformanceClient,
@@ -60,7 +60,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return responseEncryptionRequest(ctx, env, false)
 			},
-		},
+		}},
 	})
 	capture.Register("CI-023", capture.Entry{
 		Passing: &capture.Scenario{
@@ -74,7 +74,7 @@ func init() {
 				return deferredEncryptedPoll(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "deferred-request-with-unsupported-enc",
 			Description: "The conformance client sends the same encrypted Deferred Credential Request, but its credential_response_encryption asks for enc " + unsupportedResponseEnc +
 				", which the issuer does not advertise, so the issuer cannot encode the Deferred Credential Response with the parameters it was given.",
@@ -83,7 +83,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return deferredEncryptedPoll(ctx, env, true)
 			},
-		},
+		}},
 	})
 }
 

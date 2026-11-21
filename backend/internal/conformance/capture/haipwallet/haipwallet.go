@@ -49,14 +49,21 @@ func init() {
 			Expected: conformance.OutcomeAccepted,
 			Run:      encryptedCredentialResponse,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "counterparty-response-encrypted-with-unnegotiated-alg",
 			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-072 offer. The counterparty advertises ECDH-ES and A256GCM, decrypts the wallet's encrypted Credential Request, " +
 				"and answers with an application/jwt JWE encrypted to the wallet's response key with ECDH-ES+A256KW, which is not the negotiated algorithm. The wallet refuses to decrypt it.",
 			Actor:    conformance.ActorCounterparty,
 			Expected: conformance.OutcomeRejected,
 			Run:      counterpartyUnnegotiatedAlgorithm,
-		},
+		}, {
+			Name: "counterparty-plaintext-response-to-encrypted-request",
+			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-072-plaintext offer. The counterparty advertises the same required encryption, decrypts the wallet's encrypted Credential Request, " +
+				"and answers it in plaintext application/json, deferring issuance. The wallet, which asked for an encrypted response, refuses the unencrypted one (OpenID4VCI 1.0 Section 10) rather than read it.",
+			Actor:    conformance.ActorCounterparty,
+			Expected: conformance.OutcomeRejected,
+			Run:      counterpartyPlaintextResponse,
+		}},
 	})
 	capture.Register("CW-044", capture.Entry{
 		Passing: &capture.Scenario{
@@ -99,14 +106,14 @@ func init() {
 			Expected: conformance.OutcomeAccepted,
 			Run:      parWithPKCES256,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "counterparty-par-without-pkce-s256",
 			Description: "The conformance client asks the hosted wallet to start wallet-initiated issuance from the counterparty's cw-h003 issuer. Its authorization server metadata requires PAR but lists only plain in code_challenge_methods_supported. " +
 				"The wallet refuses before pushing any Authorization Request.",
 			Actor:    conformance.ActorCounterparty,
 			Expected: conformance.OutcomeRejected,
 			Run:      counterpartyWithoutS256,
-		},
+		}},
 	})
 	capture.Register("CW-H004", capture.Entry{
 		Passing: &capture.Scenario{
@@ -118,7 +125,7 @@ func init() {
 			Expected: conformance.OutcomeAccepted,
 			Run:      dpopNonceHandled,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "counterparty-use-dpop-nonce-without-dpop-nonce-header",
 			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-h004 offer. Its authorization server metadata advertises DPoP and attest_jwt_client_auth, so the wallet sends an attested, DPoP-bound Token Request. " +
 				"The counterparty answers 400 use_dpop_nonce without the DPoP-Nonce header that RFC 9449 Section 8 has the authorization server include to supply the nonce. " +
@@ -126,7 +133,7 @@ func init() {
 			Actor:    conformance.ActorCounterparty,
 			Expected: conformance.OutcomeRejected,
 			Run:      counterpartyChallengeWithoutNonce,
-		},
+		}},
 	})
 	capture.Register("CW-H010", capture.Entry{
 		Passing: &capture.Scenario{
@@ -159,22 +166,36 @@ func init() {
 	})
 	capture.Register("CW-H014", capture.Entry{
 		Passing: &capture.Scenario{
-			Name: "haip-key-attestation-without-assurance-levels",
+			Name: "haip-key-attestation-x5c-without-trust-anchor",
 			Description: "The conformance client has the issuer create a pre-authorized offer for the " + haipConfigurationID + " configuration and asks the hosted wallet to import it. " +
 				"The wallet encrypts its Credential Request, so the capture reads the proof from the wallet's own Build Credential Proof JWT record and checks that its key_attestation header is a key-attestation+jwt " +
-				"whose attested_keys include the proof key and which carries neither key_storage nor user_authentication.",
+				"whose attested_keys include the proof key, whose signature verifies under the first certificate of its x5c header, and whose x5c contains no self-signed certificate, so no trust anchor.",
+			Actor:    conformance.ActorHostedWallet,
+			Expected: conformance.OutcomeAccepted,
+			Run:      keyAttestationChain,
+		},
+		Unavailable: map[conformance.ArtefactKind]string{
+			conformance.KindFailing: "The x5c rules constrain the key attestation the wallet sends. The hosted wallet refuses attestation material whose chain carries a self-signed certificate or does not start with its signing key, so it never sends a key attestation that breaks them, and no counterparty message can make it.",
+		},
+	})
+	capture.Register("CW-101", capture.Entry{
+		Passing: &capture.Scenario{
+			Name: "key-attestation-without-assurance-levels",
+			Description: "The conformance client has the issuer create a pre-authorized offer for the " + haipConfigurationID + " configuration and asks the hosted wallet to import it. " +
+				"The capture reads the key attestation from the wallet's own Build Credential Proof JWT record and checks that it carries neither key_storage nor user_authentication: " +
+				"each Appendix D.2 value asserts an ISO/IEC 18045 attack-potential resistance, and the hosted wallet's software keys can back none.",
 			Actor:    conformance.ActorHostedWallet,
 			Expected: conformance.OutcomeAccepted,
 			Run:      keyAttestationWithoutLevels,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name: "counterparty-demands-iso-18045-levels",
-			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-h014 offer. The configuration's key_attestations_required demands iso_18045_high for key_storage and user_authentication. " +
+			Description: "The conformance client asks the hosted wallet to import the counterparty's cw-101 offer. The configuration's key_attestations_required demands iso_18045_high for key_storage and user_authentication. " +
 				"The wallet holds software keys that can back no such level, so it refuses before sending a Token Request rather than claim one.",
 			Actor:    conformance.ActorCounterparty,
 			Expected: conformance.OutcomeRejected,
 			Run:      counterpartyDemandsLevels,
-		},
+		}},
 	})
 }
 

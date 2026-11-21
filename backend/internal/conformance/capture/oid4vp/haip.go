@@ -45,13 +45,13 @@ func init() {
 		Unavailable: map[conformance.ArtefactKind]string{
 			conformance.KindPassing: "Acceptance needs an SD-JWT VC signed under a trust anchor the operator configured for independent issuers, and the conformance client holds no such issuer key; credentials ProtocolSoup issues itself are checked against their issuance lineage instead.",
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "self-made-issuer-ca",
 			Description: "The conformance client creates its own CA and issuer certificate, signs an SD-JWT VC with the issuer key, and puts only the issuer certificate in the x5c header, leaving its root out as HAIP requires. It presents the credential, with a valid Key Binding JWT, in an encrypted direct_post.jwt response to a HAIP request at /oid4vp/response. ProtocolSoup holds no issuance record for this credential, and its chain leads to no trust anchor the operator configured, so the verifier must deny it in the result at /oid4vp/result.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         selfMadeIssuerCA,
-		},
+		}},
 	})
 }
 

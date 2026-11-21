@@ -78,7 +78,13 @@ function WireText({ payload }: { payload?: WireCapturedPayload }) {
  * or received them. The wallet keeps no reconstructed raw message, so the
  * parts are shown separately rather than assembled into one.
  */
-function MessageParts({ message }: { message: WireCapturedExchange['request'] }) {
+function MessageParts({
+  message,
+  role,
+}: {
+  message: WireCapturedExchange['request']
+  role: 'request' | 'response'
+}) {
   const headers = Object.entries(message.headers ?? {}).flatMap(([name, values]) =>
     values.map((value) => `${name}: ${value}`),
   )
@@ -90,6 +96,16 @@ function MessageParts({ message }: { message: WireCapturedExchange['request'] })
         </pre>
       )}
       <WireText payload={message.body} />
+      {message.plaintext?.data && (
+        <>
+          <p className="text-xs text-surface-400">
+            {role === 'request'
+              ? 'The body above is a JWE. This is what the wallet encrypted into it.'
+              : 'The body above is a JWE. This is what the wallet decrypted from it.'}
+          </p>
+          <WireText payload={message.plaintext} />
+        </>
+      )}
     </div>
   )
 }
@@ -117,40 +133,64 @@ function ExchangeView({ exchange, index }: { exchange: WireCapturedExchange; ind
       <div className="grid gap-2 lg:grid-cols-2">
         <div className="min-w-0 space-y-1">
           <h4 className="text-xs uppercase tracking-wider text-surface-400">Request</h4>
-          {request.raw ? <WireText payload={request.raw} /> : <MessageParts message={request} />}
+          {request.raw ? <WireText payload={request.raw} /> : <MessageParts message={request} role="request" />}
         </div>
         <div className="min-w-0 space-y-1">
           <h4 className="text-xs uppercase tracking-wider text-surface-400">Response</h4>
-          {response.raw ? <WireText payload={response.raw} /> : <MessageParts message={response} />}
+          {response.raw ? <WireText payload={response.raw} /> : <MessageParts message={response} role="response" />}
         </div>
       </div>
     </li>
   )
 }
 
-function ArtefactView({ kind, artefact, unavailable }: {
+function ArtefactBody({ artefact }: { artefact: ConformanceArtefact }) {
+  return (
+    <div className="space-y-3">
+      <p className="flex flex-wrap items-center gap-2 text-xs text-surface-300">
+        <OutcomeBadge artefact={artefact} />
+        <span aria-hidden="true">{' · '}</span>
+        <span>{ACTOR_LABELS[artefact.actor]}</span>
+      </p>
+      <p className="text-sm text-surface-200 leading-relaxed">{artefact.description}</p>
+      <p className="text-xs text-surface-400">{ACTOR_NOTES[artefact.actor]}</p>
+      <ol className="space-y-4">
+        {artefact.exchanges.map((exchange, index) => (
+          <ExchangeView key={exchange.id} exchange={exchange} index={index} />
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * One kind's artefacts. A requirement has one passing artefact and one failing
+ * artefact per way of breaking it, each shown in full under a numbered
+ * heading when there are several.
+ */
+function ArtefactView({ kind, artefacts, unavailable }: {
   kind: ConformanceArtefactKind
-  artefact?: ConformanceArtefact
+  artefacts: ConformanceArtefact[]
   unavailable?: string
 }) {
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-white">{KIND_TITLES[kind]}</h3>
-      {artefact ? (
-        <>
-          <p className="flex flex-wrap items-center gap-2 text-xs text-surface-300">
-            <OutcomeBadge artefact={artefact} />
-            <span aria-hidden="true">{' · '}</span>
-            <span>{ACTOR_LABELS[artefact.actor]}</span>
-          </p>
-          <p className="text-sm text-surface-200 leading-relaxed">{artefact.description}</p>
-          <p className="text-xs text-surface-400">{ACTOR_NOTES[artefact.actor]}</p>
-          <ol className="space-y-4">
-            {artefact.exchanges.map((exchange, index) => (
-              <ExchangeView key={exchange.id} exchange={exchange} index={index} />
-            ))}
-          </ol>
-        </>
+      <h3 className="text-sm font-semibold text-white">
+        {artefacts.length > 1 ? `${KIND_TITLES[kind]}s (${artefacts.length})` : KIND_TITLES[kind]}
+      </h3>
+      {artefacts.length > 0 ? (
+        <div className="space-y-6">
+          {artefacts.map((artefact, index) => (
+            <div key={artefact.scenario} className="space-y-3">
+              {artefacts.length > 1 && (
+                <h4 className="text-xs uppercase tracking-wider text-surface-400">
+                  {index + 1}. {artefact.scenario}
+                </h4>
+              )}
+              <ArtefactBody artefact={artefact} />
+            </div>
+          ))}
+        </div>
       ) : (
         <p className="text-sm text-surface-300">
           {unavailable ? `Not captured: ${unavailable}` : 'Not captured for this build.'}
@@ -201,8 +241,12 @@ export function RequirementArtefacts({ artefacts }: { artefacts: ConformanceRequ
         </p>
       ) : (
         <div className="space-y-8">
-          <ArtefactView kind="passing" artefact={artefacts.passing} unavailable={artefacts.unavailable?.passing} />
-          <ArtefactView kind="failing" artefact={artefacts.failing} unavailable={artefacts.unavailable?.failing} />
+          <ArtefactView
+            kind="passing"
+            artefacts={artefacts.passing ? [artefacts.passing] : []}
+            unavailable={artefacts.unavailable?.passing}
+          />
+          <ArtefactView kind="failing" artefacts={artefacts.failing ?? []} unavailable={artefacts.unavailable?.failing} />
         </div>
       )}
     </div>

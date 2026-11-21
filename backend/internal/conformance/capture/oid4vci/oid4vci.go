@@ -21,7 +21,7 @@ func init() {
 				return preAuthorizedTokenRequest(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "wrong-tx-code",
 			Description: "The conformance client redeems a fresh pre-authorized code with a tx_code that is not the one the issuer delivered.",
 			Actor:       conformance.ActorConformanceClient,
@@ -29,7 +29,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return preAuthorizedTokenRequest(ctx, env, true)
 			},
-		},
+		}},
 	})
 }
 

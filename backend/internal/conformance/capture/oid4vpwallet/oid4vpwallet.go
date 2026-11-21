@@ -52,7 +52,7 @@ func init() {
 				return conformance.OutcomeAccepted, nil
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "undefined-prefix",
 			Description: "The conformance client asks the hosted wallet to resolve a counterparty request_uri whose signed request object carries client_id entity_id:..., a prefix OpenID4VP 1.0 does not define, beside the removed client_id_scheme parameter claiming pre-registration. The wallet decides from the text before the colon alone and refuses.",
 			Actor:       conformance.ActorCounterparty,
@@ -64,14 +64,14 @@ func init() {
 				}
 				return refusal(result, "invalid_request", `unsupported client_id scheme prefix in "entity_id:`, stepFetchRequestObject)
 			},
-		},
+		}},
 	})
 
 	capture.Register("VP-002", capture.Entry{
 		Unavailable: map[conformance.ArtefactKind]string{
 			conformance.KindPassing: "The hosted wallet takes the refusal option Section 5.9.2 allows, so it accepts no request whose client_id carries an unrecognised Client Identifier Prefix.",
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "unrecognised-prefix",
 			Description: "The conformance client asks the hosted wallet to resolve a counterparty request_uri whose signed request object carries client_id unregistered_prefix:..., a Client Identifier Prefix the wallet does not recognise. The wallet refuses the request rather than treating the identifier as pre-registered.",
 			Actor:       conformance.ActorCounterparty,
@@ -83,7 +83,7 @@ func init() {
 				}
 				return refusal(result, "invalid_request", `unsupported client_id scheme prefix in "unregistered_prefix:`, stepFetchRequestObject)
 			},
-		},
+		}},
 	})
 
 	capture.Register("VP-003", capture.Entry{
@@ -107,7 +107,7 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         resolveByGET,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "json-wrapped-request-object",
 			Description: "The conformance client asks the hosted wallet to resolve a counterparty request_uri that answers GET with Content-Type: application/json and the signed request object wrapped in a JSON object. The wallet refuses the response for its media type before decoding anything.",
 			Actor:       conformance.ActorCounterparty,
@@ -119,14 +119,14 @@ func init() {
 				}
 				return refusal(result, "invalid_request", `request_uri GET returned unsupported Content-Type "application/json`, stepFetchRequestObject)
 			},
-		},
+		}},
 	})
 
 	capture.Register("VP-011", capture.Entry{
 		Unavailable: map[conformance.ArtefactKind]string{
 			conformance.KindPassing: "The hosted wallet supports no transaction data type, so it refuses every request carrying transaction_data; there is no request with transaction_data it accepts.",
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "unsupported-transaction-data",
 			Description: "The conformance client asks the hosted wallet to resolve a counterparty request_uri whose signed request object carries a transaction_data entry of a type no wallet implements. The wallet, which supports no transaction data type, returns invalid_transaction_data instead of ignoring the parameter.",
 			Actor:       conformance.ActorCounterparty,
@@ -139,7 +139,7 @@ func init() {
 				check := `transaction data type "` + env.CounterpartyURL + `/scenarios/vp-011/transaction-type" is not supported`
 				return refusal(result, "invalid_transaction_data", check, stepFetchRequestObject)
 			},
-		},
+		}},
 	})
 
 	capture.Register("VP-012", capture.Entry{
@@ -150,7 +150,7 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         resolveByPOST,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "mismatched-wallet-nonce",
 			Description: "The conformance client asks the hosted wallet to resolve a counterparty request_uri with request_uri_method=post. The counterparty answers the wallet's POSTed wallet_nonce with a signed request object whose wallet_nonce claim is a different value, and the wallet terminates request processing.",
 			Actor:       conformance.ActorCounterparty,
@@ -162,7 +162,7 @@ func init() {
 				}
 				return refusal(result, "invalid_request", "request object does not contain the wallet_nonce sent in the request_uri POST", stepFetchRequestObject)
 			},
-		},
+		}},
 	})
 
 	capture.Register("CW-H017", capture.Entry{
@@ -186,7 +186,7 @@ func init() {
 				return conformance.OutcomeAccepted, nil
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "broken-es256-signature",
 			Description: "The conformance client asks the hosted wallet to preview a counterparty request_uri whose request object is signed ES256 under a decentralized_identifier client_id, with one claim changed after signing. The wallet resolves the did:web DID Document, checks the ES256 signature with the published P-256 key, and refuses because it does not verify.",
 			Actor:       conformance.ActorCounterparty,
@@ -213,7 +213,7 @@ func init() {
 				}
 				return refusal(result, "invalid_request", "request object signature verification failed", stepResolveDIDDocument)
 			},
-		},
+		}},
 	})
 }
 

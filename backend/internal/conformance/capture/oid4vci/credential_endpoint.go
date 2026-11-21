@@ -24,7 +24,7 @@ func init() {
 				return unrecognisedProofMember(ctx, env, true)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "proof-only-in-unrecognised-member",
 			Description: "The conformance client sends /oid4vci/credential a Credential Request whose only key proof is a valid jwt proof inside the singular proof member, which OID4VCI 1.0 Final does not define, and no proofs member.",
 			Actor:       conformance.ActorConformanceClient,
@@ -32,7 +32,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return unrecognisedProofMember(ctx, env, false)
 			},
-		},
+		}},
 	})
 
 	capture.Register("CI-007", capture.Entry{
@@ -45,7 +45,7 @@ func init() {
 				return credentialIdentifierRequest(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "credential-identifier-from-another-token",
 			Description: "The conformance client sends /oid4vci/credential a credential_identifier that the issuer returned with a second Access Token, presented with the first Access Token.",
 			Actor:       conformance.ActorConformanceClient,
@@ -53,7 +53,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return credentialIdentifierRequest(ctx, env, true)
 			},
-		},
+		}},
 	})
 
 	capture.Register("CI-009", capture.Entry{
@@ -64,13 +64,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         advertisedNonceEndpoint,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "proof-without-c-nonce",
 			Description: "The conformance client sends /oid4vci/credential a Credential Request whose jwt proof is correctly signed and addressed but carries no nonce claim.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         proofWithoutNonce,
-		},
+		}},
 	})
 
 	capture.Register("CI-012", capture.Entry{
@@ -96,7 +96,7 @@ func init() {
 				return reusedNonce(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "consumed-c-nonce-reused",
 			Description: "The conformance client spends a c_nonce on one Credential Request, then sends a second Credential Request on the same Access Token with a newly signed jwt proof that carries the same c_nonce.",
 			Actor:       conformance.ActorConformanceClient,
@@ -104,7 +104,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return reusedNonce(ctx, env, true)
 			},
-		},
+		}},
 	})
 }
 

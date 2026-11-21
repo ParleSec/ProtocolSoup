@@ -125,6 +125,8 @@ export interface WireCapturedMessage {
   headers?: Record<string, string[]>
   body?: WireCapturedPayload
   raw?: WireCapturedPayload
+  /** What was encrypted into, or decrypted from, a JWE body; recorded only by the hosted wallet. */
+  plaintext?: WireCapturedPayload
   status?: number
   statusText?: string
 }

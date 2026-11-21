@@ -32,7 +32,7 @@ func init() {
 				return dpopTokenRequest(ctx, env, 1)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "two-dpop-headers",
 			Description: "The conformance client sends the same token request with two DPoP header fields, each carrying a valid proof.",
 			Actor:       conformance.ActorConformanceClient,
@@ -40,63 +40,63 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return dpopTokenRequest(ctx, env, 2)
 			},
-		},
+		}},
 	})
 
 	capture.Register("DP-002", capture.Entry{
 		Passing: conformantTokenScenario("all-required-claims",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof whose payload carries jti, htm, htu and iat, plus the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("missing-required-claim",
+		Failing: []*capture.Scenario{brokenTokenScenario("missing-required-claim",
 			"The conformance client sends four client_credentials token requests to /oauth2/token, each with a correctly signed DPoP proof that carries the server-provided nonce but omits one of jti, htm, htu and iat.",
-			withoutClaim("jti"), withoutClaim("htm"), withoutClaim("htu"), withoutClaim("iat")),
+			withoutClaim("jti"), withoutClaim("htm"), withoutClaim("htu"), withoutClaim("iat"))},
 	})
 
 	capture.Register("DP-003", capture.Entry{
 		Passing: conformantTokenScenario("typ-dpop-jwt",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof whose JOSE header typ is dpop+jwt. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("typ-not-dpop-jwt",
+		Failing: []*capture.Scenario{brokenTokenScenario("typ-not-dpop-jwt",
 			"The conformance client sends two client_credentials token requests to /oauth2/token with otherwise valid DPoP proofs, the first with the JOSE header typ set to JWT and the second with no typ header parameter.",
-			withHeader("typ", "JWT"), withHeader("typ", nil)),
+			withHeader("typ", "JWT"), withHeader("typ", nil))},
 	})
 
 	capture.Register("DP-004", capture.Entry{
 		Passing: conformantTokenScenario("alg-es256",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof signed with ES256, one of the algorithms the server lists in dpop_signing_alg_values_supported. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("alg-none-mac-or-unlisted",
+		Failing: []*capture.Scenario{brokenTokenScenario("alg-none-mac-or-unlisted",
 			"The conformance client sends three client_credentials token requests to /oauth2/token: one with an unsigned proof whose alg is none, one with a proof whose alg is HS256 and whose MAC uses a secret only the client holds, and one signed with ES384, a registered asymmetric algorithm the server does not list in dpop_signing_alg_values_supported.",
-			algNone, algHS256, algES384),
+			algNone, algHS256, algES384)},
 	})
 
 	capture.Register("DP-005", capture.Entry{
 		Passing: conformantTokenScenario("signed-by-jwk-key",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof signed by the private key that matches the public key in its jwk header. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("signed-by-other-key",
+		Failing: []*capture.Scenario{brokenTokenScenario("signed-by-other-key",
 			"The conformance client sends a client_credentials token request to /oauth2/token with a DPoP proof whose jwk header carries one P-256 public key but whose signature was made with a different P-256 private key.",
-			signedByOtherKey),
+			signedByOtherKey)},
 	})
 
 	capture.Register("DP-006", capture.Entry{
 		Passing: conformantTokenScenario("public-jwk",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof whose jwk header carries only the public members kty, crv, x and y. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("jwk-with-private-d",
+		Failing: []*capture.Scenario{brokenTokenScenario("jwk-with-private-d",
 			"The conformance client sends a client_credentials token request to /oauth2/token with a DPoP proof whose jwk header also carries the private member d. The key was generated for this request alone, and the proof is correctly signed with it.",
-			privateJWK),
+			privateJWK)},
 	})
 
 	capture.Register("DP-007", capture.Entry{
 		Passing: conformantTokenScenario("htm-post",
 			"The conformance client POSTs a client_credentials token request to /oauth2/token with a DPoP proof whose htm is POST. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("htm-mismatch",
+		Failing: []*capture.Scenario{brokenTokenScenario("htm-mismatch",
 			"The conformance client POSTs two client_credentials token requests to /oauth2/token with otherwise valid DPoP proofs, the first with htm GET and the second with htm post in lower case.",
-			withClaim("htm", http.MethodGet), withClaim("htm", "post")),
+			withClaim("htm", http.MethodGet), withClaim("htm", "post"))},
 	})
 
 	capture.Register("DP-008", capture.Entry{
 		Passing: conformantTokenScenario("htu-token-endpoint",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof whose htu is the token endpoint URI. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("htu-other-endpoint",
+		Failing: []*capture.Scenario{brokenTokenScenario("htu-other-endpoint",
 			"The conformance client sends a client_credentials token request to /oauth2/token with an otherwise valid DPoP proof whose htu names /oauth2/introspect on the same server.",
-			htuOtherEndpoint),
+			htuOtherEndpoint)},
 	})
 
 	capture.Register("DP-009", capture.Entry{
@@ -109,7 +109,7 @@ func init() {
 				return tokenNonce(ctx, env, presentIssuedNonce)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "nonce-mismatch",
 			Description: "After receiving a DPoP-Nonce from /oauth2/token in a use_dpop_nonce error, the conformance client sends two more client_credentials token requests: one whose proof carries a nonce value the server never issued, and one whose proof has no nonce claim.",
 			Actor:       conformance.ActorConformanceClient,
@@ -117,16 +117,16 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return tokenNonce(ctx, env, presentOtherNonce)
 			},
-		},
+		}},
 	})
 
 	capture.Register("DP-010", capture.Entry{
 		Passing: conformantTokenScenario("iat-now",
 			"The conformance client requests a client_credentials token from /oauth2/token with a DPoP proof whose iat is the current time. The proof carries the nonce the token endpoint issued in an earlier use_dpop_nonce challenge."),
-		Failing: brokenTokenScenario("iat-outside-window",
+		Failing: []*capture.Scenario{brokenTokenScenario("iat-outside-window",
 			"The conformance client sends two client_credentials token requests to /oauth2/token with otherwise valid DPoP proofs, one whose iat is five minutes in the past and one whose iat is five minutes in the future, both outside the server's 60-second window.",
 			withClaim("iat", func() any { return time.Now().Add(-iatOffset).Unix() }),
-			withClaim("iat", func() any { return time.Now().Add(iatOffset).Unix() })),
+			withClaim("iat", func() any { return time.Now().Add(iatOffset).Unix() }))},
 	})
 
 	capture.Register("DP-011", capture.Entry{
@@ -139,7 +139,7 @@ func init() {
 				return resourceATH(ctx, env, false)
 			},
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "ath-mismatch",
 			Description: "The conformance client presents a DPoP-bound access token to GET /oauth2/resource twice, each time with a proof signed by the token's own key and carrying the resource's DPoP-Nonce: one whose ath is the hash of a second access token bound to the same key, and one with no ath claim.",
 			Actor:       conformance.ActorConformanceClient,
@@ -147,7 +147,7 @@ func init() {
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return resourceATH(ctx, env, true)
 			},
-		},
+		}},
 	})
 
 	capture.Register("DP-012", capture.Entry{

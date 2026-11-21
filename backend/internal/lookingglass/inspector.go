@@ -201,15 +201,21 @@ type CapturedExchange struct {
 
 // CapturedMessage represents one side of an HTTP exchange
 type CapturedMessage struct {
-	Method     string              `json:"method,omitempty"`
-	URL        string              `json:"url,omitempty"`
-	Host       string              `json:"host,omitempty"`
-	Proto      string              `json:"proto,omitempty"`
-	Headers    map[string][]string `json:"headers,omitempty"`
-	Body       *CapturedPayload    `json:"body,omitempty"`
-	Raw        *CapturedPayload    `json:"raw,omitempty"`
-	Status     int                 `json:"status,omitempty"`
-	StatusText string              `json:"status_text,omitempty"`
+	Method  string              `json:"method,omitempty"`
+	URL     string              `json:"url,omitempty"`
+	Host    string              `json:"host,omitempty"`
+	Proto   string              `json:"proto,omitempty"`
+	Headers map[string][]string `json:"headers,omitempty"`
+	Body    *CapturedPayload    `json:"body,omitempty"`
+	Raw     *CapturedPayload    `json:"raw,omitempty"`
+	// Plaintext is what the sender encrypted into Body, or the receiver
+	// decrypted from it, when Body is a JWE. Only a party that holds the key
+	// can record it, so it is set on exchanges the hosted wallet recorded of
+	// its own encrypted Credential Requests and Responses; the middleware,
+	// which sees only the wire, leaves it empty.
+	Plaintext  *CapturedPayload `json:"plaintext,omitempty"`
+	Status     int              `json:"status,omitempty"`
+	StatusText string           `json:"status_text,omitempty"`
 }
 
 // CapturedPayload holds raw or parsed payload data

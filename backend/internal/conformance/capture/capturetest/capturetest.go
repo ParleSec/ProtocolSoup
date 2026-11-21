@@ -52,7 +52,9 @@ func RunLive(t *testing.T) {
 	}
 	for _, req := range set.Requirements {
 		logArtefact(t, req.ID, conformance.KindPassing, req.Passing)
-		logArtefact(t, req.ID, conformance.KindFailing, req.Failing)
+		for i := range req.Failing {
+			logArtefact(t, req.ID, conformance.KindFailing, &req.Failing[i])
+		}
 		for kind, reason := range req.Unavailable {
 			t.Logf("%s %s: unavailable: %s", req.ID, kind, reason)
 		}

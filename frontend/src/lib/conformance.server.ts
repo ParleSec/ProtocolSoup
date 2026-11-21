@@ -145,14 +145,15 @@ export interface ConformanceRequirementArtefacts {
   publish_after?: string
   source_base_url?: string
   passing?: ConformanceArtefact
-  failing?: ConformanceArtefact
+  /** One artefact per way the requirement was broken and refused. */
+  failing?: ConformanceArtefact[]
   unavailable?: Partial<Record<ConformanceArtefactKind, string>>
 }
 
 type RawArtefact = Omit<ConformanceArtefact, 'exchanges'> & { exchanges?: unknown[] }
 type RawRequirementArtefacts = Omit<ConformanceRequirementArtefacts, 'passing' | 'failing'> & {
   passing?: RawArtefact
-  failing?: RawArtefact
+  failing?: RawArtefact[]
 }
 
 function normalizeArtefact(raw?: RawArtefact): ConformanceArtefact | undefined {
@@ -168,7 +169,13 @@ export async function getConformanceRequirementArtefacts(id: string): Promise<Co
     `/api/conformance/requirements/${encodeURIComponent(id)}/artefacts`,
     REVALIDATE_SECONDS,
   )
-  return { ...raw, passing: normalizeArtefact(raw.passing), failing: normalizeArtefact(raw.failing) }
+  return {
+    ...raw,
+    passing: normalizeArtefact(raw.passing),
+    failing: (raw.failing ?? [])
+      .map((artefact) => normalizeArtefact(artefact))
+      .filter((artefact): artefact is ConformanceArtefact => artefact !== undefined),
+  }
 }
 
 export function getConformanceSitemap(): Promise<ConformanceSitemapEntry[]> {

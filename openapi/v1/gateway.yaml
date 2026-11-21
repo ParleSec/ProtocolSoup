@@ -1371,10 +1371,13 @@ components:
         passing:
           $ref: "#/components/schemas/ConformanceArtefact"
         failing:
-          $ref: "#/components/schemas/ConformanceArtefact"
+          type: array
+          description: One artefact per way the requirement was broken and refused.
+          items:
+            $ref: "#/components/schemas/ConformanceArtefact"
         unavailable:
           type: object
-          description: Reason, per kind, that an artefact could not be captured from production.
+          description: Reason, per kind, that no artefact could be captured from production.
           properties:
             passing:
               type: string
@@ -1471,6 +1474,12 @@ components:
           $ref: "#/components/schemas/CapturedPayload"
         raw:
           $ref: "#/components/schemas/CapturedPayload"
+        plaintext:
+          allOf:
+            - $ref: "#/components/schemas/CapturedPayload"
+          description: >-
+            What the sender encrypted into body, or the receiver decrypted from it, when body is a JWE.
+            Present only on exchanges the hosted wallet recorded of its own encrypted Credential Requests and Responses.
         status:
           type: integer
         status_text:

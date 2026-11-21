@@ -25,12 +25,25 @@ type Scenario struct {
 	Run func(ctx context.Context, env *Env) (conformance.ArtefactOutcome, error)
 }
 
-// Entry says how a requirement is demonstrated. Each kind is either a
-// scenario or an unavailable reason.
+// Entry says how a requirement is demonstrated. Each kind is either
+// scenarios or an unavailable reason. A requirement has one passing
+// scenario, the conformant exchange, and as many failing scenarios as there
+// are distinct ways to break it that a real server or counterparty refuses.
 type Entry struct {
 	Passing     *Scenario
-	Failing     *Scenario
+	Failing     []*Scenario
 	Unavailable map[conformance.ArtefactKind]string
+}
+
+// Scenarios returns the scenarios registered for kind.
+func (e Entry) Scenarios(kind conformance.ArtefactKind) []*Scenario {
+	if kind == conformance.KindPassing {
+		if e.Passing == nil {
+			return nil
+		}
+		return []*Scenario{e.Passing}
+	}
+	return e.Failing
 }
 
 // entries maps a registry requirement ID to how it is demonstrated. The
@@ -107,39 +120,34 @@ func Run(ctx context.Context, env *Env, recorder *Recorder, commit string, only 
 			}
 		}
 		for _, kind := range []conformance.ArtefactKind{conformance.KindPassing, conformance.KindFailing} {
-			scenario := entry.Passing
-			if kind == conformance.KindFailing {
-				scenario = entry.Failing
-			}
-			if scenario == nil {
-				continue
-			}
-			_ = recorder.Take()
-			outcome, err := scenario.Run(ctx, env)
-			exchanges := recorder.Take()
-			if ctx.Err() != nil {
-				return nil, mismatches, ctx.Err()
-			}
-			if err != nil {
-				mismatches = append(mismatches, Mismatch{ID: id, Kind: kind, Scenario: scenario.Name, Reason: err.Error()})
-				continue
-			}
-			if outcome != scenario.Expected {
-				mismatches = append(mismatches, Mismatch{ID: id, Kind: kind, Scenario: scenario.Name,
-					Reason: fmt.Sprintf("production %s it; a conformant server %s it", outcome, scenario.Expected)})
-			}
-			artefact := &conformance.Artefact{
-				Scenario:    scenario.Name,
-				Actor:       scenario.Actor,
-				Description: scenario.Description,
-				Expected:    scenario.Expected,
-				Outcome:     outcome,
-				Exchanges:   exchanges,
-			}
-			if kind == conformance.KindPassing {
-				result.Passing = artefact
-			} else {
-				result.Failing = artefact
+			for _, scenario := range entry.Scenarios(kind) {
+				_ = recorder.Take()
+				outcome, err := scenario.Run(ctx, env)
+				exchanges := recorder.Take()
+				if ctx.Err() != nil {
+					return nil, mismatches, ctx.Err()
+				}
+				if err != nil {
+					mismatches = append(mismatches, Mismatch{ID: id, Kind: kind, Scenario: scenario.Name, Reason: err.Error()})
+					continue
+				}
+				if outcome != scenario.Expected {
+					mismatches = append(mismatches, Mismatch{ID: id, Kind: kind, Scenario: scenario.Name,
+						Reason: fmt.Sprintf("production %s it; a conformant server %s it", outcome, scenario.Expected)})
+				}
+				artefact := conformance.Artefact{
+					Scenario:    scenario.Name,
+					Actor:       scenario.Actor,
+					Description: scenario.Description,
+					Expected:    scenario.Expected,
+					Outcome:     outcome,
+					Exchanges:   exchanges,
+				}
+				if kind == conformance.KindPassing {
+					result.Passing = &artefact
+				} else {
+					result.Failing = append(result.Failing, artefact)
+				}
 			}
 		}
 		set.Requirements = append(set.Requirements, result)

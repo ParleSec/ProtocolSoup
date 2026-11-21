@@ -63,13 +63,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         presentConformant,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "altered-element-value",
 			Description: presentDescription + " Before presenting, it replaces the elementValue of the family_name IssuerSignedItem with another name, keeping that item's digestID, random and elementIdentifier and leaving IssuerAuth unchanged. The item's SHA-256 digest no longer equals the MSO valueDigests entry for its digestID, so the verifier must deny the presentation with a digest mismatch.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         presentAlteredElementValue,
-		},
+		}},
 	})
 
 	capture.Register("MDOC-004", capture.Entry{
@@ -80,13 +80,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         presentConformant,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "version-2-0",
 			Description: presentDescription + " The DeviceResponse is otherwise valid, with the issuer's IssuerSigned and a valid deviceSignature, but its version is \"2.0\". The verifier must refuse a DeviceResponse whose version is not exactly \"1.0\".",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         presentVersion2,
-		},
+		}},
 	})
 
 	capture.Register("MDOC-005", capture.Entry{
@@ -97,13 +97,13 @@ func init() {
 			Expected:    conformance.OutcomeAccepted,
 			Run:         presentConformant,
 		},
-		Failing: &capture.Scenario{
+		Failing: []*capture.Scenario{{
 			Name:        "self-made-document-signer",
 			Description: presentDescription + " Before presenting, it creates its own CA and a document-signer certificate under it, and puts that certificate in place of the issuer's in the IssuerAuth unprotected x5chain header (label 33), which the COSE signature does not cover; the MSO and signature are unchanged. The certificate does not chain to any IACA root the verifier is configured with, so the verifier must deny the presentation when certificate path validation fails.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeRejected,
 			Run:         presentSelfMadeDocumentSigner,
-		},
+		}},
 	})
 
 	capture.Register("MDOC-006", capture.Entry{
