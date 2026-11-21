@@ -425,6 +425,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 	router.Post("/token", p.handleToken)
 	router.Post("/par", p.handlePushedAuthorizationRequest)
 	router.Get("/status-lists/{listID}", p.handleStatusList)
+	router.Get(mdoc.CRLDistributionPath, p.handleIACACRL)
 	router.Get("/credential-types/university-degree", p.handleUniversityDegreeTypeMetadata)
 	router.Post("/nonce", p.handleNonce)
 	router.Post("/credential", p.handleCredential)
@@ -932,6 +933,28 @@ func (p *Plugin) vcAnnotation(key string) []lookingglass.Annotation {
 
 func (p *Plugin) issuerID() string {
 	return p.baseURL + "/oid4vci"
+}
+
+// handleIACACRL serves the CRL that the IACA root and the document-signer
+// certificate name in cRLDistributionPoints. RFC 5280 Section 4.2.1.13: "When
+// the HTTP or FTP URI scheme is used, the URI MUST point to a single DER
+// encoded CRL as specified in [RFC2585]. HTTP server implementations accessed
+// via the URI SHOULD specify the media type application/pkix-crl in the
+// content-type header field of the response."
+func (p *Plugin) handleIACACRL(w http.ResponseWriter, _ *http.Request) {
+	if p.mdocPKI == nil {
+		writeServerError(w, "issue IACA CRL", fmt.Errorf("issuer PKI is unavailable"))
+		return
+	}
+	der, err := p.mdocPKI.RevocationList(time.Now())
+	if err != nil {
+		writeServerError(w, "issue IACA CRL", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/pkix-crl")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(der)
 }
 
 // initIssuerPKI loads or creates the persistent ISO/IEC 18013-5 issuer PKI.

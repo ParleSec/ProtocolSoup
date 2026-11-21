@@ -588,6 +588,28 @@ paths:
               schema: {type: string}
         "404":
           description: Unknown status list.
+  /oid4vci/crl/mdl-iaca.crl:
+    get:
+      tags: [OID4VCI]
+      summary: Retrieve the IACA certificate revocation list
+      description: >-
+        The CRL named by cRLDistributionPoints in the IACA root and the
+        document-signer certificate. A single DER-encoded CRL signed by the
+        IACA (RFC 5280 Section 4.2.1.13, RFC 2585).
+      operationId: vcGetIACACRL
+      security: []
+      responses:
+        "200":
+          description: DER-encoded X.509 v2 CRL.
+          content:
+            application/pkix-crl:
+              schema: {type: string, format: binary}
+        "500":
+          description: The issuer PKI is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oid4vci/credential-types/university-degree:
     get:
       tags: [OID4VCI]

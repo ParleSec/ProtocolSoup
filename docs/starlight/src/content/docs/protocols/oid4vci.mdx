@@ -289,6 +289,7 @@ reference client when HAIP attestation env is configured.
 | Credential Endpoint | `credential_endpoint` from issuer metadata | Submit proof and request credential issuance |
 | Deferred Credential Endpoint | `deferred_credential_endpoint` from issuer metadata | Poll a pending issuance transaction with `transaction_id` |
 | Status List Endpoint | Credential `status.status_list.uri` | Retrieve the certificate-backed signed OAuth Status List Token |
+| IACA CRL Endpoint | `cRLDistributionPoints` in the IACA and document-signer certificates (`/oid4vci/crl/mdl-iaca.crl`) | Retrieve the DER-encoded CRL signed by the IACA (RFC 5280 Section 4.2.1.13), served as `application/pkix-crl` |
 
 ## Illustrative Examples (Non-Normative)
 

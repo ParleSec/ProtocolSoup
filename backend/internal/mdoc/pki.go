@@ -51,6 +51,14 @@ const (
 	// so a verifier can be configured to trust it without parsing the
 	// full bundle.
 	iacaRootFile = "iaca_root.pem"
+
+	// CRLDistributionPath is the path, below the issuer identifier, of the CRL
+	// that both certificates name in cRLDistributionPoints. The issuer serves
+	// RevocationList there.
+	CRLDistributionPath = "/crl/mdl-iaca.crl"
+
+	// crlValidity is the interval between a CRL's thisUpdate and nextUpdate.
+	crlValidity = 7 * 24 * time.Hour
 )
 
 // PKIParams configures generation of the issuer PKI. The country and
@@ -94,7 +102,7 @@ func DefaultPKIParams(issuerID string) PKIParams {
 		DSCommonName:     "ProtocolSoup mDL Document Signer",
 		IACAValidity:     10 * 365 * 24 * time.Hour,
 		DSValidity:       365 * 24 * time.Hour,
-		CRLDistribution:  base + "/crl/mdl-iaca.crl",
+		CRLDistribution:  base + CRLDistributionPath,
 		IssuerAltNameURI: base,
 	}
 }
@@ -189,6 +197,33 @@ func (p *IssuerPKI) Organization() string {
 // as its configured mdoc trust anchor.
 func (p *IssuerPKI) IACARootPEM() []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.iacaCert.Raw})
+}
+
+// RevocationList returns the current DER-encoded CRL, issued and signed by the
+// IACA, for the certificates this PKI has issued. RFC 5280 Section 4.2.1.13:
+// "When the HTTP or FTP URI scheme is used, the URI MUST point to a single DER
+// encoded CRL as specified in [RFC2585]." The IACA has revoked no certificate,
+// so the list is empty, and RFC 5280 Section 5.1.2.6 applies: "When there are
+// no revoked certificates, the revoked certificates list MUST be absent."
+//
+// The CRL is version 2 with nextUpdate, the authority key identifier and a CRL
+// number (RFC 5280 Sections 5.1.2.1, 5.1.2.5, 5.2.1 and 5.2.3). The CRL number
+// is thisUpdate in Unix seconds, which meets Section 5.2.3 without stored
+// state: it rises with time across restarts, and "if the this update field
+// (Section 5.1.2.4) in the two CRLs are not identical, the CRL numbers MUST be
+// different."
+func (p *IssuerPKI) RevocationList(now time.Time) ([]byte, error) {
+	thisUpdate := now.UTC().Truncate(time.Second)
+	der, err := x509.CreateRevocationList(rand.Reader, &x509.RevocationList{
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
+		Number:             big.NewInt(thisUpdate.Unix()),
+		ThisUpdate:         thisUpdate,
+		NextUpdate:         thisUpdate.Add(crlValidity),
+	}, p.iacaCert, p.iacaKey)
+	if err != nil {
+		return nil, fmt.Errorf("mdoc: create IACA CRL: %w", err)
+	}
+	return der, nil
 }
 
 // GenerateIssuerPKI builds a fresh IACA root and a document signer chained to
