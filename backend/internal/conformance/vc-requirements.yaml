@@ -1426,6 +1426,38 @@ requirements:
       normative storage deviation. Decision record is docs/packages/wallet.md
       (no separate ADR file).
 
+  - id: CW-101
+    specification: oid4vci
+    section: "Appendix D.2"
+    level: MUST
+    title: Key attestation levels assert ISO 18045 attack resistance
+    question: "When may a wallet's key attestation claim an iso_18045 key_storage level?"
+    statement: >-
+      This specification defines the following values for key_storage and
+      user_authentication: iso_18045_high: It MUST be used when key storage or
+      user authentication is resistant to attack with attack potential "High",
+      equivalent to VAN.5 according to [ISO.18045]. iso_18045_moderate: It
+      MUST be used when key storage or user authentication is resistant to
+      attack with attack potential "Moderate", equivalent to VAN.4 according
+      to [ISO.18045]. iso_18045_enhanced-basic: It MUST be used when key
+      storage or user authentication is resistant to attack with attack
+      potential "Enhanced-Basic", equivalent to VAN.3 according to
+      [ISO.18045]. iso_18045_basic: It MUST be used when key storage or user
+      authentication is resistant to attack with attack potential "Basic",
+      equivalent to VAN.2 according to [ISO.18045].
+    roles: [wallet]
+    applicability: applicable
+    implementation:
+      - backend/cmd/walletharness/haip_issuance.go
+      - backend/cmd/walletharness/oid4vci_client.go
+    tests:
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/oid4vci_client_test.go
+        name: TestRefuseUnbackedKeyAttestationLevels
+      - package: ./cmd/walletharness
+        file: backend/cmd/walletharness/main_test.go
+        name: TestHAIPBatchProofsShareSingleKeyAttestation
+
   - id: CW-H003
     specification: haip
     section: "4"
@@ -1538,11 +1570,15 @@ requirements:
     specification: haip
     section: "4.5.1"
     level: MUST
-    title: Key attestations supported; no unproven hardware or ISO 18045 claims
-    question: "Can a software wallet claim ISO 18045 key protection in a key attestation?"
+    title: Key attestations supported with x5c excluding the trust anchor
+    question: "What must a HAIP wallet's key attestation carry in its x5c header?"
     statement: >-
-      Wallets MUST support key attestations. Software wallets MUST NOT claim
-      hardware or ISO 18045 assurance properties they cannot prove.
+      Wallets MUST support key attestations. When using the format specified
+      in Appendix D of [OIDF.OID4VCI]: The public key used to validate the
+      signature on the key attestation MUST be included in the x5c JOSE header
+      of the key attestation. The X.509 certificate of the trust anchor MUST
+      NOT be included in the x5c JOSE header of the key attestation. The X.509
+      certificate signing the key attestation MUST NOT be self-signed.
     roles: [wallet]
     applicability: applicable
     implementation:
@@ -1550,8 +1586,8 @@ requirements:
       - backend/cmd/walletharness/oid4vci_client.go
     tests:
       - package: ./cmd/walletharness
-        file: backend/cmd/walletharness/oid4vci_client_test.go
-        name: TestRefuseUnbackedKeyAttestationLevels
+        file: backend/cmd/walletharness/main_test.go
+        name: TestValidateAttestationX5CExcludesTheTrustAnchor
       - package: ./cmd/walletharness
         file: backend/cmd/walletharness/main_test.go
         name: TestHAIPBatchProofsShareSingleKeyAttestation

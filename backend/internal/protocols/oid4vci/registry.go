@@ -275,7 +275,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			// constraints" (OID4VCI 1.0 Section 12.2.4). HAIP 1.0 sets no level,
 			// and the hosted wallet is software, so demanding iso_18045_moderate
 			// could only be met by claiming a level it cannot prove (OID4VCI 1.0
-			// Appendix D.2; registry requirement CW-H014).
+			// Appendix D.2; registry requirement CW-101).
 			RequireKeyAttestation: true,
 			Claims: []claimDescription{
 				{Path: []string{mdlNamespace, "family_name"}, Mandatory: true},

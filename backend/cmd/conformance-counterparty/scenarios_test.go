@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -174,10 +175,10 @@ func TestIssuerMetadataBreaksOneRuleEach(t *testing.T) {
 	if got := metadata("cw-010")["authorization_servers"]; len(got.([]interface{})) != 1 {
 		t.Fatalf("cw-010 authorization_servers = %v", got)
 	}
-	configuration := metadata("cw-h014")["credential_configurations_supported"].(map[string]interface{})[counterpartyConfigurationID].(map[string]interface{})
+	configuration := metadata("cw-101")["credential_configurations_supported"].(map[string]interface{})[counterpartyConfigurationID].(map[string]interface{})
 	required := configuration["proof_types_supported"].(map[string]interface{})["jwt"].(map[string]interface{})["key_attestations_required"].(map[string]interface{})
 	if required["key_storage"] == nil || required["user_authentication"] == nil {
-		t.Fatalf("cw-h014 key_attestations_required = %v", required)
+		t.Fatalf("cw-101 key_attestations_required = %v", required)
 	}
 
 	resp, body := get(t, server.URL+"/.well-known/oauth-authorization-server/scenarios/cw-h003")
@@ -279,18 +280,21 @@ func TestCI010CredentialEndpointAnswersAnEmptyCredentialsArray(t *testing.T) {
 // TestCW072EncryptsTheResponseWithAnUnnegotiatedAlgorithm sends the
 // encrypted Credential Request a wallet would and checks the response is a
 // JWE under ECDH-ES+A256KW to the wallet's key, not the negotiated ECDH-ES.
-func TestCW072EncryptsTheResponseWithAnUnnegotiatedAlgorithm(t *testing.T) {
-	server := newTestServer(t)
-	accessToken := redeemOffer(t, server.URL, "cw-072")
+// encryptedCredentialRequest redeems scenario's offer and sends the encrypted
+// Credential Request a wallet would, asking for an encrypted response to a
+// fresh P-256 key, which it returns with the response.
+func encryptedCredentialRequest(t *testing.T, serverURL, scenario string) (*ecdsa.PrivateKey, *http.Response, []byte) {
+	t.Helper()
+	accessToken := redeemOffer(t, serverURL, scenario)
 
-	_, body := get(t, server.URL+"/.well-known/openid-credential-issuer/scenarios/cw-072")
+	_, body := get(t, serverURL+"/.well-known/openid-credential-issuer/scenarios/"+scenario)
 	var metadata struct {
 		RequestEncryption struct {
 			JWKS jose.JSONWebKeySet `json:"jwks"`
 		} `json:"credential_request_encryption"`
 	}
 	if err := json.Unmarshal(body, &metadata); err != nil || len(metadata.RequestEncryption.JWKS.Keys) != 1 {
-		t.Fatalf("cw-072 credential_request_encryption: %v %s", err, body)
+		t.Fatalf("%s credential_request_encryption: %v %s", scenario, err, body)
 	}
 	walletKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	walletJWK := jose.JSONWebKey{Key: &walletKey.PublicKey, Algorithm: "ECDH-ES", Use: "enc", KeyID: "wallet-response"}
@@ -306,7 +310,7 @@ func TestCW072EncryptsTheResponseWithAnUnnegotiatedAlgorithm(t *testing.T) {
 	object, _ := encrypter.Encrypt(plaintext)
 	compact, _ := object.CompactSerialize()
 
-	req, _ := http.NewRequest(http.MethodPost, server.URL+"/scenarios/cw-072/credential", strings.NewReader(compact))
+	req, _ := http.NewRequest(http.MethodPost, serverURL+"/scenarios/"+scenario+"/credential", strings.NewReader(compact))
 	req.Header.Set("Content-Type", "application/jwt")
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := http.DefaultClient.Do(req)
@@ -315,6 +319,27 @@ func TestCW072EncryptsTheResponseWithAnUnnegotiatedAlgorithm(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	responseBody, _ := io.ReadAll(resp.Body)
+	return walletKey, resp, responseBody
+}
+
+// TestCW072PlaintextAnswersAnEncryptedRequestInTheClear checks the second
+// cw-072 case: the encrypted Credential Request that asked for an encrypted
+// response is answered as plaintext application/json, deferring issuance.
+func TestCW072PlaintextAnswersAnEncryptedRequestInTheClear(t *testing.T) {
+	server := newTestServer(t)
+	_, resp, responseBody := encryptedCredentialRequest(t, server.URL, "cw-072-plaintext")
+	if resp.StatusCode != http.StatusAccepted || !strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
+		t.Fatalf("cw-072-plaintext credential response: %d %s %s", resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
+	}
+	response := decodeJSON(t, responseBody)
+	if response["transaction_id"] == "" || response["credentials"] != nil || !strings.Contains(fmt.Sprint(response["conformance_counterparty"]), "plaintext") {
+		t.Fatalf("cw-072-plaintext response must defer issuance in the clear and say so: %s", responseBody)
+	}
+}
+
+func TestCW072EncryptsTheResponseWithAnUnnegotiatedAlgorithm(t *testing.T) {
+	server := newTestServer(t)
+	walletKey, resp, responseBody := encryptedCredentialRequest(t, server.URL, "cw-072")
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/jwt" {
 		t.Fatalf("cw-072 credential response: %d %s %s", resp.StatusCode, resp.Header.Get("Content-Type"), responseBody)
 	}
