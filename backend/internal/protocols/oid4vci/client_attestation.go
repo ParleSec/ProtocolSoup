@@ -168,6 +168,9 @@ func validateClientAttestationJWT(compact string, roots *x509.CertPool) (string,
 	}
 
 	parsed, err := jwt.Parse(compact, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		return leaf.PublicKey, nil
 	})
 	if err != nil {
@@ -224,6 +227,9 @@ func validateClientAttestationPoPJWT(compact string, cnfJWK crypto.JWK, expected
 		return "", fmt.Errorf("client instance key: %w", err)
 	}
 	parsed, err := jwt.Parse(compact, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
 			return nil, fmt.Errorf("pop jwt uses unexpected algorithm")
 		}

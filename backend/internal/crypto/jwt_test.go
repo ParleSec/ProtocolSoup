@@ -1,12 +1,47 @@
 package crypto
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+// TestVerifySignatureWithKeyRejectsCriticalHeader proves a JWS that carries
+// the "crit" Header Parameter is invalid although its signature is valid: no
+// JWS extension is understood and supported here (RFC 7515 Section 4.1.11).
+func TestVerifySignatureWithKeyRejectsCriticalHeader(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	sign := func(critical bool) string {
+		token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{"iss": "https://issuer.example"})
+		if critical {
+			token.Header["crit"] = []string{"urn:example:not-understood"}
+			token.Header["urn:example:not-understood"] = true
+		}
+		signed, err := token.SignedString(key)
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		return signed
+	}
+
+	if valid, err := VerifySignatureWithKey(sign(false), &key.PublicKey); err != nil || !valid {
+		t.Fatalf("JWS without crit: valid=%v err=%v, want valid", valid, err)
+	}
+	valid, err := VerifySignatureWithKey(sign(true), &key.PublicKey)
+	if valid || err == nil || !strings.Contains(err.Error(), "RFC 7515 Section 4.1.11") {
+		t.Fatalf("JWS with crit: valid=%v err=%v, want the RFC 7515 Section 4.1.11 refusal", valid, err)
+	}
+}
 
 func decodeClaims(t *testing.T, token string) map[string]interface{} {
 	t.Helper()

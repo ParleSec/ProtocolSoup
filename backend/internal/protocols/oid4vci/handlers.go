@@ -2356,6 +2356,9 @@ func (p *Plugin) validateProofJWT(proof credentialProof, expectedAudience string
 		return "", emptyJWK, "", err
 	}
 	parsed, err := jwt.Parse(proof.JWT, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if !strings.HasPrefix(token.Method.Alg(), expectedAlgPrefix) {
 			return nil, fmt.Errorf("proof jwt uses unexpected algorithm")
 		}

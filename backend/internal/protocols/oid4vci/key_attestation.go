@@ -67,6 +67,9 @@ func (p *Plugin) validateKeyAttestationJWT(compact string, expectedNonce string)
 	}
 
 	parsed, err := jwt.Parse(compact, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		return leaf.PublicKey, nil
 	})
 	if err != nil {

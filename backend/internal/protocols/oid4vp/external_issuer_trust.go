@@ -94,7 +94,10 @@ func (p *Plugin) validateSDJWTCredentialStatus(raw interface{}, issuerKeys []cry
 		}
 		verifyKey = chain[0].PublicKey
 	}
-	parsed, err := jwt.Parse(strings.TrimSpace(string(rawToken)), func(_ *jwt.Token) (interface{}, error) {
+	parsed, err := jwt.Parse(strings.TrimSpace(string(rawToken)), func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		return verifyKey, nil
 	})
 	if err != nil || !parsed.Valid {

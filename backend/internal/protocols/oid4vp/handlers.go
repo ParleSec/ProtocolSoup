@@ -918,6 +918,9 @@ func (p *Plugin) evaluateVPToken(session *requestSession, vpToken string) *model
 	}
 
 	parsed, err := jwt.Parse(vpToken, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if !strings.HasPrefix(token.Method.Alg(), walletContext.VerificationAlgPrefix) {
 			return nil, fmt.Errorf("vp_token uses unexpected algorithm")
 		}
@@ -1070,6 +1073,9 @@ func (p *Plugin) evaluateSDJWTPresentation(session *requestSession, vpToken stri
 	// Validate KB-JWT
 	if holderKey != nil {
 		kbParsed, kbErr := jwt.Parse(envelope.KeyBindingJWT, func(token *jwt.Token) (interface{}, error) {
+			if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+				return nil, err
+			}
 			if !strings.HasPrefix(token.Method.Alg(), holderAlgPrefix) {
 				return nil, fmt.Errorf("kb-jwt uses unexpected algorithm")
 			}
@@ -1304,6 +1310,9 @@ func (p *Plugin) decryptAndExtractDirectPostJWT(compactJWE string, session *requ
 	}
 
 	parsed, err := jwt.Parse(innerJWT, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if !strings.HasPrefix(token.Method.Alg(), walletContext.VerificationAlgPrefix) {
 			return nil, fmt.Errorf("response jwt uses unexpected algorithm")
 		}

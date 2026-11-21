@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -235,6 +236,9 @@ func (p *Plugin) validateIdentityAssertion(assertion string) (jwt.MapClaims, err
 	// whose signature does not verify. Pinning the algorithm prevents an
 	// attacker choosing "none" or substituting a symmetric algorithm.
 	parsed, err := jwt.Parse(assertion, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if token.Method != jwt.SigningMethodRS256 {
 			return nil, fmt.Errorf("unexpected signing algorithm %v", token.Header["alg"])
 		}

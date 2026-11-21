@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -473,6 +474,9 @@ func (rs *ReceiverService) processSET(ctx context.Context, setToken, sessionID s
 
 	// Verify the SET signature
 	parsedToken, err := jwt.Parse(setToken, func(t *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(t.Header); err != nil {
+			return nil, err
+		}
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}

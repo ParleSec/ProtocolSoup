@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -229,6 +230,9 @@ func NewSETDecoder(publicKey *rsa.PublicKey, issuer, audience string) *SETDecode
 // Decode parses and validates a SET token
 func (d *SETDecoder) Decode(tokenString string) (*DecodedSET, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &SETClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}

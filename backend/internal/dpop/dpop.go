@@ -187,6 +187,9 @@ func ValidateProof(compact string, opts ValidateOptions) (*Proof, error) {
 	}
 
 	parsed, err := jwt.Parse(compact, func(token *jwt.Token) (interface{}, error) {
+		if err := internalcrypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		if token.Method.Alg() != algHeader {
 			return nil, errors.New("dpop: signature algorithm does not match the header alg")
 		}

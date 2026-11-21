@@ -68,6 +68,9 @@ func VerifySign1(coseSign1Bytes, externalAAD []byte, key *ecdsa.PublicKey) (*Sig
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectUnknownCritical(msg.Headers.Protected); err != nil {
+		return nil, err
+	}
 	verifier, err := cose.NewVerifier(AlgorithmES256, key)
 	if err != nil {
 		return nil, fmt.Errorf("cose: build ES256 verifier: %w", err)
@@ -80,6 +83,31 @@ func VerifySign1(coseSign1Bytes, externalAAD []byte, key *ecdsa.PublicKey) (*Sig
 		Protected:   msg.Headers.Protected,
 		Unprotected: msg.Headers.Unprotected,
 	}, nil
+}
+
+// rejectUnknownCritical enforces the "crit" header parameter (label 2). RFC
+// 9052 Section 3.1: "This header parameter is used to indicate which protected
+// header parameters an application that is processing a message is required to
+// understand." The verifiers here process one protected header parameter, alg
+// (label 1), so a "crit" array naming any other label names a parameter this
+// application does not understand and the message is refused. go-cose has
+// already refused a "crit" whose labels are absent from the protected bucket.
+func rejectUnknownCritical(protected ProtectedHeader) error {
+	raw, present := protected[cose.HeaderLabelCritical]
+	if !present {
+		return nil
+	}
+	labels, ok := raw.([]any)
+	if !ok || len(labels) == 0 {
+		return fmt.Errorf("cose: \"crit\" header parameter must be a non-empty array of labels (RFC 9052 Section 3.1)")
+	}
+	for _, label := range labels {
+		if n, isInt := asInt64(label); isInt && n == HeaderLabelAlgorithm {
+			continue
+		}
+		return fmt.Errorf("cose: \"crit\" header parameter requires label %v, which is not understood (RFC 9052 Section 3.1)", label)
+	}
+	return nil
 }
 
 // ParseSign1 decodes a COSE_Sign1 message without verifying its signature,
@@ -156,6 +184,9 @@ func VerifySign1Detached(coseSign1Bytes, payload, externalAAD []byte, key *ecdsa
 		return nil, fmt.Errorf("cose: expected a detached payload (CBOR null), got %d attached bytes", len(msg.Payload))
 	}
 	msg.Payload = payload
+	if err := rejectUnknownCritical(msg.Headers.Protected); err != nil {
+		return nil, err
+	}
 	verifier, err := cose.NewVerifier(AlgorithmES256, key)
 	if err != nil {
 		return nil, fmt.Errorf("cose: build ES256 verifier: %w", err)

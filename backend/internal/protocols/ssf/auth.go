@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -134,6 +135,9 @@ func (p *Plugin) validateBearerJWT(tokenString string) (receiverIdentity, error)
 	}
 
 	token, err := jwt.ParseWithClaims(tokenString, jwt.MapClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		kid, _ := token.Header["kid"].(string)
 		var jwk interface{ ToPublicKey() (interface{}, error) }
 		if kid != "" {
