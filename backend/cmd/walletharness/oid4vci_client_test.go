@@ -718,11 +718,66 @@ func TestDoDPoPJSONRequestAcceptsDeferred202AfterNonceRetry(t *testing.T) {
 	if asString(payload["transaction_id"]) != "tx-deferred-1" {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
-	if positiveIntFromAny(payload["interval"]) != 5 {
-		t.Fatalf("interval = %v, want 5", payload["interval"])
+	if interval, ok := deferredInterval(payload); !ok || interval != 5*time.Second {
+		t.Fatalf("interval = %v, want 5s", payload["interval"])
 	}
 	if attempt != 2 {
 		t.Fatalf("attempt = %d, want 2", attempt)
+	}
+}
+
+// TestDeferredIntervalKeepsTheFraction proves OID4VCI 1.0 Section 8.3's
+// "positive number" of seconds is honoured whole: a fractional interval is
+// never rounded down to a shorter wait, and a missing or non-positive value
+// is reported as absent.
+func TestDeferredIntervalKeepsTheFraction(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		raw  interface{}
+		want time.Duration
+		ok   bool
+	}{
+		{float64(5), 5 * time.Second, true},
+		{1.5, 1500 * time.Millisecond, true},
+		{0.25, 250 * time.Millisecond, true},
+		{json.Number("2"), 2 * time.Second, true},
+		{json.Number("0.5"), 500 * time.Millisecond, true},
+		{float64(0), 0, false},
+		{float64(-3), 0, false},
+		{"5", 0, false},
+		{nil, 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := deferredInterval(map[string]interface{}{"interval": tc.raw})
+		if ok != tc.ok || got != tc.want {
+			t.Errorf("interval %v (%T): got %v, %v; want %v, %v", tc.raw, tc.raw, got, ok, tc.want, tc.ok)
+		}
+	}
+	if _, ok := deferredInterval(map[string]interface{}{}); ok {
+		t.Error("a response without interval must report none")
+	}
+}
+
+// TestReadCredentialResponseRejectsPlaintextWhenEncryptionWasRequested proves
+// OID4VCI 1.0 Section 10: a Credential Response that arrives unencrypted
+// although the request carried credential_response_encryption is rejected,
+// while an unencrypted response to a request that asked for none is read.
+func TestReadCredentialResponseRejectsPlaintextWhenEncryptionWasRequested(t *testing.T) {
+	t.Parallel()
+	responseKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	plain := map[string]interface{}{"credentials": []interface{}{map[string]interface{}{"credential": "eyJ"}}}
+	if _, err := readCredentialResponse(context.Background(), "credential response", plain, responseKey); err == nil || !strings.Contains(err.Error(), "unencrypted") {
+		t.Fatalf("an unencrypted response to an encryption request must be rejected, got %v", err)
+	}
+	got, err := readCredentialResponse(context.Background(), "credential response", plain, nil)
+	if err != nil || got["credentials"] == nil {
+		t.Fatalf("an unencrypted response to a plain request must be read: %v %v", got, err)
+	}
+	if _, err := readCredentialResponse(context.Background(), "credential response", map[string]interface{}{"__encrypted_jwt": "a.b.c.d.e"}, nil); err == nil {
+		t.Fatal("an encrypted response without a response key must be an error")
 	}
 }
 

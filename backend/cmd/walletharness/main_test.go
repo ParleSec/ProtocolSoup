@@ -2195,6 +2195,30 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
+// TestValidateAttestationX5CExcludesTheTrustAnchor proves the wallet accepts
+// only an attestation chain HAIP 1.0 Sections 4.4.1 and 4.5.1 allow in x5c:
+// the signing certificate first, no self-signed certificate, so no trust
+// anchor.
+func TestValidateAttestationX5CExcludesTheTrustAnchor(t *testing.T) {
+	t.Parallel()
+	leafKey, chain := createECDSACertificateChain(t, []string{"attester.example"}, "Attester")
+	leafOnly := encodeCertificateChain(chain[:1])
+	if err := validateAttestationX5C(leafOnly, &leafKey.PublicKey); err != nil {
+		t.Fatalf("a leaf signed by an absent trust anchor must be accepted: %v", err)
+	}
+	err := validateAttestationX5C(encodeCertificateChain(chain), &leafKey.PublicKey)
+	if err == nil || !strings.Contains(err.Error(), "self-signed") {
+		t.Fatalf("a chain carrying the self-signed trust anchor must be refused, got %v", err)
+	}
+	otherKey := generateECDSAKey(t)
+	if err := validateAttestationX5C(leafOnly, &otherKey.PublicKey); err == nil {
+		t.Fatal("a leaf that does not carry the signing key must be refused")
+	}
+	if err := validateAttestationX5C([]string{"not base64!"}, &leafKey.PublicKey); err == nil {
+		t.Fatal("an undecodable x5c entry must be refused")
+	}
+}
+
 func TestParseAttestationJWKInputPreservesX5C(t *testing.T) {
 	raw := `{"keys":[{"kty":"EC","crv":"P-256","x":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","y":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","d":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","x5c":["MIIB"]}]}`
 	_, x5c, err := parseAttestationJWKInput(raw)

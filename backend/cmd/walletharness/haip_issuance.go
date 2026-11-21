@@ -6,6 +6,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -75,10 +76,50 @@ func loadAttestationJWKMaterialFromEnv(envName string) (*attestationJWKMaterial,
 	if len(x5c) == 0 {
 		return nil, fmt.Errorf("%s must include an x5c certificate chain", envName)
 	}
+	if err := validateAttestationX5C(x5c, &privateKey.PublicKey); err != nil {
+		return nil, fmt.Errorf("%s x5c: %w", envName, err)
+	}
 	return &attestationJWKMaterial{
 		PrivateKey: privateKey,
 		X5C:        x5c,
 	}, nil
+}
+
+// validateAttestationX5C checks the certificate chain the wallet will put in
+// the x5c header of its Client Attestations and Key Attestations against
+// HAIP 1.0 Sections 4.4.1 and 4.5.1: "The public key used to validate the
+// signature on the key attestation MUST be included in the x5c JOSE header",
+// "The X.509 certificate of the trust anchor MUST NOT be included in the x5c
+// JOSE header", and "The X.509 certificate signing the key attestation MUST
+// NOT be self-signed." The first certificate must therefore carry the
+// signing key, every certificate must be signed by the next one, and none
+// may be self-signed, which is what a trust anchor in the chain would be.
+func validateAttestationX5C(x5c []string, signingKey *ecdsa.PublicKey) error {
+	certificates := make([]*x509.Certificate, 0, len(x5c))
+	for i, encoded := range x5c {
+		der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			return fmt.Errorf("entry %d is not base64 DER: %w", i, err)
+		}
+		certificate, err := x509.ParseCertificate(der)
+		if err != nil {
+			return fmt.Errorf("entry %d: %w", i, err)
+		}
+		if certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature) == nil {
+			return fmt.Errorf("entry %d (%s) is self-signed; HAIP 1.0 excludes the trust anchor from x5c and forbids a self-signed signing certificate", i, certificate.Subject.String())
+		}
+		certificates = append(certificates, certificate)
+	}
+	leafKey, ok := certificates[0].PublicKey.(*ecdsa.PublicKey)
+	if !ok || !leafKey.Equal(signingKey) {
+		return fmt.Errorf("the first certificate does not carry the attestation signing key")
+	}
+	for i := 0; i+1 < len(certificates); i++ {
+		if err := certificates[i].CheckSignatureFrom(certificates[i+1]); err != nil {
+			return fmt.Errorf("entry %d is not signed by entry %d: %w", i, i+1, err)
+		}
+	}
+	return nil
 }
 
 func parseAttestationJWKInput(raw string) (intcrypto.JWK, []string, error) {

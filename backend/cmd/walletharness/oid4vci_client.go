@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -1116,13 +1117,30 @@ func (s *walletHarnessServer) requestCredentialWithLifecycle(
 	if err != nil {
 		return nil, fmt.Errorf("credential request: %w", err)
 	}
-	if encrypted := strings.TrimSpace(asString(payload["__encrypted_jwt"])); encrypted != "" {
-		if built.ResponsePrivateKey == nil {
-			return nil, fmt.Errorf("received encrypted credential response without a response decryption key")
-		}
-		return decryptRecordedCredentialResponse(ctx, encrypted, built.ResponsePrivateKey)
+	return readCredentialResponse(ctx, "credential response", payload, built.ResponsePrivateKey)
+}
+
+// readCredentialResponse returns the Credential or Deferred Credential
+// Response payload, decrypting it when it arrived as a JWE. responseKey is
+// the key the wallet asked the issuer to encrypt to, nil when it asked for
+// no encryption. OID4VCI 1.0 Section 8.3: "If the Client requested an
+// encrypted response by including the credential_response_encryption object
+// in the request, the Credential Issuer MUST encode the information in the
+// Credential Response as specified by Section 10". Section 10: "When
+// encryption of a message was required but the received message is
+// unencrypted, it SHOULD be rejected." The wallet rejects it.
+func readCredentialResponse(ctx context.Context, what string, payload map[string]interface{}, responseKey *ecdsa.PrivateKey) (map[string]interface{}, error) {
+	encrypted := strings.TrimSpace(asString(payload["__encrypted_jwt"]))
+	switch {
+	case encrypted != "" && responseKey == nil:
+		return nil, fmt.Errorf("received encrypted %s without a response decryption key", what)
+	case encrypted != "":
+		return decryptRecordedCredentialResponse(ctx, encrypted, responseKey)
+	case responseKey != nil:
+		return nil, fmt.Errorf("%s is unencrypted application/json although the request carried credential_response_encryption; OID4VCI 1.0 Section 10: a message that was required to be encrypted but arrived unencrypted is rejected", what)
+	default:
+		return payload, nil
 	}
-	return payload, nil
 }
 
 func (s *walletHarnessServer) pollDeferredCredentialAt(
@@ -1199,17 +1217,18 @@ func (s *walletHarnessServer) pollDeferredCredentialAt(
 		if reqErr != nil {
 			return nil, fmt.Errorf("deferred credential request: %w", reqErr)
 		}
-		if encrypted := strings.TrimSpace(asString(payload["__encrypted_jwt"])); encrypted != "" {
-			if responseKey == nil {
-				return nil, fmt.Errorf("received encrypted deferred response without a response decryption key")
-			}
-			return decryptRecordedCredentialResponse(ctx, encrypted, responseKey)
+		// OID4VCI 1.0 Section 9.2: a Deferred Credential Response that still
+		// defers is encrypted like one that issues, so it is read the same
+		// way before the wallet looks for credentials or an interval.
+		payload, reqErr = readCredentialResponse(ctx, "deferred credential response", payload, responseKey)
+		if reqErr != nil {
+			return nil, reqErr
 		}
 		if _, credErr := credentialResponseValues(payload); credErr == nil {
 			return payload, nil
 		}
-		if seconds := positiveIntFromAny(payload["interval"]); seconds > 0 {
-			backoff = time.Duration(seconds) * time.Second
+		if interval, ok := deferredInterval(payload); ok {
+			backoff = interval
 		}
 		select {
 		case <-ctx.Done():
@@ -1307,40 +1326,47 @@ func parsePositiveInt(raw string) (int, error) {
 	return value, nil
 }
 
-// positiveIntFromAny coerces JSON-decoded numbers (float64) or numeric strings
-// into a positive int. Used for OID4VCI deferred `interval` values.
-func positiveIntFromAny(raw interface{}) int {
-	switch v := raw.(type) {
+// deferredInterval reads a Credential Response's interval. OID4VCI 1.0
+// Section 8.3: "Contains a positive number that represents the minimum amount
+// of time in seconds that the Wallet SHOULD wait after receiving the response
+// before sending a new request to the Deferred Credential Endpoint." The
+// number is kept whole, fraction included, so the wallet never waits less
+// than the issuer asked. A missing, non-numeric or non-positive value is
+// reported as absent.
+func deferredInterval(payload map[string]interface{}) (time.Duration, bool) {
+	var seconds float64
+	switch v := payload["interval"].(type) {
 	case float64:
-		if v > 0 {
-			return int(v)
-		}
+		seconds = v
 	case json.Number:
-		n, err := v.Int64()
-		if err == nil && n > 0 {
-			return int(n)
+		parsed, err := v.Float64()
+		if err != nil {
+			return 0, false
 		}
+		seconds = parsed
 	case int:
-		if v > 0 {
-			return v
-		}
-	case string:
-		if n, err := parsePositiveInt(v); err == nil {
-			return n
-		}
+		seconds = float64(v)
+	default:
+		return 0, false
 	}
-	return 0
+	if seconds <= 0 || math.IsInf(seconds, 0) || math.IsNaN(seconds) {
+		return 0, false
+	}
+	return time.Duration(math.Ceil(seconds * float64(time.Second))), true
 }
 
+// waitDeferredInterval waits the interval a Credential Response named before
+// the first Deferred Credential Request, and returns at once when it named
+// none.
 func waitDeferredInterval(ctx context.Context, payload map[string]interface{}) error {
-	seconds := positiveIntFromAny(payload["interval"])
-	if seconds <= 0 {
+	interval, ok := deferredInterval(payload)
+	if !ok {
 		return nil
 	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(time.Duration(seconds) * time.Second):
+	case <-time.After(interval):
 		return nil
 	}
 }
