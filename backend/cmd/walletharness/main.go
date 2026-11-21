@@ -2325,6 +2325,9 @@ func publicKeysFromJWKS(jwks *intcrypto.JWKS, jwtHeader map[string]interface{}) 
 
 func verifyCompactJWTSignature(tokenString string, key interface{}) error {
 	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if err := intcrypto.RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		return key, nil
 	})
 	return err

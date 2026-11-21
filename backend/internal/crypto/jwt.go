@@ -236,6 +236,9 @@ func (s *JWTService) CreateRefreshToken(subject string, clientID string, scope s
 // ValidateToken validates a JWT and returns its claims
 func (s *JWTService) ValidateToken(tokenString string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if err := RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
 		// Check signing method
 		switch token.Method.(type) {
 		case *jwt.SigningMethodRSA:
@@ -313,6 +316,21 @@ type DecodedToken struct {
 	SignatureRaw string                 `json:"signature_raw"`
 }
 
+// RejectCriticalHeader reports a JOSE Header that carries the "crit" Header
+// Parameter. RFC 7515 Section 4.1.11: "If any of the listed extension Header
+// Parameters are not understood and supported by the recipient, then the JWS
+// is invalid." ProtocolSoup understands and supports no JWS extension, so
+// every "crit" value makes the JWS invalid. Section 5.2 step 5 puts the check
+// in signature validation, so every JWS verifier calls this before trusting
+// the signature.
+func RejectCriticalHeader(header map[string]interface{}) error {
+	critical, present := header["crit"]
+	if !present {
+		return nil
+	}
+	return fmt.Errorf("JWS is invalid: \"crit\" Header Parameter %v lists extensions that are not understood and supported (RFC 7515 Section 4.1.11)", critical)
+}
+
 // VerifySignatureWithKey verifies a token signature with a given key
 func VerifySignatureWithKey(tokenString string, key interface{}) (bool, error) {
 	parts := strings.Split(tokenString, ".")
@@ -327,6 +345,9 @@ func VerifySignatureWithKey(tokenString string, key interface{}) (bool, error) {
 	}
 	var header map[string]interface{}
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return false, err
+	}
+	if err := RejectCriticalHeader(header); err != nil {
 		return false, err
 	}
 

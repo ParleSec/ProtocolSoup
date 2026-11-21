@@ -65,6 +65,15 @@ func TestMdocTrustAnchorsCombineExternalAndLocalIssuerRoots(t *testing.T) {
 // whose IACA root is the verifier trust anchor.
 func issueMdocForVerifier(t *testing.T, deviceKey *ecdsa.PrivateKey) (mdoc.IssuerSigned, *mdoc.IssuerPKI) {
 	t.Helper()
+	return issueMdocForVerifierWithProtectedHeader(t, deviceKey, nil)
+}
+
+// issueMdocForVerifierWithProtectedHeader is issueMdocForVerifier with the
+// IssuerAuth COSE_Sign1 signed under the given protected header, for tests that
+// need a validly signed IssuerAuth carrying extra protected header parameters.
+// A nil header signs the usual IssuerAuth through mdoc.BuildIssuerAuth.
+func issueMdocForVerifierWithProtectedHeader(t *testing.T, deviceKey *ecdsa.PrivateKey, protected intcose.ProtectedHeader) (mdoc.IssuerSigned, *mdoc.IssuerPKI) {
+	t.Helper()
 	pki, err := mdoc.GenerateIssuerPKI(mdoc.DefaultPKIParams("https://issuer.example"))
 	if err != nil {
 		t.Fatalf("GenerateIssuerPKI: %v", err)
@@ -99,9 +108,18 @@ func issueMdocForVerifier(t *testing.T, deviceKey *ecdsa.PrivateKey) (mdoc.Issue
 	if err != nil {
 		t.Fatalf("EncodeMSOBytes: %v", err)
 	}
-	issuerAuth, err := mdoc.BuildIssuerAuth(msoBytes, pki.DocumentSignerKey(), pki.DocumentSignerChain())
+	var issuerAuth []byte
+	if protected == nil {
+		issuerAuth, err = mdoc.BuildIssuerAuth(msoBytes, pki.DocumentSignerKey(), pki.DocumentSignerChain())
+	} else {
+		unprotected := intcose.UnprotectedHeader{}
+		if err := intcose.SetX5Chain(unprotected, pki.DocumentSignerChain()); err != nil {
+			t.Fatalf("SetX5Chain: %v", err)
+		}
+		issuerAuth, err = intcose.Sign1Untagged(msoBytes, nil, pki.DocumentSignerKey(), protected, unprotected)
+	}
 	if err != nil {
-		t.Fatalf("BuildIssuerAuth: %v", err)
+		t.Fatalf("sign IssuerAuth: %v", err)
 	}
 	return mdoc.IssuerSigned{NameSpaces: ns, IssuerAuth: issuerAuth}, pki
 }
@@ -224,6 +242,44 @@ func TestEvaluateMdocPresentationRejectsSessionTranscriptMismatch(t *testing.T) 
 	}
 	if !containsPolicyCode(result, "device_auth_invalid") {
 		t.Fatalf("expected device_auth_invalid reason, got %v", result.Policy.ReasonCodes)
+	}
+}
+
+// TestEvaluateMdocPresentationRejectsIssuerAuthUnknownCritical denies a
+// DeviceResponse whose IssuerAuth is validly signed by a trusted document
+// signer but names, in its protected "crit" header parameter, a label the
+// verifier does not understand (RFC 9052 Section 3.1).
+func TestEvaluateMdocPresentationRejectsIssuerAuthUnknownCritical(t *testing.T) {
+	deviceKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("device key: %v", err)
+	}
+	const unknownLabel = int64(-70001)
+	protected := intcose.ES256ProtectedHeader()
+	protected[int64(2)] = []any{unknownLabel}
+	protected[unknownLabel] = "not understood"
+	issuerSigned, pki := issueMdocForVerifierWithProtectedHeader(t, deviceKey, protected)
+
+	p := NewPlugin()
+	p.mdocTrustAnchors = pki.TrustAnchors()
+
+	handover := realHandover(t, "verifier-client-1", "nonce-xyz", "https://verifier.example/response", nil)
+	vpToken := buildMdocVPToken(t, deviceKey, issuerSigned, handover)
+
+	session := &requestSession{
+		ID:          "req-crit",
+		ClientID:    "verifier-client-1",
+		Nonce:       "nonce-xyz",
+		ResponseURI: "https://verifier.example/response",
+		DCQLQuery:   mdocDCQLQuery,
+	}
+
+	result := p.evaluateVPToken(session, vpToken)
+	if result.Policy.Allowed {
+		t.Fatal("expected denial of an IssuerAuth with an unknown critical label")
+	}
+	if !strings.Contains(strings.Join(result.Policy.Reasons, " "), "RFC 9052 Section 3.1") {
+		t.Fatalf("expected the refusal to cite RFC 9052 Section 3.1, got codes=%v reasons=%v", result.Policy.ReasonCodes, result.Policy.Reasons)
 	}
 }
 

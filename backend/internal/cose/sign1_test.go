@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
 	"testing"
 )
 
@@ -192,5 +193,38 @@ func TestVerifySign1WrongKeyFails(t *testing.T) {
 
 	if _, err := VerifySign1(coseSign1, nil, &wrong.PublicKey); err == nil {
 		t.Fatal("expected verification failure under the wrong key, got nil")
+	}
+}
+
+// TestVerifySign1RejectsUnknownCritical proves a COSE_Sign1 whose protected
+// "crit" header parameter names a label this application does not understand
+// is refused although its signature is valid (RFC 9052 Section 3.1), in both
+// the attached form of an mdoc IssuerAuth and the detached form of a
+// deviceSignature.
+func TestVerifySign1RejectsUnknownCritical(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	const unknownLabel = int64(-70001)
+	protected := ES256ProtectedHeader()
+	protected[int64(2)] = []any{unknownLabel}
+	protected[unknownLabel] = "not understood"
+	payload := []byte("mdoc IssuerAuth payload")
+
+	attached, err := Sign1Untagged(payload, nil, priv, protected, UnprotectedHeader{})
+	if err != nil {
+		t.Fatalf("Sign1Untagged: %v", err)
+	}
+	if _, err := VerifySign1(attached, nil, &priv.PublicKey); err == nil || !strings.Contains(err.Error(), "crit") {
+		t.Fatalf("VerifySign1 with an unknown critical label: got %v, want a crit refusal", err)
+	}
+
+	detached, err := Sign1DetachedUntagged(payload, nil, priv, protected, UnprotectedHeader{})
+	if err != nil {
+		t.Fatalf("Sign1DetachedUntagged: %v", err)
+	}
+	if _, err := VerifySign1Detached(detached, payload, nil, &priv.PublicKey); err == nil || !strings.Contains(err.Error(), "crit") {
+		t.Fatalf("VerifySign1Detached with an unknown critical label: got %v, want a crit refusal", err)
 	}
 }

@@ -1599,6 +1599,7 @@ func buildRawSDJWTKBVPToken(t *testing.T, createPayload map[string]interface{}, 
 		kbIssuedAt,
 		envelope.IssuerSignedJWT,
 		envelope.Disclosures,
+		nil,
 	)
 }
 
@@ -1609,6 +1610,7 @@ func buildRawSDJWTKBVPTokenFromParts(
 	kbIssuedAt time.Time,
 	issuerSignedJWT string,
 	disclosures []string,
+	extraKBHeader map[string]interface{},
 ) string {
 	t.Helper()
 	sdJWTWithoutKB := vc.BuildSDJWTSerialization(issuerSignedJWT, disclosures, "")
@@ -1626,6 +1628,9 @@ func buildRawSDJWTKBVPTokenFromParts(
 	kbToken := jwt.NewWithClaims(jwt.SigningMethodRS256, kbClaims)
 	kbToken.Header["typ"] = "kb+jwt"
 	kbToken.Header["kid"] = wallet.KeySet.RSAKeyID()
+	for name, value := range extraKBHeader {
+		kbToken.Header[name] = value
+	}
 	signedKB, err := kbToken.SignedString(wallet.KeySet.RSAPrivateKey())
 	if err != nil {
 		t.Fatalf("sign kb-jwt: %v", err)
@@ -1661,6 +1666,55 @@ func TestDirectPostPolicyAllowsFreshKBJWTIat(t *testing.T) {
 	assertPolicyAllowed(t, resultPayload)
 }
 
+// TestDirectPostPolicyRejectsKBJWTCriticalHeader proves an otherwise valid
+// KB-JWT that carries the "crit" Header Parameter is refused: RFC 7515 Section
+// 4.1.11 makes a JWS invalid when a listed extension is not understood and
+// supported, and the verifier supports none.
+func TestDirectPostPolicyRejectsKBJWTCriticalHeader(t *testing.T) {
+	env := newCombinedVCServer(t)
+	defer env.Server.Close()
+
+	wallet := issueCredentialForWallet(t, env.Server.URL, "alice")
+	createPayload := createVPRequest(t, env.Server.URL, "direct_post")
+	envelope, err := vc.ParseSDJWTEnvelope(wallet.CredentialJWT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vpToken := buildRawSDJWTKBVPTokenFromParts(
+		t,
+		createPayload,
+		wallet,
+		time.Now().UTC(),
+		envelope.IssuerSignedJWT,
+		envelope.Disclosures,
+		map[string]interface{}{
+			"crit":                       []string{"urn:example:not-understood"},
+			"urn:example:not-understood": true,
+		},
+	)
+	postRawSDJWTKBResponse(t, env.Server.URL, createPayload, vpToken)
+
+	resultPayload := fetchVerificationResult(t, env.Server.URL, asVPString(createPayload["request_id"]))
+	policyObj := extractVPPolicy(t, resultPayload)
+	if allowed, ok := policyObj["allowed"].(bool); !ok || allowed {
+		t.Fatal("expected a KB-JWT with a crit Header Parameter to be rejected")
+	}
+	reasonCodes, _ := policyObj["reason_codes"].([]interface{})
+	if !containsVPReasonCode(reasonCodes, "kb_jwt_invalid") {
+		t.Fatalf("expected kb_jwt_invalid reason code, got %v", reasonCodes)
+	}
+	reasons, _ := policyObj["reasons"].([]interface{})
+	namesCrit := false
+	for _, reason := range reasons {
+		if strings.Contains(asVPString(reason), "RFC 7515 Section 4.1.11") {
+			namesCrit = true
+		}
+	}
+	if !namesCrit {
+		t.Fatalf("expected the refusal to cite RFC 7515 Section 4.1.11, got %v", reasons)
+	}
+}
+
 func TestDirectPostPolicyRejectsUncommittedSDJWTDisclosure(t *testing.T) {
 	env := newCombinedVCServer(t)
 	defer env.Server.Close()
@@ -1683,6 +1737,7 @@ func TestDirectPostPolicyRejectsUncommittedSDJWTDisclosure(t *testing.T) {
 		time.Now().UTC(),
 		envelope.IssuerSignedJWT,
 		disclosures,
+		nil,
 	)
 	postRawSDJWTKBResponse(t, env.Server.URL, createPayload, vpToken)
 

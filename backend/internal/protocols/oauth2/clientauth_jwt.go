@@ -220,7 +220,7 @@ func parseAndValidateClientAssertion(
 		return nil, nil, assertionError("disallowed_alg")
 	}
 
-	if _, present := decoded.Header["crit"]; present {
+	if internalcrypto.RejectCriticalHeader(decoded.Header) != nil {
 		return nil, nil, assertionError("unsupported_critical_header")
 	}
 	if _, present := decoded.Header["b64"]; present {
