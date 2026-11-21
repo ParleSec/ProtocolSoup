@@ -117,6 +117,7 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
 | `/deferred_credential` | `POST` | Poll deferred transaction |
 | `/notification` | `POST` | Report the storage outcome for an issued credential |
 | `/status-lists/{listID}` | `GET` | Retrieve the signed OAuth Status List Token used by HAIP SD-JWT VC credentials |
+| `/crl/mdl-iaca.crl` | `GET` | Retrieve the DER-encoded CRL signed by the IACA, at the URI the IACA and document-signer certificates carry in `cRLDistributionPoints` (RFC 5280 Section 4.2.1.13) |
 | `/credential-types/university-degree` | `GET` | Retrieve ProtocolSoup's HAIP SD-JWT VC Type Metadata |
 | `/offers/pre-authorized` | `POST` | Create pre-authorized offer |
 | `/offers/pre-authorized/by-value` | `POST` | Create by-value pre-authorized offer |
@@ -182,6 +183,8 @@ The default and lead `credential_configurations_supported` entry is the ISO/IEC 
   root. Mandatory mDL elements include an identity-derived stylized JPEG
   portrait that is explicitly not presented as a real person's photograph.
   CRL/OCSP revocation requires external trust state.
+  The issuer publishes its IACA CRL at `/crl/mdl-iaca.crl`; ProtocolSoup's own
+  mdoc verification does not fetch it.
 - Issued credentials are persisted into a shared wallet credential store for downstream OID4VP presentation lineage.
 - `c_nonce` freshness is enforced at runtime (`invalid_nonce` on stale replay/mismatch).
 - Client attestation, when presented, is authenticated by real `x5c` chain validation against `OID4VCI_CLIENT_ATTESTATION_TRUST_ANCHOR_PEM` and real signature verification of both the attestation and PoP JWTs — never accepted on trust anchor absence.

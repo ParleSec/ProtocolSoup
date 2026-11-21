@@ -2230,3 +2230,44 @@ func mustMarshalJSON(t *testing.T, value interface{}) string {
 	}
 	return string(data)
 }
+
+// TestIACACRLIsServedAtTheCertificateDistributionPoint follows the
+// cRLDistributionPoints URI in the document-signer certificate and requires
+// what RFC 5280 Section 4.2.1.13 says is there: a single DER-encoded CRL,
+// served as application/pkix-crl and signed by the IACA.
+func TestIACACRLIsServedAtTheCertificateDistributionPoint(t *testing.T) {
+	env := newTestEnvironment(t)
+	defer env.Server.Close()
+
+	signer := env.Plugin.mdocPKI.DocumentSignerCertificate()
+	if len(signer.CRLDistributionPoints) != 1 {
+		t.Fatalf("document-signer cRLDistributionPoints = %v, want one URI", signer.CRLDistributionPoints)
+	}
+	path, isIssuerURI := strings.CutPrefix(signer.CRLDistributionPoints[0], env.Plugin.issuerID())
+	if !isIssuerURI {
+		t.Fatalf("distribution point %q is not under the issuer %q", signer.CRLDistributionPoints[0], env.Plugin.issuerID())
+	}
+
+	resp, err := http.Get(env.Server.URL + "/oid4vci" + path)
+	if err != nil {
+		t.Fatalf("CRL request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CRL status = %d, want 200", resp.StatusCode)
+	}
+	if contentType := resp.Header.Get("Content-Type"); contentType != "application/pkix-crl" {
+		t.Errorf("Content-Type = %q, want application/pkix-crl", contentType)
+	}
+	der, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read CRL: %v", err)
+	}
+	crl, err := x509.ParseRevocationList(der)
+	if err != nil {
+		t.Fatalf("response is not a single DER-encoded CRL: %v", err)
+	}
+	if err := crl.CheckSignatureFrom(env.Plugin.mdocPKI.IACACertificate()); err != nil {
+		t.Errorf("CRL is not signed by the IACA: %v", err)
+	}
+}

@@ -243,3 +243,62 @@ func hasExtKeyUsageOID(cert *x509.Certificate, oid []int) bool {
 	}
 	return false
 }
+
+// TestRevocationListConformsToRFC5280 checks the IACA CRL against the RFC 5280
+// Section 5 profile: signed by the IACA, nextUpdate present (5.1.2.5), no
+// revoked certificates list when nothing is revoked (5.1.2.6), the authority
+// key identifier by the key identifier method (5.2.1), and a non-critical CRL
+// number that differs between CRLs with different thisUpdate values (5.2.3).
+func TestRevocationListConformsToRFC5280(t *testing.T) {
+	pki, err := GenerateIssuerPKI(testPKIParams())
+	if err != nil {
+		t.Fatalf("GenerateIssuerPKI: %v", err)
+	}
+	issuedAt := time.Now()
+	der, err := pki.RevocationList(issuedAt)
+	if err != nil {
+		t.Fatalf("RevocationList: %v", err)
+	}
+	crl, err := x509.ParseRevocationList(der)
+	if err != nil {
+		t.Fatalf("ParseRevocationList: %v", err)
+	}
+	iaca := pki.IACACertificate()
+	if err := crl.CheckSignatureFrom(iaca); err != nil {
+		t.Errorf("CRL is not signed by the IACA: %v", err)
+	}
+	if crl.NextUpdate.IsZero() || !crl.NextUpdate.After(crl.ThisUpdate) {
+		t.Errorf("nextUpdate %s must follow thisUpdate %s", crl.NextUpdate, crl.ThisUpdate)
+	}
+	if len(crl.RevokedCertificateEntries) != 0 {
+		t.Errorf("CRL lists %d revoked certificates, want none", len(crl.RevokedCertificateEntries))
+	}
+	if !reflect.DeepEqual(crl.AuthorityKeyId, iaca.SubjectKeyId) {
+		t.Errorf("authorityKeyIdentifier = %x, want the IACA subjectKeyIdentifier %x", crl.AuthorityKeyId, iaca.SubjectKeyId)
+	}
+	crlNumberOID := []int{2, 5, 29, 20}
+	found := false
+	for _, extension := range crl.Extensions {
+		if extension.Id.Equal(crlNumberOID) {
+			found = true
+			if extension.Critical {
+				t.Error("CRL number extension must be non-critical")
+			}
+		}
+	}
+	if !found || crl.Number == nil {
+		t.Fatal("CRL number extension is missing")
+	}
+
+	laterDER, err := pki.RevocationList(issuedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("RevocationList (later): %v", err)
+	}
+	later, err := x509.ParseRevocationList(laterDER)
+	if err != nil {
+		t.Fatalf("ParseRevocationList (later): %v", err)
+	}
+	if later.Number.Cmp(crl.Number) <= 0 {
+		t.Errorf("later CRL number %s must exceed %s", later.Number, crl.Number)
+	}
+}
