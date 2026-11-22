@@ -108,6 +108,30 @@ func (p *Plugin) handleProtectedResource(w http.ResponseWriter, r *http.Request)
 	jkt := accessTokenJKT(claims)
 	dpopBound := jkt != ""
 
+	// RFC 7519 Section 4.1.3: "If the principal processing the claim does
+	// not identify itself with a value in the "aud" claim when this claim is
+	// present, then the JWT MUST be rejected." This resource identifies
+	// itself by its own URL.
+	if audience, present := claims["aud"]; present && !audienceContainsExactly(audience, p.resourceURL()) {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Protected Resource Access Denied", map[string]interface{}{
+			"endpoint": "/oauth2/resource",
+			"reason":   "the access token's aud claim does not name this resource",
+			"aud":      audience,
+			"resource": p.resourceURL(),
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Audience Restriction",
+			Description: "A resource server accepts only tokens whose aud claim names it, so a token issued for one resource cannot be replayed at another.",
+			Reference:   "RFC 7519 Section 4.1.3",
+		})
+		challenge := "Bearer"
+		if dpopBound {
+			challenge = dpop.HeaderName
+		}
+		writeResourceAuthError(w, http.StatusUnauthorized, challenge, "invalid_token", "the access token's aud claim does not name this resource", "")
+		return
+	}
+
 	if !dpopBound {
 		p.respondProtectedResource(w, sessionID, claims, "", false)
 		return

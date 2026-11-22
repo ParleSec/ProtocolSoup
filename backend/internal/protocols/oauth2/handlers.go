@@ -1055,14 +1055,21 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 
 	// Issue access token (no refresh token for client credentials)
 	jwtService := p.mockIdP.JWTService()
+	// RFC 8693 Section 4.3: 'The "client_id" claim carries the client
+	// identifier of the OAuth 2.0 [RFC6749] client that requested the token.'
 	accessTokenClaims := map[string]interface{}{
+		"client_id":   clientID,
 		"client_name": client.Name,
 	}
 	if dpopJKT != "" {
 		// RFC 9449 Section 4.1: bind the token to the presented proof key.
 		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
 	}
-	audience := clientID
+	// RFC 7519 Section 4.1.3: "Each principal intended to process the JWT
+	// MUST identify itself with a value in the audience claim." The
+	// principal that processes this access token is the protected resource,
+	// so the audience is the resource's own URL and never the client.
+	audience := p.resourceURL()
 	ttl := time.Hour
 	expiresIn := 3600
 	if grantsSSFScope(scope) {
@@ -1223,8 +1230,15 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		response.Sub = sub
 		response.Username = sub
 	}
+	// RFC 7662 Section 2.2: aud is the token's intended audience and
+	// client_id is the client that requested it. A client_credentials token
+	// carries both; a token issued for an End-User names its client in aud.
 	if audClaim, ok := claims["aud"].(string); ok {
+		response.Aud = audClaim
 		response.ClientID = audClaim
+	}
+	if clientIDClaim, ok := claims["client_id"].(string); ok && clientIDClaim != "" {
+		response.ClientID = clientIDClaim
 	}
 	if exp, ok := claims["exp"].(float64); ok {
 		response.Exp = int64(exp)
