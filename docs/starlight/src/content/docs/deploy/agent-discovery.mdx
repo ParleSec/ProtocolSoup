@@ -30,6 +30,7 @@ by the application and needs no operator action.
 | Link headers | every page response | Frontend + backend edge | [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288) |
 | Markdown representation | every page, via `Accept` | Frontend | Markdown for Agents |
 | Normative requirement pages | `/spec/{spec}`, `/spec/{spec}/{requirement}` | Frontend, from backend `/api/conformance/*` | [Normative requirements](#normative-requirement-pages) |
+| Example pages | `/example/{example}` | Frontend, from backend `/api/conformance/examples` | [Example pages](#example-pages) |
 | `llms.txt` | `/llms.txt` | Frontend | [llms.txt](https://llmstxt.org/), see [below](#llmstxt) |
 | `llms-full.txt` | `/llms-full.txt` | Frontend | [llms.txt](https://llmstxt.org/) |
 | Wallet `llms.txt` | `https://wallet.protocolsoup.com/llms.txt` | Wallet harness | [llms.txt](https://llmstxt.org/) |
@@ -61,14 +62,16 @@ for example:
 
 The tasks cover the protocol catalog (`/api/protocols`), token decoding, the
 MCP server and its tools, the OpenID Connect, OAuth 2.0, and OID4VCI metadata
-and key sets, the conformance registry (`/api/conformance/*`), markdown
-negotiation, and the wallet's `/api/*` endpoints on its own origin. Every path
-listed is mounted and answers without authentication. The apex file is
-generated in `frontend/src/app/(infrastructure)/llms.txt/route.ts` and
-revalidates every five minutes, so its protocol guides and indexable
-[normative requirement](#normative-requirement-pages) indexes follow the live
-registry. The docs file is static, in `docs/starlight/public/llms.txt`. The
-wallet generates its own `llms.txt`.
+and key sets, the conformance registry and its real example messages
+(`/api/conformance/*`), markdown negotiation, and the wallet's `/api/*`
+endpoints on its own origin. Every path listed is mounted and answers without
+authentication. The apex file is generated in
+`frontend/src/app/(infrastructure)/llms.txt/route.ts` and revalidates every
+five minutes, so its protocol guides, indexable
+[normative requirement](#normative-requirement-pages) indexes and indexable
+[example pages](#example-pages) follow the live registry. The docs file is
+static, in `docs/starlight/public/llms.txt`. The wallet generates its own
+`llms.txt`.
 
 A task added to either file must name an endpoint that is mounted on that
 origin; removing an endpoint removes its task in the same change.
@@ -197,6 +200,53 @@ from production says why.
 ```bash
 curl -s https://protocolsoup.com/api/conformance/specs | jq '.specs[] | {id, requirement_count, indexable}'
 curl -H 'Accept: text/markdown' https://protocolsoup.com/spec/oid4vp/vp-001
+```
+
+### Example pages
+
+Each protocol message type in the registry's `examples` list has a
+server-rendered page at `/example/{example}` (for example
+`/example/dpop-proof`). A page is titled with the question it answers ("What
+does a valid DPoP proof look like?") and opens by saying what the message is.
+It then shows a real one: a message the deployed server issued or accepted in
+an exchange CI captured after the deploy, exactly as it was sent.
+
+Below the message, every member of its decoded parts is listed in the order
+the sender wrote it. Each member has its value as sent, the specification's
+own text for it, a link to that section, and a link to each
+[requirement page](#normative-requirement-pages) the member satisfies. A
+requirement page links back to every example with a field that satisfies it.
+The definitions live beside the requirements in
+`backend/internal/conformance/vc-requirements.yaml`, so a page and its
+citations come from one registry.
+
+`cmd/conformance-capture` records a message only when three checks pass, and
+fails the run otherwise:
+
+- The value is present in the recorded request or response it is attributed
+  to.
+- Every top-level member of the value has a field in the registry, and every
+  registry field is present in the value.
+- The signature verifies. A DPoP proof verifies under the public key in its
+  own `jwk` header parameter. An access token verifies under the key its
+  `kid` selects from the JWK Set the run fetches from the `jwks_uri` in the
+  token issuer's RFC 8414 metadata.
+
+The metadata and JWK Set requests are recorded and shown on the page, because
+keys rotate and the JWK Set published later might no longer hold the key. The
+page states when the message was issued and the commit that issued it, and
+links to the Looking Glass flow that produces the message live.
+
+Example values are part of the same artefact set as the requirement exchanges
+(`CONFORMANCE_ARTEFACTS`), so the same rules hold: a value is only shown for
+the build that captured it, and only once every token, code and nonce in its
+exchanges has expired or been revoked. A page is indexable, and listed in
+`/sitemap.xml` and `/llms.txt`, once the launch gate is open and the build's
+artefact set holds its value.
+
+```bash
+curl -s https://protocolsoup.com/api/conformance/examples | jq '.examples[] | {id, question, indexable}'
+curl -H 'Accept: text/markdown' https://protocolsoup.com/example/dpop-proof
 ```
 
 ### Content signals

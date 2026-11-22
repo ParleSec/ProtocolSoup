@@ -34,6 +34,8 @@ None of the endpoints below needs authentication.
 - To list the specifications in the conformance registry, `GET https://protocolsoup.com/api/conformance/specs`.
 - To read one specification or requirement, `GET https://protocolsoup.com/api/conformance/specs/{specId}` or `GET https://protocolsoup.com/api/conformance/requirements/{requirementId}`.
 - To read the passing and failing exchanges captured from production for one requirement, `GET https://protocolsoup.com/api/conformance/requirements/{requirementId}/artefacts`.
+- To list the protocol message types that have a real captured example, `GET https://protocolsoup.com/api/conformance/examples`.
+- To read one real message with every field decoded and the specification text that defines each field, `GET https://protocolsoup.com/api/conformance/examples/{exampleId}`, for example `https://protocolsoup.com/api/conformance/examples/dpop-proof`.
 
 ## Drive the wallet
 
