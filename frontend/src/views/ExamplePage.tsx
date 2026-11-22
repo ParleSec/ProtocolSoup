@@ -38,8 +38,12 @@ const PART_TITLES: Record<string, string> = {
   payload: 'JWT Claims Set',
 }
 
-const FORMAT_LABELS: Record<ConformanceExampleResponse['format'], string> = {
-  jwt: 'JWT, compact serialization',
+/** How a message format is named on the page. */
+function formatLabel(format: ConformanceExampleResponse['format']): string {
+  switch (format) {
+    case 'jwt':
+      return 'JWT, compact serialization'
+  }
 }
 
 function memberName(path: string): string {
@@ -159,7 +163,7 @@ export function ExamplePage({ example }: { example: ConformanceExampleResponse }
         <p className="text-sm text-surface-400 flex flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-surface-200">{example.title}</span>
           <span aria-hidden="true">{' · '}</span>
-          <span>{FORMAT_LABELS[example.format]}</span>
+          <span>{formatLabel(example.format)}</span>
         </p>
       </header>
 
