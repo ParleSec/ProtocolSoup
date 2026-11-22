@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -156,5 +157,156 @@ func TestIDTokenHashClaims(t *testing.T) {
 	}
 	if _, present := pc["c_hash"]; present {
 		t.Errorf("c_hash must be absent without a code")
+	}
+}
+
+// TestCreateAccessTokenFollowsRFC9068 covers RFC 9068 Section 2: the "typ"
+// header is at+jwt, and iss, exp, aud, sub, client_id, iat and jti are
+// present. A token with no client, audience or subject is not issued.
+func TestCreateAccessTokenFollowsRFC9068(t *testing.T) {
+	ks, err := NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewJWTService(ks, "https://as.example")
+	token := AccessToken{
+		Subject:  "alice",
+		Audience: "https://rs.example/api",
+		ClientID: "client-abc",
+		Scope:    "read",
+		Lifetime: time.Minute,
+		// A caller's extra claims never replace the ones the profile sets.
+		Claims: map[string]interface{}{"aud": "client-abc", "department": "physics"},
+	}
+	signed, err := svc.CreateAccessToken(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeTokenWithoutValidation(signed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Header["typ"] != "at+jwt" {
+		t.Errorf("typ = %v, want at+jwt", decoded.Header["typ"])
+	}
+	for claim, want := range map[string]interface{}{
+		"iss":        "https://as.example",
+		"sub":        "alice",
+		"aud":        "https://rs.example/api",
+		"client_id":  "client-abc",
+		"scope":      "read",
+		"department": "physics",
+	} {
+		if decoded.Payload[claim] != want {
+			t.Errorf("%s = %v, want %v", claim, decoded.Payload[claim], want)
+		}
+	}
+	for _, required := range []string{"exp", "iat", "jti"} {
+		if _, present := decoded.Payload[required]; !present {
+			t.Errorf("%s is REQUIRED by RFC 9068 Section 2.2 and is missing", required)
+		}
+	}
+
+	for name, missing := range map[string]func(*AccessToken){
+		"client_id": func(a *AccessToken) { a.ClientID = "" },
+		"aud":       func(a *AccessToken) { a.Audience = "" },
+		"sub":       func(a *AccessToken) { a.Subject = "" },
+	} {
+		incomplete := token
+		missing(&incomplete)
+		if _, err := svc.CreateAccessToken(incomplete); err == nil {
+			t.Errorf("an access token without %s was issued", name)
+		}
+	}
+}
+
+// TestValidateAccessTokenRunsEachRFC9068Check covers RFC 9068 Section 4. Each
+// refused token is signed by the service's own key and unexpired, so the
+// named check is what refuses it.
+func TestValidateAccessTokenRunsEachRFC9068Check(t *testing.T) {
+	ks, err := NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewJWTService(ks, "https://as.example")
+	const issuer, resource = "https://as.example", "https://rs.example/api"
+	base := AccessToken{Subject: "alice", Audience: resource, ClientID: "client-abc", Scope: "read", Lifetime: time.Minute}
+
+	accepted, err := svc.CreateAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ValidateAccessToken(accepted, issuer, resource); err != nil {
+		t.Fatalf("a conforming token was refused: %v", err)
+	}
+
+	untyped, err := svc.CreateUnprofiledAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshToken, err := svc.CreateRefreshToken("alice", "client-abc", "read", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := base
+	expired.Lifetime = -time.Minute
+	expiredToken, err := svc.CreateAccessToken(expired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherKeys, err := NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged, err := NewJWTService(otherKeys, issuer).CreateAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, tc := range map[string]struct {
+		token, issuer, audience, check string
+	}{
+		"typ is JWT":                     {untyped, issuer, resource, "typ"},
+		"a refresh token":                {refreshToken, issuer, resource, "typ"},
+		"iss is another server":          {accepted, "https://as.example/oauth2", resource, "iss"},
+		"aud names another resource":     {accepted, issuer, "https://rs.example/other", "aud"},
+		"the token has expired":          {expiredToken, issuer, resource, "signature"},
+		"the signature is another key's": {forged, issuer, resource, "signature"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := svc.ValidateAccessToken(tc.token, tc.issuer, tc.audience)
+			var tokenErr *AccessTokenError
+			if !errors.As(err, &tokenErr) {
+				t.Fatalf("err = %v, want an *AccessTokenError", err)
+			}
+			if tokenErr.Check != tc.check {
+				t.Fatalf("failed check = %q (%s), want %q", tokenErr.Check, tokenErr.Reason, tc.check)
+			}
+		})
+	}
+}
+
+// TestAudienceContains covers the two "aud" shapes of RFC 7519 Section 4.1.3:
+// an array of strings, or a single string for one audience.
+func TestAudienceContains(t *testing.T) {
+	const resource = "https://rs.example/api"
+	for name, tc := range map[string]struct {
+		aud  interface{}
+		want bool
+	}{
+		"single string":           {resource, true},
+		"another single string":   {"https://rs.example/other", false},
+		"array naming it":         {[]interface{}{"https://rs.example/other", resource}, true},
+		"array not naming it":     {[]interface{}{"https://rs.example/other"}, false},
+		"string array":            {[]string{resource}, true},
+		"a prefix is not a match": {resource + "/v2", false},
+		"absent":                  {nil, false},
+	} {
+		if got := AudienceContains(tc.aud, resource); got != tc.want {
+			t.Errorf("%s: AudienceContains = %v, want %v", name, got, tc.want)
+		}
+	}
+	if AudienceContains("", "") {
+		t.Error("an empty expected audience matched")
 	}
 }

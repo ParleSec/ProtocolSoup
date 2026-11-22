@@ -57,6 +57,20 @@ func (p *Plugin) applyRequestURI(query url.Values) (url.Values, string, string) 
 	merged := cloneValues(query)
 	merged.Del("request_uri")
 	for key, value := range claims {
+		// RFC 8707 Section 2.1: in a request sent as a JWT, "a single
+		// "resource" parameter value is represented as a JSON string while
+		// multiple values are represented as an array of strings."
+		if list, ok := value.([]interface{}); ok && key == "resource" {
+			merged.Del(key)
+			for _, item := range list {
+				if s, ok := item.(string); ok {
+					merged.Add(key, s)
+				} else {
+					return nil, "invalid_target", "resource in the request object must be a string or an array of strings (RFC 8707 Section 2.1)"
+				}
+			}
+			continue
+		}
 		switch typed := value.(type) {
 		case string:
 			merged.Set(key, typed)

@@ -971,3 +971,106 @@ func requestDeferredOffer(t *testing.T, server *dpopOID4VCITestServer) (preAuthC
 	offerPayload := decodeJSONMap(t, offerResp)
 	return asString(t, offerPayload["pre_authorized_code"]), asString(t, offerPayload["wallet_subject"])
 }
+
+// TestAccessTokenNamesTheCredentialIssuer covers RFC 7519 Section 4.1.3,
+// "Each principal intended to process the JWT MUST identify itself with a
+// value in the audience claim": the access token's aud is the Credential
+// Issuer Identifier. The token does not claim the RFC 9068 profile, because
+// an anonymous Pre-Authorized Code Token Request has no client_id to carry.
+func TestAccessTokenNamesTheCredentialIssuer(t *testing.T) {
+	env := newTestEnvironment(t)
+	accessToken, _, _, _ := issuePreAuthorizedGrantWithAuthorizationDetails(
+		t,
+		env.Server.URL,
+		[]string{"UniversityDegreeCredential"},
+		[]string{"UniversityDegreeCredential"},
+	)
+	decoded, err := internalcrypto.DecodeTokenWithoutValidation(accessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Payload["aud"] != testIssuerAudience {
+		t.Errorf("aud = %v, want the Credential Issuer Identifier %s", decoded.Payload["aud"], testIssuerAudience)
+	}
+	if decoded.Header["typ"] != "JWT" {
+		t.Errorf("typ = %v, want JWT: the token does not follow RFC 9068", decoded.Header["typ"])
+	}
+	if clientID, present := decoded.Payload["client_id"]; present {
+		t.Errorf("client_id = %v on a token from anonymous access, want it absent", clientID)
+	}
+}
+
+// TestAccessTokenCarriesTheClientThatRequestedIt covers RFC 8693 Section 4.3:
+// a Pre-Authorized Code Token Request that names a client gets that client in
+// the token's client_id claim.
+func TestAccessTokenCarriesTheClientThatRequestedIt(t *testing.T) {
+	env := newTestEnvironment(t)
+	offerResp := postJSON(t, env.Server.URL+"/oid4vci/offers/pre-authorized", map[string]interface{}{
+		"credential_configuration_ids": []string{"UniversityDegreeCredential"},
+	})
+	assertStatus(t, offerResp, http.StatusCreated)
+	offer := decodeJSONMap(t, offerResp)
+	tokenResp, err := http.PostForm(env.Server.URL+"/oid4vci/token", url.Values{
+		"grant_type":          {"urn:ietf:params:oauth:grant-type:pre-authorized_code"},
+		"pre-authorized_code": {asString(t, offer["pre_authorized_code"])},
+		"client_id":           {"wallet-client"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStatus(t, tokenResp, http.StatusOK)
+	decoded, err := internalcrypto.DecodeTokenWithoutValidation(asString(t, decodeJSONMap(t, tokenResp)["access_token"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Payload["client_id"] != "wallet-client" {
+		t.Fatalf("client_id = %v, want wallet-client", decoded.Payload["client_id"])
+	}
+}
+
+// TestResourceEndpointsRejectTokenForAnotherAudience covers the second
+// sentence of RFC 7519 Section 4.1.3: "If the principal processing the claim
+// does not identify itself with a value in the "aud" claim when this claim is
+// present, then the JWT MUST be rejected." The token is signed by the
+// issuer's own authorization server key and unexpired, so only its aud can
+// refuse it, at each resource endpoint, with RFC 6750 Section 3.1's
+// invalid_token.
+func TestResourceEndpointsRejectTokenForAnotherAudience(t *testing.T) {
+	env := newTestEnvironment(t)
+	forAnotherResource, err := env.IDP.JWTService().CreateUnprofiledAccessToken(internalcrypto.AccessToken{
+		Subject:  "wallet:other",
+		Audience: "http://localhost:8080/oidc/userinfo",
+		Scope:    "vc:issue",
+		Lifetime: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutAudience, err := env.IDP.JWTService().CreateRefreshToken("wallet:other", "wallet-client", "vc:issue", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, endpoint := range []string{"/oid4vci/credential", "/oid4vci/deferred_credential", "/oid4vci/notification"} {
+		for name, token := range map[string]string{
+			"aud names another resource": forAnotherResource,
+			"no aud":                     withoutAudience,
+		} {
+			t.Run(endpoint+" "+name, func(t *testing.T) {
+				resp := postJSONWithHeaders(t, env.Server.URL+endpoint, map[string]interface{}{},
+					map[string]string{"Authorization": "Bearer " + token})
+				assertStatus(t, resp, http.StatusUnauthorized)
+				if challenge := resp.Header.Get("WWW-Authenticate"); challenge != `Bearer error="invalid_token"` {
+					t.Fatalf("WWW-Authenticate = %q", challenge)
+				}
+				payload := decodeJSONMap(t, resp)
+				if payload["error"] != "invalid_token" {
+					t.Fatalf("error = %v, want invalid_token", payload["error"])
+				}
+				if payload["error_description"] != "the access token's aud claim does not name this Credential Issuer" {
+					t.Fatalf("error_description = %v", payload["error_description"])
+				}
+			})
+		}
+	}
+}

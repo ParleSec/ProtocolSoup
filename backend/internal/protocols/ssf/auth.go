@@ -165,31 +165,26 @@ func (p *Plugin) validateBearerJWT(tokenString string) (receiverIdentity, error)
 		return receiverIdentity{}, fmt.Errorf("invalid access token claims")
 	}
 
-	iss, _ := claims["iss"].(string)
-	if p.asIssuer != "" && iss != p.asIssuer {
+	// RFC 9068 Section 4: "The resource server MUST verify that the "typ"
+	// header value is "at+jwt" or "application/at+jwt" and reject tokens
+	// carrying any other value."
+	typ, _ := token.Header["typ"].(string)
+	if !strings.EqualFold(typ, crypto.AccessTokenType) && !strings.EqualFold(typ, "application/"+crypto.AccessTokenType) {
+		return receiverIdentity{}, fmt.Errorf("invalid typ header")
+	}
+
+	// "The issuer identifier for the authorization server (which is
+	// typically obtained during discovery) MUST exactly match the value of
+	// the "iss" claim."
+	if iss, _ := claims["iss"].(string); iss != p.asIssuer {
 		return receiverIdentity{}, fmt.Errorf("invalid issuer")
 	}
 
-	if p.asAudience != "" {
-		switch aud := claims["aud"].(type) {
-		case string:
-			if aud != p.asAudience {
-				return receiverIdentity{}, fmt.Errorf("invalid audience")
-			}
-		case []interface{}:
-			found := false
-			for _, item := range aud {
-				if s, ok := item.(string); ok && s == p.asAudience {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return receiverIdentity{}, fmt.Errorf("invalid audience")
-			}
-		default:
-			return receiverIdentity{}, fmt.Errorf("invalid audience")
-		}
+	// "The JWT access token MUST be rejected if "aud" does not contain a
+	// resource indicator of the current resource server as a valid
+	// audience."
+	if !crypto.AudienceContains(claims["aud"], p.asAudience) {
+		return receiverIdentity{}, fmt.Errorf("invalid audience")
 	}
 
 	if err := p.checkAccessTokenRevocation(tokenString); err != nil {
@@ -210,6 +205,11 @@ func (p *Plugin) validateBearerJWT(tokenString string) (receiverIdentity, error)
 	}, nil
 }
 
+// introspectionClientID is the resource server registration the OAuth 2.0
+// authorization server seeds for this Transmitter
+// (mockidp.SSFTransmitterClientID).
+const introspectionClientID = "ssf-transmitter"
+
 func (p *Plugin) checkAccessTokenRevocation(tokenString string) error {
 	if p.revoker != nil {
 		if p.revoker.IsTokenRevoked(tokenString) {
@@ -227,7 +227,15 @@ func (p *Plugin) checkAccessTokenRevocation(tokenString string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Authorization", "Bearer "+tokenString)
+	// RFC 7662 Section 2.1: the endpoint requires "some form of
+	// authorization", and Section 4 has the authorization server decide
+	// whether the token can be used at the resource server that is calling.
+	// The Transmitter therefore authenticates as its own resource server
+	// registration; the token under introspection is not a credential.
+	if p.introspectSecret == "" {
+		return fmt.Errorf("token introspection is configured without SSF_AS_INTROSPECT_CLIENT_SECRET")
+	}
+	req.SetBasicAuth(introspectionClientID, p.introspectSecret)
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

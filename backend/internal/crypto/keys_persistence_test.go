@@ -109,7 +109,7 @@ func TestPersistedKeySetSignsVerifiably(t *testing.T) {
 		t.Fatalf("LoadOrCreateKeySet: %v", err)
 	}
 	svc := NewJWTService(first, "https://op.example.com")
-	token, err := svc.CreateAccessToken("alice", "demo-app", "openid", time.Hour, nil)
+	token, err := svc.CreateAccessToken(AccessToken{Subject: "alice", Audience: "https://rs.example/", ClientID: "demo-app", Scope: "openid", Lifetime: time.Hour})
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}

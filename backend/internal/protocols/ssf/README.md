@@ -115,7 +115,7 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 
 ### Stream Management (SSF §8.1.1)
 
-When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` with `ssf.read` or `ssf.manage`, or a Looking Glass session header. The Transmitter verifies signature, expiry, audience, scope, and revocation status (in-process MockIdP, or `SSF_AS_INTROSPECT_URI` on the split SSF image). Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
+When `SSF_AS_JWKS_URI` is set, these endpoints require `Authorization: Bearer` with `ssf.read` or `ssf.manage`, or a Looking Glass session header. The Transmitter runs the RFC 9068 §4 checks (`typ` header `at+jwt`, `iss` equal to `SSF_AS_ISSUER`, which defaults to `SHOWCASE_BASE_URL` + `/oauth2`, `aud` containing `SSF_RESOURCE`, signature, expiry), then scope and revocation status (in-process MockIdP, or `SSF_AS_INTROSPECT_URI` on the split SSF image, where it authenticates as the resource server `ssf-transmitter` with `SSF_AS_INTROSPECT_CLIENT_SECRET`). Federation seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|

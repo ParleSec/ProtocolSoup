@@ -896,7 +896,7 @@ func TestArgumentsAreValidatedAgainstTheSchema(t *testing.T) {
 func TestDecodeJWTReportsSignatureStatus(t *testing.T) {
 	p := newTestPlugin(t)
 
-	token, err := p.mockIdP.JWTService().CreateAccessToken("agent-1", "test-client", "openid", 3600000000000, nil)
+	token, err := p.mockIdP.JWTService().CreateAccessToken(crypto.AccessToken{Subject: "agent-1", Audience: "https://rs.example/", ClientID: "test-client", Scope: "openid", Lifetime: 3600000000000})
 	if err != nil {
 		t.Fatal(err)
 	}

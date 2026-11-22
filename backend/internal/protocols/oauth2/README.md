@@ -328,11 +328,18 @@ token=ACCESS_TOKEN&token_type_hint=access_token
   "exp": 1704825600,
   "iat": 1704822000,
   "sub": "alice@example.com",
-  "aud": "demo-app",
-  "iss": "https://protocolsoup.com",
+  "aud": "https://protocolsoup.com/oauth2/resource",
+  "iss": "https://protocolsoup.com/oauth2",
   "jti": "unique-token-id"
 }
 ```
+
+`aud` is the protected resource the token is for and `client_id` is the client
+that requested it (RFC 7662 §2.2); access tokens follow RFC 9068. The caller is
+told a token is active only when it is that client, or a resource server the
+token's `aud` names (RFC 7662 §4). Any other authenticated caller receives the
+inactive response below. The token being introspected is not accepted as the
+caller's credential.
 
 **Response (Inactive/Revoked Token):**
 ```json
@@ -446,6 +453,7 @@ The authorization server advertises `response_types_supported: ["code", "token"]
 | `MOCKIDP_DEMO_CLIENT_SECRET` | demo-app client secret | (auto-generated) |
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | machine-client secret | (auto-generated) |
 | `SSF_STREAM_CLIENT_SECRET` | ssf-stream-client secret | (auto-generated) |
+| `SSF_TRANSMITTER_CLIENT_SECRET` | Secret of the `ssf-transmitter` resource server registration, which the split SSF Transmitter uses at `/oauth2/introspect` | (auto-generated) |
 
 ### Registered Clients
 

@@ -2,10 +2,12 @@ package oidc
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
@@ -77,15 +79,38 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate the access token
+	// Validate the access token. UserInfo is an OAuth 2.0 Protected Resource
+	// (OpenID Connect Core 1.0 Section 5.3), so it runs the resource server
+	// validation of RFC 9068 Section 4: the typ header is at+jwt, iss is the
+	// OP issuer, aud names UserInfo, the signature verifies and the token has
+	// not expired. "In particular, in case of any failure in the validation
+	// checks listed above, the authorization server response MUST include
+	// the error code "invalid_token"."
 	jwtService := p.mockIdP.JWTService()
-	claims, err := jwtService.ValidateToken(accessToken)
+	claims, err := jwtService.ValidateAccessToken(accessToken, p.mockIdP.GetIssuer(), p.userInfoResource())
 	if err != nil {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Validation Failed", map[string]interface{}{
-			"error":        err.Error(),
+		description := "Token validation failed"
+		eventData := map[string]interface{}{
+			"endpoint":     "/oidc/userinfo",
+			"error":        "invalid_token",
+			"reason":       err.Error(),
 			"token_length": len(accessToken),
+		}
+		var tokenErr *crypto.AccessTokenError
+		if errors.As(err, &tokenErr) && tokenErr.Check != "signature" {
+			description = "The access token is not valid at UserInfo: its " + tokenErr.Check + " does not match (RFC 9068 Section 4)"
+			eventData["failed_check"] = tokenErr.Check
+			eventData["expected_issuer"] = p.mockIdP.GetIssuer()
+			eventData["expected_audience"] = p.userInfoResource()
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Validation Failed", eventData, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "JWT Access Token Validation",
+			Description: "UserInfo accepts a JWT only when its typ header says at+jwt, its iss is the OpenID Provider, its aud names UserInfo, its signature verifies and it has not expired. An ID Token, a refresh token or an access token issued for another resource fails one of these checks.",
+			Severity:    "warning",
+			Reference:   "RFC 9068 Section 4",
 		})
-		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Token validation failed")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", description)
 		return
 	}
 
@@ -104,21 +129,22 @@ func (p *Plugin) handleUserInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The access-token subject is the client-visible public or pairwise
-	// identifier. Resolve it through the token audience so claim lookup uses
-	// the canonical local identity while UserInfo returns the same sub.
+	// identifier. Resolve it through the client the token was issued to, its
+	// client_id claim (RFC 8693 Section 4.3), so claim lookup uses the
+	// canonical local identity while UserInfo returns the same sub.
 	tokenSubject, ok := claims["sub"].(string)
 	if !ok {
 		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Missing subject claim")
 		return
 	}
-	clientID, ok := claims["aud"].(string)
+	clientID, ok := claims["client_id"].(string)
 	if !ok {
-		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Missing client audience claim")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Missing client_id claim")
 		return
 	}
 	client, exists := p.mockIdP.GetClient(clientID)
 	if !exists {
-		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Unknown client audience")
+		p.writeUserInfoError(w, http.StatusUnauthorized, "invalid_token", "Unknown client_id claim")
 		return
 	}
 	userID, found := p.mockIdP.ResolveUserIDForSubject(client, tokenSubject)

@@ -49,14 +49,15 @@ type KeyBindingInfo =
 // Standard JWT claim explanations
 const claimInfo: Record<string, { label: string; description: string; icon: ElementType }> = {
   iss: { label: 'Issuer', description: 'Entity that issued the token', icon: Globe },
-  sub: { label: 'Subject', description: 'Unique identifier of the user', icon: User },
-  aud: { label: 'Audience', description: 'Intended recipient (your app)', icon: FileText },
+  sub: { label: 'Subject', description: 'The user, or the client when no user takes part in the grant', icon: User },
+  aud: { label: 'Audience', description: 'Intended recipient: the protected resource for an access token, the client for an ID Token', icon: FileText },
   exp: { label: 'Expiration', description: 'When the token expires', icon: Clock },
   nbf: { label: 'Not Before', description: 'Token not valid before this time', icon: Calendar },
   iat: { label: 'Issued At', description: 'When the token was created', icon: Calendar },
   jti: { label: 'Token ID', description: 'Unique identifier for this token', icon: Fingerprint },
   nonce: { label: 'Nonce', description: 'Replay attack prevention (OIDC)', icon: Lock },
   azp: { label: 'Authorized Party', description: 'Client ID the token was issued to', icon: Key },
+  client_id: { label: 'Client', description: 'Client that requested the token (RFC 8693)', icon: Key },
   scope: { label: 'Scope', description: 'Permissions granted to this token', icon: Shield },
   email: { label: 'Email', description: "User's email address", icon: User },
   name: { label: 'Name', description: "User's full name", icon: User },

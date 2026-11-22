@@ -33,13 +33,17 @@ type Plugin struct {
 
 	// Authorization server used to validate Stream Management access tokens.
 	// [CAEPINTEROP] §2.7: the AS MAY be a different entity from the Transmitter.
-	asIssuer     string
-	asJWKSURI    string
-	asAudience   string
-	jwksFetch    *crypto.JWKSFetcher
-	revoker      tokenRevoker
+	asIssuer      string
+	asJWKSURI     string
+	asAudience    string
+	jwksFetch     *crypto.JWKSFetcher
+	revoker       tokenRevoker
 	introspectURL string
-	minVerifyInt int // seconds; SSF §8.1.1 min_verification_interval
+	// introspectSecret authenticates this Transmitter to the introspection
+	// endpoint as the resource server registration "ssf-transmitter" (RFC
+	// 7662 Section 2.1).
+	introspectSecret string
+	minVerifyInt     int // seconds; SSF §8.1.1 min_verification_interval
 }
 
 // NewPlugin creates a new SSF plugin
@@ -90,7 +94,15 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 	// 3. Real HTTP traffic still flows between transmitter and receiver
 	p.receiverEndpoint = strings.TrimRight(p.baseURL, "/") + "/ssf/receiver/push"
 
+	// RFC 9068 Section 4: "The issuer identifier for the authorization server
+	// (which is typically obtained during discovery) MUST exactly match the
+	// value of the "iss" claim." Stream Management tokens come from the OAuth
+	// 2.0 authorization server, whose issuer is {origin}/oauth2. On the
+	// monolith that is this origin; a split deployment names it explicitly.
 	p.asIssuer = strings.TrimRight(strings.TrimSpace(os.Getenv("SSF_AS_ISSUER")), "/")
+	if p.asIssuer == "" {
+		p.asIssuer = strings.TrimRight(p.baseURL, "/") + "/oauth2"
+	}
 	p.asJWKSURI = strings.TrimSpace(os.Getenv("SSF_AS_JWKS_URI"))
 	p.asAudience = strings.TrimRight(strings.TrimSpace(os.Getenv("SSF_RESOURCE")), "/")
 	if p.asAudience == "" {
@@ -101,6 +113,10 @@ func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) err
 		p.revoker = checker
 	}
 	p.introspectURL = strings.TrimSpace(os.Getenv("SSF_AS_INTROSPECT_URI"))
+	p.introspectSecret = strings.TrimSpace(os.Getenv("SSF_AS_INTROSPECT_CLIENT_SECRET"))
+	if p.introspectURL != "" && p.introspectSecret == "" {
+		log.Printf("[SSF] WARNING: SSF_AS_INTROSPECT_URI is set without SSF_AS_INTROSPECT_CLIENT_SECRET; the Transmitter cannot authenticate to the introspection endpoint, so every Stream Management bearer token will be refused")
+	}
 	p.minVerifyInt = 10
 	if strings.EqualFold(config.Environment, "production") && p.asJWKSURI == "" {
 		log.Printf("[SSF] WARNING: SSF_AS_JWKS_URI is unset in production; Stream Management will not require bearer tokens")

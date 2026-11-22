@@ -76,6 +76,18 @@ paths:
           schema:
             type: string
           required: true
+        - in: query
+          name: resource
+          description: >-
+            RFC 8707 Section 2 resource indicator: the protected resource the
+            access token is for. This authorization server issues each access
+            token for one resource, {base}/oauth2/resource or the SSF
+            resource. A value that is not an absolute URI without a fragment,
+            names another resource, or does not fit the requested scope is
+            returned to the client as invalid_target.
+          schema:
+            type: string
+            format: uri
       responses:
         "200":
           description: Authorization/login page.
@@ -135,6 +147,13 @@ paths:
                   type: string
                 scope:
                   type: string
+                resource:
+                  type: string
+                  format: uri
+                  description: >-
+                    RFC 8707 Section 2 resource indicator. Refused with
+                    invalid_target when it does not name the resource the
+                    requested scope belongs to.
       responses:
         "200":
           description: Device authorization response.
@@ -293,9 +312,26 @@ paths:
                   type: string
                 code_verifier:
                   type: string
+                resource:
+                  type: string
+                  format: uri
+                  description: >-
+                    RFC 8707 Section 2 resource indicator: the protected
+                    resource the access token is for, which becomes its aud
+                    claim (RFC 9068 Section 3). Without it the granted scope
+                    decides: {base}/oauth2/resource, or the SSF resource for
+                    ssf.read and ssf.manage. Refused with invalid_target when
+                    it is not an absolute URI without a fragment, names a
+                    resource this server does not issue tokens for, or does
+                    not fit the granted scope.
       responses:
         "200":
-          description: Access token response.
+          description: >-
+            Access token response. The access token is a JWT that follows RFC
+            9068: its typ header is at+jwt, iss is {base}/oauth2 (the issuer
+            of this server's RFC 8414 metadata), aud is the one protected
+            resource it is for, and client_id is the client that requested
+            it.
           headers:
             DPoP-Nonce:
               schema:
@@ -310,7 +346,7 @@ paths:
               examples:
                 success:
                   value:
-                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    access_token: "eyJhbGciOiJSUzI1NiIsImtpZCI6..."
                     token_type: Bearer
                     expires_in: 3600
                     refresh_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
@@ -318,7 +354,7 @@ paths:
                 dpop_bound:
                   summary: DPoP-bound response (client sent a valid DPoP proof header)
                   value:
-                    access_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    access_token: "eyJhbGciOiJSUzI1NiIsImtpZCI6..."
                     token_type: DPoP
                     expires_in: 3600
                     refresh_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
@@ -326,8 +362,11 @@ paths:
         "400":
           description: >-
             OAuth error response, including invalid_dpop_proof (RFC 9449
-            Section 5) and use_dpop_nonce (RFC 9449 Section 8, only when
-            nonce enforcement is enabled for this endpoint).
+            Section 5), use_dpop_nonce (RFC 9449 Section 8, only when
+            nonce enforcement is enabled for this endpoint), invalid_target
+            (RFC 8707 Section 2) for a refused resource parameter, and
+            invalid_scope when the scope values belong to different
+            resources (RFC 9068 Section 3).
           headers:
             DPoP-Nonce:
               schema:
@@ -474,10 +513,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+  /oauth2/resource:
+    get:
+      tags: [OAuth2]
+      summary: OAuth2 protected resource
+      description: >-
+        A protected resource for the access tokens /oauth2/token issues.
+        Authorization accepts Bearer <token> or, for a token that carries a
+        DPoP cnf.jkt binding (RFC 9449), DPoP <token> plus a matching DPoP
+        proof header. The token is validated as RFC 9068 Section 4 lists: the
+        typ header is at+jwt, iss is {base}/oauth2, aud contains this
+        resource's URL, the signature verifies and the token has not expired.
+      operationId: oauth2ProtectedResource
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: DPoP
+          schema:
+            type: string
+          description: DPoP proof JWT, required for a DPoP-bound access token (RFC 9449 Section 7).
+      responses:
+        "200":
+          description: The resource payload and what the resource read from the token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: string
+                  sub:
+                    type: string
+                  scope:
+                    type: string
+                  token_type:
+                    type: string
+                    enum: [Bearer, DPoP]
+                  dpop_bound:
+                    type: boolean
+        "401":
+          description: >-
+            invalid_token (RFC 6750 Section 3.1) for a JWT that fails any RFC
+            9068 Section 4 check, a revoked token or an invalid DPoP proof;
+            use_dpop_nonce when resource nonce enforcement is enabled. The
+            WWW-Authenticate challenge uses the DPoP scheme for a DPoP-bound
+            token and Bearer otherwise.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oauth2/introspect:
     post:
       tags: [OAuth2]
       summary: Token introspection endpoint
+      description: >-
+        RFC 7662 token introspection. The caller authenticates as a
+        registered client with HTTP Basic or client_id and client_secret in
+        the body (Section 2.1). It is told a token is active only when it is
+        the client the token was issued to (the token's client_id) or a
+        resource server the token's aud names (Section 4). Any other
+        authenticated caller receives {"active": false} with no other member
+        (Section 2.2). The token being introspected is not accepted as the
+        caller's own credential.
       operationId: oauth2Introspect
       requestBody:
         required: true
@@ -491,6 +589,11 @@ paths:
                   type: string
                 token_type_hint:
                   type: string
+                client_id:
+                  type: string
+                  description: The caller's client identifier, when HTTP Basic is not used.
+                client_secret:
+                  type: string
       responses:
         "200":
           description: Token active state.
@@ -498,6 +601,25 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [active]
+                properties:
+                  active:
+                    type: boolean
+                  client_id:
+                    type: string
+                    description: Client that requested the token (RFC 7662 Section 2.2), from the token's client_id claim.
+                  aud:
+                    type: string
+                    description: Protected resource the token is for, from the token's aud claim.
+                  iss:
+                    type: string
+                  sub:
+                    type: string
+                  scope:
+                    type: string
+                  token_type:
+                    type: string
+                    description: Bearer, or DPoP for a DPoP-bound token (RFC 9449 Section 6.2).
                 additionalProperties: true
         "400":
           description: Invalid introspection request.
@@ -667,6 +789,17 @@ paths:
           schema:
             type: string
           required: true
+        - in: query
+          name: resource
+          description: >-
+            RFC 8707 Section 2 resource indicator. The OpenID Provider issues
+            access tokens for UserInfo only, so the one accepted value is
+            {issuer}/oidc/userinfo; any other value is returned to the client
+            as invalid_target. Not checked on an OID4VCI authorization
+            request, whose token comes from the Credential Issuer.
+          schema:
+            type: string
+            format: uri
       responses:
         "200":
           description: Authorization/login page.
@@ -730,9 +863,19 @@ paths:
                   type: string
                 code_verifier:
                   type: string
+                resource:
+                  type: string
+                  format: uri
+                  description: >-
+                    RFC 8707 Section 2 resource indicator. The one accepted
+                    value is {issuer}/oidc/userinfo; any other value is
+                    refused with invalid_target.
       responses:
         "200":
-          description: Token response including ID token.
+          description: >-
+            Token response including ID token. The access token is a JWT that
+            follows RFC 9068: its typ header is at+jwt, iss is the OP issuer,
+            aud is {issuer}/oidc/userinfo and client_id is the Relying Party.
           content:
             application/json:
               schema:
@@ -752,6 +895,12 @@ paths:
     get:
       tags: [OIDC]
       summary: OIDC userinfo endpoint
+      description: >-
+        UserInfo is an OAuth 2.0 protected resource. It validates the access
+        token as RFC 9068 Section 4 lists: the typ header is at+jwt, iss is
+        the OP issuer, aud contains {issuer}/oidc/userinfo, the signature
+        verifies and the token has not expired. The Relying Party is read
+        from the token's client_id claim.
       operationId: oidcUserInfoGet
       security:
         - bearerAuth: []
@@ -764,7 +913,11 @@ paths:
                 type: object
                 additionalProperties: true
         "401":
-          description: Invalid token.
+          description: >-
+            invalid_token (RFC 6750 Section 3.1): no token, a revoked token,
+            or a JWT that fails any RFC 9068 Section 4 check, such as an ID
+            Token, a refresh token or an access token issued for another
+            resource.
           content:
             application/json:
               schema:
@@ -1291,7 +1444,10 @@ paths:
         header on the proof JWT. Authorization accepts Bearer <token> or,
         when the token carries a DPoP cnf.jkt binding (RFC 9449), DPoP
         <token> plus a matching DPoP proof header -- presenting a
-        DPoP-bound token as bare Bearer is rejected outright.
+        DPoP-bound token as bare Bearer is rejected outright. The access
+        token is a JWT whose aud is the Credential Issuer Identifier; a token
+        whose aud does not name this Credential Issuer is refused with 401
+        invalid_token (RFC 7519 Section 4.1.3).
       operationId: oid4vciCredential
       security:
         - bearerAuth: []

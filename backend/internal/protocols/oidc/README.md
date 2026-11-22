@@ -343,10 +343,14 @@ This prevents:
   "exp": 1704825600,
   "iat": 1704822000,
   "sub": "alice@example.com",
-  "aud": "public-app",
+  "aud": "https://protocolsoup.com/oidc/userinfo",
   "iss": "https://protocolsoup.com"
 }
 ```
+
+An OP access token follows RFC 9068: its `aud` is the UserInfo endpoint, the
+one resource the OP issues tokens for, and `client_id` names the Relying Party.
+UserInfo refuses a JWT that fails any RFC 9068 §4 check with `invalid_token`.
 
 ## Looking Glass Flows
 

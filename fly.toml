@@ -68,8 +68,10 @@ primary_region = 'syd'
   # SSF Transmitter as an OAuth 2.0 resource server (CAEP Interop Profile).
   # The AS is federation on this host; the Transmitter validates bearer JWTs
   # against the same JWKS. Pin SSF_STREAM_CLIENT_SECRET as a fly secret if
-  # Stream Management tokens must survive restarts.
-  SSF_AS_ISSUER = 'https://protocolsoup.com'
+  # Stream Management tokens must survive restarts. SSF_AS_ISSUER is the
+  # issuer identifier of the OAuth 2.0 authorization server at /oauth2, the
+  # "iss" of the access tokens it signs (RFC 9068 Section 4).
+  SSF_AS_ISSUER = 'https://protocolsoup.com/oauth2'
   SSF_AS_JWKS_URI = 'https://protocolsoup.com/api/.well-known/jwks.json'
   SSF_RESOURCE = 'https://protocolsoup.com'
 

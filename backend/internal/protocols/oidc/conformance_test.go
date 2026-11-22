@@ -603,9 +603,7 @@ func TestCodeFlowIDTokenOmitsScopeAndCustomClaims(t *testing.T) {
 func TestUserInfoReturnsScopeClaims(t *testing.T) {
 	p := newTestPlugin(t)
 
-	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(
-		testUserID, testConfClient, "openid profile email", time.Hour, nil,
-	)
+	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(p.accessTokenFor(testUserID, testConfClient, "openid profile email", nil))
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}
@@ -636,9 +634,7 @@ func TestUserInfoReturnsScopeClaims(t *testing.T) {
 func TestUserInfoReturnsFullProfileScopeClaims(t *testing.T) {
 	p := newTestPlugin(t)
 
-	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(
-		testUserID, testConfClient, "openid profile", time.Hour, nil,
-	)
+	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(p.accessTokenFor(testUserID, testConfClient, "openid profile", nil))
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}
@@ -676,9 +672,7 @@ func TestUserInfoReturnsFullProfileScopeClaims(t *testing.T) {
 func TestUserInfoReturnsAddressAndPhoneScopeClaims(t *testing.T) {
 	p := newTestPlugin(t)
 
-	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(
-		testUserID, testConfClient, "openid address phone", time.Hour, nil,
-	)
+	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(p.accessTokenFor(testUserID, testConfClient, "openid address phone", nil))
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}
@@ -728,9 +722,7 @@ func TestUserInfoReturnsAddressAndPhoneScopeClaims(t *testing.T) {
 func TestUserInfoAcceptsAccessTokenInPostBody(t *testing.T) {
 	p := newTestPlugin(t)
 
-	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(
-		testUserID, testConfClient, "openid email", time.Hour, nil,
-	)
+	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(p.accessTokenFor(testUserID, testConfClient, "openid email", nil))
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}
@@ -759,9 +751,7 @@ func TestUserInfoAcceptsAccessTokenInPostBody(t *testing.T) {
 func TestUserInfoRejectsMultipleTokenMethods(t *testing.T) {
 	p := newTestPlugin(t)
 
-	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(
-		testUserID, testConfClient, "openid", time.Hour, nil,
-	)
+	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(p.accessTokenFor(testUserID, testConfClient, "openid", nil))
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}
