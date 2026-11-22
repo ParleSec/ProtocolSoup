@@ -103,6 +103,9 @@ type RequirementResponse struct {
 	Siblings          []RequirementLink `json:"siblings"`
 	Previous          *RequirementLink  `json:"previous,omitempty"`
 	Next              *RequirementLink  `json:"next,omitempty"`
+	// Examples are the example pages with a field that satisfies this
+	// requirement.
+	Examples []ExampleLink `json:"examples"`
 }
 
 // SitemapEntry is one indexable page for the frontend sitemap.
@@ -118,6 +121,8 @@ func (c *Catalogue) Routes() chi.Router {
 	r.Get("/specs/{specId}", c.handleSpec)
 	r.Get("/requirements/{id}", c.handleRequirement)
 	r.Get("/requirements/{id}/artefacts", c.handleRequirementArtefacts)
+	r.Get("/examples", c.handleExamples)
+	r.Get("/examples/{id}", c.handleExample)
 	r.Get("/sitemap", c.handleSitemap)
 	return r
 }
@@ -231,6 +236,7 @@ func (c *Catalogue) handleRequirement(w http.ResponseWriter, r *http.Request) {
 		Notes:          req.Notes,
 		Indexable:      c.Indexable(req.ID),
 		Siblings:       []RequirementLink{},
+		Examples:       c.examplesCiting(req.ID),
 	}
 
 	result, hasResult := c.Result(req.ID)
@@ -273,9 +279,10 @@ func (c *Catalogue) handleSitemap(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-// Sitemap lists indexable specification and requirement pages. lastmod is
-// the report generation time (sitemaps.org 0.9 W3C Datetime). It returns an
-// empty, non-nil slice when nothing is indexable.
+// Sitemap lists indexable specification, requirement and example pages.
+// lastmod is the report generation time for the first two and the capture
+// time for an example (sitemaps.org 0.9 W3C Datetime). It returns an empty,
+// non-nil slice when nothing is indexable.
 func (c *Catalogue) Sitemap() []SitemapEntry {
 	entries := []SitemapEntry{}
 	if !c.LaunchGateOpen() {
@@ -291,6 +298,14 @@ func (c *Catalogue) Sitemap() []SitemapEntry {
 			if c.Indexable(req.ID) {
 				entries = append(entries, SitemapEntry{Path: RequirementPath(spec.ID, req.ID), LastMod: lastmod})
 			}
+		}
+	}
+	for _, example := range c.registry.Examples {
+		if c.ExampleIndexable(example.ID) {
+			entries = append(entries, SitemapEntry{
+				Path:    ExamplePath(example.ID),
+				LastMod: c.artefacts.CapturedAt.UTC().Format(time.RFC3339),
+			})
 		}
 	}
 	return entries

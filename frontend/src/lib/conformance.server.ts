@@ -91,6 +91,90 @@ export interface ConformanceRequirementResponse {
   siblings: ConformanceRequirementLink[]
   previous?: ConformanceRequirementLink
   next?: ConformanceRequirementLink
+  /** Example pages with a field that satisfies this requirement. */
+  examples: ConformanceExampleLink[]
+}
+
+export interface ConformanceExampleLink {
+  id: string
+  title: string
+  question: string
+}
+
+export interface ConformanceExampleSummary extends ConformanceExampleLink {
+  summary: string
+  format: 'jwt'
+  indexable: boolean
+}
+
+export interface ConformanceExamplesResponse {
+  examples: ConformanceExampleSummary[]
+}
+
+/** A requirement a field satisfies; path is its requirement page. */
+export interface ConformanceExampleRequirementLink extends ConformanceRequirementLink {
+  path: string
+}
+
+/** One member of the message with the specification text that defines it. */
+export interface ConformanceExampleField {
+  /** Decoded part and member, such as `header.typ` or `payload.cnf.jkt`. */
+  path: string
+  reference: string
+  url: string
+  /** The specification's own text, verbatim. */
+  statement: string
+  note?: string
+  requirements: ConformanceExampleRequirementLink[]
+}
+
+export interface ConformanceExampleMember {
+  path: string
+  /** The member's JSON text exactly as the sender wrote it. */
+  value: string
+}
+
+export interface ConformanceExamplePart {
+  name: string
+  /** The decoded part, byte for byte. */
+  json: string
+  /** The same tokens with line breaks and indentation between them. */
+  indented: string
+  members: ConformanceExampleMember[]
+}
+
+export interface ConformanceExampleSource {
+  exchange: number
+  message: 'request' | 'response'
+  location: string
+}
+
+export interface ConformanceExampleVerification {
+  method: 'embedded_jwk' | 'jwks'
+  algorithm: string
+  key_id?: string
+  jwks_exchange?: number
+}
+
+/**
+ * GET /api/conformance/examples/{id}. The definition is always present; the
+ * value and everything derived from it only when status is published.
+ */
+export interface ConformanceExampleResponse extends ConformanceExampleSummary {
+  run_url: string
+  fields: ConformanceExampleField[]
+  status: 'published' | 'pending' | 'not_captured'
+  commit?: string
+  captured_at?: string
+  publish_after?: string
+  actor?: ConformanceArtefactActor
+  description?: string
+  value?: string
+  issued_at?: string
+  parts?: ConformanceExamplePart[]
+  source?: ConformanceExampleSource
+  verification?: ConformanceExampleVerification
+  exchanges?: WireCapturedExchange[]
 }
 
 export interface ConformanceSitemapEntry {
@@ -178,6 +262,23 @@ export async function getConformanceRequirementArtefacts(id: string): Promise<Co
   }
 }
 
+export function getConformanceExamples(): Promise<ConformanceExamplesResponse> {
+  return fetchBackendJSON<ConformanceExamplesResponse>('/api/conformance/examples', REVALIDATE_SECONDS)
+}
+
+export async function getConformanceExample(id: string): Promise<ConformanceExampleResponse> {
+  const raw = await fetchBackendJSON<Omit<ConformanceExampleResponse, 'exchanges'> & { exchanges?: unknown[] }>(
+    `/api/conformance/examples/${encodeURIComponent(id)}`,
+    REVALIDATE_SECONDS,
+  )
+  return {
+    ...raw,
+    exchanges: raw.exchanges
+      ?.map((exchange) => normalizeWireExchange(exchange))
+      .filter((exchange): exchange is WireCapturedExchange => exchange !== null),
+  }
+}
+
 export function getConformanceSitemap(): Promise<ConformanceSitemapEntry[]> {
   return fetchBackendJSON<ConformanceSitemapEntry[]>('/api/conformance/sitemap', REVALIDATE_SECONDS)
 }
@@ -211,6 +312,10 @@ export function specPath(specId: string): string {
 
 export function requirementPath(specId: string, requirementId: string): string {
   return `/spec/${specId}/${requirementId.toLowerCase()}`
+}
+
+export function examplePath(exampleId: string): string {
+  return `/example/${exampleId}`
 }
 
 /** Truncates at a word boundary so meta descriptions never cut mid-word. */

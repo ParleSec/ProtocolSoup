@@ -65,6 +65,8 @@ type Registry struct {
 	Suite          SuiteBaseline   `yaml:"suite" json:"suite"`
 	Specifications []Specification `yaml:"specifications" json:"specifications"`
 	Requirements   []Requirement   `yaml:"requirements" json:"requirements"`
+	// Examples are the protocol message types that have their own page.
+	Examples []Example `yaml:"examples" json:"examples"`
 }
 
 type SuiteBaseline struct {
@@ -301,6 +303,8 @@ func Validate(registry Registry, repoRoot string) error {
 			}
 		}
 	}
+
+	issues = append(issues, validateExamples(registry, requirementIDs)...)
 
 	if len(issues) == 0 {
 		return nil

@@ -33,7 +33,7 @@ const KIND_TITLES: Record<ConformanceArtefactKind, string> = {
   failing: 'Failing exchange',
 }
 
-function formatUTC(value?: string): string {
+export function formatUTC(value?: string): string {
   if (!value) return ''
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
@@ -110,7 +110,7 @@ function MessageParts({
   )
 }
 
-function ExchangeView({ exchange, index }: { exchange: WireCapturedExchange; index: number }) {
+export function ExchangeView({ exchange, index }: { exchange: WireCapturedExchange; index: number }) {
   const { request, response, tls, meta } = exchange
   const tlsLine = tls?.version
     ? [tls.version, tls.cipherSuite, tls.negotiatedProtocol].filter(Boolean).join(' · ')

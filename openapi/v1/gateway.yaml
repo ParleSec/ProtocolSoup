@@ -541,16 +541,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/conformance/examples:
+    get:
+      tags: [Conformance]
+      summary: List the protocol message types that have an example page
+      description: >-
+        Returns every example in the registry: one protocol message type
+        each, such as a DPoP proof. `indexable` is true once the launch gate
+        is open and the artefact set for the running build holds the
+        example's value.
+      operationId: listConformanceExamples
+      responses:
+        "200":
+          description: Registry examples.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConformanceExamplesResponse"
+  /api/conformance/examples/{id}:
+    get:
+      tags: [Conformance]
+      summary: Get a real protocol message with every field annotated
+      description: >-
+        Returns one example. The definition is always present: what the
+        message is, and for each of its members the specification's own text
+        and the registry requirements the member satisfies. When `status` is
+        `published` the response also carries the value, a message the
+        deployed build really issued or accepted, exactly as the source
+        exchange carried it; its decoded parts with members in the sender's
+        order; the exchanges that carried it; and how its signature was
+        verified when it was captured. `cmd/conformance-capture` records a
+        value only when it is present in the exchange it is attributed to,
+        every member of it is annotated, and its signature verifies. `status`
+        is `not_captured` when no artefact set for the running build holds
+        the value, and `pending` while some token, code or nonce in the
+        exchanges could still be used. The lookup is case-insensitive.
+      operationId: getConformanceExample
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: dpop-proof
+      responses:
+        "200":
+          description: The example.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: public, max-age=300
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConformanceExampleResponse"
+        "404":
+          description: Unknown example.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/conformance/sitemap:
     get:
       tags: [Conformance]
-      summary: List indexable specification and requirement pages
+      summary: List indexable specification, requirement and example pages
       description: >-
-        Returns the `/spec` paths that may be indexed: the launch gate is
-        open (valid report, no MUST-family FAIL, MISSING_TEST or CHECK), the
+        Returns the `/spec` and `/example` paths that may be indexed. A
+        requirement page is listed when the launch gate is open (valid
+        report, no MUST-family FAIL, MISSING_TEST or CHECK), the
         requirement's verdict is PASS, DEVIATION or N/A, and a human-authored
-        explainer exists. `lastmod` is the report's `generated_at`. The
-        array is empty when nothing is indexable.
+        explainer exists; its `lastmod` is the report's `generated_at`. An
+        example page is listed when the launch gate is open and the artefact
+        set for the running build holds its value; its `lastmod` is the
+        capture time. The array is empty when nothing is indexable.
       operationId: getConformanceSitemap
       responses:
         "200":
@@ -1263,6 +1332,7 @@ components:
         - implementation
         - indexable
         - siblings
+        - examples
       properties:
         id:
           type: string
@@ -1343,6 +1413,11 @@ components:
           $ref: "#/components/schemas/ConformanceRequirementLink"
         next:
           $ref: "#/components/schemas/ConformanceRequirementLink"
+        examples:
+          type: array
+          description: Example pages with a field that satisfies this requirement.
+          items:
+            $ref: "#/components/schemas/ConformanceExampleLink"
     ConformanceRequirementArtefacts:
       type: object
       required: [id, status]
@@ -1411,6 +1486,193 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CapturedExchange"
+    ConformanceExampleLink:
+      type: object
+      required: [id, title, question]
+      properties:
+        id:
+          type: string
+          example: dpop-proof
+        title:
+          type: string
+          example: DPoP proof
+        question:
+          type: string
+          example: What does a valid DPoP proof look like?
+    ConformanceExampleSummary:
+      allOf:
+        - $ref: "#/components/schemas/ConformanceExampleLink"
+        - type: object
+          required: [summary, format, indexable]
+          properties:
+            summary:
+              type: string
+              description: What the message is, in one or two sentences.
+            format:
+              type: string
+              enum: [jwt]
+              description: >-
+                `jwt` is a compact JWS whose payload is a JWT Claims Set. Its
+                decoded parts are `header` and `payload`.
+            indexable:
+              type: boolean
+    ConformanceExamplesResponse:
+      type: object
+      required: [examples]
+      properties:
+        examples:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConformanceExampleSummary"
+    ConformanceExampleField:
+      type: object
+      required: [path, reference, url, statement, requirements]
+      properties:
+        path:
+          type: string
+          description: The decoded part and the member within it.
+          example: payload.cnf.jkt
+        reference:
+          type: string
+          example: RFC 9449 Section 6.1
+        url:
+          type: string
+          format: uri
+        statement:
+          type: string
+          description: The specification's own text for the member, verbatim.
+        note:
+          type: string
+          description: >-
+            What ProtocolSoup puts in the member, where the specification
+            leaves that to the deployment.
+        requirements:
+          type: array
+          description: Registry requirements the member satisfies.
+          items:
+            allOf:
+              - $ref: "#/components/schemas/ConformanceRequirementLink"
+              - type: object
+                required: [path]
+                properties:
+                  path:
+                    type: string
+                    description: Path of the requirement's page.
+                    example: /spec/rfc9449/dp-011
+    ConformanceExamplePart:
+      type: object
+      required: [name, json, indented, members]
+      properties:
+        name:
+          type: string
+          example: payload
+        json:
+          type: string
+          description: The part exactly as decoded from the value, byte for byte.
+        indented:
+          type: string
+          description: >-
+            `json` with line breaks and indentation added between its tokens.
+            No token is changed or moved.
+        members:
+          type: array
+          description: >-
+            The part's members in the order the sender wrote them. A nested
+            member that a field annotates follows its parent.
+          items:
+            type: object
+            required: [path, value]
+            properties:
+              path:
+                type: string
+                example: payload.htu
+              value:
+                type: string
+                description: >-
+                  The member's JSON text as the sender wrote it, carried as a
+                  string so no parser reformats it.
+    ConformanceExampleResponse:
+      allOf:
+        - $ref: "#/components/schemas/ConformanceExampleSummary"
+        - type: object
+          required: [run_url, fields, status]
+          properties:
+            run_url:
+              type: string
+              description: Looking Glass deep link to the flow that produces this message live.
+              example: /looking-glass?protocol=oauth2&flow=client_credentials&token_mode=dpop
+            fields:
+              type: array
+              items:
+                $ref: "#/components/schemas/ConformanceExampleField"
+            status:
+              type: string
+              enum: [published, pending, not_captured]
+            commit:
+              type: string
+              description: Commit the value was captured from, equal to the serving build.
+            captured_at:
+              type: string
+              format: date-time
+            publish_after:
+              type: string
+              format: date-time
+            actor:
+              type: string
+              enum: [conformance_client, hosted_wallet, counterparty]
+              description: Who sent the requests in `exchanges`.
+            description:
+              type: string
+            value:
+              type: string
+              description: The message exactly as the source exchange carried it.
+            issued_at:
+              type: string
+              format: date-time
+              description: When the source exchange began.
+            parts:
+              type: array
+              items:
+                $ref: "#/components/schemas/ConformanceExamplePart"
+            source:
+              type: object
+              description: Where in `exchanges` the value was on the wire.
+              required: [exchange, message, location]
+              properties:
+                exchange:
+                  type: integer
+                  description: Zero-based index into `exchanges`.
+                message:
+                  type: string
+                  enum: [request, response]
+                location:
+                  type: string
+                  example: the DPoP header
+            verification:
+              type: object
+              description: The signature check the capture run made on the value.
+              required: [method, algorithm]
+              properties:
+                method:
+                  type: string
+                  enum: [embedded_jwk, jwks]
+                  description: >-
+                    `embedded_jwk` means the signature verified under the
+                    public key in the value's own `jwk` header parameter.
+                    `jwks` means it verified under the key its `kid` selects
+                    from the JWK Set fetched in exchange `jwks_exchange`.
+                algorithm:
+                  type: string
+                  example: ES256
+                key_id:
+                  type: string
+                jwks_exchange:
+                  type: integer
+                  description: Zero-based index into `exchanges`.
+            exchanges:
+              type: array
+              items:
+                $ref: "#/components/schemas/CapturedExchange"
     CapturedExchange:
       type: object
       required: [id, request, response, timing, meta]

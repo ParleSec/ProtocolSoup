@@ -6,7 +6,7 @@ import type {
   ConformanceRequirementResponse,
   ConformanceVerdict,
 } from '@/lib/conformance.server'
-import { requirementPath, specPath } from '@/lib/conformance.server'
+import { examplePath, requirementPath, specPath } from '@/lib/conformance.server'
 import type { ProtocolCatalogDataItem } from '@/protocols/presentation/protocol-catalog-data'
 import { RequirementArtefacts } from '@/views/RequirementArtefacts'
 
@@ -77,7 +77,7 @@ function SourceLink({ href, label, mono = true }: { href: string | null; label: 
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-xl border border-white/10 bg-surface-900/40 p-4 sm:p-5">
       <h2 className="text-base sm:text-lg font-semibold text-white mb-3">{title}</h2>
@@ -226,6 +226,20 @@ export function RequirementPage({ requirement, artefacts, relatedProtocol }: Req
             headingLevel={2}
             className="space-y-2 text-sm leading-relaxed text-surface-200"
           />
+        </Section>
+      )}
+
+      {requirement.examples.length > 0 && (
+        <Section title="Real messages that carry it">
+          <ul className="space-y-1">
+            {requirement.examples.map((example) => (
+              <li key={example.id}>
+                <Link href={examplePath(example.id)} className="text-sm text-amber-300 underline-offset-2 hover:underline">
+                  {example.question}
+                </Link>
+              </li>
+            ))}
+          </ul>
         </Section>
       )}
 

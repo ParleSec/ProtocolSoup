@@ -1,6 +1,6 @@
 import { sortedProtocolCatalogData } from '@/protocols/presentation/protocol-catalog-data'
 import { DOCS_ORIGIN, SITE_ORIGIN, WALLET_ORIGIN } from '@/lib/seo'
-import { getConformanceSpecs, specPath } from '@/lib/conformance.server'
+import { examplePath, getConformanceExamples, getConformanceSpecs, specPath } from '@/lib/conformance.server'
 
 export const revalidate = 300
 
@@ -16,11 +16,23 @@ async function requirementLines(): Promise<string[]> {
   }
 }
 
+/** Indexable example pages, or nothing when none qualify or the backend is unavailable. */
+async function exampleLines(): Promise<string[]> {
+  try {
+    const response = await getConformanceExamples()
+    return response.examples
+      .filter((example) => example.indexable)
+      .map((example) => `- [${example.question}](${SITE_ORIGIN}${examplePath(example.id)})`)
+  } catch {
+    return []
+  }
+}
+
 export async function GET() {
   const protocolLines = sortedProtocolCatalogData().map(
     (protocol) => `- [${protocol.name}](${SITE_ORIGIN}/protocol/${protocol.id})`,
   )
-  const specLines = await requirementLines()
+  const [specLines, realExampleLines] = await Promise.all([requirementLines(), exampleLines()])
 
   // Every task names an endpoint that is mounted on its origin and answers
   // without authentication. Keep each line in step with the backend router.
@@ -72,6 +84,11 @@ export async function GET() {
     '- To read one requirement with its statement, specification section, and the self-test verdict for this build, `GET /api/conformance/requirements/{requirementId}`, for example `/api/conformance/requirements/vp-001`.',
     '- To read the passing and failing exchanges captured from production for one requirement, `GET /api/conformance/requirements/{requirementId}/artefacts`.',
     '',
+    '## See a real protocol message',
+    '',
+    '- To list the message types that have a real captured example, `GET /api/conformance/examples`.',
+    '- To read one real message with every field decoded, the specification text that defines each field, the exchanges that carried it and the key that verified it, `GET /api/conformance/examples/{exampleId}`, for example `/api/conformance/examples/dpop-proof`.',
+    '',
     '## Read any page as markdown',
     '',
     '- To read a page without parsing HTML, `GET` it with `Accept: text/markdown`, for example `GET /protocols`.',
@@ -88,6 +105,14 @@ export async function GET() {
     '## Protocol Guides',
     ...protocolLines,
     '',
+    ...(realExampleLines.length > 0
+      ? [
+          '## Real examples',
+          'One page per protocol message type: a message the deployed sandbox really sent or issued, decoded field by field against the specification.',
+          ...realExampleLines,
+          '',
+        ]
+      : []),
     ...(specLines.length > 0
       ? [
           '## Normative requirements',

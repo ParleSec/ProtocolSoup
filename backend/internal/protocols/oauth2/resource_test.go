@@ -338,3 +338,118 @@ func TestSSFClientCredentialsIssuesShortLivedResourceAudience(t *testing.T) {
 		t.Fatalf("scope %v", claims["scope"])
 	}
 }
+
+// clientCredentialsToken requests a client_credentials access token over
+// HTTP and returns it with the token response.
+func clientCredentialsToken(t *testing.T, server *oauthAssertionTestServer, clientID, secret, scope string) (string, map[string]interface{}) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/token", strings.NewReader(url.Values{
+		"grant_type": {"client_credentials"},
+		"scope":      {scope},
+	}.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.SetBasicAuth(clientID, secret)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("token status = %d, body = %#v", response.StatusCode, body)
+	}
+	accessToken, _ := body["access_token"].(string)
+	if accessToken == "" {
+		t.Fatalf("token response missing access_token: %#v", body)
+	}
+	return accessToken, body
+}
+
+// TestClientCredentialsTokenNamesTheResourceAndTheClient covers RFC 7519
+// Section 4.1.3, "Each principal intended to process the JWT MUST identify
+// itself with a value in the audience claim": the access token's aud is the
+// protected resource that processes it, and the client that requested it is
+// carried in client_id (RFC 8693 Section 4.3). Introspection reports the two
+// separately (RFC 7662 Section 2.2).
+func TestClientCredentialsTokenNamesTheResourceAndTheClient(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "audience-client", "audience-secret")
+	accessToken, _ := clientCredentialsToken(t, server, "audience-client", "audience-secret", "api:read")
+
+	parsed, _, err := jwt.NewParser().ParseUnverified(accessToken, jwt.MapClaims{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, _ := parsed.Claims.(jwt.MapClaims)
+	if got, _ := claims["aud"].(string); got != server.plugin.resourceURL() {
+		t.Fatalf("aud = %v, want the protected resource %s", claims["aud"], server.plugin.resourceURL())
+	}
+	if got, _ := claims["client_id"].(string); got != "audience-client" {
+		t.Fatalf("client_id = %v, want audience-client", claims["client_id"])
+	}
+
+	introspectRequest, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/introspect",
+		strings.NewReader(url.Values{"token": {accessToken}}.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	introspectRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	introspectRequest.SetBasicAuth("audience-client", "audience-secret")
+	introspectResponse, err := http.DefaultClient.Do(introspectRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer introspectResponse.Body.Close()
+	var introspection map[string]interface{}
+	if err := json.NewDecoder(introspectResponse.Body).Decode(&introspection); err != nil {
+		t.Fatal(err)
+	}
+	if introspection["active"] != true {
+		t.Fatalf("active = %v, want true: %#v", introspection["active"], introspection)
+	}
+	if introspection["client_id"] != "audience-client" {
+		t.Fatalf("introspection client_id = %v, want audience-client", introspection["client_id"])
+	}
+	if introspection["aud"] != server.plugin.resourceURL() {
+		t.Fatalf("introspection aud = %v, want %s", introspection["aud"], server.plugin.resourceURL())
+	}
+}
+
+// TestProtectedResourceRejectsTokenForAnotherAudience covers the second
+// sentence of RFC 7519 Section 4.1.3: "If the principal processing the claim
+// does not identify itself with a value in the "aud" claim when this claim
+// is present, then the JWT MUST be rejected." An SSF-scoped token is issued
+// for the SSF resource, so this resource refuses it.
+func TestProtectedResourceRejectsTokenForAnotherAudience(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	client, ok := server.idp.GetClient(mockidp.SSFStreamClientID)
+	if !ok || client == nil {
+		t.Fatal("ssf client missing")
+	}
+	accessToken, _ := clientCredentialsToken(t, server, mockidp.SSFStreamClientID, client.Secret, "ssf.manage")
+
+	parsed, _, err := jwt.NewParser().ParseUnverified(accessToken, jwt.MapClaims{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aud, _ := parsed.Claims.(jwt.MapClaims)["aud"].(string); aud == server.plugin.resourceURL() {
+		t.Fatalf("the SSF token's aud %q already names /oauth2/resource, so it cannot show a refusal", aud)
+	}
+
+	status, body, header := getResourceRequest(t, server, "Bearer "+accessToken, "")
+	if status != http.StatusUnauthorized {
+		t.Fatalf("resource status = %d, want 401; body = %#v", status, body)
+	}
+	if body["error"] != "invalid_token" {
+		t.Fatalf("error = %v, want invalid_token", body["error"])
+	}
+	if got := header.Get("WWW-Authenticate"); got != `Bearer error="invalid_token"` {
+		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+}
