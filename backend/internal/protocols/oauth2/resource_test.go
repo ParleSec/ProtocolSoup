@@ -185,9 +185,11 @@ func TestProtectedResourceRejectsBoundTokenPresentedAsBearer(t *testing.T) {
 	}
 }
 
-// TestProtectedResourceRejectsWrongKeyProof guards the cnf.jkt binding
-// check: a proof from a different key than the one the token was bound to
-// must not be accepted just because it is otherwise well-formed.
+// TestProtectedResourceRejectsWrongKeyProof guards the second half of RFC
+// 9449 Section 4.3 check 12, "confirm that the public key to which the
+// access token is bound matches the public key from the DPoP proof": a
+// proof from a different key than the one the token was bound to must not
+// be accepted just because it is otherwise well-formed.
 func TestProtectedResourceRejectsWrongKeyProof(t *testing.T) {
 	server := newOAuthAssertionTestServer(t)
 	registerDPoPClientCredentialsClient(t, server, "wrongkey-client", "wrongkey-secret")
@@ -223,9 +225,25 @@ func TestProtectedResourceRejectsWrongKeyProof(t *testing.T) {
 		"ath": computeTestATH(accessToken),
 	})
 
-	status, body, _ := getResourceRequest(t, server, "DPoP "+accessToken, wrongProof)
+	status, body, headers := getResourceRequest(t, server, "DPoP "+accessToken, wrongProof)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("resource status = %d, body = %#v, want 401", status, body)
+	}
+	// The proof's ath, htm, htu, iat and signature are all valid, so only
+	// the key comparison can have refused it.
+	if body["error"] != "invalid_token" || body["error_description"] != "DPoP proof key does not match the token's bound key" {
+		t.Fatalf("body = %#v, want invalid_token for the key binding", body)
+	}
+	if challenge := headers.Get("WWW-Authenticate"); !strings.HasPrefix(challenge, dpop.HeaderName+" ") {
+		t.Fatalf("WWW-Authenticate = %q, want a DPoP challenge", challenge)
+	}
+
+	// The same token with a proof from the key it is bound to is accepted.
+	boundProof := boundKey.proof(t, http.MethodGet, resourceURL, map[string]interface{}{
+		"ath": computeTestATH(accessToken),
+	})
+	if status, body, _ := getResourceRequest(t, server, "DPoP "+accessToken, boundProof); status != http.StatusOK {
+		t.Fatalf("resource status with the bound key = %d, body = %#v, want 200", status, body)
 	}
 }
 
