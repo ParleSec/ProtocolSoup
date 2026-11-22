@@ -41,6 +41,7 @@
 | `MOCKIDP_MACHINE_CLIENT_SECRET` | No | `(auto-generated)` | OAuth machine-client secret override |
 | `SSF_STREAM_CLIENT_SECRET` | No | `(auto-generated)` | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
+| `SSF_TRANSMITTER_CLIENT_SECRET` | With a split SSF service | `(auto-generated)` | Secret for the seeded resource server registration `ssf-transmitter`, which the split SSF Transmitter uses at `/oauth2/introspect`. Set it to the SSF service's `SSF_AS_INTROSPECT_CLIENT_SECRET`. |
 
 ### Storage And Volumes
 
@@ -67,7 +68,8 @@
 - `GET|POST /oauth2/device` (RFC 8628 verification URI)
 - `POST /oauth2/token`
 - `GET /.well-known/oauth-authorization-server/oauth2`
-- `POST /oauth2/introspect` (RFC 7662; confidential client auth, or the access token presented as Bearer when it is the token being introspected)
+- `POST /oauth2/introspect` (RFC 7662; the caller authenticates as a registered client and is told a token is active only when it is the token's `client_id` or a resource server its `aud` names)
+- `GET /oauth2/resource` (protected resource; RFC 9068 §4 validation)
 - `POST /oauth2/revoke`
 - `GET /oauth2/demo/users`
 - `GET /oauth2/demo/clients`
@@ -75,7 +77,10 @@
 - `POST /oauth2/demo/caep/revoke-subject` (SSF receiver CAEP hook; bearer `SSF_TO_FEDERATION_TOKEN`)
 
 The OAuth token endpoint supports `private_key_jwt` for the
-`client_credentials` grant with RS256, ES256, and EdDSA assertions. Client
+`client_credentials` grant with RS256, ES256, and EdDSA assertions. Access
+tokens follow RFC 9068: the `typ` header is `at+jwt`, `iss` is
+`SHOWCASE_BASE_URL` + `/oauth2`, `client_id` names the client, and `aud` names
+one protected resource. Client
 credentials tokens that include `ssf.read` or `ssf.manage` last 900 seconds and
 use `SSF_RESOURCE` (default `SHOWCASE_BASE_URL`) as `aud` so the SSF Transmitter
 can validate them as a resource server. The

@@ -3,9 +3,11 @@ package oauth2
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
@@ -15,6 +17,128 @@ import (
 // Plugin.tokenEndpointURL for the resource-server role.
 func (p *Plugin) resourceURL() string {
 	return p.baseURL + "/oauth2/resource"
+}
+
+// issuer is this authorization server's issuer identifier, the value its RFC
+// 8414 metadata publishes and the "iss" of every access token it signs. RFC
+// 9068 Section 4: "Authorization servers SHOULD use OAuth 2.0 Authorization
+// Server Metadata [RFC8414] to advertise to resource servers their signing
+// keys via "jwks_uri" and what "iss" claim value to expect via the "issuer"
+// metadata value."
+func (p *Plugin) issuer() string {
+	return strings.TrimRight(p.baseURL, "/") + "/oauth2"
+}
+
+// targetError is a refused "resource" or "scope" combination: the OAuth error
+// code and its description.
+type targetError struct {
+	code        string
+	description string
+}
+
+// defaultResource is the resource indicator a scope value implies. RFC 9068
+// Section 3: "If the request does not include a "resource" parameter, the
+// authorization server MUST use a default resource indicator in the "aud"
+// claim. If a "scope" parameter is present in the request, the authorization
+// server SHOULD use it to infer the value of the default resource indicator
+// to be used in the "aud" claim." ssf.read and ssf.manage have meaning only
+// at the SSF Transmitter; every other scope this server grants belongs to
+// /oauth2/resource.
+func (p *Plugin) defaultResource(scope string) (string, *targetError) {
+	ssf, other := false, false
+	for _, item := range strings.Fields(scope) {
+		if item == "ssf.read" || item == "ssf.manage" {
+			ssf = true
+		} else {
+			other = true
+		}
+	}
+	switch {
+	case ssf && other:
+		// RFC 9068 Section 3: "If the values in the "scope" parameter refer
+		// to different default resource indicator values, the authorization
+		// server SHOULD reject the request with "invalid_scope" as described
+		// in Section 4.1.2.1 of [RFC6749]."
+		return "", &targetError{
+			code:        "invalid_scope",
+			description: "the requested scope values belong to different resources; request ssf.read and ssf.manage separately from the other scopes",
+		}
+	case ssf:
+		return p.ssfResourceAudience(), nil
+	default:
+		return p.resourceURL(), nil
+	}
+}
+
+// tokenAudience decides the "aud" of an access token from the request's
+// "resource" parameter values (RFC 8707 Section 2) and the granted scope.
+// This server issues each access token for exactly one resource, because RFC
+// 9068 Section 3 says "The authorization server MUST NOT issue a JWT access
+// token if the authorization granted by the token would be ambiguous."
+func (p *Plugin) tokenAudience(resources []string, scope string) (string, *targetError) {
+	if len(resources) == 0 {
+		return p.defaultResource(scope)
+	}
+
+	requested := ""
+	for _, value := range resources {
+		// RFC 8707 Section 2: "Its value MUST be an absolute URI, as
+		// specified by Section 4.3 of [RFC3986]. The URI MUST NOT include a
+		// fragment component."
+		parsed, err := url.Parse(value)
+		if err != nil || !parsed.IsAbs() || parsed.Fragment != "" || strings.Contains(value, "#") {
+			return "", &targetError{code: "invalid_target", description: "resource must be an absolute URI with no fragment component (RFC 8707 Section 2)"}
+		}
+		if value != p.resourceURL() && value != p.ssfResourceAudience() {
+			return "", &targetError{code: "invalid_target", description: "resource does not name a protected resource this authorization server issues access tokens for"}
+		}
+		if requested != "" && requested != value {
+			return "", &targetError{code: "invalid_target", description: "this authorization server issues each access token for one resource; send one resource value per request"}
+		}
+		requested = value
+	}
+
+	// RFC 9068 Section 2.2.3: "All the individual scope strings in the
+	// "scope" claim MUST have meaning for the resources indicated in the
+	// "aud" claim." RFC 8707 Section 2 gives invalid_target for "an invalid
+	// combination of resource and scope".
+	if implied, scopeErr := p.defaultResource(scope); scopeErr != nil || implied != requested {
+		return "", &targetError{code: "invalid_target", description: "the requested scope has no meaning at the requested resource"}
+	}
+	return requested, nil
+}
+
+// emitTargetRejected records a refused resource indicator in Looking Glass.
+func (p *Plugin) emitTargetRejected(sessionID, endpoint string, resources []string, scope string, rejected *targetError) {
+	reference := "RFC 8707 Section 2"
+	if rejected.code == "invalid_scope" {
+		reference = "RFC 9068 Section 3"
+	}
+	p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Resource Indicator Rejected", map[string]interface{}{
+		"endpoint":          endpoint,
+		"error":             rejected.code,
+		"error_description": rejected.description,
+		"resource":          resources,
+		"scope":             scope,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeSecurityHint,
+		Title:       "One Resource Per Access Token",
+		Description: "The authorization server audience-restricts each access token to one protected resource. It refuses a resource it does not issue tokens for, and a scope that has no meaning at the requested resource.",
+		Severity:    "warning",
+		Reference:   reference,
+	})
+}
+
+// tokenAudienceOrError resolves the audience for a token endpoint request and
+// writes the RFC 6749 Section 5.2 error response when it is refused.
+func (p *Plugin) tokenAudienceOrError(w http.ResponseWriter, sessionID string, resources []string, scope string) (string, bool) {
+	audience, rejected := p.tokenAudience(resources, scope)
+	if rejected != nil {
+		p.emitTargetRejected(sessionID, "/oauth2/token", resources, scope, rejected)
+		writeOAuth2Error(w, rejected.code, rejected.description, "")
+		return "", false
+	}
+	return audience, true
 }
 
 // parseAuthorizedToken extracts the access token from the Authorization
@@ -87,13 +211,39 @@ func (p *Plugin) handleProtectedResource(w http.ResponseWriter, r *http.Request)
 		"has_dpop_header":    r.Header.Get(dpop.HeaderName) != "",
 	}, p.oauth2Annotation("dpop_ath")...)
 
-	claims, err := p.mockIdP.JWTService().ValidateToken(token)
+	// RFC 9068 Section 4: "Resource servers receiving a JWT access token
+	// MUST validate it in the following manner." This resource trusts the
+	// OAuth 2.0 authorization server at /oauth2 and identifies itself by its
+	// own URL. "In particular, in case of any failure in the validation
+	// checks listed above, the authorization server response MUST include
+	// the error code "invalid_token"."
+	claims, err := p.mockIdP.JWTService().ValidateAccessToken(token, p.issuer(), p.resourceURL())
 	if err != nil {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Protected Resource Access Denied", map[string]interface{}{
+		challenge := "Bearer"
+		if accessTokenJKT(claims) != "" {
+			challenge = dpop.HeaderName
+		}
+		description := "invalid or expired access token"
+		eventData := map[string]interface{}{
 			"endpoint": "/oauth2/resource",
+			"error":    "invalid_token",
 			"reason":   err.Error(),
+		}
+		var tokenErr *crypto.AccessTokenError
+		if errors.As(err, &tokenErr) && tokenErr.Check != "signature" {
+			description = tokenErr.Reason
+			eventData["failed_check"] = tokenErr.Check
+			eventData["expected_issuer"] = p.issuer()
+			eventData["expected_audience"] = p.resourceURL()
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Protected Resource Access Denied", eventData, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "JWT Access Token Validation",
+			Description: "A resource server accepts a JWT only when its typ header says at+jwt, its iss is the authorization server the resource trusts, its aud names the resource, its signature verifies and it has not expired. An ID Token, a refresh token or a token issued for another resource fails one of these checks.",
+			Severity:    "warning",
+			Reference:   "RFC 9068 Section 4",
 		})
-		writeResourceAuthError(w, http.StatusUnauthorized, "Bearer", "invalid_token", "invalid or expired access token", "")
+		writeResourceAuthError(w, http.StatusUnauthorized, challenge, "invalid_token", description, "")
 		return
 	}
 	if p.mockIdP.IsTokenRevoked(token) {
@@ -107,30 +257,6 @@ func (p *Plugin) handleProtectedResource(w http.ResponseWriter, r *http.Request)
 
 	jkt := accessTokenJKT(claims)
 	dpopBound := jkt != ""
-
-	// RFC 7519 Section 4.1.3: "If the principal processing the claim does
-	// not identify itself with a value in the "aud" claim when this claim is
-	// present, then the JWT MUST be rejected." This resource identifies
-	// itself by its own URL.
-	if audience, present := claims["aud"]; present && !audienceContainsExactly(audience, p.resourceURL()) {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Protected Resource Access Denied", map[string]interface{}{
-			"endpoint": "/oauth2/resource",
-			"reason":   "the access token's aud claim does not name this resource",
-			"aud":      audience,
-			"resource": p.resourceURL(),
-		}, lookingglass.Annotation{
-			Type:        lookingglass.AnnotationTypeSecurityHint,
-			Title:       "Audience Restriction",
-			Description: "A resource server accepts only tokens whose aud claim names it, so a token issued for one resource cannot be replayed at another.",
-			Reference:   "RFC 7519 Section 4.1.3",
-		})
-		challenge := "Bearer"
-		if dpopBound {
-			challenge = dpop.HeaderName
-		}
-		writeResourceAuthError(w, http.StatusUnauthorized, challenge, "invalid_token", "the access token's aud claim does not name this resource", "")
-		return
-	}
 
 	if !dpopBound {
 		p.respondProtectedResource(w, sessionID, claims, "", false)
@@ -256,8 +382,8 @@ func (p *Plugin) respondProtectedResource(w http.ResponseWriter, sessionID strin
 		lookingglass.Annotation{
 			Type:        lookingglass.AnnotationTypeSecurityHint,
 			Title:       "Resource Server Validated Before Responding",
-			Description: "The resource server checked the token's signature and expiry, and -- for a DPoP-bound token -- the accompanying proof's key and ath, before returning any data.",
-			Reference:   "RFC 6750 Section 2.1; RFC 9449 Section 7.1",
+			Description: "The resource server checked the token's typ, iss, aud, signature and expiry, and -- for a DPoP-bound token -- the accompanying proof's key and ath, before returning any data.",
+			Reference:   "RFC 9068 Section 4; RFC 9449 Section 7.1",
 		},
 	)
 

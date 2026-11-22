@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
 // dpopValidation is the outcome of inspecting an incoming token request for
@@ -155,6 +157,69 @@ func (e *resourceAuthError) respond(w http.ResponseWriter) {
 	writeOID4VCIError(w, e.status, e.code, e.description)
 }
 
+// accessTokenFor describes an access token this issuer's authorization
+// server signs. RFC 7519 Section 4.1.3: "Each principal intended to process
+// the JWT MUST identify itself with a value in the audience claim." The
+// principal that processes it is the Credential Issuer, so "aud" is the
+// Credential Issuer Identifier. clientID is the client that requested the
+// token (RFC 8693 Section 4.3) and is empty for anonymous access to the
+// token endpoint, which is why this token cannot follow RFC 9068, whose
+// Section 2.2 makes client_id REQUIRED.
+func (p *Plugin) accessTokenFor(subject, clientID, scope string, claims map[string]interface{}) crypto.AccessToken {
+	return crypto.AccessToken{
+		Subject:  subject,
+		Audience: p.issuerID(),
+		ClientID: clientID,
+		Scope:    scope,
+		Lifetime: tokenTTL,
+		Claims:   claims,
+	}
+}
+
+// validateAccessTokenJWT checks the JWT a resource endpoint was handed before
+// its grant is looked up: the signature and time claims, then the audience.
+// RFC 7519 Section 4.1.3: "If the principal processing the claim does not
+// identify itself with a value in the "aud" claim when this claim is present,
+// then the JWT MUST be rejected." A token with no "aud" was not issued for
+// this Credential Issuer either, so it is refused the same way. RFC 6750
+// Section 3.1 gives invalid_token for an access token that is "expired,
+// revoked, malformed, or invalid for other reasons."
+func (p *Plugin) validateAccessTokenJWT(token, sessionID, endpoint string) *resourceAuthError {
+	if p.mockIDP == nil {
+		return &resourceAuthError{status: http.StatusServiceUnavailable, code: "server_error", description: "mock identity provider is unavailable"}
+	}
+	claims, err := p.mockIDP.JWTService().ValidateToken(token)
+	if err != nil {
+		return &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: "unknown access token"}
+	}
+	if crypto.AudienceContains(claims["aud"], p.issuerID()) {
+		return nil
+	}
+	dpopBound := false
+	if cnf, ok := claims["cnf"].(map[string]interface{}); ok {
+		jkt, _ := cnf["jkt"].(string)
+		dpopBound = jkt != ""
+	}
+	p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Access Token Audience Rejected", map[string]interface{}{
+		"endpoint":          endpoint,
+		"error":             "invalid_token",
+		"aud":               claims["aud"],
+		"credential_issuer": p.issuerID(),
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeSecurityHint,
+		Title:       "Audience Restriction",
+		Description: "The Credential Issuer accepts only an access token whose aud claim names its Credential Issuer Identifier, so a token issued for another resource cannot be replayed here.",
+		Severity:    "warning",
+		Reference:   "RFC 7519 Section 4.1.3",
+	})
+	return &resourceAuthError{
+		status:      http.StatusUnauthorized,
+		code:        "invalid_token",
+		description: "the access token's aud claim does not name this Credential Issuer",
+		dpopBound:   dpopBound,
+	}
+}
+
 // authorizeResourceRequest extracts and authorizes the access token
 // presented to a DPoP-aware OID4VCI resource endpoint (the credential,
 // nonce, deferred_credential, and notification endpoints; RFC 9449 Section 7). A token
@@ -162,10 +227,13 @@ func (e *resourceAuthError) respond(w http.ResponseWriter) {
 // presented with a valid, matching DPoP proof -- presenting it as a bare
 // bearer token is rejected outright, never silently downgraded. A token
 // with no jkt continues to work exactly as it did before DPoP existed.
-func (p *Plugin) authorizeResourceRequest(r *http.Request) (string, *accessGrant, *resourceAuthError) {
+func (p *Plugin) authorizeResourceRequest(r *http.Request, sessionID string) (string, *accessGrant, *resourceAuthError) {
 	scheme, token, err := parseAuthorizedToken(r)
 	if err != nil {
 		return "", nil, &resourceAuthError{status: http.StatusUnauthorized, code: "invalid_token", description: err.Error()}
+	}
+	if tokenErr := p.validateAccessTokenJWT(token, sessionID, r.URL.Path); tokenErr != nil {
+		return "", nil, tokenErr
 	}
 
 	p.mu.RLock()

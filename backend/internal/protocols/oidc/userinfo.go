@@ -213,6 +213,18 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 
 	// Step 3: every remaining request error redirects to redirect_uri.
 
+	// RFC 8707 Section 2.1: a "resource" parameter names the protected
+	// resource the grant is for. An OID4VCI request is for the Credential
+	// Issuer and is authorized by its own authorization server, so only an
+	// OpenID Connect request is checked against the OP's one resource.
+	if !isOID4VCIRequest {
+		if description := p.resourceIndicatorError(query["resource"]); description != "" {
+			p.emitTargetRejected(sessionID, "/oidc/authorize", query["resource"], description)
+			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state, "invalid_target", description, responseIss)
+			return
+		}
+	}
+
 	// request (by value) remains unsupported. request_uri is handled by
 	// applyRequestURI above when Dynamic Registration is enabled (OIDC Core §15.2).
 	if rawRequestObject := query.Get("request"); rawRequestObject != "" {
@@ -715,7 +727,7 @@ func (p *Plugin) issueAuthorizationResponse(w http.ResponseWriter, r *http.Reque
 		// Requested UserInfo claims (OIDC Core 1.0 Section 5.5) travel with the
 		// access token so the UserInfo endpoint knows which extra claims to
 		// return; identity claim values are not embedded (Section 5.4).
-		accessToken, err = jwtService.CreateAccessToken(subject, params.ClientID, params.Scope, time.Hour, requestedUserInfoClaimNames(params.Claims))
+		accessToken, err = jwtService.CreateAccessToken(p.accessTokenFor(subject, params.ClientID, params.Scope, requestedUserInfoClaimNames(params.Claims)))
 		if err != nil {
 			p.redirectAuthError(w, r, params.RedirectURI, params.ResponseType, params.ResponseMode, params.State,
 				"server_error", "Failed to create access token", responseIss)
@@ -894,6 +906,16 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		Description: "OIDC uses the OAuth 2.0 token endpoint with additional ID token processing",
 		Reference:   "OpenID Connect Core 1.0 Section 3.1.3",
 	})
+
+	// RFC 8707 Section 2.2: a "resource" parameter on a token request names
+	// "the target service or protected resource where the client intends to
+	// use the requested access token." This token endpoint issues access
+	// tokens for UserInfo only.
+	if description := p.resourceIndicatorError(r.Form["resource"]); description != "" {
+		p.emitTargetRejected(sessionID, "/oidc/token", r.Form["resource"], description)
+		writeOIDCTokenError(w, http.StatusBadRequest, "invalid_target", description, "")
+		return
+	}
 
 	switch grantType {
 	case "authorization_code":
@@ -1099,13 +1121,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	// As with the code flow, the access token carries the granted scope and the
 	// UserInfo endpoint serves the scope-requested claims; the token does not
 	// embed identity claims (OIDC Core 1.0 Section 5.4).
-	accessToken, err := jwtService.CreateAccessToken(
-		subject,
-		clientID,
-		scope,
-		time.Hour,
-		nil,
-	)
+	accessToken, err := jwtService.CreateAccessToken(p.accessTokenFor(subject, clientID, scope, nil))
 	if err != nil {
 		writeOIDCTokenError(w, http.StatusInternalServerError, "server_error", "Failed to create access token", "")
 		return
@@ -1209,6 +1225,24 @@ func clientSupportsGrant(client *models.Client, grant string) bool {
 	return false
 }
 
+// accessTokenFor describes the access token the OP issues to clientID for an
+// End-User. It follows RFC 9068: "iss" is the OP issuer that discovery
+// publishes, "aud" is the UserInfo endpoint, the one protected resource the
+// OP issues tokens for (RFC 9068 Section 3: "the authorization server MUST
+// use a default resource indicator in the "aud" claim"), and "client_id" is
+// the Relying Party.
+func (p *Plugin) accessTokenFor(subject, clientID, scope string, claims map[string]interface{}) crypto.AccessToken {
+	return crypto.AccessToken{
+		Issuer:   p.mockIdP.GetIssuer(),
+		Subject:  subject,
+		Audience: p.userInfoResource(),
+		ClientID: clientID,
+		Scope:    scope,
+		Lifetime: time.Hour,
+		Claims:   claims,
+	}
+}
+
 // outwardSubject derives the client-visible subject while canonical local user
 // IDs remain in authorization-code, refresh-token, and session storage.
 func (p *Plugin) outwardSubject(clientID, userID string) (string, error) {
@@ -1235,13 +1269,12 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	// does not embed identity claims (OIDC Core 1.0 Section 5.4). Any UserInfo
 	// claims the client requested via the claims parameter (Section 5.5) ride
 	// along as claim names so UserInfo can return them.
-	accessToken, err := jwtService.CreateAccessToken(
+	accessToken, err := jwtService.CreateAccessToken(p.accessTokenFor(
 		subject,
 		authCode.ClientID,
 		authCode.Scope,
-		time.Hour,
 		requestedUserInfoClaimNames(authCode.Claims),
-	)
+	))
 	if err != nil {
 		return nil, err
 	}

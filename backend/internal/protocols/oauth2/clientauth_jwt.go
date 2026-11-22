@@ -860,12 +860,28 @@ func authorizationServerMetadataIssuer(baseURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil ||
+	// RFC 8414 Section 2: the issuer identifier is "a URL that uses the
+	// "https" scheme and has no query or fragment components." A development
+	// server on a loopback address has no TLS on any endpoint, so its http
+	// origin is accepted there and nowhere else: the access tokens it signs
+	// name this issuer, and a resource server has to be able to read the
+	// metadata that issuer publishes (RFC 9068 Section 4).
+	secure := parsed.Scheme == "https" || (parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()))
+	if !secure || parsed.Host == "" || parsed.User != nil ||
 		parsed.Path != "" || parsed.RawPath != "" ||
 		parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", errors.New("RFC 8414 issuer must be derived from a pathless HTTPS origin")
 	}
 	return strings.TrimRight(baseURL, "/") + "/oauth2", nil
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP address.
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (p *Plugin) handleRegisterPrivateKeyJWTClientJWKS(w http.ResponseWriter, r *http.Request) {

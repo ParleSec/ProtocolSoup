@@ -331,7 +331,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       8,
 					Name:        "Protected Resource Response",
-					Description: "Resource Server validates the access token and returns the requested data. Token validation may use introspection (RFC 7662) or local JWT verification.",
+					Description: "Resource Server validates the access token and returns the requested data. A JWT access token is validated locally as RFC 9068 Section 4 lists: typ header, iss, aud, signature and exp.",
 					From:        "Resource Server",
 					To:          "Client",
 					Type:        "response",
@@ -758,14 +758,15 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       2,
 					Name:        "Token Validation",
-					Description: "Authorization Server validates the token: checks signature (if JWT), expiration, and whether it has been revoked. Revoked tokens return active: false.",
+					Description: "Authorization Server validates the token: checks signature (if JWT), expiration, and whether it has been revoked. It then decides whether this caller may learn about the token: only the client the token was issued to, or a resource server the token's aud names (RFC 7662 Section 4).",
 					From:        "Authorization Server",
 					To:          "Authorization Server",
 					Type:        "internal",
 					Parameters: map[string]string{
-						"signature":  "Verify JWT signature using private key",
+						"signature":  "Verify JWT signature using the authorization server's public key",
 						"expiration": "Check exp claim against current time",
 						"revocation": "Check if token is in revocation blacklist",
+						"caller":     "Compare the authenticated caller with the token's client_id and aud",
 					},
 				},
 				{
@@ -776,18 +777,19 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					To:          "Resource Server",
 					Type:        "response",
 					Parameters: map[string]string{
-						"active":    "Boolean - false if expired, revoked, or invalid (REQUIRED)",
+						"active":    "Boolean - false if expired, revoked, invalid, or not for this caller (REQUIRED)",
 						"scope":     "Space-separated list of scopes",
 						"client_id": "Client that requested the token",
 						"username":  "Resource owner (if applicable)",
 						"exp":       "Expiration timestamp",
 						"iat":       "Issued-at timestamp",
 						"sub":       "Subject identifier",
-						"aud":       "Intended audience",
+						"aud":       "Protected resource the token is for",
 						"iss":       "Token issuer",
 					},
 					Security: []string{
 						"active=false for expired, revoked, or invalid tokens",
+						"active=false, with no other member, for a caller that is neither the token's client nor a resource server its aud names (RFC 7662 Sections 2.2 and 4)",
 						"Introspection is authoritative for token status",
 					},
 				},

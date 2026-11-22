@@ -214,15 +214,15 @@ func TestOAuthResourceServerIsolationAndQueryToken(t *testing.T) {
 	env := startSSFTestEnv(t)
 
 	jwtSvc := crypto.NewJWTService(asKeys, "https://as.example")
-	tokenA, err := jwtSvc.CreateAccessToken("client-a", env.server.URL, ScopeSSFManage, 15*time.Minute, nil)
+	tokenA, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-a", Audience: env.server.URL, ClientID: "client-a", Scope: ScopeSSFManage, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tokenB, err := jwtSvc.CreateAccessToken("client-b", env.server.URL, ScopeSSFManage, 15*time.Minute, nil)
+	tokenB, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-b", Audience: env.server.URL, ClientID: "client-b", Scope: ScopeSSFManage, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	readOnly, err := jwtSvc.CreateAccessToken("client-a", env.server.URL, ScopeSSFRead, 15*time.Minute, nil)
+	readOnly, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-a", Audience: env.server.URL, ClientID: "client-a", Scope: ScopeSSFRead, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +650,7 @@ func TestRevokedAccessTokenRejected(t *testing.T) {
 	env.plugin.revoker = revoker
 
 	jwtSvc := crypto.NewJWTService(asKeys, "https://as.example")
-	token, err := jwtSvc.CreateAccessToken("client-a", env.server.URL, ScopeSSFManage, 15*time.Minute, nil)
+	token, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-a", Audience: env.server.URL, ClientID: "client-a", Scope: ScopeSSFManage, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +758,7 @@ func startOAuthSSFEnv(t *testing.T) (*ssfTestEnv, *crypto.JWTService, string) {
 	env := startSSFTestEnv(t)
 
 	jwtSvc := crypto.NewJWTService(asKeys, "https://as.example")
-	token, err := jwtSvc.CreateAccessToken("client-a", env.server.URL, ScopeSSFManage+" "+ScopeSSFRead, 15*time.Minute, nil)
+	token, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-a", Audience: env.server.URL, ClientID: "client-a", Scope: ScopeSSFManage + " " + ScopeSSFRead, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1177,7 @@ func TestOIDFCAEPInteropPollModuleLocal(t *testing.T) {
 		t.Fatalf("expected empty sets after ack, got %d", len(leftover))
 	}
 
-	readOnly, err := jwtSvc.CreateAccessToken("client-a", env.server.URL, ScopeSSFRead, 15*time.Minute, nil)
+	readOnly, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-a", Audience: env.server.URL, ClientID: "client-a", Scope: ScopeSSFRead, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1408,7 +1408,7 @@ func TestOIDFCAEPInteropNegativePaths(t *testing.T) {
 	if err := json.Unmarshal(body, &owned); err != nil {
 		t.Fatal(err)
 	}
-	tokenB, err := jwtSvc.CreateAccessToken("client-b", env.server.URL, ScopeSSFManage+" "+ScopeSSFRead, 15*time.Minute, nil)
+	tokenB, err := jwtSvc.CreateAccessToken(crypto.AccessToken{Subject: "client-b", Audience: env.server.URL, ClientID: "client-b", Scope: ScopeSSFManage + " " + ScopeSSFRead, Lifetime: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1427,4 +1427,84 @@ type mapRevoker struct {
 
 func (m *mapRevoker) IsTokenRevoked(token string) bool {
 	return m.revoked[token]
+}
+
+// TestStreamManagementValidatesJWTAccessTokens covers the RFC 9068 Section 4
+// checks the Transmitter runs as a resource server. Each refused token is
+// signed by the authorization server's key and unexpired, so the named check
+// is what refuses it; a token that passes them all is accepted. An introspection
+// endpoint stands in for the split deployment's revocation check and records
+// how the Transmitter authenticates to it (RFC 7662 Section 2.1).
+func TestStreamManagementValidatesJWTAccessTokens(t *testing.T) {
+	asKeys, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwksSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(asKeys.PublicJWKS())
+	}))
+	t.Cleanup(jwksSrv.Close)
+
+	var introspectionCallers []string
+	var introspectionMu sync.Mutex
+	introspectSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clientID, secret, _ := r.BasicAuth()
+		introspectionMu.Lock()
+		introspectionCallers = append(introspectionCallers, clientID+":"+secret)
+		introspectionMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"active": clientID == "ssf-transmitter" && secret == "transmitter-test-secret"})
+	}))
+	t.Cleanup(introspectSrv.Close)
+
+	t.Setenv("SSF_AS_ISSUER", "https://as.example/oauth2")
+	t.Setenv("SSF_AS_JWKS_URI", jwksSrv.URL)
+	t.Setenv("SSF_AS_INTROSPECT_URI", introspectSrv.URL)
+	t.Setenv("SSF_AS_INTROSPECT_CLIENT_SECRET", "transmitter-test-secret")
+	env := startSSFTestEnv(t)
+
+	jwtSvc := crypto.NewJWTService(asKeys, "https://as.example/oauth2")
+	base := crypto.AccessToken{Subject: "client-a", Audience: env.server.URL, ClientID: "client-a", Scope: ScopeSSFRead, Lifetime: 15 * time.Minute}
+
+	accepted, err := jwtSvc.CreateAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body := env.doBearerJSON(t, http.MethodGet, "/ssf/stream", accepted, nil); status != http.StatusOK {
+		t.Fatalf("a conforming token: status %d, want 200: %s", status, body)
+	}
+	introspectionMu.Lock()
+	callers := append([]string(nil), introspectionCallers...)
+	introspectionMu.Unlock()
+	if len(callers) != 1 || callers[0] != "ssf-transmitter:transmitter-test-secret" {
+		t.Fatalf("introspection callers = %v, want one call authenticated as the ssf-transmitter resource server", callers)
+	}
+
+	untyped, err := jwtSvc.CreateUnprofiledAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromOtherIssuer, err := crypto.NewJWTService(asKeys, "https://as.example").CreateAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherResource := base
+	otherResource.Audience = env.server.URL + "/oauth2/resource"
+	forOtherResource, err := jwtSvc.CreateAccessToken(otherResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, token := range map[string]string{
+		"typ is JWT":                 untyped,
+		"iss is another server":      fromOtherIssuer,
+		"aud names another resource": forOtherResource,
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := env.doBearerJSON(t, http.MethodGet, "/ssf/stream", token, nil)
+			if status != http.StatusUnauthorized || !strings.Contains(string(body), "invalid_token") {
+				t.Fatalf("status %d, want 401 invalid_token: %s", status, body)
+			}
+		})
+	}
 }

@@ -490,8 +490,8 @@ func buildCredentialOfferDeliveryURL(endpoint string, offer models.VCCredentialO
 // part of OpenID4VCI 1.0 Section 4.1.1.
 func marshalCredentialOfferForWire(offer models.VCCredentialOffer) ([]byte, error) {
 	wire := struct {
-		CredentialIssuer           string                        `json:"credential_issuer"`
-		CredentialConfigurationIDs []string                      `json:"credential_configuration_ids"`
+		CredentialIssuer           string                         `json:"credential_issuer"`
+		CredentialConfigurationIDs []string                       `json:"credential_configuration_ids"`
 		Grants                     models.VCCredentialOfferGrants `json:"grants,omitempty"`
 	}{
 		CredentialIssuer:           offer.CredentialIssuer,
@@ -1009,13 +1009,13 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 		// RFC 9449 Section 4.1: bind the token to the presented proof key.
 		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
 	}
-	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
-		"wallet:"+offerID,
-		"oid4vci",
-		scope,
-		tokenTTL,
-		accessTokenClaims,
-	)
+	// The client_id is empty for a request sent without one, which the
+	// metadata allows (pre-authorized_grant_anonymous_access_supported).
+	tokenClientID := strings.TrimSpace(r.FormValue("client_id"))
+	if attestationUsed {
+		tokenClientID = attestation.ClientID
+	}
+	accessToken, err := p.mockIDP.JWTService().CreateUnprofiledAccessToken(p.accessTokenFor("wallet:"+offerID, tokenClientID, scope, accessTokenClaims))
 	if err != nil {
 		writeServerError(w, "issue access token", err)
 		return
@@ -1030,11 +1030,6 @@ func (p *Plugin) handlePreAuthorizedTokenGrant(w http.ResponseWriter, r *http.Re
 	if !ok {
 		writeOID4VCIError(w, http.StatusBadRequest, "invalid_grant", "wallet context for offer is unavailable")
 		return
-	}
-
-	tokenClientID := strings.TrimSpace(r.FormValue("client_id"))
-	if attestationUsed {
-		tokenClientID = attestation.ClientID
 	}
 
 	p.mu.Lock()
@@ -1204,13 +1199,7 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 	if dpopJKT != "" {
 		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, dpopJKT)
 	}
-	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
-		authCode.UserID,
-		"oid4vci",
-		scope,
-		tokenTTL,
-		accessTokenClaims,
-	)
+	accessToken, err := p.mockIDP.JWTService().CreateUnprofiledAccessToken(p.accessTokenFor(authCode.UserID, clientID, scope, accessTokenClaims))
 	if err != nil {
 		writeServerError(w, "issue access token", err)
 		return
@@ -1426,13 +1415,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	if boundJKT != "" {
 		accessTokenClaims = dpop.WithCnfJKT(accessTokenClaims, boundJKT)
 	}
-	accessToken, err := p.mockIDP.JWTService().CreateAccessToken(
-		rt.UserID,
-		"oid4vci",
-		scope,
-		tokenTTL,
-		accessTokenClaims,
-	)
+	accessToken, err := p.mockIDP.JWTService().CreateUnprofiledAccessToken(p.accessTokenFor(rt.UserID, clientID, scope, accessTokenClaims))
 	if err != nil {
 		writeServerError(w, "issue access token", err)
 		return
@@ -1563,7 +1546,7 @@ func (p *Plugin) handleNonce(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	accessToken, grant, authErr := p.authorizeResourceRequest(r)
+	accessToken, grant, authErr := p.authorizeResourceRequest(r, sessionID)
 	if authErr != nil {
 		authErr.respond(w)
 		return
@@ -1915,7 +1898,7 @@ func (p *Plugin) handleCredential(w http.ResponseWriter, r *http.Request) {
 
 func (p *Plugin) handleDeferredCredential(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	accessToken, grant, authErr := p.authorizeResourceRequest(r)
+	accessToken, grant, authErr := p.authorizeResourceRequest(r, sessionID)
 	if authErr != nil {
 		authErr.respond(w)
 		return
@@ -2179,7 +2162,7 @@ func decodeRequestObject(body io.Reader, target interface{}, requestName string)
 
 func (p *Plugin) handleNotification(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
-	accessToken, _, authErr := p.authorizeResourceRequest(r)
+	accessToken, _, authErr := p.authorizeResourceRequest(r, sessionID)
 	if authErr != nil {
 		authErr.respond(w)
 		return

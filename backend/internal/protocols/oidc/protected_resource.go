@@ -3,7 +3,10 @@ package oidc
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
+
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 )
 
 // UserInfo is the only Bearer-protected resource this deployment exposes
@@ -20,6 +23,52 @@ const userInfoResourcePath = "/oidc/userinfo"
 const protectedResourceWellKnown = "/.well-known/oauth-protected-resource"
 
 const userInfoResourceMetadataPath = protectedResourceWellKnown + userInfoResourcePath
+
+// userInfoResource is the resource identifier of the UserInfo endpoint, the
+// "resource" value of its RFC 9728 metadata. Every access token the OP issues
+// carries it in "aud", and UserInfo accepts only a token that does (RFC 9068
+// Section 4).
+func (p *Plugin) userInfoResource() string {
+	return strings.TrimRight(p.mockIdP.GetIssuer(), "/") + userInfoResourcePath
+}
+
+// resourceIndicatorError checks the "resource" parameter values of a request
+// to the OP (RFC 8707 Section 2). The OP issues access tokens for one
+// protected resource, UserInfo, so that is the only value it accepts. It
+// returns the invalid_target description, or "" when the request is
+// acceptable.
+func (p *Plugin) resourceIndicatorError(resources []string) string {
+	for _, value := range resources {
+		// RFC 8707 Section 2: "Its value MUST be an absolute URI, as
+		// specified by Section 4.3 of [RFC3986]. The URI MUST NOT include a
+		// fragment component."
+		parsed, err := url.Parse(value)
+		if err != nil || !parsed.IsAbs() || parsed.Fragment != "" || strings.Contains(value, "#") {
+			return "resource must be an absolute URI with no fragment component (RFC 8707 Section 2)"
+		}
+		if value != p.userInfoResource() {
+			return "resource does not name a protected resource this OpenID Provider issues access tokens for"
+		}
+	}
+	return ""
+}
+
+// emitTargetRejected records a refused resource indicator in Looking Glass.
+func (p *Plugin) emitTargetRejected(sessionID, endpoint string, resources []string, description string) {
+	p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Resource Indicator Rejected", map[string]interface{}{
+		"endpoint":          endpoint,
+		"error":             "invalid_target",
+		"error_description": description,
+		"resource":          resources,
+		"accepted_resource": p.userInfoResource(),
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeSecurityHint,
+		Title:       "Access Tokens Are For UserInfo",
+		Description: "The OpenID Provider audience-restricts every access token to its UserInfo endpoint and refuses a request for any other resource.",
+		Severity:    "warning",
+		Reference:   "RFC 8707 Section 2",
+	})
+}
 
 // handleProtectedResourceMetadata serves OAuth 2.0 Protected Resource Metadata
 // (RFC 9728). Two documents are published: an origin-level document that points

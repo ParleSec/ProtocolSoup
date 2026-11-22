@@ -244,7 +244,7 @@ func TestSignedUserInfoReturnsJWT(t *testing.T) {
 	_ = json.Unmarshal(regRR.Body.Bytes(), &resp)
 	clientID, _ := resp["client_id"].(string)
 
-	accessToken, err := p.mockIdP.JWTService().CreateAccessToken("alice", clientID, "openid profile email", time.Hour, nil)
+	accessToken, err := p.mockIdP.JWTService().CreateAccessToken(p.accessTokenFor("alice", clientID, "openid profile email", nil))
 	if err != nil {
 		t.Fatalf("CreateAccessToken: %v", err)
 	}

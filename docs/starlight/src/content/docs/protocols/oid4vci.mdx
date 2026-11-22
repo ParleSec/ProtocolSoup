@@ -168,6 +168,16 @@ attestation and DPoP proofs in the browser. Issuer-initiated Looking Glass
 observes a real wallet conversation via `status_uri`. The unattested Final
 flow remains unaffected by default.
 
+- **Access token audience (RFC 7519 Section 4.1.3).** The access token is a
+  JWT whose `aud` is the Credential Issuer Identifier (`{base}/oid4vci`). The
+  credential, deferred_credential, and notification endpoints verify the
+  token's signature and expiry and answer `401` with `invalid_token` when
+  `aud` does not name this Credential Issuer, so a token issued for another
+  resource cannot be replayed here. `client_id` carries the client that
+  requested the token (RFC 8693 Section 4.3) and is absent for anonymous
+  access to the token endpoint. For that reason the token does not claim the
+  RFC 9068 profile, which makes `client_id` REQUIRED: its `typ` header stays
+  `JWT`.
 - **Sender-constrained access tokens (RFC 9449 DPoP).** The token endpoint
   accepts an optional `DPoP` proof header; when present, the issued access
   token is bound to the proof's key via a `cnf.jkt` claim, with

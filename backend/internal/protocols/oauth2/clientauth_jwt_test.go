@@ -1702,6 +1702,7 @@ func TestOAuthAuthorizationServerMetadataAdvertisesDPoPAlgorithms(t *testing.T) 
 
 func TestOAuthAuthorizationServerMetadataRejectsNonHTTPSIssuer(t *testing.T) {
 	testServer := newOAuthAssertionTestServer(t)
+	testServer.plugin.baseURL = "http://as.example"
 	response, err := http.Get(testServer.server.URL + "/oauth2/.well-known/oauth-authorization-server")
 	if err != nil {
 		t.Fatal(err)
@@ -1709,6 +1710,27 @@ func TestOAuthAuthorizationServerMetadataRejectsNonHTTPSIssuer(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusServiceUnavailable)
+	}
+}
+
+// TestOAuthAuthorizationServerMetadataAcceptsLoopbackHTTP covers the one
+// place an http issuer is accepted: a development server on a loopback
+// address, whose access tokens name that issuer in "iss".
+func TestOAuthAuthorizationServerMetadataAcceptsLoopbackHTTP(t *testing.T) {
+	for baseURL, want := range map[string]string{
+		"http://localhost:8080": "http://localhost:8080/oauth2",
+		"http://127.0.0.1:8080": "http://127.0.0.1:8080/oauth2",
+		"http://[::1]:8080":     "http://[::1]:8080/oauth2",
+	} {
+		issuer, err := authorizationServerMetadataIssuer(baseURL)
+		if err != nil || issuer != want {
+			t.Errorf("authorizationServerMetadataIssuer(%q) = %q, %v; want %q", baseURL, issuer, err, want)
+		}
+	}
+	for _, baseURL := range []string{"http://as.example", "http://192.0.2.10:8080"} {
+		if _, err := authorizationServerMetadataIssuer(baseURL); err == nil {
+			t.Errorf("non-loopback http base URL %q was accepted", baseURL)
+		}
 	}
 }
 

@@ -27,12 +27,15 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 
 - `GET|POST /oauth2/authorize` (`response_type=code`, or `token` for the implicit grant), `POST /oauth2/token`
 - `POST /oauth2/device/authorize` (RFC 8628), `GET|POST /oauth2/device`
-- `POST /oauth2/introspect` (RFC 7662; confidential client, or Bearer of the token being introspected), `POST /oauth2/revoke`
+- `POST /oauth2/introspect` (RFC 7662; the caller authenticates as a registered client and is told a token is active only when it is the token's `client_id` or a resource server its `aud` names), `POST /oauth2/revoke`
+- `GET /oauth2/resource` (protected resource; RFC 9068 §4 validation, Bearer or DPoP)
 - `GET /oauth2/demo/users`, `GET /oauth2/demo/clients`
 - `POST /oauth2/demo/clients/machine-client-pkjwt/jwks` (owned, active-session, one-shot public-key registration)
 - `POST /oauth2/demo/caep/revoke-subject` (SSF CAEP session-revoked hook; bearer `SSF_TO_FEDERATION_TOKEN`)
 - `/oauth2/token` optionally accepts a `DPoP` proof header (RFC 9449), binding the issued access token (and, for `authorization_code` public clients, the refresh token) to the proof's key
+- Access tokens follow RFC 9068: `typ` header `at+jwt`, `iss` = `SHOWCASE_BASE_URL` + `/oauth2`, `client_id`, and `aud` naming one resource (`SHOWCASE_BASE_URL` + `/oauth2/resource` by default; the `resource` parameter of RFC 8707 may name it)
 - Client credentials tokens with `ssf.read` / `ssf.manage` last 900 seconds and carry `aud` = `SSF_RESOURCE` (default `SHOWCASE_BASE_URL`)
+- Seeded resource server registration `ssf-transmitter` (no grant types); the split SSF Transmitter authenticates with it at `/oauth2/introspect`. Secret from `SSF_TRANSMITTER_CLIENT_SECRET` or auto-generated
 - Seeded confidential client `ssf-stream-client` (`client_credentials`, `ssf.read` / `ssf.manage`); secret from `SSF_STREAM_CLIENT_SECRET` or auto-generated, listed at `GET /oauth2/demo/clients`
 
 ### OIDC
@@ -73,6 +76,7 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | No | `false` | Enables the RFC 9449 §9 resource-server nonce challenge, as a separate nonce space, at `/oauth2/resource` and OID4VCI's credential, deferred_credential, and notification endpoints. The hosted deployment sets it to `true`. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
 | `SSF_STREAM_CLIENT_SECRET` | No | auto-generated | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
+| `SSF_TRANSMITTER_CLIENT_SECRET` | With a split SSF service | auto-generated | Secret for the seeded `ssf-transmitter` resource server registration. Set it to the SSF service's `SSF_AS_INTROSPECT_CLIENT_SECRET`. |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |

@@ -45,6 +45,13 @@ func (p *Plugin) handleDeviceAuthorize(w http.ResponseWriter, r *http.Request) {
 	if !scopeOK {
 		return
 	}
+	// RFC 8707 Section 2: a "resource" parameter is checked when the
+	// authorization is requested, before the user is asked to approve it.
+	if _, rejected := p.tokenAudience(r.Form["resource"], scope); rejected != nil {
+		p.emitTargetRejected(sessionID, "/oauth2/device/authorize", r.Form["resource"], scope, rejected)
+		writeOAuth2Error(w, rejected.code, rejected.description, "")
+		return
+	}
 
 	now := p.now()
 	auth, err := p.mockIdP.CreateDeviceAuthorization(client.ID, scope, sessionID, now)
@@ -283,8 +290,12 @@ func (p *Plugin) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 
+	audience, audienceOK := p.tokenAudienceOrError(w, sessionID, r.Form["resource"], auth.Scope)
+	if !audienceOK {
+		return
+	}
 	bindRefresh := client.Public
-	tokenResponse, err := p.issueTokens(auth.UserID, client.ID, auth.Scope, dpopJKT, bindRefresh)
+	tokenResponse, err := p.issueTokens(auth.UserID, client.ID, auth.Scope, audience, dpopJKT, bindRefresh)
 	if err != nil {
 		writeOAuth2ErrorStatus(w, http.StatusInternalServerError, "server_error", "Failed to issue tokens", "")
 		return

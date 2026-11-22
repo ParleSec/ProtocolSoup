@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
@@ -136,6 +137,19 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirectURI = normalizedRedirectURI
+
+	// RFC 8707 Section 2.1: a "resource" parameter in the authorization
+	// request names the protected resource the grant is for. It is checked
+	// here so an unacceptable value is refused before the End-User signs in.
+	if _, rejected := p.tokenAudience(query["resource"], scope); rejected != nil {
+		p.emitTargetRejected(sessionID, "/oauth2/authorize", query["resource"], scope, rejected)
+		if responseType == "token" {
+			p.redirectAuthorizeFragmentError(w, r, redirectURI, state, rejected.code, rejected.description)
+		} else {
+			p.redirectAuthorizeQueryError(w, r, redirectURI, state, rejected.code, rejected.description)
+		}
+		return
+	}
 
 	if responseType == "token" {
 		p.beginImplicitAuthorization(w, r, sessionID, client, redirectURI, scope, state)
@@ -642,7 +656,11 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	// clients per RFC 9449 Section 5 -- a confidential client's refresh
 	// token is already sender-constrained via its authentication
 	// credentials, so it is not additionally bound to the proof key.
-	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope, dpopJKT, client.Public)
+	audience, audienceOK := p.tokenAudienceOrError(w, sessionID, r.Form["resource"], authCode.Scope)
+	if !audienceOK {
+		return
+	}
+	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope, audience, dpopJKT, client.Public)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
 			"error": err.Error(),
@@ -792,7 +810,11 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	// public-client restriction applied there -- only happens for a
 	// public client; client.Public is re-checked here too so the
 	// invariant holds even if that upstream guarantee ever changes.
-	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope, boundJKT, client.Public)
+	audience, audienceOK := p.tokenAudienceOrError(w, sessionID, r.Form["resource"], scope)
+	if !audienceOK {
+		return
+	}
+	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope, audience, boundJKT, client.Public)
 	if err != nil {
 		writeOAuth2Error(w, "server_error", "Failed to issue tokens", "")
 		return
@@ -1055,10 +1077,7 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 
 	// Issue access token (no refresh token for client credentials)
 	jwtService := p.mockIdP.JWTService()
-	// RFC 8693 Section 4.3: 'The "client_id" claim carries the client
-	// identifier of the OAuth 2.0 [RFC6749] client that requested the token.'
 	accessTokenClaims := map[string]interface{}{
-		"client_id":   clientID,
 		"client_name": client.Name,
 	}
 	if dpopJKT != "" {
@@ -1068,22 +1087,31 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 	// RFC 7519 Section 4.1.3: "Each principal intended to process the JWT
 	// MUST identify itself with a value in the audience claim." The
 	// principal that processes this access token is the protected resource,
-	// so the audience is the resource's own URL and never the client.
-	audience := p.resourceURL()
+	// so the audience is the resource's own identifier and never the client.
+	audience, audienceOK := p.tokenAudienceOrError(w, sessionID, r.Form["resource"], scope)
+	if !audienceOK {
+		return
+	}
 	ttl := time.Hour
 	expiresIn := 3600
-	if grantsSSFScope(scope) {
-		audience = p.ssfResourceAudience()
+	if audience == p.ssfResourceAudience() {
 		ttl = 15 * time.Minute
 		expiresIn = 900
 	}
-	accessToken, err := jwtService.CreateAccessToken(
-		clientID, // Subject is the client itself
-		audience,
-		scope,
-		ttl,
-		accessTokenClaims,
-	)
+	accessToken, err := jwtService.CreateAccessToken(crypto.AccessToken{
+		Issuer: p.issuer(),
+		// RFC 9068 Section 2.2: with no resource owner in the grant, sub
+		// "SHOULD correspond to an identifier the authorization server uses
+		// to indicate the client application." client.ID is the
+		// authenticated client; a private_key_jwt request may omit the
+		// client_id form parameter (RFC 7523 Section 3).
+		Subject:  client.ID,
+		Audience: audience,
+		ClientID: client.ID,
+		Scope:    scope,
+		Lifetime: ttl,
+		Claims:   accessTokenClaims,
+	})
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
 			"error": err.Error(),
@@ -1145,14 +1173,13 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		clientAuthMethod = "post"
 	}
 
-	_, clientErr := p.mockIdP.ValidateClient(clientID, clientSecret)
-	if clientErr != nil {
-		bearer := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-		if bearer != "" && subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) == 1 {
-			clientAuthMethod = "bearer"
-			clientErr = nil
-		}
-	}
+	// RFC 7662 Section 2.1: "To prevent token scanning attacks, the endpoint
+	// MUST also require some form of authorization to access this endpoint,
+	// such as client authentication as described in OAuth 2.0 [RFC6749] or a
+	// separate OAuth 2.0 access token". The caller authenticates as a
+	// registered client or resource server; the token being introspected is
+	// not a credential for introspecting itself.
+	caller, clientErr := p.mockIdP.ValidateClient(clientID, clientSecret)
 
 	// Emit introspection request
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Introspection Request", map[string]interface{}{
@@ -1207,6 +1234,42 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 7662 Section 4: "If the token can be used only at certain resource
+	// servers, the authorization server MUST determine whether or not the
+	// token can be used at the resource server making the introspection
+	// call." Every access token is audience-restricted, so the caller learns
+	// about a token only when it is the client the token was issued to or a
+	// resource server the token's aud names. Section 2.2: when "the protected
+	// resource is not allowed to introspect this particular token, then the
+	// authorization server MUST return an introspection response with the
+	// "active" field set to "false"", and it "SHOULD NOT include any
+	// additional information about an inactive token, including why the
+	// token is inactive."
+	tokenClientID, _ := claims["client_id"].(string)
+	callerResource := p.protectedResourceOf(caller)
+	issuedToCaller := tokenClientID != "" && tokenClientID == caller.ID
+	usableAtCaller := callerResource != "" && crypto.AudienceContains(claims["aud"], callerResource)
+	if !issuedToCaller && !usableAtCaller {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Refused For This Caller", map[string]interface{}{
+			"active":           false,
+			"caller":           caller.ID,
+			"caller_resource":  callerResource,
+			"token_client_id":  tokenClientID,
+			"token_aud":        claims["aud"],
+			"token":            token,
+			"token_type_hint":  tokenTypeHint,
+			"response_reveals": "active: false only",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Introspection Is Limited To The Token's Parties",
+			Description: "The authorization server answers active: true only to the client the token was issued to, or to a resource server the token's aud names. Any other caller is told the token is not active and nothing else.",
+			Severity:    "warning",
+			Reference:   "RFC 7662 Section 4",
+		})
+		writeJSON(w, http.StatusOK, models.IntrospectionResponse{Active: false})
+		return
+	}
+
 	// Build introspection response. RFC 9449 Section 6.2: for a DPoP-bound
 	// access token, convey the cnf.jkt confirmation as a top-level member so
 	// the resource server can validate the DPoP binding itself -- the
@@ -1230,16 +1293,14 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		response.Sub = sub
 		response.Username = sub
 	}
-	// RFC 7662 Section 2.2: aud is the token's intended audience and
-	// client_id is the client that requested it. A client_credentials token
-	// carries both; a token issued for an End-User names its client in aud.
+	// RFC 7662 Section 2.2: aud is the "identifier or list of string
+	// identifiers representing the intended audience for this token" and
+	// client_id is the "Client identifier for the OAuth 2.0 client that
+	// requested this token." Each is reported from its own claim.
 	if audClaim, ok := claims["aud"].(string); ok {
 		response.Aud = audClaim
-		response.ClientID = audClaim
 	}
-	if clientIDClaim, ok := claims["client_id"].(string); ok && clientIDClaim != "" {
-		response.ClientID = clientIDClaim
-	}
+	response.ClientID = tokenClientID
 	if exp, ok := claims["exp"].(float64); ok {
 		response.Exp = int64(exp)
 	}
@@ -1552,7 +1613,15 @@ func (p *Plugin) completeImplicitGrant(
 		return
 	}
 
-	tokenResponse, err := p.issueImplicitAccessToken(user.ID, info.ClientID, info.Scope)
+	// The "resource" parameter, if any, was checked against this scope when
+	// the authorization request arrived, so it equals the scope's default.
+	audience, rejected := p.defaultResource(info.Scope)
+	if rejected != nil {
+		p.emitTargetRejected(sessionID, "/oauth2/authorize", nil, info.Scope, rejected)
+		p.redirectAuthorizeFragmentError(w, r, info.RedirectURI, info.State, rejected.code, rejected.description)
+		return
+	}
+	tokenResponse, err := p.issueImplicitAccessToken(user.ID, info.ClientID, info.Scope, audience)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Implicit Access Token Failed", map[string]interface{}{
 			"error":     err.Error(),
@@ -1596,10 +1665,18 @@ func (p *Plugin) completeImplicitGrant(
 
 // issueImplicitAccessToken creates a real bearer access token and does not
 // create or store a refresh token (RFC 6749 §4.2.2).
-func (p *Plugin) issueImplicitAccessToken(userID, clientID, scope string) (*models.TokenResponse, error) {
+func (p *Plugin) issueImplicitAccessToken(userID, clientID, scope, audience string) (*models.TokenResponse, error) {
 	jwtService := p.mockIdP.JWTService()
 	userClaims := p.mockIdP.UserClaims(userID, strings.Fields(scope))
-	accessToken, err := jwtService.CreateAccessToken(userID, clientID, scope, time.Hour, userClaims)
+	accessToken, err := jwtService.CreateAccessToken(crypto.AccessToken{
+		Issuer:   p.issuer(),
+		Subject:  userID,
+		Audience: audience,
+		ClientID: clientID,
+		Scope:    scope,
+		Lifetime: time.Hour,
+		Claims:   userClaims,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1639,6 +1716,35 @@ func (p *Plugin) registeredAuthorizeRedirect(clientID, redirectURI string) (stri
 		return "", false
 	}
 	return normalized, true
+}
+
+// redirectAuthorizeQueryError returns an authorization code flow error to the
+// client in the query component of the redirection URI (RFC 6749 Section
+// 4.1.2.1), with iss when this server's metadata issuer is valid (RFC 9207).
+func (p *Plugin) redirectAuthorizeQueryError(
+	w http.ResponseWriter,
+	r *http.Request,
+	redirectURI, state, errorCode, description string,
+) {
+	redirectURL, err := url.Parse(redirectURI)
+	if err != nil {
+		writeOAuth2Error(w, errorCode, description, state)
+		return
+	}
+	q := redirectURL.Query()
+	q.Set("error", errorCode)
+	if description != "" {
+		q.Set("error_description", description)
+	}
+	if state != "" {
+		q.Set("state", state)
+	}
+	if issuer, err := authorizationServerMetadataIssuer(p.baseURL); err == nil {
+		q.Set("iss", issuer)
+	}
+	redirectURL.RawQuery = q.Encode()
+	w.Header().Set("Cache-Control", "no-store")
+	http.Redirect(w, r, redirectURL.String(), http.StatusFound)
 }
 
 func (p *Plugin) redirectAuthorizeFragmentError(
@@ -1698,7 +1804,11 @@ func (p *Plugin) redirectAuthorizationFragment(w http.ResponseWriter, r *http.Re
 // would remove that mechanism's documented benefit (client credential
 // rotation without invalidating the refresh token) for no security gain,
 // since the token is already sender-constrained.
-func (p *Plugin) issueTokens(userID, clientID, scope, dpopJKT string, bindRefreshToken bool) (*models.TokenResponse, error) {
+//
+// audience is the protected resource the access token is for, from
+// tokenAudience. The token follows RFC 9068: its "aud" is that resource, its
+// "client_id" is the client, and its "iss" is this authorization server.
+func (p *Plugin) issueTokens(userID, clientID, scope, audience, dpopJKT string, bindRefreshToken bool) (*models.TokenResponse, error) {
 	jwtService := p.mockIdP.JWTService()
 
 	// Get user claims
@@ -1709,13 +1819,15 @@ func (p *Plugin) issueTokens(userID, clientID, scope, dpopJKT string, bindRefres
 	}
 
 	// Create access token
-	accessToken, err := jwtService.CreateAccessToken(
-		userID,
-		clientID,
-		scope,
-		time.Hour,
-		userClaims,
-	)
+	accessToken, err := jwtService.CreateAccessToken(crypto.AccessToken{
+		Issuer:   p.issuer(),
+		Subject:  userID,
+		Audience: audience,
+		ClientID: clientID,
+		Scope:    scope,
+		Lifetime: time.Hour,
+		Claims:   userClaims,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1759,13 +1871,17 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
-func grantsSSFScope(scope string) bool {
-	for _, item := range strings.Fields(scope) {
-		if item == "ssf.read" || item == "ssf.manage" {
-			return true
-		}
+// protectedResourceOf returns the resource identifier a registration serves
+// as a resource server, or "" for a registration that is only a client. The
+// SSF Transmitter is the one resource server that calls the introspection
+// endpoint: on the split SSF image it has no access to this server's
+// revocation list. /oauth2/resource, UserInfo and the Credential Issuer run
+// in this process and validate tokens locally.
+func (p *Plugin) protectedResourceOf(client *models.Client) string {
+	if client != nil && client.ID == mockidp.SSFTransmitterClientID {
+		return p.ssfResourceAudience()
 	}
-	return false
+	return ""
 }
 
 func (p *Plugin) ssfResourceAudience() string {
@@ -1783,6 +1899,7 @@ var oauth2ErrorURIs = map[string]string{
 	"unauthorized_client":       "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"unsupported_grant_type":    "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"invalid_scope":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"invalid_target":            "https://datatracker.ietf.org/doc/html/rfc8707#section-2",
 	"unsupported_response_type": "https://datatracker.ietf.org/doc/html/rfc6749#section-4.1.2.1",
 	"access_denied":             "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",
 	"authorization_pending":     "https://datatracker.ietf.org/doc/html/rfc8628#section-3.5",

@@ -27,6 +27,15 @@ const AuthorizationCodeTTL = 60 * time.Second
 // so the secret survives restarts; otherwise it is generated at process start.
 const SSFStreamClientID = "ssf-stream-client"
 
+// SSFTransmitterClientID is the registration the SSF Transmitter uses as a
+// resource server when it calls the introspection endpoint (RFC 7662 Section
+// 2.1). It has no grant types: it cannot obtain tokens, only ask about tokens
+// whose aud names the SSF resource. The split SSF image and this
+// authorization server share its secret through SSF_TRANSMITTER_CLIENT_SECRET;
+// when that is unset the secret is generated at process start and only the
+// in-process Transmitter, which does not introspect, works.
+const SSFTransmitterClientID = "ssf-transmitter"
+
 // MockIdP provides a mock identity provider for demonstrations
 type MockIdP struct {
 	users                map[string]*models.User
@@ -225,6 +234,7 @@ func (idp *MockIdP) initDemoData() {
 	demoClientSecret := envOrRandom("MOCKIDP_DEMO_CLIENT_SECRET", 32)
 	machineClientSecret := envOrRandom("MOCKIDP_MACHINE_CLIENT_SECRET", 32)
 	ssfStreamClientSecret := envOrRandom("SSF_STREAM_CLIENT_SECRET", 32)
+	ssfTransmitterClientSecret := envOrRandom("SSF_TRANSMITTER_CLIENT_SECRET", 32)
 
 	// Demo users
 	alice := &models.User{
@@ -404,6 +414,16 @@ func (idp *MockIdP) initDemoData() {
 		CreatedAt:    time.Now(),
 	}
 
+	idp.clients[SSFTransmitterClientID] = &models.Client{
+		ID:           SSFTransmitterClientID,
+		Secret:       ssfTransmitterClientSecret,
+		Name:         "SSF Transmitter (resource server)",
+		RedirectURIs: []string{},
+		GrantTypes:   []string{},
+		Scopes:       []string{},
+		Public:       false,
+		CreatedAt:    time.Now(),
+	}
 }
 
 // GetUser retrieves a user by ID

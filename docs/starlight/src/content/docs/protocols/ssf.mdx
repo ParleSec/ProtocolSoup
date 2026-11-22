@@ -99,7 +99,7 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 - Stream configuration: nested `delivery: { method, endpoint_url }`, `events_supported` vs `events_delivered`
 - Discovery: `GET /.well-known/ssf-configuration`, `spec_version` `"1_0"`, `issuer` identical to SET `iss`, `authorization_schemes` includes `urn:ietf:rfc:6749`, `default_subjects` `"ALL"`
 - Stream management is `stream_id` addressed. `GET /ssf/stream` without `stream_id` returns that Receiver's list (`[]` when none). Create is **201**. Delete is **204**.
-- Stream Management is an OAuth 2.0 resource server when `SSF_AS_JWKS_URI` is set: `ssf.read` / `ssf.manage`, bearer header only (no query `access_token`). The Transmitter also checks revocation status (MockIdP on the monolith, or `SSF_AS_INTROSPECT_URI` on the split SSF image). The federation AS seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
+- Stream Management is an OAuth 2.0 resource server when `SSF_AS_JWKS_URI` is set: `ssf.read` / `ssf.manage`, bearer header only (no query `access_token`). The Transmitter also checks revocation status (MockIdP on the monolith, or `SSF_AS_INTROSPECT_URI` on the split SSF image, where it authenticates to the introspection endpoint as the resource server `ssf-transmitter` with `SSF_AS_INTROSPECT_CLIENT_SECRET`). The federation AS seeds confidential client `ssf-stream-client` for those scopes (`GET /oauth2/demo/clients`).
 - SET structure: `iss`, `iat`, `jti`, `aud`, `events` (exactly one event), top-level `sub_id`, no JWT `sub` or `exp`, `typ=secevent+jwt`, RS256
 - Push delivery: `Content-Type: application/secevent+jwt`, signature, **202** (not 200); push URL is the Receiver's `delivery.endpoint_url`
 - Poll delivery: POST to the stream's Transmitter-supplied `delivery.endpoint_url` (`/ssf/poll/{stream_id}`); `sets` map keyed by `jti`; unacknowledged SETs retransmit; `maxEvents: 0` is ack-only; `acks` / `setErrs` on the next poll
@@ -107,5 +107,5 @@ Local/demo `issuer` may be `http://` (SSF §7.1 wants `https`). Same lab TLS sto
 - Device Compliance: CAEP `device-compliance-change` SETs use a Complex `sub_id` (`user` + `device`) and `reason_admin`. The Receiver restricts RP access when `current_status` is `not-compliant`.
 - Verification: `stream_id` required, **204** empty, verification SET `sub_id` opaque stream id; `state` echoed only when supplied
 - CAEP/RISC members: `namespace` + `current_level`; `credential_type`; `not-compliant`; RISC `reason` only `hijacking` | `bulk-account`
-- Stream Management tokens: signature, expiry, `iss`/`aud`/scope, and RFC 7009 revocation status (in-process MockIdP or RFC 7662 introspection)
+- Stream Management tokens: the RFC 9068 Section 4 checks (`typ` header `at+jwt`, `iss` equal to `SSF_AS_ISSUER`, `aud` containing `SSF_RESOURCE`, signature, expiry), scope, and RFC 7009 revocation status (in-process MockIdP or RFC 7662 introspection)
 - Looking Glass Flow tab is the Looking Glass bus only (no executor-local spoof timeline)

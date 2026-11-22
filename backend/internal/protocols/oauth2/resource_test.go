@@ -8,9 +8,12 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
+	"github.com/ParleSec/ProtocolSoup/pkg/models"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -469,5 +472,301 @@ func TestProtectedResourceRejectsTokenForAnotherAudience(t *testing.T) {
 	}
 	if got := header.Get("WWW-Authenticate"); got != `Bearer error="invalid_token"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+}
+
+// accessTokenParts decodes a JWT access token's header and claims without
+// verifying it, for assertions on what the token endpoint issued.
+func accessTokenParts(t *testing.T, accessToken string) (map[string]interface{}, jwt.MapClaims) {
+	t.Helper()
+	parsed, _, err := jwt.NewParser().ParseUnverified(accessToken, jwt.MapClaims{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed.Header, parsed.Claims.(jwt.MapClaims)
+}
+
+// introspect posts token to /oauth2/introspect authenticated as clientID.
+func introspect(t *testing.T, server *oauthAssertionTestServer, clientID, secret, token string) (int, map[string]interface{}) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/introspect",
+		strings.NewReader(url.Values{"token": {token}}.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if clientID != "" {
+		request.SetBasicAuth(clientID, secret)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return response.StatusCode, body
+}
+
+// TestAuthorizationCodeAccessTokenFollowsRFC9068 covers RFC 9068 Section 2:
+// the "typ" header is at+jwt (Section 2.1), and iss, aud, sub and client_id
+// are present (Section 2.2), with iss the issuer this authorization server's
+// metadata publishes and aud the default resource indicator (Section 3). The
+// resource the token names accepts it.
+func TestAuthorizationCodeAccessTokenFollowsRFC9068(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	code := createDPoPTestAuthCode(t, server)
+	status, body := postTokenRequest(t, server.server.URL, url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code.Code},
+		"redirect_uri": {"http://localhost:3000/callback"},
+		"client_id":    {"public-app"},
+	}, "")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %#v", status, body)
+	}
+	accessToken, _ := body["access_token"].(string)
+	header, claims := accessTokenParts(t, accessToken)
+	if header["typ"] != "at+jwt" {
+		t.Errorf("typ = %v, want at+jwt", header["typ"])
+	}
+	if claims["iss"] != server.plugin.issuer() {
+		t.Errorf("iss = %v, want the authorization server issuer %s", claims["iss"], server.plugin.issuer())
+	}
+	if claims["aud"] != server.plugin.resourceURL() {
+		t.Errorf("aud = %v, want the protected resource %s", claims["aud"], server.plugin.resourceURL())
+	}
+	if claims["client_id"] != "public-app" {
+		t.Errorf("client_id = %v, want public-app", claims["client_id"])
+	}
+	if claims["sub"] != "alice" {
+		t.Errorf("sub = %v, want alice", claims["sub"])
+	}
+	for _, required := range []string{"exp", "iat", "jti"} {
+		if _, present := claims[required]; !present {
+			t.Errorf("%s is REQUIRED by RFC 9068 Section 2.2 and is missing", required)
+		}
+	}
+
+	if status, body, _ := getResourceRequest(t, server, "Bearer "+accessToken, ""); status != http.StatusOK {
+		t.Fatalf("resource status = %d, want 200; body = %#v", status, body)
+	}
+}
+
+// TestProtectedResourceRejectsJWTsThatAreNotItsAccessTokens covers the RFC
+// 9068 Section 4 checks one at a time. Each token is signed by the server's
+// own key and unexpired, so only the named check can refuse it. RFC 6750
+// Section 3.1: the error code is invalid_token.
+func TestProtectedResourceRejectsJWTsThatAreNotItsAccessTokens(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	jwtService := server.idp.JWTService()
+	base := internalcrypto.AccessToken{
+		Issuer:   server.plugin.issuer(),
+		Subject:  "alice",
+		Audience: server.plugin.resourceURL(),
+		ClientID: "public-app",
+		Scope:    "profile",
+		Lifetime: time.Hour,
+	}
+
+	refreshToken, err := jwtService.CreateRefreshToken("alice", "public-app", "profile", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idToken, err := jwtService.CreateIDToken("alice", "public-app", "", time.Now(), time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	untyped, err := jwtService.CreateUnprofiledAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherIssuer := base
+	otherIssuer.Issuer = server.plugin.baseURL
+	fromOtherIssuer, err := jwtService.CreateAccessToken(otherIssuer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherResource := base
+	otherResource.Audience = server.plugin.baseURL + "/oidc/userinfo"
+	forOtherResource, err := jwtService.CreateAccessToken(otherResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, token := range map[string]string{
+		"a refresh token has no at+jwt typ and no aud":     refreshToken,
+		"an ID Token has no at+jwt typ":                    idToken,
+		"an access token typed JWT":                        untyped,
+		"an access token from another issuer":              fromOtherIssuer,
+		"an access token whose aud names another resource": forOtherResource,
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body, header := getResourceRequest(t, server, "Bearer "+token, "")
+			if status != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401; body = %#v", status, body)
+			}
+			if body["error"] != "invalid_token" {
+				t.Fatalf("error = %v, want invalid_token", body["error"])
+			}
+			if got := header.Get("WWW-Authenticate"); got != `Bearer error="invalid_token"` {
+				t.Fatalf("WWW-Authenticate = %q", got)
+			}
+		})
+	}
+
+	accepted, err := jwtService.CreateAccessToken(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, body, _ := getResourceRequest(t, server, "Bearer "+accepted, ""); status != http.StatusOK {
+		t.Fatalf("a token that names this resource: status = %d, want 200; body = %#v", status, body)
+	}
+}
+
+// TestTokenEndpointResourceParameter covers RFC 8707 Section 2 and RFC 9068
+// Section 3: a "resource" value that names the resource the scope belongs to
+// becomes "aud"; a value that is not an absolute URI, carries a fragment,
+// names an unknown resource or does not fit the scope is refused with
+// invalid_target.
+func TestTokenEndpointResourceParameter(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "resource-client", "resource-secret")
+	request := func(resources ...string) (int, map[string]interface{}) {
+		form := url.Values{
+			"grant_type":    {"client_credentials"},
+			"client_id":     {"resource-client"},
+			"client_secret": {"resource-secret"},
+			"scope":         {"api:read"},
+		}
+		for _, resource := range resources {
+			form.Add("resource", resource)
+		}
+		return postTokenRequest(t, server.server.URL, form, "")
+	}
+
+	status, body := request(server.plugin.resourceURL())
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, body = %#v", status, body)
+	}
+	accessToken, _ := body["access_token"].(string)
+	if _, claims := accessTokenParts(t, accessToken); claims["aud"] != server.plugin.resourceURL() {
+		t.Fatalf("aud = %v, want the resource parameter %s", claims["aud"], server.plugin.resourceURL())
+	}
+
+	for name, resources := range map[string][]string{
+		"an unknown resource":                {"https://rs.example/api"},
+		"a relative reference":               {"oauth2/resource"},
+		"a URI with a fragment":              {server.plugin.resourceURL() + "#section"},
+		"a resource the scope has no use at": {server.plugin.ssfResourceAudience()},
+		"two resources":                      {server.plugin.resourceURL(), server.plugin.ssfResourceAudience()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := request(resources...)
+			if status != http.StatusBadRequest || body["error"] != "invalid_target" {
+				t.Fatalf("status = %d, error = %v; want 400 invalid_target; body = %#v", status, body["error"], body)
+			}
+		})
+	}
+}
+
+// TestTokenEndpointRejectsScopesOfDifferentResources covers RFC 9068 Section
+// 3: "If the values in the "scope" parameter refer to different default
+// resource indicator values, the authorization server SHOULD reject the
+// request with "invalid_scope"".
+func TestTokenEndpointRejectsScopesOfDifferentResources(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	server.idp.RegisterClient(&models.Client{
+		ID:         "two-resource-client",
+		Secret:     "two-resource-secret",
+		Name:       "Client Registered For Two Resources",
+		GrantTypes: []string{"client_credentials"},
+		Scopes:     []string{"api:read", "ssf.read"},
+	})
+	status, body := postTokenRequest(t, server.server.URL, url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"two-resource-client"},
+		"client_secret": {"two-resource-secret"},
+		"scope":         {"api:read ssf.read"},
+	}, "")
+	if status != http.StatusBadRequest || body["error"] != "invalid_scope" {
+		t.Fatalf("status = %d, error = %v; want 400 invalid_scope; body = %#v", status, body["error"], body)
+	}
+}
+
+// TestIntrospectionAnswersOnlyTheTokensParties covers RFC 7662 Section 4: "If
+// the token can be used only at certain resource servers, the authorization
+// server MUST determine whether or not the token can be used at the resource
+// server making the introspection call." The client a token was issued to
+// and a resource server its aud names are told it is active. Section 2.2:
+// any other authorized caller gets "active" false and nothing else.
+func TestIntrospectionAnswersOnlyTheTokensParties(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	registerDPoPClientCredentialsClient(t, server, "other-client", "other-secret")
+	ssfClient, _ := server.idp.GetClient(mockidp.SSFStreamClientID)
+	transmitter, ok := server.idp.GetClient(mockidp.SSFTransmitterClientID)
+	if ssfClient == nil || !ok || transmitter == nil {
+		t.Fatal("the seeded SSF client and SSF Transmitter resource server are required")
+	}
+
+	apiToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+	ssfToken, _ := clientCredentialsToken(t, server, mockidp.SSFStreamClientID, ssfClient.Secret, "ssf.read")
+	refreshToken, err := server.idp.JWTService().CreateRefreshToken("alice", "owner-client", "api:read", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idToken, err := server.idp.JWTService().CreateIDToken("alice", "owner-client", "", time.Now(), time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, call := range map[string]struct {
+		clientID, secret, token string
+		active                  bool
+	}{
+		"the client the access token was issued to":  {"owner-client", "owner-secret", apiToken, true},
+		"the client the refresh token was issued to": {"owner-client", "owner-secret", refreshToken, true},
+		"another client":                               {"other-client", "other-secret", apiToken, false},
+		"the resource server the aud names":            {mockidp.SSFTransmitterClientID, transmitter.Secret, ssfToken, true},
+		"a resource server the aud does not name":      {mockidp.SSFTransmitterClientID, transmitter.Secret, apiToken, false},
+		"an ID Token, which is not an OAuth 2.0 token": {"owner-client", "owner-secret", idToken, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := introspect(t, server, call.clientID, call.secret, call.token)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, body = %#v", status, body)
+			}
+			if body["active"] != call.active {
+				t.Fatalf("active = %v, want %v; body = %#v", body["active"], call.active, body)
+			}
+			if !call.active && len(body) != 1 {
+				t.Fatalf("an inactive response carried more than \"active\": %#v", body)
+			}
+		})
+	}
+
+	// The token under introspection is not a credential for introspecting
+	// itself (RFC 7662 Section 2.1).
+	request, err := http.NewRequest(http.MethodPost, server.server.URL+"/oauth2/introspect",
+		strings.NewReader(url.Values{"token": {apiToken}}.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer "+apiToken)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var body map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error"] != "invalid_client" {
+		t.Fatalf("a token presented as its own credential: body = %#v, want invalid_client", body)
 	}
 }
