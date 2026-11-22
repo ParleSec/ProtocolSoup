@@ -152,16 +152,58 @@ func init() {
 
 	capture.Register("DP-012", capture.Entry{
 		Passing: &capture.Scenario{
-			Name:        "nonce-within-lifetime",
-			Description: "The conformance client receives a DPoP-Nonce from /oauth2/token in a use_dpop_nonce error, then sends two client_credentials token requests whose proofs carry that nonce, both well within its five-minute lifetime.",
+			Name:        "recently-supplied-nonce",
+			Description: "The conformance client receives a DPoP-Nonce from /oauth2/token in a use_dpop_nonce error, then sends two client_credentials token requests whose proofs carry exactly that nonce, seconds after the server supplied it.",
 			Actor:       conformance.ActorConformanceClient,
 			Expected:    conformance.OutcomeAccepted,
 			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
 				return tokenNonce(ctx, env, reuseIssuedNonce)
 			},
 		},
+		Failing: []*capture.Scenario{{
+			Name:        "nonce-not-exact-match",
+			Description: "After receiving a DPoP-Nonce from /oauth2/token in a use_dpop_nonce error, the conformance client sends two more client_credentials token requests with otherwise valid proofs: one whose nonce claim is the supplied value with its last character replaced, and one whose nonce claim is the supplied value with its last character removed.",
+			Actor:       conformance.ActorConformanceClient,
+			Expected:    conformance.OutcomeRejected,
+			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+				return tokenNonce(ctx, env, presentAlteredNonce)
+			},
+		}},
+	})
+
+	capture.Register("DP-013", capture.Entry{
+		Passing: &capture.Scenario{
+			Name:        "proof-signed-by-bound-key",
+			Description: "The conformance client presents a DPoP-bound access token to GET /oauth2/resource with Authorization: DPoP and a DPoP proof signed by the key whose JWK SHA-256 Thumbprint is the token's cnf.jkt. The proof carries the token's ath and the nonce the resource issued in an earlier use_dpop_nonce challenge.",
+			Actor:       conformance.ActorConformanceClient,
+			Expected:    conformance.OutcomeAccepted,
+			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+				return resourceKeyBinding(ctx, env, false)
+			},
+		},
+		Failing: []*capture.Scenario{{
+			Name:        "proof-signed-by-other-key",
+			Description: "The conformance client presents a DPoP-bound access token to GET /oauth2/resource with a DPoP proof that a second P-256 key signed and whose jwk header carries that second key's public key. The proof's signature verifies and it carries the token's ath and the resource's DPoP-Nonce, but the token's cnf.jkt is the thumbprint of the first key.",
+			Actor:       conformance.ActorConformanceClient,
+			Expected:    conformance.OutcomeRejected,
+			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+				return resourceKeyBinding(ctx, env, true)
+			},
+		}},
+	})
+
+	capture.Register("DP-014", capture.Entry{
+		Passing: &capture.Scenario{
+			Name:        "server-generated-nonce",
+			Description: "The conformance client sends a client_credentials token request to /oauth2/token with a DPoP proof that has no nonce claim, receives a use_dpop_nonce error whose DPoP-Nonce header carries a value the server generated, and retries with a new proof whose nonce claim is that value. The exchange shows the nonce the server supplied; no single exchange can show that it was unpredictable.",
+			Actor:       conformance.ActorConformanceClient,
+			Expected:    conformance.OutcomeAccepted,
+			Run: func(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+				return tokenNonce(ctx, env, presentIssuedNonce)
+			},
+		},
 		Unavailable: map[conformance.ArtefactKind]string{
-			conformance.KindFailing: "A nonce can only be shown being refused after the server has dropped it, which takes up to 15 minutes from issue, longer than a capture run waits, and a failed random read inside the server cannot be caused over HTTP.",
+			conformance.KindFailing: "The requirement constrains how the server generates nonce values. It reads each one from its random source and answers 500 server_error when that read fails, and no request a client sends can make it issue a predictable value.",
 		},
 	})
 }
@@ -574,12 +616,24 @@ const (
 	reuseIssuedNonce
 	// presentOtherNonce sends a nonce the server never issued, then no nonce.
 	presentOtherNonce
+	// presentAlteredNonce sends the issued nonce with its last character
+	// replaced, then with its last character removed.
+	presentAlteredNonce
 )
+
+// rejected reports whether a conformant server refuses every request the
+// use sends after the challenge.
+func (use nonceUse) rejected() bool {
+	return use == presentOtherNonce || use == presentAlteredNonce
+}
 
 // tokenNonce records the token endpoint providing a nonce (RFC 9449
 // Section 8) and then the requests that use it. Section 4.3 check 10 is
 // "If the server provided a nonce value to the client, the nonce claim
-// matches the server-provided nonce value."
+// matches the server-provided nonce value." Section 8 adds "If the nonce
+// claim in the DPoP proof does not exactly match a nonce recently supplied
+// by the authorization server to the client, the authorization server MUST
+// reject the request."
 func tokenNonce(ctx context.Context, env *capture.Env, use nonceUse) (conformance.ArtefactOutcome, error) {
 	client, err := newTokenClient(ctx, env)
 	if err != nil {
@@ -631,10 +685,17 @@ func tokenNonce(ctx context.Context, env *capture.Env, use nonceUse) (conformanc
 			return "", err
 		}
 		nonces = []string{base64.RawURLEncoding.EncodeToString(raw), ""}
+	case presentAlteredNonce:
+		prefix, last := issued[:len(issued)-1], issued[len(issued)-1]
+		replacement := "A"
+		if last == 'A' {
+			replacement = "B"
+		}
+		nonces = []string{prefix + replacement, prefix}
 	}
 
 	outcome := conformance.OutcomeRejected
-	if use != presentOtherNonce {
+	if !use.rejected() {
 		outcome = conformance.OutcomeAccepted
 	}
 	for _, nonce := range nonces {
@@ -642,117 +703,130 @@ func tokenNonce(ctx context.Context, env *capture.Env, use nonceUse) (conformanc
 		if err != nil {
 			return "", err
 		}
-		got, err := client.outcome(ctx, env, resp, use == presentOtherNonce)
+		got, err := client.outcome(ctx, env, resp, use.rejected())
 		if err != nil {
 			return "", err
 		}
 		switch {
-		case use == presentOtherNonce && got == conformance.OutcomeAccepted:
+		case use.rejected() && got == conformance.OutcomeAccepted:
 			outcome = conformance.OutcomeAccepted
-		case use != presentOtherNonce && got == conformance.OutcomeRejected:
+		case !use.rejected() && got == conformance.OutcomeRejected:
 			outcome = conformance.OutcomeRejected
 		}
 	}
 	return outcome, nil
 }
 
-// resourceATH presents a DPoP-bound token to the OAuth 2.0 protected
-// resource. Section 4.3 check 12 requires the server to "ensure that the
-// value of the ath claim equals the hash of that access token".
-func resourceATH(ctx context.Context, env *capture.Env, failing bool) (conformance.ArtefactOutcome, error) {
+// boundResource is a DPoP-bound access token ready to present to the OAuth
+// 2.0 protected resource, with the nonce the resource currently requires.
+type boundResource struct {
+	client *tokenClient
+	key    *proofKey
+	token  string
+	url    string
+	nonce  string
+}
+
+// newBoundResource obtains, without recording, an access token bound to a
+// new key and the resource's current DPoP-Nonce. The caller runs retire when
+// the scenario ends.
+func newBoundResource(ctx context.Context, env *capture.Env) (res *boundResource, retire func(), err error) {
 	client, err := newTokenClient(ctx, env)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 	key, err := newProofKey(elliptic.P256())
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
 	token, lifetime, err := client.boundToken(ctx, env, key)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
-	defer client.retireToken(ctx, env, token, lifetime)
+	retire = func() { client.retireToken(ctx, env, token, lifetime) }
+	res = &boundResource{client: client, key: key, token: token, url: env.BaseURL + "/oauth2/resource"}
 
-	resource := env.BaseURL + "/oauth2/resource"
-	get := func(spec *proofSpec, record bool) (*capture.Response, error) {
-		proof, err := spec.signES256(key)
-		if err != nil {
-			return nil, err
-		}
-		req, err := http.NewRequest(http.MethodGet, resource, nil)
-		if err != nil {
-			return nil, err
-		}
-		req.Header.Set("Authorization", "DPoP "+token)
-		req.Header.Set("DPoP", proof)
-		if record {
-			return env.Do(ctx, req)
-		}
-		return env.Setup(ctx, req)
-	}
-	proofFor := func(nonce, athToken string) (*proofSpec, error) {
-		return newProofSpec(key, http.MethodGet, resource, nonce, athToken)
-	}
-
-	// The resource's nonce space is separate from the token endpoint's
-	// (RFC 9449 Section 8.2). It challenges only after the proof's ath and
-	// key have passed, and before it records the jti.
-	spec, err := proofFor("", token)
+	// The resource's nonces are its own, not the token endpoint's: RFC 9449
+	// Section 9 says "nonces will be only accepted by the server that issued
+	// them". It challenges only after the proof's ath and key have passed,
+	// and before it records the jti.
+	spec, err := res.proof(key, token)
 	if err != nil {
-		return "", err
+		retire()
+		return nil, nil, err
 	}
-	first, err := get(spec, false)
+	first, err := res.get(ctx, env, spec, key, false)
 	if err != nil {
-		return "", err
+		retire()
+		return nil, nil, err
 	}
-	nonce := ""
 	switch {
 	case first.Status == http.StatusUnauthorized && first.Error() == "use_dpop_nonce":
-		if nonce = first.Header.Get("DPoP-Nonce"); nonce == "" {
-			return "", fmt.Errorf("use_dpop_nonce without a DPoP-Nonce header")
+		if res.nonce = first.Header.Get("DPoP-Nonce"); res.nonce == "" {
+			retire()
+			return nil, nil, fmt.Errorf("use_dpop_nonce without a DPoP-Nonce header")
 		}
 	case first.Status != http.StatusOK:
-		return "", fmt.Errorf("protected resource answered %d %s", first.Status, capture.Truncate(first.Body))
+		retire()
+		return nil, nil, fmt.Errorf("protected resource answered %d %s", first.Status, capture.Truncate(first.Body))
 	}
+	return res, retire, nil
+}
 
-	if !failing {
-		if spec, err = proofFor(nonce, token); err != nil {
-			return "", err
-		}
-		resp, err := get(spec, true)
+// proof is a conformant proof for this resource whose jwk header carries
+// signer's public key, with the resource's nonce and the hash of athToken.
+func (r *boundResource) proof(signer *proofKey, athToken string) (*proofSpec, error) {
+	return newProofSpec(signer, http.MethodGet, r.url, r.nonce, athToken)
+}
+
+// get presents the token with spec signed by signer.
+func (r *boundResource) get(ctx context.Context, env *capture.Env, spec *proofSpec, signer *proofKey, record bool) (*capture.Response, error) {
+	proof, err := spec.signES256(signer)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest(http.MethodGet, r.url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "DPoP "+r.token)
+	req.Header.Set("DPoP", proof)
+	if record {
+		return env.Do(ctx, req)
+	}
+	return env.Setup(ctx, req)
+}
+
+// conformant records the token presented with a proof from the key it is
+// bound to, carrying the token's ath.
+func (r *boundResource) conformant(ctx context.Context, env *capture.Env) (conformance.ArtefactOutcome, error) {
+	send := func() (*capture.Response, error) {
+		spec, err := r.proof(r.key, r.token)
 		if err != nil {
+			return nil, err
+		}
+		return r.get(ctx, env, spec, r.key, true)
+	}
+	resp, err := send()
+	if err != nil {
+		return "", err
+	}
+	// The nonce can rotate between preparation and this request.
+	if resp.Status == http.StatusUnauthorized && resp.Error() == "use_dpop_nonce" && resp.Header.Get("DPoP-Nonce") != "" {
+		r.nonce = resp.Header.Get("DPoP-Nonce")
+		if resp, err = send(); err != nil {
 			return "", err
 		}
-		// The nonce can rotate between preparation and this request.
-		if resp.Status == http.StatusUnauthorized && resp.Error() == "use_dpop_nonce" && resp.Header.Get("DPoP-Nonce") != "" {
-			if spec, err = proofFor(resp.Header.Get("DPoP-Nonce"), token); err != nil {
-				return "", err
-			}
-			if resp, err = get(spec, true); err != nil {
-				return "", err
-			}
-		}
-		return resourceOutcome(resp)
 	}
+	return resourceOutcome(resp)
+}
 
-	other, otherLifetime, err := client.boundToken(ctx, env, key)
-	if err != nil {
-		return "", err
-	}
-	defer client.retireToken(ctx, env, other, otherLifetime)
-
-	wrongATH, err := proofFor(nonce, other)
-	if err != nil {
-		return "", err
-	}
-	noATH, err := proofFor(nonce, "")
-	if err != nil {
-		return "", err
-	}
+// broken records the token presented once with each spec, signed by signer.
+// The resource is recorded as accepting the scenario if it accepts any.
+func (r *boundResource) broken(ctx context.Context, env *capture.Env, signer *proofKey, specs ...*proofSpec) (conformance.ArtefactOutcome, error) {
 	outcome := conformance.OutcomeRejected
-	for _, spec := range []*proofSpec{wrongATH, noATH} {
-		resp, err := get(spec, true)
+	for _, spec := range specs {
+		resp, err := r.get(ctx, env, spec, signer, true)
 		if err != nil {
 			return "", err
 		}
@@ -765,6 +839,63 @@ func resourceATH(ctx context.Context, env *capture.Env, failing bool) (conforman
 		}
 	}
 	return outcome, nil
+}
+
+// resourceATH presents a DPoP-bound token to the OAuth 2.0 protected
+// resource. Section 4.3 check 12 requires the server to "ensure that the
+// value of the ath claim equals the hash of that access token".
+func resourceATH(ctx context.Context, env *capture.Env, failing bool) (conformance.ArtefactOutcome, error) {
+	res, retire, err := newBoundResource(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	defer retire()
+	if !failing {
+		return res.conformant(ctx, env)
+	}
+
+	other, otherLifetime, err := res.client.boundToken(ctx, env, res.key)
+	if err != nil {
+		return "", err
+	}
+	defer res.client.retireToken(ctx, env, other, otherLifetime)
+
+	wrongATH, err := res.proof(res.key, other)
+	if err != nil {
+		return "", err
+	}
+	noATH, err := res.proof(res.key, "")
+	if err != nil {
+		return "", err
+	}
+	return res.broken(ctx, env, res.key, wrongATH, noATH)
+}
+
+// resourceKeyBinding presents a DPoP-bound token to the OAuth 2.0 protected
+// resource. Section 4.3 check 12 also requires the server to "confirm that
+// the public key to which the access token is bound matches the public key
+// from the DPoP proof". The failing proof is conformant in every other
+// respect: a second key signs it, its jwk header carries that key, and it
+// has the token's ath and the resource's nonce.
+func resourceKeyBinding(ctx context.Context, env *capture.Env, failing bool) (conformance.ArtefactOutcome, error) {
+	res, retire, err := newBoundResource(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	defer retire()
+	if !failing {
+		return res.conformant(ctx, env)
+	}
+
+	otherKey, err := newProofKey(elliptic.P256())
+	if err != nil {
+		return "", err
+	}
+	spec, err := res.proof(otherKey, res.token)
+	if err != nil {
+		return "", err
+	}
+	return res.broken(ctx, env, otherKey, spec)
 }
 
 // resourceOutcome classifies a protected resource response: a rejected

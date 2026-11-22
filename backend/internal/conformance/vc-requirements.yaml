@@ -916,12 +916,61 @@ requirements:
     specification: rfc9449
     section: "8"
     level: MUST
-    title: DPoP nonces expire and entropy-generation failure is an error
-    question: "How long do DPoP nonces last, and what happens if one cannot be generated?"
+    title: Nonce claim not exactly matching a recently supplied nonce is rejected
+    question: "Which DPoP nonce values must an authorization server reject?"
     statement: >-
-      Server-provided DPoP nonces expire after the configured lifetime and
-      entropy-generation failure is handled as an error rather than emitting a
-      predictable value.
+      If the nonce claim in the DPoP proof does not exactly match a nonce
+      recently supplied by the authorization server to the client, the
+      authorization server MUST reject the request.
+    roles: [authorization_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/nonce.go
+      - backend/internal/protocols/oauth2/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/nonce_test.go
+        name: TestNonceIssuerRejectsOldNonceAfterLongIdlePeriod
+      - package: ./internal/dpop
+        file: backend/internal/dpop/nonce_test.go
+        name: TestNonceIssuerRejectsUnknownNonce
+      - package: ./internal/protocols/oauth2
+        file: backend/internal/protocols/oauth2/dpop_test.go
+        name: TestTokenEndpointForeignOrStaleNonceIsRejectedAsFreshChallenge
+
+  - id: DP-013
+    specification: rfc9449
+    section: "4.3"
+    level: MUST
+    title: Public key bound to the access token matches the DPoP proof key
+    question: "Which key must sign the DPoP proof presented with a DPoP-bound access token?"
+    statement: >-
+      confirm that the public key to which the access token is bound matches
+      the public key from the DPoP proof.
+    roles: [resource_server]
+    applicability: applicable
+    implementation:
+      - backend/internal/dpop/dpop.go
+      - backend/internal/protocols/oauth2/resource.go
+      - backend/internal/protocols/oid4vci/dpop.go
+    tests:
+      - package: ./internal/dpop
+        file: backend/internal/dpop/dpop_test.go
+        name: TestJKTComputedFromProofMatchesCryptoThumbprint
+      - package: ./internal/protocols/oauth2
+        file: backend/internal/protocols/oauth2/resource_test.go
+        name: TestProtectedResourceRejectsWrongKeyProof
+      - package: ./internal/protocols/oid4vci
+        file: backend/internal/protocols/oid4vci/dpop_test.go
+        name: TestCredentialEndpointRejectsDPoPProofFromAnotherKey
+
+  - id: DP-014
+    specification: rfc9449
+    section: "8"
+    level: MUST
+    title: Nonce values are unpredictable
+    question: "Can a server-provided DPoP nonce be predictable?"
+    statement: Nonce values MUST be unpredictable.
     roles: [authorization_server, resource_server]
     applicability: applicable
     implementation:
@@ -929,7 +978,7 @@ requirements:
     tests:
       - package: ./internal/dpop
         file: backend/internal/dpop/nonce_test.go
-        name: TestNonceIssuerRejectsOldNonceAfterLongIdlePeriod
+        name: TestNonceIssuerDrawsNonceFromRandomSource
       - package: ./internal/dpop
         file: backend/internal/dpop/nonce_test.go
         name: TestNonceIssuerFailsClosedWhenEntropyUnavailable

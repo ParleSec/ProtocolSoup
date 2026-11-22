@@ -626,6 +626,41 @@ func TestCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 	_ = dpopNotification.Body.Close()
 }
 
+// TestCredentialEndpointRejectsDPoPProofFromAnotherKey covers the second
+// half of RFC 9449 Section 4.3 check 12, "confirm that the public key to
+// which the access token is bound matches the public key from the DPoP
+// proof": a proof that is valid in every other respect, ath included, but
+// signed by a key the token is not bound to is refused.
+func TestCredentialEndpointRejectsDPoPProofFromAnotherKey(t *testing.T) {
+	server := newDPoPOID4VCITestServer(t)
+	boundKey := newDPoPOID4VCITestKey(t)
+	otherKey := newDPoPOID4VCITestKey(t)
+	accessToken, _ := issueDPoPBoundCredentialGrant(t, server, boundKey)
+
+	credentialURL := server.server.URL + "/oid4vci/credential"
+	otherKeyProof := otherKey.proof(t, http.MethodPost, credentialURL, jwt.MapClaims{"ath": computeTestATH(accessToken)})
+	response := postJSONWithHeaders(
+		t,
+		credentialURL,
+		map[string]interface{}{"credential_configuration_id": "UniversityDegreeCredential"},
+		map[string]string{
+			"Authorization": dpop.HeaderName + " " + accessToken,
+			dpop.HeaderName: otherKeyProof,
+		},
+	)
+	assertStatus(t, response, http.StatusUnauthorized)
+	if challenge := response.Header.Get("WWW-Authenticate"); !strings.HasPrefix(challenge, dpop.HeaderName+" ") {
+		t.Fatalf("WWW-Authenticate = %q, want a DPoP challenge", challenge)
+	}
+	payload := decodeJSONMap(t, response)
+	if got := asString(t, payload["error"]); got != "invalid_dpop_proof" {
+		t.Fatalf("error = %q, want invalid_dpop_proof", got)
+	}
+	if got := asString(t, payload["error_description"]); got != "DPoP proof key does not match the token's bound key" {
+		t.Fatalf("error_description = %q, want the key binding refusal", got)
+	}
+}
+
 func TestDeferredCredentialEndpointEnforcesDPoPBinding(t *testing.T) {
 	server := newDPoPOID4VCITestServer(t)
 	key := newDPoPOID4VCITestKey(t)

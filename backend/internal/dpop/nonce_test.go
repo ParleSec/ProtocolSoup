@@ -1,6 +1,9 @@
 package dpop
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"testing"
 	"time"
@@ -86,6 +89,26 @@ func TestNonceIssuerRejectsOldNonceAfterLongIdlePeriod(t *testing.T) {
 	time.Sleep(25 * time.Millisecond)
 	if nonceValid(t, issuer, old) {
 		t.Fatal("a nonce older than the current and grace windows must not validate")
+	}
+}
+
+// TestNonceIssuerDrawsNonceFromRandomSource covers RFC 9449 Section 8,
+// "Nonce values MUST be unpredictable.": the issuer reads from crypto/rand
+// unless a test replaces the source, and a nonce is the base64url encoding
+// of 24 bytes read from that source and nothing else.
+func TestNonceIssuerDrawsNonceFromRandomSource(t *testing.T) {
+	issuer := NewNonceIssuer(time.Minute)
+	if issuer.random != rand.Reader {
+		t.Fatalf("random source = %T, want crypto/rand.Reader", issuer.random)
+	}
+	raw := make([]byte, 24)
+	for i := range raw {
+		raw[i] = byte(0xA0 + i)
+	}
+	issuer.random = bytes.NewReader(raw)
+	nonce := mustIssueNonce(t, issuer)
+	if want := base64.RawURLEncoding.EncodeToString(raw); nonce != want {
+		t.Fatalf("nonce = %q, want %q, the encoding of the 24 bytes read", nonce, want)
 	}
 }
 
