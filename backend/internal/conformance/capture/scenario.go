@@ -82,9 +82,11 @@ func (m Mismatch) String() string {
 	return fmt.Sprintf("%s %s (%s): %s", m.ID, m.Kind, m.Scenario, m.Reason)
 }
 
-// Run captures every registered requirement, or only those in only when it
-// is non-empty, and returns the artefact set. Mismatches are recorded
-// truthfully in the set as well as returned, so the caller can fail loudly.
+// Run captures every registered requirement and example, or only those in
+// only when it is non-empty, and returns the artefact set. A requirement
+// mismatch is recorded truthfully in the set as well as returned, so the
+// caller can fail loudly. An example whose value fails a check is returned
+// as a mismatch and left out of the set.
 func Run(ctx context.Context, env *Env, recorder *Recorder, commit string, only []string) (*conformance.ArtefactSet, []Mismatch, error) {
 	wanted := map[string]bool{}
 	for _, id := range only {
@@ -151,6 +153,29 @@ func Run(ctx context.Context, env *Env, recorder *Recorder, commit string, only 
 			}
 		}
 		set.Requirements = append(set.Requirements, result)
+	}
+
+	registry, err := conformance.Embedded()
+	if err != nil {
+		return nil, mismatches, fmt.Errorf("embedded registry: %w", err)
+	}
+	for _, definition := range registry.Examples {
+		if len(wanted) > 0 && !wanted[strings.ToUpper(definition.ID)] {
+			continue
+		}
+		scenario, registered := exampleScenarios[definition.ID]
+		if !registered {
+			continue
+		}
+		captured, err := captureExample(ctx, env, recorder, definition, scenario)
+		if ctx.Err() != nil {
+			return nil, mismatches, ctx.Err()
+		}
+		if err != nil {
+			mismatches = append(mismatches, Mismatch{ID: definition.ID, Kind: kindExample, Scenario: "value", Reason: err.Error()})
+			continue
+		}
+		set.Examples = append(set.Examples, *captured)
 	}
 	set.PublishAfter = env.PublishAfter().UTC()
 	if set.PublishAfter.Before(set.CapturedAt) {

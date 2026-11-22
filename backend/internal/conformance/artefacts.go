@@ -12,8 +12,8 @@ import (
 
 // ArtefactSchemaVersion is the artefacts.json format this build reads.
 // Version 2 made failing a list, one artefact per way a requirement was
-// broken and refused.
-const ArtefactSchemaVersion = 2
+// broken and refused. Version 3 added examples.
+const ArtefactSchemaVersion = 3
 
 // ArtefactActor names who sent the requests in an artefact. The hosted wallet
 // only ever behaves as a conformant wallet; malformed requests come from the
@@ -64,6 +64,56 @@ type RequirementArtefacts struct {
 	Unavailable map[ArtefactKind]string `json:"unavailable,omitempty"`
 }
 
+// Where an example value sat in the exchange that carried it.
+const (
+	ExampleInRequest  = "request"
+	ExampleInResponse = "response"
+)
+
+// ExampleSource says where an example value was on the wire.
+type ExampleSource struct {
+	// Exchange indexes the example's Exchanges.
+	Exchange int `json:"exchange"`
+	// Message is ExampleInRequest or ExampleInResponse.
+	Message string `json:"message"`
+	// Location names the place in that message, such as "the DPoP header".
+	Location string `json:"location"`
+}
+
+// How an example's signature was checked when it was captured.
+const (
+	// VerifiedByEmbeddedJWK means the signature verified under the public
+	// key in the value's own jwk header parameter.
+	VerifiedByEmbeddedJWK = "embedded_jwk"
+	// VerifiedByJWKS means the signature verified under the key, selected by
+	// kid, in the JWK Set one of the example's exchanges fetched.
+	VerifiedByJWKS = "jwks"
+)
+
+// ExampleVerification records the signature check the capture run made on
+// an example value. The run fails rather than record a value that does not
+// verify.
+type ExampleVerification struct {
+	Method    string `json:"method"`
+	Algorithm string `json:"algorithm"`
+	KeyID     string `json:"key_id,omitempty"`
+	// JWKSExchange indexes the exchange that fetched the JWK Set, for
+	// VerifiedByJWKS.
+	JWKSExchange *int `json:"jwks_exchange,omitempty"`
+}
+
+// CapturedExample is one example value with the exchanges that carried and
+// verified it, recorded in full.
+type CapturedExample struct {
+	ID           string                          `json:"id"`
+	Actor        ArtefactActor                   `json:"actor"`
+	Description  string                          `json:"description"`
+	Value        string                          `json:"value"`
+	Source       ExampleSource                   `json:"source"`
+	Verification ExampleVerification             `json:"verification"`
+	Exchanges    []lookingglass.CapturedExchange `json:"exchanges"`
+}
+
 // ArtefactSet is the output of cmd/conformance-capture for one deployed build.
 type ArtefactSet struct {
 	SchemaVersion int                    `json:"schema_version"`
@@ -72,6 +122,7 @@ type ArtefactSet struct {
 	PublishAfter  time.Time              `json:"publish_after"`
 	BaseURLs      map[string]string      `json:"base_urls"`
 	Requirements  []RequirementArtefacts `json:"requirements"`
+	Examples      []CapturedExample      `json:"examples,omitempty"`
 }
 
 // LoadArtefacts reads an artefacts.json file.

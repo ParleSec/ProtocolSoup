@@ -1,7 +1,8 @@
 // Command conformance-capture sends each conformance requirement's passing
-// and failing scenario to a deployed ProtocolSoup and writes the recorded
-// exchanges to artifacts/vc-conformance/artefacts.json, which the next image
-// of the same commit serves on the requirement pages. Run it from backend/.
+// and failing scenario to a deployed ProtocolSoup, captures each registry
+// example's value from a real exchange, and writes the recorded exchanges to
+// artifacts/vc-conformance/artefacts.json, which the next image of the same
+// commit serves on the requirement and example pages. Run it from backend/.
 package main
 
 import (
@@ -35,7 +36,7 @@ func run(ctx context.Context, args []string) error {
 	counterpartyPort := flags.Int("counterparty-port", 0, "local conformance counterparty port, 0 when not running (-target local)")
 	productionCounterparty := flags.Bool("production-counterparty", false, "use the deployed conformance counterparty with local servers (-target local)")
 	commit := flags.String("commit", "", "commit the deployed apps must report on /health; defaults to what the main app reports")
-	only := flags.String("only", "", "comma-separated requirement IDs to capture; all registered when empty")
+	only := flags.String("only", "", "comma-separated requirement and example IDs to capture; all registered when empty")
 	rpm := flags.Int("rpm", capture.DefaultRequestsPerMinute, "requests per minute against the deployed apps")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -122,8 +123,8 @@ func run(ctx context.Context, args []string) error {
 	if err := os.WriteFile(outputPath, encoded, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("conformance-capture: wrote %d requirements for commit %s to %s (publish after %s)\n",
-		len(set.Requirements), expected, outputPath, set.PublishAfter.Format(time.RFC3339))
+	fmt.Printf("conformance-capture: wrote %d requirements and %d examples for commit %s to %s (publish after %s)\n",
+		len(set.Requirements), len(set.Examples), expected, outputPath, set.PublishAfter.Format(time.RFC3339))
 
 	if len(mismatches) > 0 {
 		for _, mismatch := range mismatches {

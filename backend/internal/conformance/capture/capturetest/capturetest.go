@@ -59,6 +59,14 @@ func RunLive(t *testing.T) {
 			t.Logf("%s %s: unavailable: %s", req.ID, kind, reason)
 		}
 	}
+	for _, example := range set.Examples {
+		t.Logf("example %s: %s, from %s of exchange %d (%s), verified by %s with %s",
+			example.ID, example.Value, example.Source.Message, example.Source.Exchange, example.Source.Location,
+			example.Verification.Method, example.Verification.Algorithm)
+		for _, exchange := range example.Exchanges {
+			t.Logf("    %s %s -> %d", exchange.Request.Method, exchange.Request.URL, exchange.Response.Status)
+		}
+	}
 	for _, mismatch := range mismatches {
 		t.Errorf("mismatch: %s", mismatch)
 	}

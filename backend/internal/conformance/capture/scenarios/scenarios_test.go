@@ -63,3 +63,30 @@ func TestEveryRequirementHasAnEntry(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryExampleHasAScenario keeps the example scenarios and the registry
+// in step: every registry example has a scenario that captures its value,
+// and nothing is registered for an example the registry lacks.
+func TestEveryExampleHasAScenario(t *testing.T) {
+	registry, err := conformance.Embedded()
+	if err != nil {
+		t.Fatalf("embedded registry: %v", err)
+	}
+	scenarios := capture.ExampleScenarios()
+	known := map[string]bool{}
+	for _, example := range registry.Examples {
+		known[example.ID] = true
+		scenario, registered := scenarios[example.ID]
+		switch {
+		case !registered:
+			t.Errorf("example %s has no capture scenario", example.ID)
+		case strings.TrimSpace(scenario.Description) == "" || scenario.Actor == "" || scenario.Run == nil:
+			t.Errorf("example %s scenario is missing a description, actor or Run", example.ID)
+		}
+	}
+	for id := range scenarios {
+		if !known[id] {
+			t.Errorf("example scenario %s is not a registry example", id)
+		}
+	}
+}
