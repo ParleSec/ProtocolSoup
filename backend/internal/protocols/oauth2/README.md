@@ -335,11 +335,19 @@ token=ACCESS_TOKEN&token_type_hint=access_token
 ```
 
 `aud` is the protected resource the token is for and `client_id` is the client
-that requested it (RFC 7662 §2.2); access tokens follow RFC 9068. The caller is
-told a token is active only when it is that client, or a resource server the
-token's `aud` names (RFC 7662 §4). Any other authenticated caller receives the
-inactive response below. The token being introspected is not accepted as the
-caller's credential.
+that requested it (RFC 7662 §2.2); access tokens follow RFC 9068.
+
+The endpoint requires authorization (RFC 7662 §2.1). The caller authenticates
+with a client password, over HTTP Basic or as `client_id` and `client_secret`
+in the body. A public client has no credential, so a request that only names
+a public `client_id` is refused with `invalid_client` (RFC 6749 §2.3). Invalid
+client credentials are answered with `401` and `WWW-Authenticate` (RFC 7662
+§2.3); a request with no credentials and no `Authorization` header gets `400`.
+The token being introspected is not accepted as the caller's credential.
+
+An authenticated caller is told a token is active only when it is the client
+the token was issued to, or a resource server the token's `aud` names (RFC
+7662 §4). Any other authenticated caller receives the inactive response below.
 
 **Response (Inactive/Revoked Token):**
 ```json
@@ -350,7 +358,7 @@ caller's credential.
 
 ## Token Revocation (RFC 7009)
 
-Invalidate tokens when no longer needed:
+Invalidate tokens when no longer needed. The request comes from the client the token was issued to (RFC 7009 §2.1). A confidential client authenticates with its client password, over HTTP Basic or as `client_id` and `client_secret` in the body. A client registered for `private_key_jwt` sends `client_assertion_type` and `client_assertion` instead (RFC 7523 §2.2); the assertion is validated as at the token endpoint, and its `aud` may be the issuer identifier or the token endpoint URL of this authorization server or of the OpenID Provider (RFC 7523 §3). A public client has no credentials and sends `client_id`:
 
 **Request:**
 ```http
@@ -365,7 +373,37 @@ token=REFRESH_TOKEN&token_type_hint=refresh_token&client_id=public-app
 HTTP/1.1 200 OK
 ```
 
-Per RFC 7009 §2.2, the server always returns 200 OK regardless of whether the token was valid. This prevents attackers from using the endpoint to probe for valid tokens.
+Per RFC 7009 §2.2, the server returns 200 when the token was revoked and when the client submitted an invalid token (unknown, expired, or a refresh token that was already rotated or revoked). `token_type_hint` is not needed to find the token.
+
+Revoking a refresh token also revokes every unexpired access token of the same authorization grant, including the ones issued through earlier refresh tokens of a rotated chain (RFC 7009 §2.1). The `Token Revoked` event lists their `jti` values under `access_token_jtis_revoked`. Revoking an access token leaves its refresh token valid.
+
+A token that was issued to another client is not revoked. The request is refused and the token stays valid. RFC 7009 names no error code for this: §2.1 says "the request is refused and the client is informed of the error by the authorization server as described below", and §2.2.1 says "The error presentation conforms to the definition in Section 5.2 of [RFC6749]". There, `invalid_grant` is defined as "The provided authorization grant (e.g., authorization code, resource owner credentials) or refresh token is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client." Those words cover a refresh token. No §5.2 code covers an access token by its words, and this server uses `invalid_grant` for it too, as the only code that names the condition. An access token issued to no identified client (an OID4VCI token from a request without `client_id`) is refused the same way:
+
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "invalid_grant",
+  "error_description": "The token was not issued to the client making the revocation request (RFC 7009 Section 2.1)"
+}
+```
+
+A valid JWT of this server that is neither a refresh token nor an access token is not revoked either. An ID Token is the usual case; a signed UserInfo response or a JWT another component signed with the same key is treated the same. RFC 7009 §2.2.1 defines the code: "unsupported_token_type: The authorization server does not support the revocation of the presented token type."
+
+```http
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "unsupported_token_type",
+  "error_description": "The authorization server does not support the revocation of the presented token type (RFC 7009 Section 2.2.1)"
+}
+```
+
+An access token is recognised by how it was minted, not by what it lacks: an RFC 9068 token by its `at+jwt` `typ` header, and an unprofiled one (OID4VCI, `typ: JWT`) by the `jti` the JWT service recorded when it minted it.
+
+Failed client authentication is `invalid_client`: 401 with `WWW-Authenticate` when the client used the `Authorization` header, 400 otherwise (RFC 6749 §5.2). The 401 carries one `WWW-Authenticate` field per challenge: `Basic realm="oauth2"` first, then a challenge for the scheme the client used when that was another one, as §5.2 requires a challenge "matching the authentication scheme used by the client". For `Bearer` that is `Bearer realm="oauth2"`; for any other scheme that is an RFC 9110 token it is the scheme name alone; anything else is not repeated. Only `/oauth2/introspect` adds `error="invalid_token"` to the Bearer challenge (RFC 7662 §2.3, RFC 6750 §3). An invalid client assertion is `invalid_client` with a generic description (RFC 7523 §3.2); Looking Glass shows the reason. If the assertion cannot be checked for replay, the response is 503 and the token is not revoked (RFC 7009 §2.2.1).
 
 ## Token Response Format
 
@@ -420,7 +458,12 @@ The following events are emitted for real-time visualization:
 | `Access Token Issued` | Tokens generated |
 | `Tokens Refreshed` | New tokens via refresh grant |
 | `Token Introspection Result` | Introspection response |
-| `Token Revoked` | Token invalidated |
+| `Token Revoked` | Token invalidated by the client it was issued to |
+| `Revocation Refused: Token Issued To Another Client` | Revocation asked for by a client the token was not issued to |
+| `Revocation Refused: Token Issued To No Identified Client` | Revocation asked for an access token that carries no `client_id` |
+| `Revocation Refused: Unsupported Token Type` | Revocation asked for a JWT of this server that is neither a refresh token nor an access token |
+| `Nothing To Revoke: Invalid Token` | Revocation asked for a value that is not a live token |
+| `Authorization Code Replayed: Tokens Revoked` | A code was presented a second time; lists the access tokens revoked with it, including refreshed ones (RFC 6749 §4.1.2) |
 
 ## Looking Glass Flows
 
@@ -493,10 +536,11 @@ curl -X POST http://localhost:8080/oauth2/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=client_credentials&client_id=ssf-stream-client&client_secret=$SSF_SECRET&scope=ssf.manage"
 
-# Introspect token
+# Introspect token (as the confidential client it was issued to, over HTTP Basic)
 curl -X POST http://localhost:8080/oauth2/introspect \
+  -u "demo-app:$SECRET" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "token=ACCESS_TOKEN&client_id=demo-app&client_secret=$SECRET"
+  -d "token=ACCESS_TOKEN"
 
 # Revoke token
 curl -X POST http://localhost:8080/oauth2/revoke \

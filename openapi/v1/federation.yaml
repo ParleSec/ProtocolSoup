@@ -377,7 +377,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/OAuthError"
         "401":
-          description: Client authentication failure.
+          description: >-
+            Client authentication failed and the client used the
+            Authorization header (RFC 6749 Section 5.2). The same failure
+            with the credentials in the request body is a 400. The response
+            carries one WWW-Authenticate field per challenge: Basic first,
+            the scheme these endpoints support, then the scheme the client
+            used when that was another one (for Bearer,
+            `Bearer realm="oauth2"`; for any other RFC 9110 token, the scheme
+            name alone).
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                example: Basic realm="oauth2"
           content:
             application/json:
               schema:
@@ -568,14 +581,19 @@ paths:
       tags: [OAuth2]
       summary: Token introspection endpoint
       description: >-
-        RFC 7662 token introspection. The caller authenticates as a
-        registered client with HTTP Basic or client_id and client_secret in
-        the body (Section 2.1). It is told a token is active only when it is
-        the client the token was issued to (the token's client_id) or a
-        resource server the token's aud names (Section 4). Any other
-        authenticated caller receives {"active": false} with no other member
-        (Section 2.2). The token being introspected is not accepted as the
-        caller's own credential.
+        RFC 7662 token introspection. The endpoint requires authorization
+        (Section 2.1), which this server takes as client authentication with
+        a client password: HTTP Basic, or client_id and client_secret in the
+        body. The authorization server metadata lists both under
+        introspection_endpoint_auth_methods_supported. A public client has no
+        credential, so a request that only names a public client_id is
+        refused with invalid_client (RFC 6749 Section 2.3). An authenticated
+        caller is told a token is active only when it is the client the token
+        was issued to (the token's client_id) or a resource server the
+        token's aud names (Section 4). Any other authenticated caller
+        receives {"active": false} with no other member (Section 2.2). The
+        token being introspected is not accepted as the caller's own
+        credential.
       operationId: oauth2Introspect
       requestBody:
         required: true
@@ -594,6 +612,10 @@ paths:
                   description: The caller's client identifier, when HTTP Basic is not used.
                 client_secret:
                   type: string
+                  description: >-
+                    The caller's client password, when HTTP Basic is not
+                    used. Sending it together with HTTP Basic is an
+                    invalid_request (RFC 6749 Section 2.3).
       responses:
         "200":
           description: Token active state.
@@ -622,7 +644,28 @@ paths:
                     description: Bearer, or DPoP for a DPoP-bound token (RFC 9449 Section 6.2).
                 additionalProperties: true
         "400":
-          description: Invalid introspection request.
+          description: >-
+            invalid_request, or invalid_client for a request that carried no
+            client credentials and no Authorization header.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: >-
+            invalid_client. The client credentials are invalid (RFC 7662
+            Section 2.3): an unknown client, a wrong client password, or a
+            public client. The response carries one WWW-Authenticate field
+            per challenge: Basic first, then the scheme the client used when
+            that was another one. A Bearer credential gets
+            `Bearer realm="oauth2", error="invalid_token"`, because RFC 7662
+            Section 2.3 answers an invalid bearer token as RFC 6750 Section 3
+            describes.
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                example: Basic realm="oauth2"
           content:
             application/json:
               schema:
@@ -631,6 +674,26 @@ paths:
     post:
       tags: [OAuth2]
       summary: Token revocation endpoint
+      description: >-
+        RFC 7009 token revocation. A confidential client authenticates with
+        HTTP Basic, with client_id and client_secret in the body, or with a
+        private_key_jwt assertion (RFC 7523 Section 2.2); a public client
+        identifies itself with client_id (Section 2.1). The
+        authorization server metadata lists these under
+        revocation_endpoint_auth_methods_supported. The server revokes a
+        token only for the client it was issued to. The response is 200 when
+        the token was revoked and when the client submitted an invalid token
+        (Section 2.2). A token issued to another client is refused and stays
+        valid (Section 2.1). RFC 7009 names no error code for that refusal
+        and takes the error from RFC 6749 Section 5.2; this server answers
+        invalid_grant, whose definition names a refresh token that "was
+        issued to another client", and uses the same code for an access
+        token. A valid JWT of this server that is neither a refresh token
+        nor an access token, such as an ID Token, is refused with
+        unsupported_token_type (Section 2.2.1). Revoking a refresh token also
+        revokes the unexpired access tokens of the same authorization grant
+        (Section 2.1); revoking an access token leaves its refresh token
+        valid.
       operationId: oauth2Revoke
       requestBody:
         required: true
@@ -644,14 +707,66 @@ paths:
                   type: string
                 token_type_hint:
                   type: string
+                client_id:
+                  type: string
+                  description: The client identifier, when HTTP Basic is not used.
+                client_secret:
+                  type: string
+                  description: The client password of a confidential client, when HTTP Basic is not used.
+                client_assertion_type:
+                  type: string
+                  enum: ["urn:ietf:params:oauth:client-assertion-type:jwt-bearer"]
+                  description: Sent with client_assertion by a private_key_jwt client.
+                client_assertion:
+                  type: string
+                  description: >-
+                    A single-use JWT signed with the client's registered key
+                    (RFC 7523 Section 2.2). Its aud is the issuer identifier
+                    or the token endpoint URL of the authorization server.
       responses:
         "200":
-          description: Revocation processed.
+          description: >-
+            The token was revoked, or the submitted value was not a live
+            token. The body is empty.
+        "400":
+          description: >-
+            invalid_grant when the token was not issued to the client making
+            the request (RFC 7009 Section 2.1): it was issued to another
+            client, or it is an access token issued to no identified client.
+            unsupported_token_type when the token is a valid JWT of this
+            server that is neither a refresh token nor an access token (RFC
+            7009 Section 2.2.1). invalid_request. invalid_client when client
+            authentication failed and the credentials were in the request
+            body (RFC 6749 Section 5.2).
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                $ref: "#/components/schemas/OAuthError"
+        "401":
+          description: >-
+            invalid_client. Client authentication failed and the client used
+            the Authorization header (RFC 6749 Section 5.2). The response
+            carries one WWW-Authenticate field per challenge: Basic first,
+            then the scheme the client used when that was another one (for
+            Bearer, `Bearer realm="oauth2"` with no error attribute).
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                example: Basic realm="oauth2"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
+        "503":
+          description: >-
+            server_error. A client assertion could not be checked for replay,
+            so the client was not authenticated and the token still exists
+            (RFC 7009 Section 2.2.1).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthError"
   /oauth2/demo/caep/revoke-subject:
     post:
       tags: [OAuth2]
