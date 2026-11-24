@@ -529,13 +529,13 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 	switch grantType {
 	case "authorization_code":
 		if assertionPresent {
-			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			p.rejectClientAssertionForUnsupportedGrant(w, r, sessionID, grantType)
 			return
 		}
 		p.handleAuthorizationCodeGrant(w, r, sessionID, dpopResult.JKT)
 	case "refresh_token":
 		if assertionPresent {
-			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			p.rejectClientAssertionForUnsupportedGrant(w, r, sessionID, grantType)
 			return
 		}
 		p.handleRefreshTokenGrant(w, r, sessionID, dpopResult.JKT)
@@ -543,7 +543,7 @@ func (p *Plugin) handleToken(w http.ResponseWriter, r *http.Request) {
 		p.handleClientCredentialsGrant(w, r, sessionID, dpopResult.JKT)
 	case mockidp.DeviceCodeGrantType:
 		if assertionPresent {
-			p.rejectClientAssertionForUnsupportedGrant(w, sessionID, grantType)
+			p.rejectClientAssertionForUnsupportedGrant(w, r, sessionID, grantType)
 			return
 		}
 		p.handleDeviceCodeGrant(w, r, sessionID, dpopResult.JKT)
@@ -601,7 +601,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unknown Client", map[string]interface{}{
 			"client_id": clientID,
 		})
-		writeOAuth2Error(w, "invalid_client", "Unknown client", "")
+		writeInvalidClient(w, r, "Unknown client")
 		return
 	}
 
@@ -612,7 +612,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 				"reason":             "invalid_credentials",
 				"client_auth_method": clientAuthMethod,
 			})
-			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
+			writeInvalidClient(w, r, "Client authentication failed")
 			return
 		}
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Client Authenticated", map[string]interface{}{
@@ -633,6 +633,22 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 			"code":                  code,
 			"code_verifier_present": codeVerifier != "",
 		})
+		var replay *mockidp.AuthorizationCodeReplay
+		if errors.As(err, &replay) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Authorization Code Replayed: Tokens Revoked", map[string]interface{}{
+				"error":                     "invalid_grant",
+				"client_id":                 clientID,
+				"code":                      code,
+				"access_token_jtis_revoked": replay.AccessTokenJTIs,
+				"refresh_tokens_revoked":    replay.RefreshTokens,
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "A Replayed Code Revokes What It Issued",
+				Description: `"If an authorization code is used more than once, the authorization server MUST deny the request and SHOULD revoke (when possible) all tokens previously issued based on that authorization code." That covers the tokens issued when the code was redeemed and the ones obtained since by refreshing.`,
+				Severity:    "warning",
+				Reference:   "RFC 6749 Section 4.1.2",
+			})
+		}
 		writeOAuth2Error(w, "invalid_grant", err.Error(), "")
 		return
 	}
@@ -660,7 +676,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	if !audienceOK {
 		return
 	}
-	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope, audience, dpopJKT, client.Public)
+	tokenResponse, err := p.issueTokens(authCode.UserID, clientID, authCode.Scope, audience, dpopJKT, client.Public, nil)
 	if err != nil {
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Token Generation Failed", map[string]interface{}{
 			"error": err.Error(),
@@ -696,6 +712,7 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 
 func (p *Plugin) rejectClientAssertionForUnsupportedGrant(
 	w http.ResponseWriter,
+	r *http.Request,
 	sessionID string,
 	grantType string,
 ) {
@@ -709,7 +726,7 @@ func (p *Plugin) rejectClientAssertionForUnsupportedGrant(
 		Description: "This ProtocolSoup profile enables private_key_jwt only for the client_credentials grant.",
 		Reference:   "RFC 7523 Section 2.2",
 	})
-	writeOAuth2Error(w, "invalid_client", "Client authentication method is not supported for this grant type", "")
+	writeInvalidClient(w, r, "Client authentication method is not supported for this grant type")
 }
 
 func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request, sessionID string, dpopJKT string) {
@@ -752,7 +769,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unknown Client", map[string]interface{}{
 			"client_id": clientID,
 		})
-		writeOAuth2Error(w, "invalid_client", "Unknown client", "")
+		writeInvalidClient(w, r, "Unknown client")
 		return
 	}
 
@@ -762,7 +779,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 				"client_id":          clientID,
 				"client_auth_method": clientAuthMethod,
 			})
-			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
+			writeInvalidClient(w, r, "Client authentication failed")
 			return
 		}
 	}
@@ -814,7 +831,7 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	if !audienceOK {
 		return
 	}
-	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope, audience, boundJKT, client.Public)
+	tokenResponse, err := p.issueTokens(rt.UserID, clientID, scope, audience, boundJKT, client.Public, rt)
 	if err != nil {
 		writeOAuth2Error(w, "server_error", "Failed to issue tokens", "")
 		return
@@ -975,16 +992,7 @@ func (p *Plugin) handleClientCredentialsGrant(w http.ResponseWriter, r *http.Req
 			Description: "Detailed validation reasons remain internal; the OAuth response is deliberately generic.",
 			Reference:   "RFC 7523 Section 3.2",
 		})
-		// RFC 6749 Section 5.2: "If the client attempted to authenticate via the
-		// 'Authorization' request header field, the authorization server MUST respond
-		// with an HTTP 401 (Unauthorized) status code and include the
-		// 'WWW-Authenticate' response header field."
-		if hasBasicAuth {
-			w.Header().Set("WWW-Authenticate", `Basic realm="oauth2"`)
-			writeOAuth2ErrorStatus(w, http.StatusUnauthorized, "invalid_client", externalDescription, "")
-		} else {
-			writeOAuth2Error(w, "invalid_client", externalDescription, "")
-		}
+		writeInvalidClient(w, r, externalDescription)
 		return
 	}
 
@@ -1161,25 +1169,7 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 
 	token := r.FormValue("token")
 	tokenTypeHint := r.FormValue("token_type_hint")
-	clientID, clientSecret, _ := r.BasicAuth()
-	if clientID == "" {
-		clientID = r.FormValue("client_id")
-		clientSecret = r.FormValue("client_secret")
-	}
-	clientAuthMethod := "none"
-	if _, _, ok := r.BasicAuth(); ok {
-		clientAuthMethod = "basic"
-	} else if clientSecret != "" {
-		clientAuthMethod = "post"
-	}
-
-	// RFC 7662 Section 2.1: "To prevent token scanning attacks, the endpoint
-	// MUST also require some form of authorization to access this endpoint,
-	// such as client authentication as described in OAuth 2.0 [RFC6749] or a
-	// separate OAuth 2.0 access token". The caller authenticates as a
-	// registered client or resource server; the token being introspected is
-	// not a credential for introspecting itself.
-	caller, clientErr := p.mockIdP.ValidateClient(clientID, clientSecret)
+	clientID, clientSecret, clientAuthMethod, multipleAuthMethods := presentedClientPassword(r)
 
 	// Emit introspection request
 	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Introspection Request", map[string]interface{}{
@@ -1196,12 +1186,48 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 		Reference:   "RFC 7662",
 	})
 
-	if clientErr != nil {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Client Auth Failed", map[string]interface{}{
+	if multipleAuthMethods {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Introspection Refused: Two Client Authentication Methods", map[string]interface{}{
+			"error":                 "invalid_request",
+			"client_id":             clientID,
+			"basic_present":         true,
+			"client_secret_present": true,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "One Authentication Method Per Request",
+			Description: `"The client MUST NOT use more than one authentication method in each request." This request carried HTTP Basic credentials and a client_secret in the body.`,
+			Severity:    "warning",
+			Reference:   "RFC 6749 Section 2.3",
+		})
+		writeOAuth2Error(w, "invalid_request",
+			"A client MUST NOT use more than one authentication method in each request (RFC 6749 Section 2.3)", "")
+		return
+	}
+
+	caller, refusal := p.authenticateIntrospectionCaller(clientID, clientSecret, clientAuthMethod)
+	if refusal != nil {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, refusal.title, map[string]interface{}{
+			"error":              "invalid_client",
+			"reason":             refusal.reason,
 			"client_id":          clientID,
 			"client_auth_method": clientAuthMethod,
-		})
-		writeOAuth2Error(w, "invalid_client", "Client authentication required", "")
+		}, refusal.annotations...)
+		// RFC 7662 Section 2.3: "If the protected resource uses OAuth 2.0
+		// client credentials to authenticate to the introspection endpoint
+		// and its credentials are invalid, the authorization server responds
+		// with an HTTP 401 (Unauthorized) as described in Section 5.2 of
+		// OAuth 2.0 [RFC6749]." And for a bearer token that "does not
+		// contain sufficient privileges or is otherwise invalid for this
+		// request, the authorization server responds with an HTTP 401 code
+		// as described in Section 3 of OAuth 2.0 Bearer Token Usage
+		// [RFC6750]", which is where the Bearer challenge gets its "error"
+		// attribute. A request with no client credentials and no
+		// Authorization header follows RFC 6749 Section 5.2 as it stands.
+		if clientAuthMethod == "none" && strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			writeOAuth2Error(w, "invalid_client", refusal.description, "")
+		} else {
+			writeInvalidClientUnauthorized(w, r, refusal.description, "invalid_token")
+		}
 		return
 	}
 
@@ -1343,6 +1369,101 @@ func (p *Plugin) handleIntrospect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// introspectionRefusal is why a caller was not let into the introspection
+// endpoint: the reason and annotations go to Looking Glass, the description
+// goes into the invalid_client response.
+type introspectionRefusal struct {
+	reason      string
+	title       string
+	description string
+	annotations []lookingglass.Annotation
+}
+
+// authenticateIntrospectionCaller authenticates the caller of the
+// introspection endpoint. RFC 7662 Section 2.1: "To prevent token scanning
+// attacks, the endpoint MUST also require some form of authorization to
+// access this endpoint, such as client authentication as described in OAuth
+// 2.0 [RFC6749] or a separate OAuth 2.0 access token". Section 4: "the
+// authorization server MUST require authentication of protected resources
+// that need to access the introspection endpoint".
+//
+// This server authorizes the call by client authentication with a client
+// password (RFC 6749 Section 2.3.1). A public client is refused: RFC 6749
+// Section 2.1 defines it as "incapable of secure client authentication via
+// any other means", and Section 2.3 says "the authorization server MUST NOT
+// rely on public client authentication for the purpose of identifying the
+// client", so a public client_id on its own authorizes nothing. The token
+// under introspection is not a credential for introspecting itself either.
+func (p *Plugin) authenticateIntrospectionCaller(clientID, clientSecret, clientAuthMethod string) (*models.Client, *introspectionRefusal) {
+	requiresAuthorization := lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeSecurityHint,
+		Title:       "Introspection Requires Authorization",
+		Description: `"To prevent token scanning attacks, the endpoint MUST also require some form of authorization to access this endpoint, such as client authentication as described in OAuth 2.0 [RFC6749] or a separate OAuth 2.0 access token". This server authorizes the call by authenticating a confidential client or resource server registration.`,
+		Severity:    "warning",
+		Reference:   "RFC 7662 Section 2.1",
+	}
+
+	if clientID == "" {
+		return nil, &introspectionRefusal{
+			reason:      "no_client_authentication",
+			title:       "Introspection Refused: No Client Authentication",
+			description: "Client authentication required",
+			annotations: []lookingglass.Annotation{requiresAuthorization},
+		}
+	}
+
+	client, exists := p.mockIdP.GetClient(clientID)
+	if !exists {
+		return nil, &introspectionRefusal{
+			reason:      "unknown_client",
+			title:       "Introspection Refused: Unknown Client",
+			description: "Unknown client",
+			annotations: []lookingglass.Annotation{requiresAuthorization},
+		}
+	}
+
+	if client.Public {
+		return nil, &introspectionRefusal{
+			reason:      "public_client",
+			title:       "Introspection Refused: Public Client",
+			description: "A public client cannot authenticate, so it is not authorized to call the introspection endpoint",
+			annotations: []lookingglass.Annotation{requiresAuthorization, {
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "A Public Client Cannot Be Authenticated",
+				Description: `"The authorization server MAY establish a client authentication method with public clients. However, the authorization server MUST NOT rely on public client authentication for the purpose of identifying the client." Anyone can send a public client's client_id, so it does not show who is calling.`,
+				Severity:    "warning",
+				Reference:   "RFC 6749 Section 2.3",
+			}},
+		}
+	}
+
+	if clientAuthMethod == "none" {
+		return nil, &introspectionRefusal{
+			reason:      "no_client_authentication",
+			title:       "Introspection Refused: No Client Authentication",
+			description: "Client authentication required",
+			annotations: []lookingglass.Annotation{requiresAuthorization},
+		}
+	}
+
+	if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
+		return nil, &introspectionRefusal{
+			reason:      "invalid_credentials",
+			title:       "Introspection Refused: Client Authentication Failed",
+			description: "Client authentication failed",
+			annotations: []lookingglass.Annotation{requiresAuthorization, {
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "Invalid Client Credentials Are Answered With 401",
+				Description: `"If the protected resource uses OAuth 2.0 client credentials to authenticate to the introspection endpoint and its credentials are invalid, the authorization server responds with an HTTP 401 (Unauthorized) as described in Section 5.2 of OAuth 2.0 [RFC6749]."`,
+				Severity:    "warning",
+				Reference:   "RFC 7662 Section 2.3",
+			}},
+		}
+	}
+
+	return client, nil
+}
+
 // Token revocation endpoint (RFC 7009)
 func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	sessionID := p.getSessionFromRequest(r)
@@ -1354,78 +1475,364 @@ func (p *Plugin) handleRevoke(w http.ResponseWriter, r *http.Request) {
 
 	token := r.FormValue("token")
 	tokenTypeHint := r.FormValue("token_type_hint")
-	clientID, clientSecret, _ := r.BasicAuth()
-	if clientID == "" {
-		clientID = r.FormValue("client_id")
-		clientSecret = r.FormValue("client_secret")
-	}
-	clientAuthMethod := "none"
-	if _, _, ok := r.BasicAuth(); ok {
-		clientAuthMethod = "basic"
-	} else if clientSecret != "" {
-		clientAuthMethod = "post"
+	clientID, clientSecret, clientAuthMethod, multipleAuthMethods := presentedClientPassword(r)
+	// RFC 7523 Section 2.2: a client registered for private_key_jwt
+	// authenticates with client_assertion_type and client_assertion.
+	assertionTypePresent := r.PostForm.Has("client_assertion_type")
+	assertionPresent := r.PostForm.Has("client_assertion")
+	assertion := r.PostForm.Get("client_assertion")
+	usesAssertion := assertionTypePresent || assertionPresent
+	if usesAssertion {
+		multipleAuthMethods = multipleAuthMethods || clientAuthMethod != "none"
+		clientAuthMethod = "private_key_jwt"
 	}
 
 	// Emit revocation request
-	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Revocation Request", map[string]interface{}{
+	request := map[string]interface{}{
 		"endpoint":           "/oauth2/revoke",
 		"client_id":          clientID,
 		"client_auth_method": clientAuthMethod,
 		"token":              token,
 		"token_type_hint":    tokenTypeHint,
 		"token_length":       len(token),
-	}, lookingglass.Annotation{
+	}
+	if usesAssertion {
+		request["client_assertion"] = assertion
+	}
+	p.emitEvent(sessionID, lookingglass.EventTypeRequestSent, "Token Revocation Request", request, lookingglass.Annotation{
 		Type:        lookingglass.AnnotationTypeExplanation,
 		Title:       "Token Revocation",
 		Description: "Allows clients to notify the authorization server that a previously issued token is no longer needed",
 		Reference:   "RFC 7009",
 	})
 
-	client, exists := p.mockIdP.GetClient(clientID)
-	if !exists {
-		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unknown Client", map[string]interface{}{
-			"client_id": clientID,
+	if assertionTypePresent != assertionPresent {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Incomplete Client Assertion Authentication", map[string]interface{}{
+			"error":                         "invalid_request",
+			"reason":                        "client_assertion_parameter_pair_required",
+			"client_assertion_type_present": assertionTypePresent,
+			"client_assertion_present":      assertionPresent,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeRFCReference,
+			Title:       "JWT Client Authentication Parameters",
+			Description: "client_assertion_type and client_assertion are used together for JWT client authentication.",
+			Reference:   "RFC 7523 Section 2.2",
 		})
-		writeOAuth2Error(w, "invalid_client", "Unknown client", "")
+		writeOAuth2Error(w, "invalid_request", "client_assertion_type and client_assertion must be provided together", "")
 		return
 	}
 
-	if !client.Public {
-		if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
-			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Auth Failed", map[string]interface{}{
+	if multipleAuthMethods {
+		_, _, basicPresent := r.BasicAuth()
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Revocation Refused: More Than One Client Authentication Method", map[string]interface{}{
+			"error":                    "invalid_request",
+			"client_id":                clientID,
+			"basic_present":            basicPresent,
+			"client_secret_present":    r.PostForm.Has("client_secret"),
+			"client_assertion_present": usesAssertion,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "One Authentication Method Per Request",
+			Description: `"The client MUST NOT use more than one authentication method in each request." This request carried more than one of HTTP Basic credentials, a client_secret in the body and a client assertion.`,
+			Severity:    "warning",
+			Reference:   "RFC 6749 Section 2.3",
+		})
+		writeOAuth2Error(w, "invalid_request",
+			"A client MUST NOT use more than one authentication method in each request (RFC 6749 Section 2.3)", "")
+		return
+	}
+
+	// RFC 7009 Section 2.1: "The client also includes its authentication
+	// credentials as described in Section 2.3. of [RFC6749]", and "The
+	// authorization server first validates the client credentials (in case
+	// of a confidential client)". A public client has none and identifies
+	// itself with its client_id. Section 2.2.1: "The error presentation
+	// conforms to the definition in Section 5.2 of [RFC6749]."
+	var client *models.Client
+	if usesAssertion {
+		var authenticated bool
+		if client, authenticated = p.authenticateRevocationAssertion(w, r, sessionID, clientID, assertion); !authenticated {
+			return
+		}
+		clientID = client.ID
+	} else {
+		invalidClient := lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Client Authentication Failed",
+			Description: `"If the client attempted to authenticate via the "Authorization" request header field, the authorization server MUST respond with an HTTP 401 (Unauthorized) status code and include the "WWW-Authenticate" response header field matching the authentication scheme used by the client." Credentials sent in the request body are answered with 400.`,
+			Severity:    "warning",
+			Reference:   "RFC 6749 Section 5.2",
+		}
+		var exists bool
+		client, exists = p.mockIdP.GetClient(clientID)
+		if !exists {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Revocation Refused: Unknown Client", map[string]interface{}{
+				"error":              "invalid_client",
 				"client_id":          clientID,
 				"client_auth_method": clientAuthMethod,
-			})
-			writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
+			}, invalidClient)
+			writeInvalidClient(w, r, "Unknown client")
 			return
+		}
+
+		if !client.Public {
+			if _, err := p.mockIdP.ValidateClient(clientID, clientSecret); err != nil {
+				p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Revocation Refused: Client Authentication Failed", map[string]interface{}{
+					"error":              "invalid_client",
+					"client_id":          clientID,
+					"client_auth_method": clientAuthMethod,
+				}, invalidClient)
+				writeInvalidClient(w, r, "Client authentication failed")
+				return
+			}
 		}
 	}
 
-	// Revoke the token per RFC 7009 Section 2.1
-	// The server MUST attempt to revoke the token regardless of token_type_hint
-	// token_type_hint is advisory only - server should determine token type if hint is wrong
-	p.mockIdP.RevokeToken(token, tokenTypeHint)
+	// RFC 7009 Section 2.2: "The authorization server responds with HTTP
+	// status code 200 if the token has been revoked successfully or if the
+	// client submitted an invalid token." A string that is not a currently
+	// valid token of this server at all is such a token: there is nothing to
+	// revoke and nothing changes.
+	tokenClientID, tokenType, live := p.revocableToken(token)
+	if !live {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Nothing To Revoke: Invalid Token", map[string]interface{}{
+			"token":              token,
+			"token_type_hint":    tokenTypeHint,
+			"client_id":          clientID,
+			"client_auth_method": clientAuthMethod,
+			"revoked":            false,
+			"status":             http.StatusOK,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeExplanation,
+			Title:       "An Invalid Token Is Answered With 200",
+			Description: `"The authorization server responds with HTTP status code 200 if the token has been revoked successfully or if the client submitted an invalid token." The submitted value is not a live refresh token or access token of this authorization server, so nothing was revoked.`,
+			Reference:   "RFC 7009 Section 2.2",
+		})
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 
-	// Emit revocation success
-	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Token Revoked", map[string]interface{}{
-		"token":               token,
-		"token_type_hint":     tokenTypeHint,
-		"client_id":           clientID,
-		"client_auth_method":  clientAuthMethod,
-		"revoked":             true,
-		"rfc_compliance":      "RFC 7009 Section 2.1",
-		"hint_is_advisory":    true,
-		"attempted_all_types": true,
-	}, lookingglass.Annotation{
+	// RFC 7009 Section 2.2.1: "unsupported_token_type: The authorization
+	// server does not support the revocation of the presented token type.
+	// That is, the client tried to revoke an access token on a server not
+	// supporting this feature." This server revokes refresh tokens and
+	// access tokens. A valid JWT of its key that is neither, an ID Token for
+	// example, is a presented token type it does not revoke.
+	if tokenType == "" {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Revocation Refused: Unsupported Token Type", map[string]interface{}{
+			"error":              "unsupported_token_type",
+			"client_id":          clientID,
+			"client_auth_method": clientAuthMethod,
+			"token":              token,
+			"token_type_hint":    tokenTypeHint,
+			"revoked":            false,
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Not A Refresh Token Or An Access Token",
+			Description: `"unsupported_token_type: The authorization server does not support the revocation of the presented token type. That is, the client tried to revoke an access token on a server not supporting this feature." This server revokes refresh tokens and access tokens. The submitted value is a valid JWT signed with its key that it issued as neither; an ID Token is such a JWT. It is not revoked.`,
+			Severity:    "warning",
+			Reference:   "RFC 7009 Section 2.2.1",
+		})
+		writeOAuth2Error(w, "unsupported_token_type",
+			"The authorization server does not support the revocation of the presented token type (RFC 7009 Section 2.2.1)", "")
+		return
+	}
+
+	// RFC 7009 Section 2.1: the authorization server "then verifies whether
+	// the token was issued to the client making the revocation request. If
+	// this validation fails, the request is refused and the client is
+	// informed of the error by the authorization server as described below."
+	// RFC 7009 names no error code for that refusal. Section 2.2.1 says only
+	// that "The error presentation conforms to the definition in Section 5.2
+	// of [RFC6749]", and there invalid_grant is defined as: "The provided
+	// authorization grant (e.g., authorization code, resource owner
+	// credentials) or refresh token is invalid, expired, revoked, does not
+	// match the redirection URI used in the authorization request, or was
+	// issued to another client." Those words cover a refresh token. No
+	// Section 5.2 code covers an access token by its words; invalid_grant is
+	// used for it too, as the only code that names the condition.
+	if tokenClientID != client.ID {
+		title := "Revocation Refused: Token Issued To Another Client"
+		validation := lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Only The Token's Client May Revoke It",
+			Description: `"The authorization server first validates the client credentials (in case of a confidential client) and then verifies whether the token was issued to the client making the revocation request. If this validation fails, the request is refused and the client is informed of the error by the authorization server as described below." The token stays valid.`,
+			Severity:    "warning",
+			Reference:   "RFC 7009 Section 2.1",
+		}
+		errorCode := lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeExplanation,
+			Title:       "Why invalid_grant",
+			Description: `RFC 7009 names no error code for this refusal: "The error presentation conforms to the definition in Section 5.2 of [RFC6749]." There, invalid_grant is: "The provided authorization grant (e.g., authorization code, resource owner credentials) or refresh token is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client." `,
+			Reference:   "RFC 6749 Section 5.2",
+		}
+		switch {
+		case tokenClientID == "":
+			// An OID4VCI Pre-Authorized Code Token Request may carry no
+			// client_id, so the access token it yields has none either.
+			title = "Revocation Refused: Token Issued To No Identified Client"
+			validation.Title = "No Client To Verify The Request Against"
+			validation.Description += " This access token has no client_id claim: it was issued without client identification, so the server cannot verify that it was issued to the client making this request."
+			errorCode.Description += "No Section 5.2 code covers this case by its words. The response uses invalid_grant, the code this server gives every request that fails the Section 2.1 verification."
+		case tokenType == "refresh_token":
+			errorCode.Description += "This token is a refresh token, which those words cover."
+		default:
+			errorCode.Description += "This token is an access token. No Section 5.2 code covers an access token by its words; invalid_grant is the only one that names the condition."
+		}
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, title, map[string]interface{}{
+			"error":              "invalid_grant",
+			"client_id":          clientID,
+			"client_auth_method": clientAuthMethod,
+			"token_client_id":    tokenClientID,
+			"token_type":         tokenType,
+			"token":              token,
+			"token_type_hint":    tokenTypeHint,
+			"revoked":            false,
+		}, validation, errorCode)
+		writeOAuth2Error(w, "invalid_grant",
+			"The token was not issued to the client making the revocation request (RFC 7009 Section 2.1)", "")
+		return
+	}
+
+	revoked := map[string]interface{}{
+		"token":              token,
+		"token_type":         tokenType,
+		"token_type_hint":    tokenTypeHint,
+		"client_id":          clientID,
+		"client_auth_method": clientAuthMethod,
+		"revoked":            true,
+	}
+	annotations := []lookingglass.Annotation{{
 		Type:        lookingglass.AnnotationTypeBestPractice,
-		Title:       "Token Revocation Complete (RFC 7009 Compliant)",
-		Description: "Per RFC 7009 Section 2.1, the server attempts to revoke the token regardless of token_type_hint. The hint is advisory only.",
+		Title:       "Token Revoked By The Client It Was Issued To",
+		Description: `The token was issued to this client, so it is revoked: "The invalidation takes place immediately, and the token cannot be used again after the revocation." The server found the token type itself, so token_type_hint was not needed.`,
 		Reference:   "RFC 7009 Section 2.1",
-	})
+	}}
+	if tokenType == "refresh_token" {
+		revoked["access_token_jtis_revoked"] = p.mockIdP.RevokeRefreshToken(token)
+		annotations = append(annotations, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "The Grant's Access Tokens Are Revoked Too",
+			Description: `"If the particular token is a refresh token and the authorization server supports the revocation of access tokens, then the authorization server SHOULD also invalidate all access tokens based on the same authorization grant". access_token_jtis_revoked lists the jti of each unexpired access token issued under this grant, through this refresh token and the ones it was rotated from.`,
+			Reference:   "RFC 7009 Section 2.1",
+		})
+	} else {
+		p.mockIdP.RevokeAccessToken(token)
+	}
+	p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Token Revoked", revoked, annotations...)
 
-	// Per RFC 7009 Section 2.2, always return 200 OK regardless of whether token was valid
-	// This prevents attackers from determining if a token was valid
 	w.WriteHeader(http.StatusOK)
+}
+
+// authenticateRevocationAssertion authenticates the client of a revocation
+// request from its private_key_jwt assertion (RFC 7523 Section 2.2), with the
+// checks the token endpoint applies. On failure it writes the response and
+// reports false.
+func (p *Plugin) authenticateRevocationAssertion(w http.ResponseWriter, r *http.Request, sessionID, clientID, assertion string) (*models.Client, bool) {
+	var client *models.Client
+	var assertionDetails *validatedClientAssertion
+	var err error
+	if r.PostForm.Get("client_assertion_type") != clientAssertionType {
+		err = assertionError("unsupported_client_assertion_type")
+	} else {
+		client, assertionDetails, err = p.AuthenticatePrivateKeyJWTWithAudiences(r.Context(), clientID, assertion, p.revocationAssertionAudiences())
+	}
+
+	var infrastructureErr *clientAssertionInfrastructureError
+	if errors.As(err, &infrastructureErr) {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Client Authentication Infrastructure Failed", map[string]interface{}{
+			"client_id":          clientID,
+			"error":              "server_error",
+			"reason":             "replay_store_unavailable",
+			"client_auth_method": "private_key_jwt",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "The Token Was Not Revoked",
+			Description: `The authorization server failed closed because it could not reserve the assertion identifier atomically. "If the server responds with HTTP status code 503, the client must assume the token still exists and may retry after a reasonable delay."`,
+			Severity:    "warning",
+			Reference:   "RFC 7009 Section 2.2.1",
+		})
+		writeOAuth2ErrorStatus(w, http.StatusServiceUnavailable, "server_error", "Client authentication is temporarily unavailable", "")
+		return nil, false
+	}
+	if err != nil {
+		p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Revocation Refused: Client Authentication Failed", map[string]interface{}{
+			"error":              "invalid_client",
+			"reason":             clientAssertionFailureReason(err),
+			"client_id":          clientID,
+			"client_auth_method": "private_key_jwt",
+		}, lookingglass.Annotation{
+			Type:        lookingglass.AnnotationTypeSecurityHint,
+			Title:       "Client Assertion Rejected",
+			Description: `"If the client JWT is not valid, the authorization server constructs an error response as defined in OAuth 2.0 [RFC6749]. The value of the "error" parameter MUST be the "invalid_client" error code." The reason is shown here; the OAuth response is deliberately generic.`,
+			Severity:    "warning",
+			Reference:   "RFC 7523 Section 3.2",
+		})
+		writeInvalidClient(w, r, "client assertion validation failed")
+		return nil, false
+	}
+
+	p.emitEvent(sessionID, lookingglass.EventTypeCryptoOperation, "Client Assertion Signature Verified", map[string]interface{}{
+		"client_id": client.ID,
+		"alg":       assertionDetails.algorithm,
+		"kid":       assertionDetails.keyID,
+		"jti":       assertionDetails.jti,
+	}, lookingglass.Annotation{
+		Type:        lookingglass.AnnotationTypeRFCReference,
+		Title:       "JWT Signature Validation",
+		Description: "The authorization server verified the assertion with the client's registered public key.",
+		Reference:   "RFC 7523 Section 3",
+	})
+	return client, true
+}
+
+// revocationAssertionAudiences are the "aud" values that identify this server
+// in a client assertion presented at /oauth2/revoke. RFC 7523 Section 3: the
+// JWT MUST contain an "aud" claim "containing a value that identifies the
+// authorization server as an intended audience. The token endpoint URL of the
+// authorization server MAY be used as a value for an "aud" element". Two
+// metadata documents name this endpoint as their revocation_endpoint, so the
+// issuer identifier and the token endpoint URL of each are accepted: this
+// OAuth 2.0 authorization server and the OpenID Provider on the same Mock IdP.
+func (p *Plugin) revocationAssertionAudiences() []string {
+	providerIssuer := strings.TrimRight(p.mockIdP.GetIssuer(), "/")
+	return []string{
+		p.issuer(),
+		p.issuer() + "/token",
+		providerIssuer,
+		providerIssuer + "/oidc/token",
+	}
+}
+
+// revocableToken classifies the token of a revocation request. live is false
+// for an invalid token in the sense of RFC 7009 Section 2.2: a string that is
+// not a currently valid token of this server at all. For a live token,
+// tokenType is "refresh_token", "access_token", or empty when the token is a
+// valid JWT of this server's key that it issued as neither, and clientID is
+// the client it was issued to.
+//
+// The type is detected without token_type_hint (RFC 7009 Section 2.1: "An
+// authorization server MAY ignore this parameter, particularly if it is able
+// to detect the token type automatically."). A refresh token is live while
+// the Mock IdP stores it. An access token is one the JWT service minted as
+// such (crypto.JWTService.IssuedAccessToken), never a JWT that merely lacks
+// the marks of something else. An access token may have no client_id claim,
+// when it was issued without client identification.
+func (p *Plugin) revocableToken(token string) (clientID, tokenType string, live bool) {
+	if refreshToken, ok := p.mockIdP.GetRefreshToken(token); ok {
+		return refreshToken.ClientID, "refresh_token", true
+	}
+	claims, isAccessToken, err := p.mockIdP.JWTService().IssuedAccessToken(token)
+	if err != nil || claims["type"] == "refresh" {
+		// Not this server's token, expired, or a refresh token that was
+		// already rotated or revoked.
+		return "", "", false
+	}
+	if !isAccessToken {
+		return "", "", true
+	}
+	clientID, _ = claims["client_id"].(string)
+	return clientID, "access_token", true
 }
 
 // Demo endpoint - list users
@@ -1808,7 +2215,12 @@ func (p *Plugin) redirectAuthorizationFragment(w http.ResponseWriter, r *http.Re
 // audience is the protected resource the access token is for, from
 // tokenAudience. The token follows RFC 9068: its "aud" is that resource, its
 // "client_id" is the client, and its "iss" is this authorization server.
-func (p *Plugin) issueTokens(userID, clientID, scope, audience, dpopJKT string, bindRefreshToken bool) (*models.TokenResponse, error) {
+//
+// rotatedOut is the refresh token this request redeemed, or nil for the first
+// tokens of an authorization grant. The new access token joins the grant's
+// access tokens, which revoking the refresh token invalidates (RFC 7009
+// Section 2.1).
+func (p *Plugin) issueTokens(userID, clientID, scope, audience, dpopJKT string, bindRefreshToken bool, rotatedOut *models.RefreshToken) (*models.TokenResponse, error) {
 	jwtService := p.mockIdP.JWTService()
 
 	// Get user claims
@@ -1849,6 +2261,7 @@ func (p *Plugin) issueTokens(userID, clientID, scope, audience, dpopJKT string, 
 	if dpopJKT != "" && bindRefreshToken {
 		p.mockIdP.BindRefreshTokenKey(refreshToken, dpopJKT)
 	}
+	p.mockIdP.RecordGrantTokens(accessToken, refreshToken, rotatedOut)
 
 	response := &models.TokenResponse{
 		AccessToken:  accessToken,
@@ -1896,6 +2309,7 @@ var oauth2ErrorURIs = map[string]string{
 	"invalid_request":           "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"invalid_client":            "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"invalid_grant":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
+	"unsupported_token_type":    "https://datatracker.ietf.org/doc/html/rfc7009#section-2.2.1",
 	"unauthorized_client":       "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"unsupported_grant_type":    "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
 	"invalid_scope":             "https://datatracker.ietf.org/doc/html/rfc6749#section-5.2",
@@ -1955,6 +2369,98 @@ func writeOAuth2ErrorStatus(w http.ResponseWriter, status int, errorCode, descri
 		response["state"] = state
 	}
 	writeJSON(w, status, response)
+}
+
+// writeInvalidClient answers a failed client authentication. RFC 6749
+// Section 5.2: "If the client attempted to authenticate via the
+// "Authorization" request header field, the authorization server MUST respond
+// with an HTTP 401 (Unauthorized) status code and include the
+// "WWW-Authenticate" response header field matching the authentication scheme
+// used by the client." A request with no Authorization header gets the
+// default 400.
+func writeInvalidClient(w http.ResponseWriter, r *http.Request, description string) {
+	if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		writeOAuth2Error(w, "invalid_client", description, "")
+		return
+	}
+	writeInvalidClientUnauthorized(w, r, description, "")
+}
+
+// writeInvalidClientUnauthorized answers a failed client authentication with
+// 401 and one challenge per scheme, each in its own WWW-Authenticate field.
+//
+// The Basic challenge is always sent, and first. RFC 6749 Section 5.2: the
+// authorization server "MAY return an HTTP 401 (Unauthorized) status code to
+// indicate which HTTP authentication schemes are supported", and HTTP Basic
+// is the scheme these endpoints support (Section 2.3.1). RFC 9110 Section
+// 11.3: "Many clients fail to parse a challenge that contains an unknown
+// scheme. A workaround for this problem is to list well-supported schemes
+// (such as "basic") first."
+//
+// A client that used another scheme also gets a challenge "matching the
+// authentication scheme used by the client" (RFC 6749 Section 5.2). The
+// scheme is repeated only when it is an RFC 9110 token ("auth-scheme =
+// token", Section 11.1), so no unvalidated input reaches the header. The
+// challenge is the scheme alone ("challenge = auth-scheme [ 1*SP ( token68 /
+// #auth-param ) ]", Section 11.3), except for Bearer: RFC 6750 Section 3,
+// "This scheme MUST be followed by one or more auth-param values."
+//
+// bearerError is the "error" attribute of the Bearer challenge, for the one
+// endpoint that has a rule for it: RFC 7662 Section 2.3 answers a bearer
+// token that is "invalid for this request" at the introspection endpoint "as
+// described in Section 3 of OAuth 2.0 Bearer Token Usage [RFC6750]". Where
+// only RFC 6749 Section 5.2 applies it is empty.
+func writeInvalidClientUnauthorized(w http.ResponseWriter, r *http.Request, description, bearerError string) {
+	w.Header().Add("WWW-Authenticate", `Basic realm="oauth2"`)
+	scheme, _, _ := strings.Cut(strings.TrimSpace(r.Header.Get("Authorization")), " ")
+	switch {
+	case strings.EqualFold(scheme, "Basic") || !isHTTPToken(scheme):
+	case strings.EqualFold(scheme, "Bearer") && bearerError != "":
+		w.Header().Add("WWW-Authenticate", `Bearer realm="oauth2", error="`+bearerError+`"`)
+	case strings.EqualFold(scheme, "Bearer"):
+		w.Header().Add("WWW-Authenticate", `Bearer realm="oauth2"`)
+	default:
+		w.Header().Add("WWW-Authenticate", scheme)
+	}
+	writeOAuth2ErrorStatus(w, http.StatusUnauthorized, "invalid_client", description, "")
+}
+
+// isHTTPToken reports whether value is an RFC 9110 Section 5.6.2 token:
+// "token = 1*tchar", where tchar is "!" / "#" / "$" / "%" / "&" / "'" / "*" /
+// "+" / "-" / "." / "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA.
+func isHTTPToken(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, c := range []byte(value) {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// presentedClientPassword reads the client password a request carries (RFC
+// 6749 Section 2.3.1): HTTP Basic, or client_id and client_secret in the
+// request body. Those two parameters "can only be transmitted in the
+// request-body and MUST NOT be included in the request URI", so the query
+// string is not read. multiple reports a request that used both methods
+// (Section 2.3: "The client MUST NOT use more than one authentication method
+// in each request.").
+func presentedClientPassword(r *http.Request) (clientID, clientSecret, method string, multiple bool) {
+	basicID, basicSecret, hasBasic := r.BasicAuth()
+	hasPost := r.PostForm.Has("client_secret")
+	switch {
+	case hasBasic:
+		return basicID, basicSecret, "basic", hasPost
+	case hasPost:
+		return r.PostForm.Get("client_id"), r.PostForm.Get("client_secret"), "post", false
+	default:
+		return r.PostForm.Get("client_id"), "", "none", false
+	}
 }
 
 const oauth2ShowcasePageCSS = `

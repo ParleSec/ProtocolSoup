@@ -58,14 +58,33 @@ type MockIdP struct {
 }
 
 // usedAuthorizationCode records an authorization code that has already been
-// redeemed, together with the tokens minted from it. RFC 6749 Section 4.1.2
-// requires the OP to deny a replayed code (MUST) and to revoke the tokens
-// previously issued from that code (SHOULD); retaining this record lets the OP
-// do both when the same code is presented a second time.
+// redeemed, together with the access tokens minted when it was. RFC 6749
+// Section 4.1.2 requires the OP to deny a replayed code (MUST) and to revoke
+// the tokens previously issued from that code (SHOULD); retaining this record
+// lets the OP do both when the same code is presented a second time. The
+// grant's refresh token names the code itself (models.RefreshToken), through
+// every rotation.
 type usedAuthorizationCode struct {
 	accessTokenJTIs []string
-	refreshTokens   []string
 	usedAt          time.Time
+}
+
+// AuthorizationCodeReplay is the error for an authorization code that was
+// presented a second time. RFC 6749 Section 4.1.2: "If an authorization code
+// is used more than once, the authorization server MUST deny the request and
+// SHOULD revoke (when possible) all tokens previously issued based on that
+// authorization code." It names what the replay revoked.
+type AuthorizationCodeReplay struct {
+	// AccessTokenJTIs is the jti of each access token the replay revoked:
+	// the one issued when the code was redeemed and the unexpired ones
+	// issued by refreshing since.
+	AccessTokenJTIs []string
+	// RefreshTokens is the number of refresh tokens the replay revoked.
+	RefreshTokens int
+}
+
+func (e *AuthorizationCodeReplay) Error() string {
+	return "authorization code already used"
 }
 
 // PushedAuthorizationRequest is the validated RFC 9126 request state shared
@@ -92,9 +111,10 @@ type PushedAuthorizationRequest struct {
 	AuthorizationResponseCompleted bool
 }
 
-// usedCodeRetention bounds how long a redeemed authorization code is remembered
-// for replay detection. It matches the access-token lifetime: once the tokens a
-// code minted have expired on their own, there is nothing left to revoke.
+// usedCodeRetention is the least time a redeemed authorization code is
+// remembered for replay detection. It matches the access-token lifetime. A
+// code whose grant still has a live refresh token is remembered beyond it,
+// because a replay still has tokens to revoke (pruneUsedCodesLocked).
 const usedCodeRetention = time.Hour
 
 // NewMockIdP creates a new mock identity provider
@@ -128,7 +148,9 @@ func NewMockIdP(keySet *crypto.KeySet) *MockIdP {
 	return idp
 }
 
-// SetIssuer sets the issuer URL
+// SetIssuer sets the issuer URL. It is called once at startup: the JWT
+// service it replaces holds the record of unprofiled access tokens minted so
+// far.
 func (idp *MockIdP) SetIssuer(issuer string) {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
@@ -460,7 +482,7 @@ func (idp *MockIdP) ValidateCredentials(email, password string) (*models.User, e
 	if !exists {
 		return nil, errors.New("user not found")
 	}
-	if user.Password != password {
+	if subtle.ConstantTimeCompare([]byte(user.Password), []byte(password)) != 1 {
 		return nil, errors.New("invalid password")
 	}
 	return user, nil
@@ -563,13 +585,20 @@ func (idp *MockIdP) FindClientByRegistrationAccessTokenHash(tokenHash string) (*
 	return nil, false
 }
 
-// ValidateClient validates client credentials
+// ValidateClient checks a client password (RFC 6749 Section 2.3.1). A public
+// client has no password, so it is returned without any check: the result
+// identifies a public client by name only, and a caller that needs an
+// authenticated client must refuse client.Public itself. The comparison takes
+// the same time wherever the two secrets first differ.
 func (idp *MockIdP) ValidateClient(clientID, clientSecret string) (*models.Client, error) {
 	client, exists := idp.GetClient(clientID)
 	if !exists {
 		return nil, errors.New("client not found")
 	}
-	if !client.Public && (client.Secret == "" || client.Secret != clientSecret) {
+	if client.Public {
+		return client, nil
+	}
+	if client.Secret == "" || subtle.ConstantTimeCompare([]byte(client.Secret), []byte(clientSecret)) != 1 {
 		return nil, errors.New("invalid client secret")
 	}
 	return client, nil
@@ -788,16 +817,34 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 		// RFC 6749 Section 4.1.2: an authorization code presented more than once
 		// MUST be denied, and the OP SHOULD revoke the tokens it previously issued
 		// from that code. A code that is gone from authCodes but recorded in
-		// usedCodes is exactly such a replay, so the access tokens it minted are
-		// revoked (by JTI) and any refresh token dropped before the denial.
+		// usedCodes is exactly such a replay, so before the denial the access
+		// tokens it minted are revoked (by JTI), and so is the grant's current
+		// refresh token with the access tokens issued by refreshing.
 		if used, replayed := idp.usedCodes[code]; replayed {
+			now := time.Now()
+			replay := &AuthorizationCodeReplay{}
+			revoke := func(jti string) {
+				if _, already := idp.revokedTokens[jti]; !already {
+					replay.AccessTokenJTIs = append(replay.AccessTokenJTIs, jti)
+				}
+				idp.revokedTokens[jti] = now
+			}
 			for _, jti := range used.accessTokenJTIs {
-				idp.revokedTokens[jti] = time.Now()
+				revoke(jti)
 			}
-			for _, rt := range used.refreshTokens {
-				delete(idp.refreshTokens, rt)
+			for token, rt := range idp.refreshTokens {
+				if rt.AuthorizationCode != code {
+					continue
+				}
+				for _, accessToken := range rt.AccessTokens {
+					if accessToken.ExpiresAt.After(now) {
+						revoke(accessToken.JTI)
+					}
+				}
+				delete(idp.refreshTokens, token)
+				replay.RefreshTokens++
 			}
-			return nil, errors.New("authorization code already used")
+			return nil, replay
 		}
 		return nil, errors.New("invalid authorization code")
 	}
@@ -842,10 +889,12 @@ func (idp *MockIdP) ValidateAuthorizationCode(code, clientID, redirectURI, codeV
 }
 
 // RecordIssuedTokens binds the tokens minted from an authorization code to that
-// code's replay-detection record. If the code is later replayed,
-// ValidateAuthorizationCode revokes exactly these tokens (RFC 6749 Section
-// 4.1.2). Calling it with an empty code is a no-op, so test fixtures that build
-// an AuthorizationCode without a Code value are unaffected.
+// code: the access token to the code's replay-detection record, and the code
+// to the refresh token, which carries it through rotation. If the code is
+// later replayed, ValidateAuthorizationCode revokes these tokens and the ones
+// obtained from them by refreshing (RFC 6749 Section 4.1.2). Calling it with
+// an empty code is a no-op, so test fixtures that build an AuthorizationCode
+// without a Code value are unaffected.
 func (idp *MockIdP) RecordIssuedTokens(code, accessToken, refreshToken string) {
 	if code == "" {
 		return
@@ -873,18 +922,27 @@ func (idp *MockIdP) RecordIssuedTokens(code, accessToken, refreshToken string) {
 	if jti != "" {
 		used.accessTokenJTIs = append(used.accessTokenJTIs, jti)
 	}
-	if refreshToken != "" {
-		used.refreshTokens = append(used.refreshTokens, refreshToken)
+	if rt, exists := idp.refreshTokens[refreshToken]; exists {
+		rt.AuthorizationCode = code
 	}
 }
 
-// pruneUsedCodesLocked drops redeemed-code records older than usedCodeRetention.
-// The caller must hold idp.mu. Pruning opportunistically on each redemption
-// bounds memory without a background goroutine.
+// pruneUsedCodesLocked drops redeemed-code records older than
+// usedCodeRetention, except those whose grant still has a live refresh token:
+// a replay of such a code still has tokens to revoke. The caller must hold
+// idp.mu. Pruning opportunistically on each redemption bounds memory without
+// a background goroutine.
 func (idp *MockIdP) pruneUsedCodesLocked() {
-	cutoff := time.Now().Add(-usedCodeRetention)
+	now := time.Now()
+	refreshable := make(map[string]bool)
+	for _, rt := range idp.refreshTokens {
+		if rt.AuthorizationCode != "" && rt.ExpiresAt.After(now) {
+			refreshable[rt.AuthorizationCode] = true
+		}
+	}
+	cutoff := now.Add(-usedCodeRetention)
 	for code, used := range idp.usedCodes {
-		if used.usedAt.Before(cutoff) {
+		if used.usedAt.Before(cutoff) && !refreshable[code] {
 			delete(idp.usedCodes, code)
 		}
 	}
@@ -1064,16 +1122,74 @@ func (idp *MockIdP) ValidateRefreshToken(token, clientID string) (*models.Refres
 	return &copy, nil
 }
 
-// RevokeRefreshToken revokes a refresh token
-func (idp *MockIdP) RevokeRefreshToken(token string) {
+// RecordGrantTokens records accessToken as issued under the authorization
+// grant that refreshToken stands for, so that revoking the refresh token also
+// invalidates it (RFC 7009 Section 2.1). rotatedOut is the refresh token that
+// was redeemed and replaced by refreshToken, whose access tokens carry over;
+// it is nil for the first tokens of a grant and for a refresh that keeps the
+// same refresh token. Access tokens that have expired are dropped.
+func (idp *MockIdP) RecordGrantTokens(accessToken, refreshToken string, rotatedOut *models.RefreshToken) {
+	claims, err := idp.jwtService.ValidateToken(accessToken)
+	if err != nil {
+		return
+	}
+	// Revocation is tracked by jti, as in RevokeAccessToken/IsTokenRevoked.
+	jti := accessToken
+	if v, ok := claims["jti"].(string); ok && v != "" {
+		jti = v
+	}
+	exp, _ := claims["exp"].(float64)
+
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
+	rt, exists := idp.refreshTokens[refreshToken]
+	if !exists {
+		return
+	}
+	issued := append([]models.GrantAccessToken(nil), rt.AccessTokens...)
+	if rotatedOut != nil {
+		issued = append(issued, rotatedOut.AccessTokens...)
+		rt.AuthorizationCode = rotatedOut.AuthorizationCode
+	}
+	issued = append(issued, models.GrantAccessToken{JTI: jti, ExpiresAt: time.Unix(int64(exp), 0)})
+	now := time.Now()
+	rt.AccessTokens = rt.AccessTokens[:0:0]
+	for _, token := range issued {
+		if token.ExpiresAt.After(now) {
+			rt.AccessTokens = append(rt.AccessTokens, token)
+		}
+	}
+}
+
+// RevokeRefreshToken revokes a refresh token and, with it, the access tokens
+// issued under the same authorization grant. RFC 7009 Section 2.1: "If the
+// particular token is a refresh token and the authorization server supports
+// the revocation of access tokens, then the authorization server SHOULD also
+// invalidate all access tokens based on the same authorization grant". It
+// returns the jti of each unexpired access token it invalidated.
+func (idp *MockIdP) RevokeRefreshToken(token string) []string {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	rt, exists := idp.refreshTokens[token]
+	if !exists {
+		return nil
+	}
 	delete(idp.refreshTokens, token)
+
+	now := time.Now()
+	invalidated := []string{}
+	for _, accessToken := range rt.AccessTokens {
+		if accessToken.ExpiresAt.After(now) {
+			idp.revokedTokens[accessToken.JTI] = now
+			invalidated = append(invalidated, accessToken.JTI)
+		}
+	}
+	return invalidated
 }
 
 // RevokeAccessToken revokes an access token by its JTI claim per RFC 7009
 // The token string can be either the JTI directly or the full JWT token
-func (idp *MockIdP) RevokeAccessToken(token string) error {
+func (idp *MockIdP) RevokeAccessToken(token string) {
 	// Try to extract JTI from JWT token
 	jti := token
 	claims, err := idp.jwtService.ValidateToken(token)
@@ -1088,7 +1204,6 @@ func (idp *MockIdP) RevokeAccessToken(token string) error {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 	idp.revokedTokens[jti] = time.Now()
-	return nil
 }
 
 // IsTokenRevoked checks if an access token has been revoked per RFC 7009
@@ -1106,37 +1221,6 @@ func (idp *MockIdP) IsTokenRevoked(token string) bool {
 	defer idp.mu.RUnlock()
 	_, revoked := idp.revokedTokens[jti]
 	return revoked
-}
-
-// RevokeToken revokes a token regardless of type per RFC 7009 Section 2.1
-// This is the preferred method - token_type_hint is advisory only
-func (idp *MockIdP) RevokeToken(token, tokenTypeHint string) {
-	// RFC 7009 Section 2.1: The authorization server first validates the client credentials
-	// (if provided) and then verifies whether the token was issued to the client making the request.
-	// Per RFC 7009 Section 2.1, the server SHOULD attempt to determine the type
-	// even if the hint is incorrect or not provided.
-
-	// Try refresh token first if hinted or no hint provided
-	if tokenTypeHint == "refresh_token" || tokenTypeHint == "" {
-		idp.mu.Lock()
-		if _, exists := idp.refreshTokens[token]; exists {
-			delete(idp.refreshTokens, token)
-			idp.mu.Unlock()
-			return
-		}
-		idp.mu.Unlock()
-	}
-
-	// Try access token (always attempt per RFC 7009)
-	// Ignore error - revocation is best-effort per RFC 7009 Section 2.2
-	_ = idp.RevokeAccessToken(token)
-
-	// Also try refresh token if hint was access_token (hint may be wrong)
-	if tokenTypeHint == "access_token" {
-		idp.mu.Lock()
-		delete(idp.refreshTokens, token)
-		idp.mu.Unlock()
-	}
 }
 
 // CleanupRevokedTokens removes expired entries from the revoked tokens list

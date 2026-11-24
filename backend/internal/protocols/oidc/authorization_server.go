@@ -66,6 +66,13 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"authorization_response_iss_parameter_supported": true,
 		"service_documentation":                          issuer + "/auth.md",
 	}
+	// Client authentication at the token, revocation and introspection
+	// endpoints (RFC 8414 Section 2), from the values the OpenID Provider
+	// configuration publishes too (discovery.go).
+	metadata["token_endpoint_auth_signing_alg_values_supported"] = clientAssertionSigningAlgs
+	metadata["revocation_endpoint_auth_methods_supported"] = revocationEndpointAuthMethods
+	metadata["revocation_endpoint_auth_signing_alg_values_supported"] = clientAssertionSigningAlgs
+	metadata["introspection_endpoint_auth_methods_supported"] = introspectionEndpointAuthMethods
 	if p.registrationEnabled() {
 		metadata["registration_endpoint"] = issuer + "/oidc/register"
 	}

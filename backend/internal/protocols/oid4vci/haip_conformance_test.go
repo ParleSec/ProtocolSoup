@@ -1007,6 +1007,12 @@ func TestRefreshTokenRequiresAttestationAndSameClientInstanceKey(t *testing.T) {
 	if asString(t, refreshed["token_type"]) != "DPoP" {
 		t.Fatalf("token_type = %q, want DPoP for refreshed access token", refreshed["token_type"])
 	}
+	// RFC 7009 Section 2.1: the first access token and the refreshed one are
+	// both recorded against the refresh token, so revoking it invalidates
+	// "all access tokens based on the same authorization grant".
+	if grant, ok := idp.GetRefreshToken(refreshToken); !ok || len(grant.AccessTokens) != 2 {
+		t.Fatalf("access tokens recorded against the refresh token = %#v, want 2", grant)
+	}
 
 	// FAPI2: sender-constrained refresh without DPoP must fail.
 	noDPoP := postFormWithHeaders(t, server.URL+"/oid4vci/token", url.Values{

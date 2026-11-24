@@ -4,14 +4,18 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	internalcrypto "github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/dpop"
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 	"github.com/golang-jwt/jwt/v5"
@@ -769,4 +773,1089 @@ func TestIntrospectionAnswersOnlyTheTokensParties(t *testing.T) {
 	if body["error"] != "invalid_client" {
 		t.Fatalf("a token presented as its own credential: body = %#v, want invalid_client", body)
 	}
+}
+
+// postWithClientAuth posts form to an OAuth 2.0 endpoint. configure sets the
+// request's credentials and Looking Glass session, when there are any.
+func postWithClientAuth(t *testing.T, endpoint string, form url.Values, configure func(*http.Request)) (int, map[string]interface{}, http.Header) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if configure != nil {
+		configure(request)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]interface{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("response body %q: %v", raw, err)
+		}
+	}
+	return response.StatusCode, body, response.Header
+}
+
+func basicAuth(clientID, secret string) func(*http.Request) {
+	return func(request *http.Request) { request.SetBasicAuth(clientID, secret) }
+}
+
+func authorization(value string) func(*http.Request) {
+	return func(request *http.Request) { request.Header.Set("Authorization", value) }
+}
+
+// publicAppAccessToken redeems an authorization code as the seeded public
+// client and returns the access token it was issued.
+func publicAppAccessToken(t *testing.T, server *oauthAssertionTestServer) string {
+	t.Helper()
+	accessToken, _ := publicAppTokens(t, server)
+	return accessToken
+}
+
+// publicAppTokens redeems an authorization code as the seeded public client
+// and returns the access token and refresh token it was issued.
+func publicAppTokens(t *testing.T, server *oauthAssertionTestServer) (accessToken, refreshToken string) {
+	t.Helper()
+	code := createDPoPTestAuthCode(t, server)
+	status, body := postTokenRequest(t, server.server.URL, url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code.Code},
+		"redirect_uri": {"http://localhost:3000/callback"},
+		"client_id":    {"public-app"},
+	}, "")
+	if status != http.StatusOK {
+		t.Fatalf("token status = %d, body = %#v", status, body)
+	}
+	accessToken, _ = body["access_token"].(string)
+	refreshToken, _ = body["refresh_token"].(string)
+	if accessToken == "" || refreshToken == "" {
+		t.Fatalf("no access_token or refresh_token in %#v", body)
+	}
+	return accessToken, refreshToken
+}
+
+// TestIntrospectionRequiresAnAuthenticatedConfidentialCaller covers RFC 7662
+// Section 2.1: "To prevent token scanning attacks, the endpoint MUST also
+// require some form of authorization to access this endpoint, such as client
+// authentication as described in OAuth 2.0 [RFC6749] or a separate OAuth 2.0
+// access token". A public client's client_id authorizes nothing (RFC 6749
+// Section 2.3: "the authorization server MUST NOT rely on public client
+// authentication for the purpose of identifying the client"), so the token a
+// public client was issued cannot be read by anyone who names that client.
+//
+// It also covers the status of each refusal. RFC 7662 Section 2.3: "If the
+// protected resource uses OAuth 2.0 client credentials to authenticate to
+// the introspection endpoint and its credentials are invalid, the
+// authorization server responds with an HTTP 401 (Unauthorized) as described
+// in Section 5.2 of OAuth 2.0 [RFC6749]." RFC 6749 Section 5.2: a client
+// that "attempted to authenticate via the "Authorization" request header
+// field" gets 401 with "the "WWW-Authenticate" response header field
+// matching the authentication scheme used by the client."
+func TestIntrospectionRequiresAnAuthenticatedConfidentialCaller(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	ownerToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+	publicToken := publicAppAccessToken(t, server)
+	endpoint := server.server.URL + "/oauth2/introspect"
+
+	const basicChallenge = `Basic realm="oauth2"`
+	for name, call := range map[string]struct {
+		token      string
+		form       url.Values
+		query      string
+		configure  func(*http.Request)
+		status     int
+		errorCode  string
+		challenges []string
+	}{
+		"a public client named in the body": {
+			token: publicToken, form: url.Values{"client_id": {"public-app"}},
+			status: http.StatusBadRequest, errorCode: "invalid_client",
+		},
+		"a public client over HTTP Basic with an empty password": {
+			token: publicToken, configure: basicAuth("public-app", ""),
+			status: http.StatusUnauthorized, errorCode: "invalid_client", challenges: []string{basicChallenge},
+		},
+		"a public client with a made-up client_secret": {
+			token: publicToken, form: url.Values{"client_id": {"public-app"}, "client_secret": {"anything"}},
+			status: http.StatusUnauthorized, errorCode: "invalid_client", challenges: []string{basicChallenge},
+		},
+		"no credentials at all": {
+			token:  ownerToken,
+			status: http.StatusBadRequest, errorCode: "invalid_client",
+		},
+		"a confidential client named without its secret": {
+			token: ownerToken, form: url.Values{"client_id": {"owner-client"}},
+			status: http.StatusBadRequest, errorCode: "invalid_client",
+		},
+		"an unknown client over HTTP Basic": {
+			token: ownerToken, configure: basicAuth("no-such-client", "owner-secret"),
+			status: http.StatusUnauthorized, errorCode: "invalid_client", challenges: []string{basicChallenge},
+		},
+		"a wrong secret over HTTP Basic": {
+			token: ownerToken, configure: basicAuth("owner-client", "wrong-secret"),
+			status: http.StatusUnauthorized, errorCode: "invalid_client", challenges: []string{basicChallenge},
+		},
+		"a prefix of the secret over HTTP Basic": {
+			token: ownerToken, configure: basicAuth("owner-client", "owner-secre"),
+			status: http.StatusUnauthorized, errorCode: "invalid_client", challenges: []string{basicChallenge},
+		},
+		"a wrong secret in the body": {
+			token: ownerToken, form: url.Values{"client_id": {"owner-client"}, "client_secret": {"wrong-secret"}},
+			status: http.StatusUnauthorized, errorCode: "invalid_client", challenges: []string{basicChallenge},
+		},
+		"the right secret in the request URI": {
+			token: ownerToken, query: "?client_id=owner-client&client_secret=owner-secret",
+			status: http.StatusBadRequest, errorCode: "invalid_client",
+		},
+		"HTTP Basic and a body secret together": {
+			token: ownerToken, form: url.Values{"client_secret": {"owner-secret"}}, configure: basicAuth("owner-client", "owner-secret"),
+			status: http.StatusBadRequest, errorCode: "invalid_request",
+		},
+		// RFC 7662 Section 2.3 sends a bearer token that is "invalid for
+		// this request" to RFC 6750 Section 3, hence the error attribute.
+		"the token as its own Bearer credential": {
+			token: ownerToken, configure: authorization("Bearer " + ownerToken),
+			status: http.StatusUnauthorized, errorCode: "invalid_client",
+			challenges: []string{basicChallenge, `Bearer realm="oauth2", error="invalid_token"`},
+		},
+		"another authentication scheme": {
+			token: ownerToken, configure: authorization("DPoP " + ownerToken),
+			status: http.StatusUnauthorized, errorCode: "invalid_client",
+			challenges: []string{basicChallenge, "DPoP"},
+		},
+		"a scheme that is not an RFC 9110 token": {
+			token: ownerToken, configure: authorization(`Sche"me, x`),
+			status: http.StatusUnauthorized, errorCode: "invalid_client",
+			challenges: []string{basicChallenge},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			form := url.Values{"token": {call.token}}
+			for key, values := range call.form {
+				form[key] = values
+			}
+			status, body, header := postWithClientAuth(t, endpoint+call.query, form, call.configure)
+			if status != call.status {
+				t.Fatalf("status = %d, want %d; body = %#v", status, call.status, body)
+			}
+			if body["error"] != call.errorCode {
+				t.Fatalf("error = %v, want %s; body = %#v", body["error"], call.errorCode, body)
+			}
+			if _, leaked := body["active"]; leaked {
+				t.Fatalf("a refused caller was given an introspection response: %#v", body)
+			}
+			if got := header.Values("WWW-Authenticate"); !reflect.DeepEqual(got, call.challenges) {
+				t.Fatalf("WWW-Authenticate = %q, want %q", got, call.challenges)
+			}
+		})
+	}
+
+	for name, method := range map[string]struct {
+		form      url.Values
+		configure func(*http.Request)
+	}{
+		"client_secret_basic": {configure: basicAuth("owner-client", "owner-secret")},
+		"client_secret_post":  {form: url.Values{"client_id": {"owner-client"}, "client_secret": {"owner-secret"}}},
+	} {
+		t.Run("the token's confidential client with "+name, func(t *testing.T) {
+			form := url.Values{"token": {ownerToken}}
+			for key, values := range method.form {
+				form[key] = values
+			}
+			status, body, header := postWithClientAuth(t, endpoint, form, method.configure)
+			if status != http.StatusOK || body["active"] != true {
+				t.Fatalf("status = %d, body = %#v, want 200 and active true", status, body)
+			}
+			if got := header.Get("WWW-Authenticate"); got != "" {
+				t.Fatalf("WWW-Authenticate = %q on a successful response", got)
+			}
+		})
+	}
+}
+
+// TestIntrospectionRefusalsReachLookingGlass checks that each refusal at the
+// introspection endpoint is an event with its reason and the specification
+// section it applies.
+func TestIntrospectionRefusalsReachLookingGlass(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	ownerToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+	endpoint := server.server.URL + "/oauth2/introspect"
+
+	for name, call := range map[string]struct {
+		form       url.Values
+		configure  func(*http.Request)
+		title      string
+		reason     string
+		references []string
+	}{
+		"public client": {
+			form:  url.Values{"client_id": {"public-app"}},
+			title: "Introspection Refused: Public Client", reason: "public_client",
+			references: []string{"RFC 7662 Section 2.1", "RFC 6749 Section 2.3"},
+		},
+		"no client authentication": {
+			title: "Introspection Refused: No Client Authentication", reason: "no_client_authentication",
+			references: []string{"RFC 7662 Section 2.1"},
+		},
+		"unknown client": {
+			configure: basicAuth("no-such-client", "x"),
+			title:     "Introspection Refused: Unknown Client", reason: "unknown_client",
+			references: []string{"RFC 7662 Section 2.1"},
+		},
+		"wrong secret": {
+			configure: basicAuth("owner-client", "wrong-secret"),
+			title:     "Introspection Refused: Client Authentication Failed", reason: "invalid_credentials",
+			references: []string{"RFC 7662 Section 2.1", "RFC 7662 Section 2.3"},
+		},
+		"two authentication methods": {
+			form: url.Values{"client_secret": {"owner-secret"}}, configure: basicAuth("owner-client", "owner-secret"),
+			title:      "Introspection Refused: Two Client Authentication Methods",
+			references: []string{"RFC 6749 Section 2.3"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			session, _ := createOwnedOAuthSession(t, server.engine)
+			form := url.Values{"token": {ownerToken}}
+			for key, values := range call.form {
+				form[key] = values
+			}
+			postWithClientAuth(t, endpoint, form, func(request *http.Request) {
+				request.Header.Set("X-Looking-Glass-Session", session.ID)
+				if call.configure != nil {
+					call.configure(request)
+				}
+			})
+
+			stored, ok := server.engine.GetSession(session.ID)
+			if !ok {
+				t.Fatal("Looking Glass session not found")
+			}
+			for _, event := range stored.Events {
+				if event.Title != call.title {
+					continue
+				}
+				if call.reason != "" && event.Data["reason"] != call.reason {
+					t.Fatalf("reason = %v, want %s", event.Data["reason"], call.reason)
+				}
+				var references []string
+				for _, annotation := range event.Annotations {
+					references = append(references, annotation.Reference)
+				}
+				if !reflect.DeepEqual(references, call.references) {
+					t.Fatalf("references = %q, want %q", references, call.references)
+				}
+				return
+			}
+			t.Fatalf("event %q not found in %#v", call.title, stored.Events)
+		})
+	}
+}
+
+// TestFailedClientAuthenticationOverBasicIsChallenged covers RFC 6749 Section
+// 5.2 at the revocation and token endpoints: "If the client attempted to
+// authenticate via the "Authorization" request header field, the
+// authorization server MUST respond with an HTTP 401 (Unauthorized) status
+// code and include the "WWW-Authenticate" response header field matching the
+// authentication scheme used by the client." The same failure with the
+// credentials in the body is a 400. RFC 7009 Section 2.2.1: "The error
+// presentation conforms to the definition in Section 5.2 of [RFC6749]."
+func TestFailedClientAuthenticationOverBasicIsChallenged(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	demoApp, ok := server.idp.GetClient("demo-app")
+	if !ok || demoApp == nil || demoApp.Public {
+		t.Fatal("the seeded confidential demo-app client is required")
+	}
+	ownerToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+
+	for name, endpoint := range map[string]struct {
+		path string
+		form url.Values
+	}{
+		"revocation":                      {"/oauth2/revoke", url.Values{"token": {ownerToken}}},
+		"token, authorization_code":       {"/oauth2/token", url.Values{"grant_type": {"authorization_code"}, "code": {"none"}}},
+		"token, refresh_token":            {"/oauth2/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {"none"}}},
+		"token, client_credentials":       {"/oauth2/token", url.Values{"grant_type": {"client_credentials"}}},
+		"token, device_code":              {"/oauth2/token", url.Values{"grant_type": {mockidp.DeviceCodeGrantType}, "device_code": {"none"}}},
+		"device authorization (RFC 8628)": {"/oauth2/device/authorize", url.Values{}},
+	} {
+		for failure, clientID := range map[string]string{"a wrong secret": "demo-app", "an unknown client": "no-such-client"} {
+			t.Run(name+", "+failure+" over HTTP Basic", func(t *testing.T) {
+				status, body, header := postWithClientAuth(t, server.server.URL+endpoint.path, endpoint.form, basicAuth(clientID, "wrong-secret"))
+				if status != http.StatusUnauthorized || body["error"] != "invalid_client" {
+					t.Fatalf("status = %d, body = %#v, want 401 invalid_client", status, body)
+				}
+				if got := header.Values("WWW-Authenticate"); !reflect.DeepEqual(got, []string{`Basic realm="oauth2"`}) {
+					t.Fatalf("WWW-Authenticate = %q", got)
+				}
+			})
+			t.Run(name+", "+failure+" in the body", func(t *testing.T) {
+				form := url.Values{"client_id": {clientID}, "client_secret": {"wrong-secret"}}
+				for key, values := range endpoint.form {
+					form[key] = values
+				}
+				status, body, header := postWithClientAuth(t, server.server.URL+endpoint.path, form, nil)
+				if status != http.StatusBadRequest || body["error"] != "invalid_client" {
+					t.Fatalf("status = %d, body = %#v, want 400 invalid_client", status, body)
+				}
+				if got := header.Get("WWW-Authenticate"); got != "" {
+					t.Fatalf("WWW-Authenticate = %q on a 400", got)
+				}
+			})
+		}
+	}
+
+	// The token was not revoked by any refused request above, and the
+	// client it was issued to can still revoke it.
+	if server.idp.IsTokenRevoked(ownerToken) {
+		t.Fatal("a refused revocation request revoked the token")
+	}
+	status, _, _ := postWithClientAuth(t, server.server.URL+"/oauth2/revoke", url.Values{"token": {ownerToken}}, basicAuth("owner-client", "owner-secret"))
+	if status != http.StatusOK || !server.idp.IsTokenRevoked(ownerToken) {
+		t.Fatalf("revocation by the token's client: status = %d, revoked = %v", status, server.idp.IsTokenRevoked(ownerToken))
+	}
+
+	// Two authentication methods in one revocation request (RFC 6749
+	// Section 2.3).
+	status, body, _ := postWithClientAuth(t, server.server.URL+"/oauth2/revoke",
+		url.Values{"token": {ownerToken}, "client_secret": {"owner-secret"}}, basicAuth("owner-client", "owner-secret"))
+	if status != http.StatusBadRequest || body["error"] != "invalid_request" {
+		t.Fatalf("two methods: status = %d, body = %#v, want 400 invalid_request", status, body)
+	}
+}
+
+// TestRevocationIsLimitedToTheTokensClient covers RFC 7009 Section 2.1: "The
+// authorization server first validates the client credentials (in case of a
+// confidential client) and then verifies whether the token was issued to the
+// client making the revocation request. If this validation fails, the
+// request is refused and the client is informed of the error by the
+// authorization server as described below." Section 2.2.1 takes the error
+// from RFC 6749 Section 5.2, where invalid_grant is the code for a
+// credential that "was issued to another client". Section 2.2: "The
+// authorization server responds with HTTP status code 200 if the token has
+// been revoked successfully or if the client submitted an invalid token."
+func TestRevocationIsLimitedToTheTokensClient(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	registerDPoPClientCredentialsClient(t, server, "other-client", "other-secret")
+	endpoint := server.server.URL + "/oauth2/revoke"
+	owner := basicAuth("owner-client", "owner-secret")
+	other := basicAuth("other-client", "other-secret")
+	asPublicApp := url.Values{"client_id": {"public-app"}}
+
+	ownerToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+	publicToken, publicRefresh := publicAppTokens(t, server)
+	server.idp.StoreRefreshToken("owner-refresh-token", "owner-client", "alice", "api:read", time.Now(), time.Now().Add(time.Hour))
+	idToken, err := server.idp.JWTService().CreateIDToken("alice", "owner-client", "", time.Now(), time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Access tokens outside the RFC 9068 profile ("typ": "JWT"), as the
+	// OID4VCI token endpoint mints them: one for a client, one for a
+	// Pre-Authorized Code request that named no client.
+	unprofiled := internalcrypto.AccessToken{Subject: "wallet:alice", Audience: server.server.URL + "/oid4vci", ClientID: "owner-client", Scope: "vc:issue", Lifetime: time.Hour}
+	unprofiledToken, err := server.idp.JWTService().CreateUnprofiledAccessToken(unprofiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unprofiled.ClientID = ""
+	anonymousToken, err := server.idp.JWTService().CreateUnprofiledAccessToken(unprofiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// JWTs the same key signed that are not access tokens or refresh tokens
+	// of this server.
+	signedUserInfo, err := server.idp.JWTService().SignClaimsRS256(map[string]interface{}{"sub": "alice", "client_id": "owner-client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookalike := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": server.server.URL + "/agents", "sub": "agent-1", "aud": server.server.URL, "client_id": "owner-client",
+		"exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(), "nbf": time.Now().Unix(), "jti": "lookalike-jti", "scope": "api:read",
+	})
+	lookalike.Header["kid"] = server.plugin.keySet.RSAKeyID()
+	lookalikeToken, err := lookalike.SignedString(server.plugin.keySet.RSAPrivateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshTokenIsLive := func(token string) bool {
+		_, live := server.idp.GetRefreshToken(token)
+		return live
+	}
+
+	for name, refused := range map[string]struct {
+		token     string
+		hint      string
+		form      url.Values
+		configure func(*http.Request)
+	}{
+		"another confidential client, an access token":       {token: ownerToken, configure: other},
+		"another confidential client, a refresh token":       {token: "owner-refresh-token", configure: other},
+		"a wrong token_type_hint does not hide the owner":    {token: "owner-refresh-token", hint: "access_token", configure: other},
+		"anyone naming the public client, an access token":   {token: ownerToken, form: asPublicApp},
+		"anyone naming the public client, a refresh token":   {token: "owner-refresh-token", form: asPublicApp},
+		"a confidential client, the public client's token":   {token: publicToken, configure: owner},
+		"a confidential client, the public client's refresh": {token: publicRefresh, configure: owner},
+		"another client, an unprofiled access token":         {token: unprofiledToken, configure: other},
+		"an access token issued to no identified client":     {token: anonymousToken, configure: owner},
+	} {
+		t.Run("refused: "+name, func(t *testing.T) {
+			form := url.Values{"token": {refused.token}}
+			if refused.hint != "" {
+				form.Set("token_type_hint", refused.hint)
+			}
+			for key, values := range refused.form {
+				form[key] = values
+			}
+			status, body, header := postWithClientAuth(t, endpoint, form, refused.configure)
+			if status != http.StatusBadRequest || body["error"] != "invalid_grant" {
+				t.Fatalf("status = %d, body = %#v, want 400 invalid_grant", status, body)
+			}
+			if got := header.Get("WWW-Authenticate"); got != "" {
+				t.Fatalf("WWW-Authenticate = %q: the client authenticated, the token is the problem", got)
+			}
+		})
+	}
+	if server.idp.IsTokenRevoked(ownerToken) || server.idp.IsTokenRevoked(publicToken) ||
+		server.idp.IsTokenRevoked(unprofiledToken) || server.idp.IsTokenRevoked(anonymousToken) {
+		t.Fatal("a refused revocation request revoked an access token")
+	}
+
+	// RFC 7009 Section 2.2.1: "unsupported_token_type: The authorization
+	// server does not support the revocation of the presented token type."
+	// A valid JWT of this server's key that it issued as neither a refresh
+	// token nor an access token is such a type, whoever asks and whatever
+	// client it names.
+	for name, token := range map[string]string{
+		"an ID Token issued to the caller":                          idToken,
+		"a signed UserInfo response":                                signedUserInfo,
+		"a JWT with access token claims that was not minted as one": lookalikeToken,
+	} {
+		t.Run("unsupported token type: "+name, func(t *testing.T) {
+			status, body, header := postWithClientAuth(t, endpoint, url.Values{"token": {token}}, owner)
+			if status != http.StatusBadRequest || body["error"] != "unsupported_token_type" {
+				t.Fatalf("status = %d, body = %#v, want 400 unsupported_token_type", status, body)
+			}
+			if got := header.Get("WWW-Authenticate"); got != "" {
+				t.Fatalf("WWW-Authenticate = %q: the client authenticated", got)
+			}
+			if server.idp.IsTokenRevoked(token) {
+				t.Fatal("a token of an unsupported type was recorded as revoked")
+			}
+		})
+	}
+	if !refreshTokenIsLive("owner-refresh-token") || !refreshTokenIsLive(publicRefresh) {
+		t.Fatal("a refused revocation request revoked a refresh token")
+	}
+
+	// An invalid token is answered with 200 and changes nothing.
+	unstored, err := server.idp.JWTService().CreateRefreshToken("alice", "other-client", "api:read", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, token := range map[string]string{
+		"a string that is no token":                      "not-a-token",
+		"no token at all":                                "",
+		"a refresh token JWT that is no longer in store": unstored,
+	} {
+		t.Run("200 for an invalid token: "+name, func(t *testing.T) {
+			status, body, _ := postWithClientAuth(t, endpoint, url.Values{"token": {token}}, owner)
+			if status != http.StatusOK || body != nil {
+				t.Fatalf("status = %d, body = %#v, want 200 with an empty body", status, body)
+			}
+			if token != "" && server.idp.IsTokenRevoked(token) {
+				t.Fatal("an invalid token was recorded as revoked")
+			}
+		})
+	}
+
+	// The client a token was issued to revokes it, whatever the hint says.
+	for name, revoked := range map[string]struct {
+		token     string
+		hint      string
+		form      url.Values
+		configure func(*http.Request)
+		gone      func() bool
+	}{
+		"a confidential client's access token": {
+			token: ownerToken, hint: "refresh_token", configure: owner,
+			gone: func() bool { return server.idp.IsTokenRevoked(ownerToken) },
+		},
+		"a confidential client's refresh token": {
+			token: "owner-refresh-token", hint: "access_token", configure: owner,
+			gone: func() bool { return !refreshTokenIsLive("owner-refresh-token") },
+		},
+		"the public client's access token": {
+			token: publicToken, form: asPublicApp,
+			gone: func() bool { return server.idp.IsTokenRevoked(publicToken) },
+		},
+		"the public client's refresh token": {
+			token: publicRefresh, form: asPublicApp,
+			gone: func() bool { return !refreshTokenIsLive(publicRefresh) },
+		},
+		"a confidential client's unprofiled access token": {
+			token: unprofiledToken, configure: owner,
+			gone: func() bool { return server.idp.IsTokenRevoked(unprofiledToken) },
+		},
+	} {
+		t.Run("revoked: "+name, func(t *testing.T) {
+			form := url.Values{"token": {revoked.token}}
+			if revoked.hint != "" {
+				form.Set("token_type_hint", revoked.hint)
+			}
+			for key, values := range revoked.form {
+				form[key] = values
+			}
+			status, body, _ := postWithClientAuth(t, endpoint, form, revoked.configure)
+			if status != http.StatusOK || body != nil {
+				t.Fatalf("status = %d, body = %#v, want 200 with an empty body", status, body)
+			}
+			if !revoked.gone() {
+				t.Fatal("the token is still usable after a 200")
+			}
+			// Revoking it again is still a 200 (Section 2.2).
+			if status, _, _ := postWithClientAuth(t, endpoint, form, revoked.configure); status != http.StatusOK {
+				t.Fatalf("second revocation: status = %d, want 200", status)
+			}
+		})
+	}
+}
+
+// TestRevocationOutcomesReachLookingGlass checks that a refusal for a token
+// issued to another client, a request for an invalid token and a revocation
+// are each an event with the RFC 7009 section it applies.
+func TestRevocationOutcomesReachLookingGlass(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	registerDPoPClientCredentialsClient(t, server, "other-client", "other-secret")
+	owner := basicAuth("owner-client", "owner-secret")
+	other := basicAuth("other-client", "other-secret")
+	ownerToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+	server.idp.StoreRefreshToken("owner-refresh-token", "owner-client", "alice", "api:read", time.Now(), time.Now().Add(time.Hour))
+	idToken, err := server.idp.JWTService().CreateIDToken("alice", "owner-client", "", time.Now(), time.Hour, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anonymousToken, err := server.idp.JWTService().CreateUnprofiledAccessToken(internalcrypto.AccessToken{
+		Subject: "wallet:alice", Audience: server.server.URL + "/oid4vci", Scope: "vc:issue", Lifetime: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Ordered: the access token is revoked by the last call.
+	for _, call := range []struct {
+		name       string
+		token      string
+		configure  func(*http.Request)
+		title      string
+		references []string
+		data       map[string]interface{}
+		// explains is text the last annotation must contain.
+		explains string
+	}{
+		{
+			name: "another client, an access token", token: ownerToken, configure: other,
+			title: "Revocation Refused: Token Issued To Another Client", references: []string{"RFC 7009 Section 2.1", "RFC 6749 Section 5.2"},
+			data:     map[string]interface{}{"error": "invalid_grant", "client_id": "other-client", "token_client_id": "owner-client", "token_type": "access_token", "revoked": false},
+			explains: "No Section 5.2 code covers an access token by its words; invalid_grant is the only one that names the condition.",
+		},
+		{
+			name: "another client, a refresh token", token: "owner-refresh-token", configure: other,
+			title: "Revocation Refused: Token Issued To Another Client", references: []string{"RFC 7009 Section 2.1", "RFC 6749 Section 5.2"},
+			data:     map[string]interface{}{"error": "invalid_grant", "token_client_id": "owner-client", "token_type": "refresh_token", "revoked": false},
+			explains: `or refresh token is invalid, expired, revoked, does not match the redirection URI used in the authorization request, or was issued to another client." This token is a refresh token, which those words cover.`,
+		},
+		{
+			name: "an access token issued to no identified client", token: anonymousToken, configure: owner,
+			title: "Revocation Refused: Token Issued To No Identified Client", references: []string{"RFC 7009 Section 2.1", "RFC 6749 Section 5.2"},
+			data:     map[string]interface{}{"error": "invalid_grant", "client_id": "owner-client", "token_client_id": "", "token_type": "access_token", "revoked": false},
+			explains: "No Section 5.2 code covers this case by its words.",
+		},
+		{
+			name: "an ID Token", token: idToken, configure: owner,
+			title: "Revocation Refused: Unsupported Token Type", references: []string{"RFC 7009 Section 2.2.1"},
+			data:     map[string]interface{}{"error": "unsupported_token_type", "client_id": "owner-client", "revoked": false},
+			explains: "The authorization server does not support the revocation of the presented token type.",
+		},
+		{
+			name: "an invalid token", token: "not-a-token", configure: owner,
+			title: "Nothing To Revoke: Invalid Token", references: []string{"RFC 7009 Section 2.2"},
+			data: map[string]interface{}{"client_id": "owner-client", "revoked": false},
+		},
+		{
+			name: "the token's client", token: ownerToken, configure: owner,
+			title: "Token Revoked", references: []string{"RFC 7009 Section 2.1"},
+			data: map[string]interface{}{"client_id": "owner-client", "token_type": "access_token", "revoked": true},
+		},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			session, _ := createOwnedOAuthSession(t, server.engine)
+			postWithClientAuth(t, server.server.URL+"/oauth2/revoke", url.Values{"token": {call.token}}, func(request *http.Request) {
+				request.Header.Set("X-Looking-Glass-Session", session.ID)
+				call.configure(request)
+			})
+
+			stored, ok := server.engine.GetSession(session.ID)
+			if !ok {
+				t.Fatal("Looking Glass session not found")
+			}
+			for _, event := range stored.Events {
+				if event.Title != call.title {
+					continue
+				}
+				for key, want := range call.data {
+					if event.Data[key] != want {
+						t.Errorf("%s = %v, want %v", key, event.Data[key], want)
+					}
+				}
+				if event.Data["token"] != call.token {
+					t.Errorf("the event does not show the submitted token in full")
+				}
+				var references []string
+				for _, annotation := range event.Annotations {
+					references = append(references, annotation.Reference)
+				}
+				if !reflect.DeepEqual(references, call.references) {
+					t.Fatalf("references = %q, want %q", references, call.references)
+				}
+				if last := event.Annotations[len(event.Annotations)-1].Description; !strings.Contains(last, call.explains) {
+					t.Fatalf("the annotation does not say %q: %s", call.explains, last)
+				}
+				return
+			}
+			t.Fatalf("event %q not found in %#v", call.title, stored.Events)
+		})
+	}
+}
+
+// TestFailedClientAuthenticationChallengesTheSchemeTheClientUsed covers RFC
+// 6749 Section 5.2 for a client that used a scheme other than Basic in the
+// Authorization header: the authorization server "MUST respond with an HTTP
+// 401 (Unauthorized) status code and include the "WWW-Authenticate" response
+// header field matching the authentication scheme used by the client." Basic,
+// the scheme these endpoints support, is listed first (RFC 9110 Section 11.3:
+// "A workaround for this problem is to list well-supported schemes (such as
+// "basic") first."). A scheme is repeated only when it is an RFC 9110 token.
+// The Bearer challenge has no "error" attribute here: RFC 6750 Section 3 is
+// reached only from the introspection endpoint, through RFC 7662 Section 2.3.
+func TestFailedClientAuthenticationChallengesTheSchemeTheClientUsed(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	const basicChallenge = `Basic realm="oauth2"`
+	for name, endpoint := range map[string]struct {
+		path string
+		form url.Values
+	}{
+		"revocation":                      {"/oauth2/revoke", url.Values{"token": {"not-a-token"}}},
+		"token, authorization_code":       {"/oauth2/token", url.Values{"grant_type": {"authorization_code"}, "code": {"none"}}},
+		"token, refresh_token":            {"/oauth2/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {"none"}}},
+		"token, client_credentials":       {"/oauth2/token", url.Values{"grant_type": {"client_credentials"}}},
+		"token, device_code":              {"/oauth2/token", url.Values{"grant_type": {mockidp.DeviceCodeGrantType}, "device_code": {"none"}}},
+		"device authorization (RFC 8628)": {"/oauth2/device/authorize", url.Values{}},
+	} {
+		for credentials, challenges := range map[string][]string{
+			"Bearer some-token":       {basicChallenge, `Bearer realm="oauth2"`},
+			"bearer some-token":       {basicChallenge, `Bearer realm="oauth2"`},
+			"DPoP some-token":         {basicChallenge, "DPoP"},
+			"Negotiate":               {basicChallenge, "Negotiate"},
+			`Sche"me, injected="x" y`: {basicChallenge},
+			"Basic !not-base64!":      {basicChallenge},
+		} {
+			t.Run(name+", Authorization: "+credentials, func(t *testing.T) {
+				// demo-app is confidential and presents no usable credentials.
+				form := url.Values{"client_id": {"demo-app"}}
+				for key, values := range endpoint.form {
+					form[key] = values
+				}
+				status, body, header := postWithClientAuth(t, server.server.URL+endpoint.path, form, authorization(credentials))
+				if status != http.StatusUnauthorized || body["error"] != "invalid_client" {
+					t.Fatalf("status = %d, body = %#v, want 401 invalid_client", status, body)
+				}
+				if got := header.Values("WWW-Authenticate"); !reflect.DeepEqual(got, challenges) {
+					t.Fatalf("WWW-Authenticate = %q, want %q", got, challenges)
+				}
+			})
+		}
+	}
+}
+
+// TestAuthorizationServerMetadataNamesEndpointAuthMethods covers RFC 8414
+// Section 2. introspection_endpoint_auth_methods_supported lists the client
+// password methods and not "none". revocation_endpoint_auth_methods_supported
+// adds private_key_jwt and "none", because a public client revokes its own
+// tokens by client_id; "If omitted, the default is "client_secret_basic"",
+// which would leave those out. With private_key_jwt listed,
+// revocation_endpoint_auth_signing_alg_values_supported "MUST be present".
+func TestAuthorizationServerMetadataNamesEndpointAuthMethods(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	response, err := http.Get(server.server.URL + "/oauth2/.well-known/oauth-authorization-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var metadata map[string]interface{}
+	if err := json.NewDecoder(response.Body).Decode(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	want := []interface{}{"client_secret_basic", "client_secret_post"}
+	if got := metadata["introspection_endpoint_auth_methods_supported"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("introspection_endpoint_auth_methods_supported = %#v, want %#v", got, want)
+	}
+	want = append(want, "private_key_jwt", "none")
+	if got := metadata["revocation_endpoint_auth_methods_supported"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("revocation_endpoint_auth_methods_supported = %#v, want %#v", got, want)
+	}
+	algorithms := []interface{}{"RS256", "ES256", "EdDSA"}
+	if got := metadata["revocation_endpoint_auth_signing_alg_values_supported"]; !reflect.DeepEqual(got, algorithms) {
+		t.Fatalf("revocation_endpoint_auth_signing_alg_values_supported = %#v, want %#v", got, algorithms)
+	}
+}
+
+// TestRevocationAuthenticatesPrivateKeyJWTClients covers client
+// authentication with a JWT at the revocation endpoint. RFC 7009 Section 2.1:
+// "The client also includes its authentication credentials as described in
+// Section 2.3. of [RFC6749]". RFC 7523 Section 3: the JWT MUST contain an
+// "aud" claim "containing a value that identifies the authorization server
+// as an intended audience. The token endpoint URL of the authorization
+// server MAY be used as a value for an "aud" element", and Section 3.2: "If
+// the client JWT is not valid [...] The value of the "error" parameter MUST
+// be the "invalid_client" error code."
+func TestRevocationAuthenticatesPrivateKeyJWTClients(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	signer := newAssertionSigner(t, "ES256", "revocation-key")
+	server.registerSigner(signer)
+	registerDPoPClientCredentialsClient(t, server, "owner-client", "owner-secret")
+	const clientID = "machine-client-pkjwt"
+	base := server.server.URL
+	endpoint := base + "/oauth2/revoke"
+	issued := 0
+	assertionFor := func(audience string) string {
+		t.Helper()
+		issued++
+		return signer.sign(t, validAssertionClaims(*server.now, clientID, audience, fmt.Sprintf("revocation-jti-%d", issued)), "")
+	}
+	accessToken := func() string {
+		t.Helper()
+		status, body := postClientAssertion(t, base, assertionForm(clientID, assertionFor(base+"/oauth2/token")), "", "", "")
+		token, _ := body["access_token"].(string)
+		if status != http.StatusOK || token == "" {
+			t.Fatalf("token status = %d, body = %#v", status, body)
+		}
+		return token
+	}
+	withAssertion := func(token, assertion string) url.Values {
+		return url.Values{"token": {token}, "client_assertion_type": {clientAssertionType}, "client_assertion": {assertion}}
+	}
+
+	// Each value that identifies this server is an accepted audience.
+	for name, audience := range map[string]string{
+		"the issuer identifier":                base + "/oauth2",
+		"the token endpoint URL":               base + "/oauth2/token",
+		"the OpenID Provider's issuer":         base,
+		"the OpenID Provider's token endpoint": base + "/oidc/token",
+	} {
+		t.Run("revoked with aud "+name, func(t *testing.T) {
+			token := accessToken()
+			status, body, _ := postWithClientAuth(t, endpoint, withAssertion(token, assertionFor(audience)), nil)
+			if status != http.StatusOK || body != nil {
+				t.Fatalf("status = %d, body = %#v, want 200 with an empty body", status, body)
+			}
+			if !server.idp.IsTokenRevoked(token) {
+				t.Fatal("the token is still usable after a 200")
+			}
+		})
+	}
+
+	token := accessToken()
+	ownerToken, _ := clientCredentialsToken(t, server, "owner-client", "owner-secret", "api:read")
+	otherSigner := newAssertionSigner(t, "ES256", "revocation-key")
+	replayed := assertionFor(base + "/oauth2/token")
+	if status, _, _ := postWithClientAuth(t, endpoint, withAssertion("not-a-token", replayed), nil); status != http.StatusOK {
+		t.Fatalf("first use of the assertion: status = %d, want 200", status)
+	}
+	for name, refused := range map[string]struct {
+		form      url.Values
+		configure func(*http.Request)
+		status    int
+		code      string
+	}{
+		"an audience that is another server": {
+			form: withAssertion(token, assertionFor("https://other.example/oauth2/token")), status: http.StatusBadRequest, code: "invalid_client",
+		},
+		"an assertion signed with another key": {
+			form:   withAssertion(token, otherSigner.sign(t, validAssertionClaims(*server.now, clientID, base+"/oauth2", "other-key-jti"), "")),
+			status: http.StatusBadRequest, code: "invalid_client",
+		},
+		"an assertion that was already used": {
+			form: withAssertion(token, replayed), status: http.StatusBadRequest, code: "invalid_client",
+		},
+		"an unsupported client_assertion_type": {
+			form:   url.Values{"token": {token}, "client_assertion_type": {"urn:example:other"}, "client_assertion": {assertionFor(base + "/oauth2")}},
+			status: http.StatusBadRequest, code: "invalid_client",
+		},
+		"client_id alone for a private_key_jwt client": {
+			form: url.Values{"token": {token}, "client_id": {clientID}}, status: http.StatusBadRequest, code: "invalid_client",
+		},
+		"a client_assertion without its type": {
+			form: url.Values{"token": {token}, "client_assertion": {assertionFor(base + "/oauth2")}}, status: http.StatusBadRequest, code: "invalid_request",
+		},
+		"an assertion and HTTP Basic together": {
+			form: withAssertion(token, assertionFor(base+"/oauth2")), configure: basicAuth("owner-client", "owner-secret"),
+			status: http.StatusBadRequest, code: "invalid_request",
+		},
+		"an assertion and a client_secret together": {
+			form: func() url.Values {
+				form := withAssertion(token, assertionFor(base+"/oauth2"))
+				form.Set("client_secret", "anything")
+				return form
+			}(),
+			status: http.StatusBadRequest, code: "invalid_request",
+		},
+		"a token issued to another client": {
+			form: withAssertion(ownerToken, assertionFor(base+"/oauth2")), status: http.StatusBadRequest, code: "invalid_grant",
+		},
+	} {
+		t.Run("refused: "+name, func(t *testing.T) {
+			status, body, header := postWithClientAuth(t, endpoint, refused.form, refused.configure)
+			if status != refused.status || body["error"] != refused.code {
+				t.Fatalf("status = %d, body = %#v, want %d %s", status, body, refused.status, refused.code)
+			}
+			if refused.code == "invalid_client" && refused.form.Has("client_assertion") && body["error_description"] != "client assertion validation failed" {
+				t.Fatalf("error_description = %v, want the generic one", body["error_description"])
+			}
+			if got := header.Get("WWW-Authenticate"); got != "" {
+				t.Fatalf("WWW-Authenticate = %q on a request without an Authorization header", got)
+			}
+		})
+	}
+	if server.idp.IsTokenRevoked(token) || server.idp.IsTokenRevoked(ownerToken) {
+		t.Fatal("a refused revocation request revoked the token")
+	}
+
+	// RFC 7009 Section 2.2.1: "If the server responds with HTTP status code
+	// 503, the client must assume the token still exists and may retry after
+	// a reasonable delay."
+	t.Run("503 when the assertion cannot be checked for replay", func(t *testing.T) {
+		replayStore := server.plugin.clientAssertionReplay
+		server.plugin.clientAssertionReplay = failingClientAssertionReplayStore{}
+		defer func() { server.plugin.clientAssertionReplay = replayStore }()
+		status, body, _ := postWithClientAuth(t, endpoint, withAssertion(token, assertionFor(base+"/oauth2")), nil)
+		if status != http.StatusServiceUnavailable || body["error"] != "server_error" {
+			t.Fatalf("status = %d, body = %#v, want 503 server_error", status, body)
+		}
+		if server.idp.IsTokenRevoked(token) {
+			t.Fatal("the token was revoked although the client was not authenticated")
+		}
+	})
+
+	// Looking Glass shows the assertion, why one was refused and the
+	// verification of the accepted one.
+	events := func(form url.Values) []lookingglass.Event {
+		t.Helper()
+		session, _ := createOwnedOAuthSession(t, server.engine)
+		postWithClientAuth(t, endpoint, form, func(request *http.Request) { request.Header.Set("X-Looking-Glass-Session", session.ID) })
+		stored, ok := server.engine.GetSession(session.ID)
+		if !ok {
+			t.Fatal("Looking Glass session not found")
+		}
+		return stored.Events
+	}
+	find := func(events []lookingglass.Event, title string) lookingglass.Event {
+		t.Helper()
+		for _, event := range events {
+			if event.Title == title {
+				return event
+			}
+		}
+		t.Fatalf("event %q not found in %#v", title, events)
+		return lookingglass.Event{}
+	}
+	wrongAudience := assertionFor("https://other.example/oauth2/token")
+	refusedEvents := events(withAssertion(token, wrongAudience))
+	if got := find(refusedEvents, "Token Revocation Request").Data["client_assertion"]; got != wrongAudience {
+		t.Fatalf("the request event does not show the assertion in full: %v", got)
+	}
+	refusal := find(refusedEvents, "Revocation Refused: Client Authentication Failed")
+	if refusal.Data["reason"] != "invalid_aud" || len(refusal.Annotations) != 1 || refusal.Annotations[0].Reference != "RFC 7523 Section 3.2" {
+		t.Fatalf("refusal event = %#v", refusal)
+	}
+	acceptedEvents := events(withAssertion(token, assertionFor(base+"/oauth2")))
+	verified := find(acceptedEvents, "Client Assertion Signature Verified")
+	if verified.Data["client_id"] != clientID || verified.Data["alg"] != "ES256" || verified.Data["kid"] != "revocation-key" {
+		t.Fatalf("verification event = %#v", verified.Data)
+	}
+	revoked := find(acceptedEvents, "Token Revoked")
+	if revoked.Data["client_id"] != clientID || revoked.Data["client_auth_method"] != "private_key_jwt" {
+		t.Fatalf("revocation event = %#v", revoked.Data)
+	}
+}
+
+// TestRevokingARefreshTokenRevokesTheGrantsAccessTokens covers RFC 7009
+// Section 2.1 at the revocation endpoint: "If the particular token is a
+// refresh token and the authorization server supports the revocation of
+// access tokens, then the authorization server SHOULD also invalidate all
+// access tokens based on the same authorization grant". The grant here is one
+// authorization code, redeemed once and refreshed once.
+func TestRevokingARefreshTokenRevokesTheGrantsAccessTokens(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	firstAccess, firstRefresh := publicAppTokens(t, server)
+	status, refreshed := postTokenRequest(t, server.server.URL, url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {firstRefresh},
+		"client_id":     {"public-app"},
+	}, "")
+	if status != http.StatusOK {
+		t.Fatalf("refresh status = %d, body = %#v", status, refreshed)
+	}
+	secondAccess, _ := refreshed["access_token"].(string)
+	secondRefresh, _ := refreshed["refresh_token"].(string)
+	if secondAccess == "" || secondRefresh == "" || secondRefresh == firstRefresh {
+		t.Fatalf("the refresh did not rotate the tokens: %#v", refreshed)
+	}
+	otherAccess, otherRefresh := publicAppTokens(t, server)
+
+	session, _ := createOwnedOAuthSession(t, server.engine)
+	status, body, _ := postWithClientAuth(t, server.server.URL+"/oauth2/revoke",
+		url.Values{"token": {secondRefresh}, "client_id": {"public-app"}},
+		func(request *http.Request) { request.Header.Set("X-Looking-Glass-Session", session.ID) })
+	if status != http.StatusOK || body != nil {
+		t.Fatalf("status = %d, body = %#v, want 200 with an empty body", status, body)
+	}
+
+	if _, live := server.idp.GetRefreshToken(secondRefresh); live {
+		t.Fatal("the revoked refresh token is still usable")
+	}
+	if !server.idp.IsTokenRevoked(firstAccess) || !server.idp.IsTokenRevoked(secondAccess) {
+		t.Fatal("an access token of the revoked grant is still usable")
+	}
+	if server.idp.IsTokenRevoked(otherAccess) {
+		t.Fatal("an access token of another grant was revoked")
+	}
+	if _, live := server.idp.GetRefreshToken(otherRefresh); !live {
+		t.Fatal("the refresh token of another grant was revoked")
+	}
+
+	// Looking Glass names each access token the revocation took with it.
+	var want []string
+	for _, accessToken := range []string{firstAccess, secondAccess} {
+		_, claims := accessTokenParts(t, accessToken)
+		jti, _ := claims["jti"].(string)
+		want = append(want, jti)
+	}
+	stored, ok := server.engine.GetSession(session.ID)
+	if !ok {
+		t.Fatal("Looking Glass session not found")
+	}
+	for _, event := range stored.Events {
+		if event.Title != "Token Revoked" {
+			continue
+		}
+		if got := event.Data["access_token_jtis_revoked"]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("access_token_jtis_revoked = %#v, want %#v", got, want)
+		}
+		if event.Data["token_type"] != "refresh_token" || event.Data["token"] != secondRefresh {
+			t.Fatalf("the event does not show the revoked refresh token: %#v", event.Data)
+		}
+		var references []string
+		for _, annotation := range event.Annotations {
+			references = append(references, annotation.Reference)
+		}
+		if !reflect.DeepEqual(references, []string{"RFC 7009 Section 2.1", "RFC 7009 Section 2.1"}) {
+			t.Fatalf("references = %q", references)
+		}
+		return
+	}
+	t.Fatalf("event \"Token Revoked\" not found in %#v", stored.Events)
+}
+
+// TestAuthorizationCodeReplayRevokesRefreshedTokens covers RFC 6749 Section
+// 4.1.2 at the token endpoint: "If an authorization code is used more than
+// once, the authorization server MUST deny the request and SHOULD revoke
+// (when possible) all tokens previously issued based on that authorization
+// code." The code here was redeemed and its tokens refreshed once before the
+// replay, and Looking Glass names what the replay revoked.
+func TestAuthorizationCodeReplayRevokesRefreshedTokens(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	code := createDPoPTestAuthCode(t, server)
+	redeem := url.Values{
+		"grant_type":   {"authorization_code"},
+		"code":         {code.Code},
+		"redirect_uri": {"http://localhost:3000/callback"},
+		"client_id":    {"public-app"},
+	}
+	status, issued := postTokenRequest(t, server.server.URL, redeem, "")
+	if status != http.StatusOK {
+		t.Fatalf("token status = %d, body = %#v", status, issued)
+	}
+	firstAccess, _ := issued["access_token"].(string)
+	firstRefresh, _ := issued["refresh_token"].(string)
+	status, refreshed := postTokenRequest(t, server.server.URL, url.Values{
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {firstRefresh},
+		"client_id":     {"public-app"},
+	}, "")
+	if status != http.StatusOK {
+		t.Fatalf("refresh status = %d, body = %#v", status, refreshed)
+	}
+	secondAccess, _ := refreshed["access_token"].(string)
+	secondRefresh, _ := refreshed["refresh_token"].(string)
+	otherAccess, otherRefresh := publicAppTokens(t, server)
+
+	session, _ := createOwnedOAuthSession(t, server.engine)
+	status, body, _ := postWithClientAuth(t, server.server.URL+"/oauth2/token", redeem,
+		func(request *http.Request) { request.Header.Set("X-Looking-Glass-Session", session.ID) })
+	if status != http.StatusBadRequest || body["error"] != "invalid_grant" {
+		t.Fatalf("replay: status = %d, body = %#v, want 400 invalid_grant", status, body)
+	}
+
+	if !server.idp.IsTokenRevoked(firstAccess) || !server.idp.IsTokenRevoked(secondAccess) {
+		t.Fatal("an access token issued from the replayed code is still usable")
+	}
+	if _, live := server.idp.GetRefreshToken(secondRefresh); live {
+		t.Fatal("the refresh token obtained by refreshing is still usable")
+	}
+	if server.idp.IsTokenRevoked(otherAccess) {
+		t.Fatal("an access token of another code was revoked")
+	}
+	if _, live := server.idp.GetRefreshToken(otherRefresh); !live {
+		t.Fatal("the refresh token of another code was revoked")
+	}
+
+	var want []string
+	for _, accessToken := range []string{firstAccess, secondAccess} {
+		_, claims := accessTokenParts(t, accessToken)
+		jti, _ := claims["jti"].(string)
+		want = append(want, jti)
+	}
+	stored, ok := server.engine.GetSession(session.ID)
+	if !ok {
+		t.Fatal("Looking Glass session not found")
+	}
+	for _, event := range stored.Events {
+		if event.Title != "Authorization Code Replayed: Tokens Revoked" {
+			continue
+		}
+		if got := event.Data["access_token_jtis_revoked"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("access_token_jtis_revoked = %#v, want %#v", got, want)
+		}
+		if event.Data["refresh_tokens_revoked"] != 1 || event.Data["code"] != code.Code {
+			t.Errorf("event data = %#v", event.Data)
+		}
+		if len(event.Annotations) != 1 || event.Annotations[0].Reference != "RFC 6749 Section 4.1.2" {
+			t.Fatalf("annotations = %#v", event.Annotations)
+		}
+		return
+	}
+	t.Fatalf("replay event not found in %#v", stored.Events)
 }

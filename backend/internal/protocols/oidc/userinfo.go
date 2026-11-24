@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -992,6 +993,22 @@ func (p *Plugin) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 			"code":                  code,
 			"code_verifier_present": codeVerifier != "",
 		})
+		var replay *mockidp.AuthorizationCodeReplay
+		if errors.As(err, &replay) {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Authorization Code Replayed: Tokens Revoked", map[string]interface{}{
+				"error":                     "invalid_grant",
+				"client_id":                 clientID,
+				"code":                      code,
+				"access_token_jtis_revoked": replay.AccessTokenJTIs,
+				"refresh_tokens_revoked":    replay.RefreshTokens,
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "A Replayed Code Revokes What It Issued",
+				Description: `"If an authorization code is used more than once, the authorization server MUST deny the request and SHOULD revoke (when possible) all tokens previously issued based on that authorization code." That covers the tokens issued when the code was redeemed and the ones obtained since by refreshing.`,
+				Severity:    "warning",
+				Reference:   "RFC 6749 Section 4.1.2",
+			})
+		}
 		writeOIDCTokenError(w, http.StatusBadRequest, "invalid_grant", err.Error(), "")
 		return
 	}
@@ -1143,6 +1160,9 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	// Store new refresh token, preserving the original authentication time so a
 	// rotated chain keeps reporting the same auth_time (OIDC Core 1.0 Section 12.2).
 	p.mockIdP.StoreRefreshToken(newRefreshToken, clientID, rt.UserID, scope, rt.AuthTime, time.Now().Add(7*24*time.Hour))
+	// The new access token joins the grant's access tokens, which revoking
+	// the refresh token invalidates (RFC 7009 Section 2.1).
+	p.mockIdP.RecordGrantTokens(accessToken, newRefreshToken, rt)
 
 	response := models.TokenResponse{
 		AccessToken:  accessToken,
@@ -1298,6 +1318,9 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 	// Bind the issued tokens to the redeemed code so that, if the code is ever
 	// replayed, these exact tokens are revoked (RFC 6749 Section 4.1.2).
 	p.mockIdP.RecordIssuedTokens(authCode.Code, accessToken, refreshToken)
+	// Revoking the refresh token also invalidates the access tokens of its
+	// authorization grant (RFC 7009 Section 2.1).
+	p.mockIdP.RecordGrantTokens(accessToken, refreshToken, nil)
 
 	response := &models.TokenResponse{
 		AccessToken:  accessToken,
