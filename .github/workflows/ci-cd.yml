@@ -474,6 +474,9 @@ jobs:
   deploy:
     name: Deploy Main App to Fly.io
     runs-on: ubuntu-latest
+    # The deploy jobs share one concurrency group, so a stalled job holds
+    # every later deploy. Each stops well short of the six-hour runner limit.
+    timeout-minutes: 20
     needs: [docker-build-test, code-security-scan, repository-private-key-scan]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
@@ -524,6 +527,7 @@ jobs:
   deploy-wallet:
     name: Deploy Wallet Harness to Fly.io
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [deploy]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
@@ -760,6 +764,7 @@ jobs:
   deploy-counterparty:
     name: Deploy Conformance Counterparty to Fly.io
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [deploy-wallet]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
@@ -809,6 +814,7 @@ jobs:
   capture-artefacts:
     name: Capture Conformance Artefacts
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [deploy, deploy-wallet, deploy-counterparty]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:

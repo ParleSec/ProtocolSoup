@@ -4,20 +4,21 @@
 FROM ghcr.io/spiffe/spire-agent:1.15.3 AS spire-agent
 FROM ghcr.io/spiffe/spire-server:1.15.3 AS spire-server
 
-# Build backend
-FROM golang:1.27.0-alpine AS backend-builder
+# Build backend. The stage runs on the build platform and cross-compiles for
+# the target platform, so a multi-platform build never runs the Go compiler
+# under emulation.
+FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS backend-builder
 
 ARG SERVICE_CMD=./cmd/server
+ARG TARGETARCH
 
 WORKDIR /app
-
-RUN apk add --no-cache gcc musl-dev
 
 COPY backend/go.mod backend/go.sum ./
 COPY backend/ .
 
 RUN go mod download
-RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o server ${SERVICE_CMD}
 
 # Final image with agent + backend
 FROM alpine:3.24

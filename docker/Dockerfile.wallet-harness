@@ -1,4 +1,7 @@
-FROM node:26-alpine AS wallet-ui-builder
+# Both build stages run on the build platform. The wallet UI is static
+# files and the Go toolchain cross-compiles for the target platform, so a
+# multi-platform build never runs npm or the Go compiler under emulation.
+FROM --platform=$BUILDPLATFORM node:26-alpine AS wallet-ui-builder
 
 WORKDIR /repo
 
@@ -11,7 +14,9 @@ COPY wallet-ui/ ./wallet-ui/
 RUN mkdir -p /repo/backend/cmd/walletharness/static
 RUN cd wallet-ui && npm run build
 
-FROM golang:1.27.0-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS builder
+
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -23,7 +28,7 @@ COPY --from=wallet-ui-builder /repo/backend/cmd/walletharness/static ./cmd/walle
 # Optional cache buster for dirty local deploys of wallet harness sources.
 ARG CACHE_BUST=
 RUN echo "cache_bust=${CACHE_BUST}"
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o wallet-harness ./cmd/walletharness
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o wallet-harness ./cmd/walletharness
 
 FROM alpine:3.24
 

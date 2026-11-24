@@ -1,11 +1,16 @@
-# Build stage: server binary + palette-indexer + deterministic palette.db
-FROM golang:1.27.0-alpine AS builder
+# Build stage: server binary + palette-indexer + deterministic palette.db.
+# It runs on the build platform and cross-compiles the server for the target
+# platform, so a multi-platform build never runs the Go compiler under
+# emulation. The indexer is built for and run on the build platform:
+# palette.db is the same file on every architecture.
+FROM --platform=$BUILDPLATFORM golang:1.27.0-alpine AS builder
 
 ARG SERVICE_CMD=./cmd/server
+ARG TARGETARCH
 
 WORKDIR /app
 
-RUN apk add --no-cache gcc musl-dev file
+RUN apk add --no-cache file
 
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
@@ -13,8 +18,8 @@ RUN go mod download
 COPY backend/ .
 COPY content/ /content/
 
-RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o server ${SERVICE_CMD}
-RUN CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o palette-indexer ./cmd/palette-indexer
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -o server ${SERVICE_CMD}
+RUN CGO_ENABLED=0 go build -o palette-indexer ./cmd/palette-indexer
 RUN ./palette-indexer -content /content -registry /app/internal/conformance/vc-requirements.yaml -out /app/palette.db && \
     test -s /app/palette.db && \
     file /app/palette.db | grep -q SQLite

@@ -32,6 +32,8 @@ jobs:
   build-and-push:
     name: Build and Push ${{ matrix.name }}
     runs-on: ubuntu-latest
+    # A stalled build stops here, not at the six-hour runner limit.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +125,9 @@ jobs:
         run: |
           echo "name=${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}" | tr '[:upper:]' '[:lower:]' >> $GITHUB_OUTPUT
 
+      # The Go and wallet UI build stages cross-compile on the build platform.
+      # QEMU runs the remaining linux/arm64 steps: the runtime stages' package
+      # installs and the frontend image's build.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -190,8 +195,16 @@ jobs:
           category: 'container-${{ matrix.name }}'
         continue-on-error: true
 
-      # Security: Sign image with Cosign (keyless signing via Sigstore)
+      # Security: Sign image with Cosign (keyless signing via Sigstore).
+      # The installer downloads a release binary; a dropped download gets one
+      # more attempt before the job fails.
       - name: Install Cosign
+        id: cosign
+        uses: sigstore/cosign-installer@v3
+        continue-on-error: true
+
+      - name: Install Cosign (second attempt)
+        if: steps.cosign.outcome == 'failure'
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image with Cosign
@@ -201,8 +214,20 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
 
-      # Supply chain: Generate attestation
+      # Supply chain: Generate attestation. This step has failed with "error
+      # fetching tlog entry - (404) Not Found" from the transparency log after
+      # the image was pushed; it gets one more attempt before the job fails.
       - name: Generate artifact attestation
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        continue-on-error: true
+        with:
+          subject-name: ${{ steps.image.outputs.name }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate artifact attestation (second attempt)
+        if: steps.attest.outcome == 'failure'
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ steps.image.outputs.name }}
@@ -213,6 +238,7 @@ jobs:
   publish-summary:
     name: Publish Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: build-and-push
     if: always()
     steps:
