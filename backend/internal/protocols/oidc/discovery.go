@@ -13,6 +13,27 @@ import (
 // the protected resource metadata (RFC 9728) advertises the same list.
 var scopesSupported = []string{"openid", "profile", "email", "address", "phone", "roles", "offline_access"}
 
+// Client authentication metadata that the OpenID Provider configuration and
+// the RFC 8414 authorization server metadata both publish for this issuer.
+var (
+	// clientAssertionSigningAlgs are the algorithms a private_key_jwt client
+	// assertion may be signed with, at the token endpoint and at the
+	// revocation endpoint. RFC 8414 Section 2 on each
+	// *_endpoint_auth_signing_alg_values_supported entry: "This metadata
+	// entry MUST be present if either of these authentication methods are
+	// specified in the" matching *_endpoint_auth_methods_supported entry.
+	clientAssertionSigningAlgs = []string{"RS256", "ES256", "EdDSA"}
+	// revocationEndpointAuthMethods: RFC 8414 Section 2, "If omitted, the
+	// default is "client_secret_basic"". /oauth2/revoke also takes a client
+	// password in the body and a private_key_jwt assertion, and a public
+	// client names itself with client_id (RFC 7009 Section 2.1).
+	revocationEndpointAuthMethods = []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"}
+	// introspectionEndpointAuthMethods: /oauth2/introspect authenticates a
+	// client password only, and "none" is absent because a public client is
+	// not authorized to call it (RFC 7662 Section 2.1).
+	introspectionEndpointAuthMethods = []string{"client_secret_basic", "client_secret_post"}
+)
+
 // handleDiscovery returns the OpenID Connect discovery document
 func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	issuer := p.mockIdP.GetIssuer()
@@ -84,6 +105,12 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	if p.registrationEnabled() {
 		discovery.RegistrationEndpoint = issuer + "/oidc/register"
 	}
+	// The same entries, with the same values, as the RFC 8414 document for
+	// this issuer (handleAuthorizationServerMetadata).
+	discovery.TokenEndpointAuthSigningAlgValuesSupported = clientAssertionSigningAlgs
+	discovery.RevocationEndpointAuthMethodsSupported = revocationEndpointAuthMethods
+	discovery.RevocationEndpointAuthSigningAlgValuesSupported = clientAssertionSigningAlgs
+	discovery.IntrospectionEndpointAuthMethodsSupported = introspectionEndpointAuthMethods
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=3600")

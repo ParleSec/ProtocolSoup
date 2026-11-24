@@ -1,6 +1,8 @@
 package mockidp
 
 import (
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -184,5 +186,232 @@ func TestPeekDeviceAuthorizationByUserCodeDoesNotCountFailure(t *testing.T) {
 	}
 	if _, found := idp.LookupDeviceAuthorizationByUserCode(auth.UserCode, now); !found {
 		t.Fatal("pending user_code should still look up after peek")
+	}
+}
+
+// TestValidateClientComparesTheWholeSecret covers the client password check
+// (RFC 6749 Section 2.3.1): only the exact secret authenticates a
+// confidential client, and a public client is returned as an unauthenticated
+// registration that a caller must refuse wherever authentication is needed.
+func TestValidateClientComparesTheWholeSecret(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	machine, ok := idp.GetClient("machine-client")
+	if !ok || machine.Secret == "" {
+		t.Fatal("the seeded machine-client and its secret are required")
+	}
+
+	if client, err := idp.ValidateClient("machine-client", machine.Secret); err != nil || client.ID != "machine-client" {
+		t.Fatalf("the right secret: client = %v, err = %v", client, err)
+	}
+	for name, secret := range map[string]string{
+		"an empty secret":          "",
+		"a prefix of the secret":   machine.Secret[:len(machine.Secret)-1],
+		"the secret with a suffix": machine.Secret + "x",
+		"another client's secret":  "wrong-secret",
+	} {
+		if _, err := idp.ValidateClient("machine-client", secret); err == nil {
+			t.Fatalf("%s authenticated machine-client", name)
+		}
+	}
+	if _, err := idp.ValidateClient("no-such-client", machine.Secret); err == nil {
+		t.Fatal("an unknown client was validated")
+	}
+
+	public, err := idp.ValidateClient("public-app", "anything")
+	if err != nil || !public.Public {
+		t.Fatalf("public-app: client = %v, err = %v, want the public registration", public, err)
+	}
+
+	alice, ok := idp.GetUserByEmail("alice@example.com")
+	if !ok || alice.Password == "" {
+		t.Fatal("the seeded End-User alice and her password are required")
+	}
+	if _, err := idp.ValidateCredentials(alice.Email, alice.Password); err != nil {
+		t.Fatalf("the right End-User password: %v", err)
+	}
+	if _, err := idp.ValidateCredentials(alice.Email, alice.Password[:len(alice.Password)-1]); err == nil {
+		t.Fatal("a prefix of the End-User password was accepted")
+	}
+}
+
+// TestRevokeRefreshTokenInvalidatesTheGrantsAccessTokens covers RFC 7009
+// Section 2.1: "If the particular token is a refresh token and the
+// authorization server supports the revocation of access tokens, then the
+// authorization server SHOULD also invalidate all access tokens based on the
+// same authorization grant". The grant's access tokens follow the refresh
+// token through rotation, and another grant's tokens are untouched.
+func TestRevokeRefreshTokenInvalidatesTheGrantsAccessTokens(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	mint := func(lifetime time.Duration) (token, jti string) {
+		t.Helper()
+		token, err := idp.JWTService().CreateAccessToken(crypto.AccessToken{
+			Issuer: "https://as.example", Subject: "alice", Audience: "https://rs.example",
+			ClientID: "public-app", Scope: "profile", Lifetime: lifetime,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims, err := idp.JWTService().ValidateToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jti, _ = claims["jti"].(string)
+		if jti == "" {
+			t.Fatal("the access token has no jti")
+		}
+		return token, jti
+	}
+	store := func(refreshToken string) {
+		idp.StoreRefreshToken(refreshToken, "public-app", "alice", "profile", time.Now(), time.Now().Add(time.Hour))
+	}
+
+	// One grant: a first access token, then a rotation with a second one.
+	store("refresh-1")
+	first, firstJTI := mint(time.Hour)
+	idp.RecordGrantTokens(first, "refresh-1", nil)
+	rotatedOut, err := idp.ValidateRefreshToken("refresh-1", "public-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store("refresh-2")
+	second, secondJTI := mint(time.Hour)
+	idp.RecordGrantTokens(second, "refresh-2", rotatedOut)
+	// An access token of the grant that expires before the revocation.
+	shortLived, _ := mint(time.Second)
+	idp.RecordGrantTokens(shortLived, "refresh-2", nil)
+	// Another grant of the same client and user.
+	store("refresh-other")
+	other, _ := mint(time.Hour)
+	idp.RecordGrantTokens(other, "refresh-other", nil)
+
+	time.Sleep(1100 * time.Millisecond)
+	invalidated := idp.RevokeRefreshToken("refresh-2")
+	if want := []string{firstJTI, secondJTI}; !reflect.DeepEqual(invalidated, want) {
+		t.Fatalf("invalidated = %q, want the grant's two unexpired access tokens %q", invalidated, want)
+	}
+	if !idp.IsTokenRevoked(first) || !idp.IsTokenRevoked(second) {
+		t.Fatal("an access token of the revoked grant is still usable")
+	}
+	if _, live := idp.GetRefreshToken("refresh-2"); live {
+		t.Fatal("the refresh token is still usable")
+	}
+	if idp.IsTokenRevoked(other) {
+		t.Fatal("an access token of another grant was revoked")
+	}
+	if _, live := idp.GetRefreshToken("refresh-other"); !live {
+		t.Fatal("the refresh token of another grant was revoked")
+	}
+	for _, gone := range []string{"refresh-2", "refresh-1", "never-issued"} {
+		if again := idp.RevokeRefreshToken(gone); again != nil {
+			t.Fatalf("revoking %s, which is not a live refresh token, invalidated %q", gone, again)
+		}
+	}
+}
+
+// TestAuthorizationCodeReplayRevokesRefreshedTokens covers RFC 6749 Section
+// 4.1.2: "If an authorization code is used more than once, the authorization
+// server MUST deny the request and SHOULD revoke (when possible) all tokens
+// previously issued based on that authorization code." The tokens obtained by
+// refreshing are based on that code too, and the replay is still recognised
+// after usedCodeRetention while the grant has a live refresh token.
+func TestAuthorizationCodeReplayRevokesRefreshedTokens(t *testing.T) {
+	keySet, err := crypto.NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp := NewMockIdP(keySet)
+	mint := func() (token, jti string) {
+		t.Helper()
+		token, err := idp.JWTService().CreateAccessToken(crypto.AccessToken{
+			Issuer: "https://as.example", Subject: "alice", Audience: "https://rs.example",
+			ClientID: "public-app", Scope: "profile", Lifetime: time.Hour,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims, err := idp.JWTService().ValidateToken(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jti, _ = claims["jti"].(string)
+		return token, jti
+	}
+	const redirectURI = "http://localhost:3000/callback"
+	redeem := func(refreshToken string) (code, accessToken, jti string) {
+		t.Helper()
+		authCode, err := idp.CreateAuthorizationCode("public-app", "alice", redirectURI, "profile", "", "", "", "", "", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := idp.ValidateAuthorizationCode(authCode.Code, "public-app", redirectURI, ""); err != nil {
+			t.Fatal(err)
+		}
+		accessToken, jti = mint()
+		idp.StoreRefreshToken(refreshToken, "public-app", "alice", "profile", time.Now(), time.Now().Add(time.Hour))
+		idp.RecordIssuedTokens(authCode.Code, accessToken, refreshToken)
+		idp.RecordGrantTokens(accessToken, refreshToken, nil)
+		return authCode.Code, accessToken, jti
+	}
+
+	// One grant, refreshed once; another grant from another code.
+	code, first, firstJTI := redeem("refresh-1")
+	rotatedOut, err := idp.ValidateRefreshToken("refresh-1", "public-app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idp.StoreRefreshToken("refresh-2", "public-app", "alice", "profile", time.Now(), time.Now().Add(time.Hour))
+	second, secondJTI := mint()
+	idp.RecordGrantTokens(second, "refresh-2", rotatedOut)
+	_, other, _ := redeem("refresh-other")
+
+	// The record outlives usedCodeRetention because the grant can still be
+	// refreshed; a code whose grant has no refresh token left is forgotten.
+	idp.mu.Lock()
+	idp.usedCodes[code].usedAt = time.Now().Add(-2 * usedCodeRetention)
+	idp.usedCodes["spent-long-ago"] = &usedAuthorizationCode{usedAt: time.Now().Add(-2 * usedCodeRetention)}
+	idp.mu.Unlock()
+
+	_, err = idp.ValidateAuthorizationCode(code, "public-app", redirectURI, "")
+	var replay *AuthorizationCodeReplay
+	if !errors.As(err, &replay) {
+		t.Fatalf("replay error = %v, want an AuthorizationCodeReplay", err)
+	}
+	if err.Error() != "authorization code already used" {
+		t.Fatalf("replay error = %q", err.Error())
+	}
+	if want := []string{firstJTI, secondJTI}; !reflect.DeepEqual(replay.AccessTokenJTIs, want) || replay.RefreshTokens != 1 {
+		t.Fatalf("replay revoked access tokens %q and %d refresh tokens, want %q and 1", replay.AccessTokenJTIs, replay.RefreshTokens, want)
+	}
+	if !idp.IsTokenRevoked(first) || !idp.IsTokenRevoked(second) {
+		t.Fatal("an access token issued from the replayed code is still usable")
+	}
+	if _, live := idp.GetRefreshToken("refresh-2"); live {
+		t.Fatal("the rotated refresh token of the replayed code is still usable")
+	}
+	if idp.IsTokenRevoked(other) {
+		t.Fatal("an access token of another code was revoked")
+	}
+	if _, live := idp.GetRefreshToken("refresh-other"); !live {
+		t.Fatal("the refresh token of another code was revoked")
+	}
+	idp.mu.RLock()
+	_, kept := idp.usedCodes["spent-long-ago"]
+	idp.mu.RUnlock()
+	if kept {
+		t.Fatal("a code with no refresh token left was remembered past usedCodeRetention")
+	}
+
+	// A second replay is still denied. Nothing is left to revoke, so the old
+	// record is no longer kept and the code is simply unknown.
+	if _, err = idp.ValidateAuthorizationCode(code, "public-app", redirectURI, ""); err == nil {
+		t.Fatal("a second replay of the code was accepted")
 	}
 }

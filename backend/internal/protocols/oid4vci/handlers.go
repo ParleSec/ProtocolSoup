@@ -1230,6 +1230,9 @@ func (p *Plugin) handleAuthorizationCodeTokenGrant(w http.ResponseWriter, r *htt
 		p.mockIDP.BindRefreshTokenClientInstanceKey(refreshToken, attestation.InstanceJKT)
 	}
 	p.mockIDP.RecordIssuedTokens(authCode.Code, accessToken, refreshToken)
+	// Revoking the refresh token also invalidates the access tokens of its
+	// authorization grant (RFC 7009 Section 2.1).
+	p.mockIDP.RecordGrantTokens(accessToken, refreshToken, nil)
 
 	nonce := models.VCNonce{
 		Value:     p.randomValue(24),
@@ -1420,6 +1423,9 @@ func (p *Plugin) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 		writeServerError(w, "issue access token", err)
 		return
 	}
+	// The refresh token is not rotated, so the new access token joins the
+	// ones revoking it invalidates (RFC 7009 Section 2.1).
+	p.mockIDP.RecordGrantTokens(accessToken, refreshToken, nil)
 
 	nonce := models.VCNonce{
 		Value:     p.randomValue(24),

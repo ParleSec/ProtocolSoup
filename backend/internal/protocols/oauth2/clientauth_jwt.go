@@ -842,8 +842,17 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"token_endpoint_auth_methods_supported":            []string{"client_secret_basic", "client_secret_post", "private_key_jwt"},
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "ES256", "EdDSA"},
 		"revocation_endpoint":                              issuer + "/revoke",
+		"revocation_endpoint_auth_methods_supported":       []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
 		"introspection_endpoint":                           issuer + "/introspect",
-		"code_challenge_methods_supported":                 []string{"S256"},
+		// RFC 8414 Section 2. The introspection endpoint authenticates a
+		// client password only, and "none" is absent: a public client is
+		// not authorized to call it (RFC 7662 Section 2.1).
+		"introspection_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post"},
+		"code_challenge_methods_supported":              []string{"S256"},
+		// RFC 8414 Section 2: "This metadata entry MUST be present if either
+		// of these authentication methods are specified in the
+		// "revocation_endpoint_auth_methods_supported" entry."
+		"revocation_endpoint_auth_signing_alg_values_supported": []string{"RS256", "ES256", "EdDSA"},
 		// RFC 9207 Section 3 / FAPI 2.0 SP §5.3.2.2: advertise and return iss
 		// on authorization responses.
 		"authorization_response_iss_parameter_supported": true,

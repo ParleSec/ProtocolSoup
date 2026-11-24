@@ -165,6 +165,22 @@ type RefreshToken struct {
 	// token was issued (draft-ietf-oauth-attestation-based-client-auth
 	// §9.3 / §10.3). Empty when the token was not issued under attestation.
 	ClientInstanceJKT string `json:"client_instance_jkt,omitempty"`
+	// AccessTokens are the unexpired access tokens issued under the same
+	// authorization grant as this refresh token, carried across rotation.
+	// Revoking the refresh token invalidates them (RFC 7009 Section 2.1).
+	AccessTokens []GrantAccessToken `json:"-"`
+	// AuthorizationCode is the authorization code this refresh token's
+	// grant was issued from, carried across rotation, so that a replay of
+	// the code revokes the token (RFC 6749 Section 4.1.2). Empty for a
+	// grant that did not start from an authorization code.
+	AuthorizationCode string `json:"-"`
+}
+
+// GrantAccessToken identifies an access token issued under an authorization
+// grant, by the jti its revocation is tracked with.
+type GrantAccessToken struct {
+	JTI       string
+	ExpiresAt time.Time
 }
 
 // IntrospectionResponse represents token introspection response
@@ -241,6 +257,19 @@ type DiscoveryDocument struct {
 	ClaimsSupported                        []string `json:"claims_supported,omitempty"`
 	ACRValuesSupported                     []string `json:"acr_values_supported,omitempty"`
 	CodeChallengeMethodsSupported          []string `json:"code_challenge_methods_supported,omitempty"`
+	// token_endpoint_auth_signing_alg_values_supported is OPTIONAL in OpenID
+	// Connect Discovery 1.0 Section 3: the "JWS signing algorithms (alg
+	// values) supported by the Token Endpoint for the signature on the JWT
+	// used to authenticate the Client at the Token Endpoint for the
+	// private_key_jwt and client_secret_jwt authentication methods."
+	TokenEndpointAuthSigningAlgValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
+	// Client authentication at the revocation and introspection endpoints,
+	// as RFC 8414 Section 2 defines the entries. OpenID Connect Discovery 1.0
+	// Section 3: "Additional OpenID Provider Metadata parameters MAY also be
+	// used. Some are defined by other specifications".
+	RevocationEndpointAuthMethodsSupported          []string `json:"revocation_endpoint_auth_methods_supported,omitempty"`
+	RevocationEndpointAuthSigningAlgValuesSupported []string `json:"revocation_endpoint_auth_signing_alg_values_supported,omitempty"`
+	IntrospectionEndpointAuthMethodsSupported       []string `json:"introspection_endpoint_auth_methods_supported,omitempty"`
 	// request_parameter_supported defaults to false and request_uri_parameter_supported
 	// defaults to true (OpenID Connect Discovery 1.0 Section 3). Both are emitted
 	// explicitly (no omitempty) so the false values are advertised accurately.

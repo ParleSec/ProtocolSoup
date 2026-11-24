@@ -310,3 +310,85 @@ func TestAudienceContains(t *testing.T) {
 		t.Error("an empty expected audience matched")
 	}
 }
+
+// TestIssuedAccessTokenKnowsHowATokenWasMinted checks that an access token is
+// recognised from how it was minted and never from what a JWT lacks. An RFC
+// 9068 token declares itself (Section 2.1: "JWT access tokens MUST include
+// this media type in the "typ" header parameter to explicitly declare that
+// the JWT represents an access token complying with this profile"). An
+// unprofiled one has "typ": "JWT" like an ID Token, so the service knows it
+// by the jti it recorded. Any other JWT of the key set is not an access
+// token, and a JWT of another key set is not a valid token at all.
+func TestIssuedAccessTokenKnowsHowATokenWasMinted(t *testing.T) {
+	keySet, err := NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewJWTService(keySet, "https://as.example")
+	accessToken := AccessToken{Subject: "alice", Audience: "https://rs.example", ClientID: "client-1", Scope: "api:read", Lifetime: time.Hour}
+	must := func(token string, err error) string {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	profiled := must(service.CreateAccessToken(accessToken))
+	unprofiled := must(service.CreateUnprofiledAccessToken(accessToken))
+	anonymous := accessToken
+	anonymous.ClientID = ""
+	unprofiledAnonymous := must(service.CreateUnprofiledAccessToken(anonymous))
+	idToken := must(service.CreateIDToken("alice", "client-1", "", time.Now(), time.Hour, nil))
+	refreshToken := must(service.CreateRefreshToken("alice", "client-1", "api:read", time.Hour))
+	userInfo := must(service.SignClaimsRS256(map[string]interface{}{"sub": "alice"}))
+	// The claims of an access token, signed with the same key, by something
+	// other than the access token minting.
+	lookalike := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": "https://as.example", "sub": "alice", "aud": "https://rs.example", "client_id": "client-1", "scope": "api:read",
+		"exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(), "nbf": time.Now().Unix(), "jti": "jti-lookalike",
+	})
+	lookalikeToken := must(lookalike.SignedString(keySet.RSAPrivateKey()))
+
+	for name, token := range map[string]struct {
+		value         string
+		isAccessToken bool
+		clientID      interface{}
+	}{
+		"an RFC 9068 access token":                     {profiled, true, "client-1"},
+		"an unprofiled access token":                   {unprofiled, true, "client-1"},
+		"an unprofiled access token with no client_id": {unprofiledAnonymous, true, nil},
+		"an ID Token":                                  {idToken, false, nil},
+		"a refresh token":                              {refreshToken, false, "client-1"},
+		"a signed UserInfo response":                   {userInfo, false, nil},
+		"a JWT with the claims of an access token":     {lookalikeToken, false, "client-1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			claims, isAccessToken, err := service.IssuedAccessToken(token.value)
+			if err != nil {
+				t.Fatalf("a valid JWT of the key set was refused: %v", err)
+			}
+			if isAccessToken != token.isAccessToken {
+				t.Fatalf("isAccessToken = %v, want %v", isAccessToken, token.isAccessToken)
+			}
+			if claims["client_id"] != token.clientID {
+				t.Fatalf("client_id = %v, want %v", claims["client_id"], token.clientID)
+			}
+		})
+	}
+
+	// Another service on the same key set did not mint the unprofiled token,
+	// and another key set did not sign any of them.
+	if _, isAccessToken, err := NewJWTService(keySet, "https://as.example").IssuedAccessToken(unprofiled); err != nil || isAccessToken {
+		t.Fatalf("a service that did not mint the unprofiled token: isAccessToken = %v, err = %v", isAccessToken, err)
+	}
+	otherKeySet, err := NewKeySet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := NewJWTService(otherKeySet, "https://as.example").IssuedAccessToken(profiled); err == nil {
+		t.Fatal("a JWT of another key set was accepted")
+	}
+	if _, _, err := service.IssuedAccessToken("not-a-jwt"); err == nil {
+		t.Fatal("a string that is no JWT was accepted")
+	}
+}

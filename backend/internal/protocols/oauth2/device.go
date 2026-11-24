@@ -295,7 +295,7 @@ func (p *Plugin) handleDeviceCodeGrant(w http.ResponseWriter, r *http.Request, s
 		return
 	}
 	bindRefresh := client.Public
-	tokenResponse, err := p.issueTokens(auth.UserID, client.ID, auth.Scope, audience, dpopJKT, bindRefresh)
+	tokenResponse, err := p.issueTokens(auth.UserID, client.ID, auth.Scope, audience, dpopJKT, bindRefresh, nil)
 	if err != nil {
 		writeOAuth2ErrorStatus(w, http.StatusInternalServerError, "server_error", "Failed to issue tokens", "")
 		return
@@ -572,7 +572,7 @@ func (p *Plugin) authenticateDeviceClient(
 	contextName string,
 ) (*models.Client, string, bool) {
 	if r.Form.Has("client_assertion_type") || r.Form.Has("client_assertion") {
-		p.rejectClientAssertionForUnsupportedGrant(w, sessionID, contextName)
+		p.rejectClientAssertionForUnsupportedGrant(w, r, sessionID, contextName)
 		return nil, "", false
 	}
 
@@ -595,13 +595,13 @@ func (p *Plugin) authenticateDeviceClient(
 	}
 
 	if clientID == "" {
-		writeOAuth2Error(w, "invalid_client", "client_id is required", "")
+		writeInvalidClient(w, r, "client_id is required")
 		return nil, "", false
 	}
 
 	client, exists := p.mockIdP.GetClient(clientID)
 	if !exists {
-		writeOAuth2Error(w, "invalid_client", "Unknown client", "")
+		writeInvalidClient(w, r, "Unknown client")
 		return nil, "", false
 	}
 
@@ -613,12 +613,7 @@ func (p *Plugin) authenticateDeviceClient(
 				"error":              "invalid_client",
 				"client_auth_method": clientAuthMethod,
 			})
-			if hasBasic {
-				w.Header().Set("WWW-Authenticate", `Basic realm="oauth2"`)
-				writeOAuth2ErrorStatus(w, http.StatusUnauthorized, "invalid_client", "Client authentication failed", "")
-			} else {
-				writeOAuth2Error(w, "invalid_client", "Client authentication failed", "")
-			}
+			writeInvalidClient(w, r, "Client authentication failed")
 			return nil, "", false
 		}
 		client = authenticated

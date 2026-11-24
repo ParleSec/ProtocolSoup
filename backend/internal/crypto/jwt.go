@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -22,13 +23,21 @@ import (
 type JWTService struct {
 	keySet *KeySet
 	issuer string
+
+	// unprofiledAccessTokens holds the jti and expiry of each live access
+	// token CreateUnprofiledAccessToken minted. Such a token declares no type
+	// (its "typ" is "JWT", like an ID Token's), so this record is the only
+	// thing that tells it from the other JWTs the key set signs.
+	unprofiledMu           sync.Mutex
+	unprofiledAccessTokens map[string]time.Time
 }
 
 // NewJWTService creates a new JWT service
 func NewJWTService(keySet *KeySet, issuer string) *JWTService {
 	return &JWTService{
-		keySet: keySet,
-		issuer: issuer,
+		keySet:                 keySet,
+		issuer:                 issuer,
+		unprofiledAccessTokens: make(map[string]time.Time),
 	}
 }
 
@@ -95,7 +104,8 @@ func (s *JWTService) CreateAccessToken(token AccessToken) (string, error) {
 	if token.ClientID == "" {
 		return "", errors.New("an RFC 9068 access token requires the client_id claim (Section 2.2)")
 	}
-	return s.signAccessToken(token, AccessTokenType)
+	signed, _, _, err := s.signAccessToken(token, AccessTokenType)
+	return signed, err
 }
 
 // CreateUnprofiledAccessToken signs a JWT access token that does not claim
@@ -105,15 +115,62 @@ func (s *JWTService) CreateAccessToken(token AccessToken) (string, error) {
 // without a client_id (pre-authorized_grant_anonymous_access_supported,
 // OID4VCI 1.0 Section 12.3). client_id is carried when the request had one.
 func (s *JWTService) CreateUnprofiledAccessToken(token AccessToken) (string, error) {
-	return s.signAccessToken(token, "JWT")
+	signed, jti, expiresAt, err := s.signAccessToken(token, "JWT")
+	if err != nil {
+		return "", err
+	}
+
+	s.unprofiledMu.Lock()
+	defer s.unprofiledMu.Unlock()
+	now := time.Now()
+	for recorded, expiry := range s.unprofiledAccessTokens {
+		if !expiry.After(now) {
+			delete(s.unprofiledAccessTokens, recorded)
+		}
+	}
+	s.unprofiledAccessTokens[jti] = expiresAt
+	return signed, nil
 }
 
-func (s *JWTService) signAccessToken(token AccessToken, typ string) (string, error) {
+// IssuedAccessToken verifies tokenString against this service's key set and
+// its time claims, and reports whether it is an access token this service
+// minted. An RFC 9068 access token says so itself: Section 2.1, "JWT access
+// tokens MUST include this media type in the "typ" header parameter to
+// explicitly declare that the JWT represents an access token complying with
+// this profile." An unprofiled access token declares nothing, so it is one
+// only when CreateUnprofiledAccessToken recorded its jti. Every other JWT the
+// key set signed (an ID Token, a signed UserInfo response, a JWT another
+// component signed with the same key) is not an access token of this service.
+//
+// The error is non-nil when tokenString is not a currently valid JWT of this
+// key set at all.
+func (s *JWTService) IssuedAccessToken(tokenString string) (claims jwt.MapClaims, isAccessToken bool, err error) {
+	token, err := s.parse(tokenString)
+	if err != nil {
+		return nil, false, err
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, false, errors.New("invalid claims format")
+	}
+
+	typ, _ := token.Header["typ"].(string)
+	if strings.EqualFold(typ, AccessTokenType) || strings.EqualFold(typ, "application/"+AccessTokenType) {
+		return claims, true, nil
+	}
+	jti, _ := claims["jti"].(string)
+	s.unprofiledMu.Lock()
+	defer s.unprofiledMu.Unlock()
+	_, recorded := s.unprofiledAccessTokens[jti]
+	return claims, recorded, nil
+}
+
+func (s *JWTService) signAccessToken(token AccessToken, typ string) (signedToken, jti string, expiresAt time.Time, err error) {
 	if token.Subject == "" {
-		return "", errors.New("an access token requires the sub claim")
+		return "", "", time.Time{}, errors.New("an access token requires the sub claim")
 	}
 	if token.Audience == "" {
-		return "", errors.New("an access token requires the aud claim: the protected resource it is for")
+		return "", "", time.Time{}, errors.New("an access token requires the aud claim: the protected resource it is for")
 	}
 	issuer := token.Issuer
 	if issuer == "" {
@@ -125,14 +182,16 @@ func (s *JWTService) signAccessToken(token AccessToken, typ string) (string, err
 	for k, v := range token.Claims {
 		claims[k] = v
 	}
+	jti = generateKeyID("jti")
+	expiresAt = time.Unix(now.Add(token.Lifetime).Unix(), 0)
 	claims["iss"] = issuer
 	claims["sub"] = token.Subject
 	claims["aud"] = token.Audience
-	claims["exp"] = now.Add(token.Lifetime).Unix()
+	claims["exp"] = expiresAt.Unix()
 	claims["iat"] = now.Unix()
 	claims["nbf"] = now.Unix()
 	claims["scope"] = token.Scope
-	claims["jti"] = generateKeyID("jti")
+	claims["jti"] = jti
 	if token.ClientID != "" {
 		claims["client_id"] = token.ClientID
 	}
@@ -141,7 +200,8 @@ func (s *JWTService) signAccessToken(token AccessToken, typ string) (string, err
 	signed.Header["typ"] = typ
 	signed.Header["kid"] = s.keySet.RSAKeyID()
 
-	return signed.SignedString(s.keySet.RSAPrivateKey())
+	signedToken, err = signed.SignedString(s.keySet.RSAPrivateKey())
+	return signedToken, jti, expiresAt, err
 }
 
 // IDTokenOptions contains optional parameters for ID token creation per OIDC Core 1.0
