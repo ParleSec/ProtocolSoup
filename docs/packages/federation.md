@@ -68,9 +68,9 @@
 - `GET|POST /oauth2/device` (RFC 8628 verification URI)
 - `POST /oauth2/token`
 - `GET /.well-known/oauth-authorization-server/oauth2`
-- `POST /oauth2/introspect` (RFC 7662; the caller authenticates as a registered client and is told a token is active only when it is the token's `client_id` or a resource server its `aud` names)
+- `POST /oauth2/introspect` (RFC 7662; the caller authenticates with a client password, a public client is refused with `invalid_client`, and an authenticated caller is told a token is active only when it is the token's `client_id` or a resource server its `aud` names)
 - `GET /oauth2/resource` (protected resource; RFC 9068 §4 validation)
-- `POST /oauth2/revoke`
+- `POST /oauth2/revoke` (RFC 7009; revokes a token only for the client it was issued to, answers 200 for an invalid token, refuses any other client with `invalid_grant`, and refuses a JWT that is neither a refresh token nor an access token with `unsupported_token_type`)
 - `GET /oauth2/demo/users`
 - `GET /oauth2/demo/clients`
 - `POST /oauth2/demo/clients/machine-client-pkjwt/jwks`

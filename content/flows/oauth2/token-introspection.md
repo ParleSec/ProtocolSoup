@@ -33,7 +33,12 @@ aliases:
 Token introspection (RFC 7662) lets a protected resource ask the
 authorization server whether a presented token is active, who it was issued
 to, what scopes it carries, and when it expires. It is the canonical way to
-validate opaque access tokens that cannot be self-validated. For a
+validate opaque access tokens that cannot be self-validated. The endpoint
+requires authorization (RFC 7662 §2.1): the caller authenticates with a
+client password, and a public client, which has none, is refused with
+`invalid_client`. The authorization server answers `active: true` only to the
+client the token was issued to or a resource server its `aud` names (RFC 7662
+§4). For a
 DPoP-bound token (RFC 9449 §6.2), the response also carries a top-level
 `cnf.jkt` confirmation and `token_type: DPoP`, since the authorization
 server does not itself check a DPoP proof at this endpoint -- the resource

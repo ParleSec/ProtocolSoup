@@ -219,12 +219,64 @@ another resource is therefore refused.
   (RFC 9068 §4), so a token issued for another resource, such as an SSF
   stream-management token, is refused there.
 - Introspection response: `active`, `token_type`, `scope`, and `aud` and
-  `client_id` reported separately (RFC 7662 §2.2). The caller authenticates as
-  a registered client. It is told a token is active only when it is the client
-  the token was issued to, or a resource server the token's `aud` names (RFC
-  7662 §4). Any other caller receives `{"active": false}` and nothing else.
-  The token being introspected is not accepted as the caller's own credential.
-- Revocation: subsequent introspection returns `active: false`
+  `client_id` reported separately (RFC 7662 §2.2).
+- Introspection caller: the endpoint requires authorization (RFC 7662 §2.1),
+  which this server takes as client authentication with a client password,
+  over HTTP Basic or as `client_id` and `client_secret` in the body. The
+  authorization server metadata lists both under
+  `introspection_endpoint_auth_methods_supported`. A public client such as
+  `public-app` has no credential, so a request that only names its `client_id`
+  is refused with `invalid_client` (RFC 6749 §2.3). An authenticated caller is
+  told a token is active only when it is the client the token was issued to,
+  or a resource server the token's `aud` names (RFC 7662 §4). Any other caller
+  receives `{"active": false}` and nothing else. The token being introspected
+  is not accepted as the caller's own credential. Looking Glass runs the flow
+  as `machine-client` over HTTP Basic, so it reports a Client Credentials
+  token as active and a token issued to `public-app` as not active.
+- Failed client authentication: `invalid_client`. At `/oauth2/token`,
+  `/oauth2/revoke` and `/oauth2/device/authorize` the status is `401` with
+  `WWW-Authenticate: Basic realm="oauth2"` when the client used the
+  `Authorization` header, and `400` when the credentials were in the body (RFC
+  6749 §5.2). `/oauth2/introspect` answers `401` for any invalid client
+  credentials (RFC 7662 §2.3), and `400` only for a request with no
+  credentials and no `Authorization` header. A client that used another
+  scheme than Basic gets a second `WWW-Authenticate` field after the Basic
+  one, "matching the authentication scheme used by the client" (RFC 6749
+  §5.2): `Bearer realm="oauth2"` for Bearer, and the scheme name alone for
+  any other scheme that is an RFC 9110 token. Only `/oauth2/introspect` adds
+  `error="invalid_token"` to the Bearer challenge (RFC 7662 §2.3, RFC 6750
+  §3).
+- Revocation: the server revokes a token only for the client it was issued
+  to (RFC 7009 §2.1). A confidential client authenticates with its client
+  password, or with a `private_key_jwt` assertion when it registered a key
+  (RFC 7523 §2.2; `aud` is the issuer identifier or the token endpoint URL,
+  and an unusable replay store answers `503` without revoking); a public
+  client such as `public-app` sends `client_id`. The
+  response is `200` when the token was revoked and when the submitted value
+  is not a live token (RFC 7009 §2.2). A token issued to another client is
+  refused with `400` `invalid_grant` and stays valid. RFC 7009 names no code
+  for that refusal and takes the error from RFC 6749 §5.2, where
+  `invalid_grant` covers a refresh token that "was issued to another client";
+  no §5.2 code covers an access token by its words, so the same code is used
+  for it, and for an access token issued to no identified client. A valid JWT
+  of this server that is neither a refresh token nor an access token, such
+  as an ID Token, is refused with `400` `unsupported_token_type` (RFC 7009
+  §2.2.1). Revoking a refresh
+  token also revokes the unexpired access tokens of the same authorization
+  grant, through every rotation (RFC 7009 §2.1), and Looking Glass lists
+  their `jti` values; revoking an access token leaves its refresh token
+  valid. The authorization
+  server metadata lists the accepted methods under
+  `revocation_endpoint_auth_methods_supported`. After a `200`, introspection
+  returns `active: false`. In Looking Glass, **Revoke as** selects the client
+  that makes the request (`public-app`, `machine-client`, or the
+  `private_key_jwt` client the page registered) and follows the client that
+  obtained the captured token.
+- Authorization code replay: a code presented a second time is refused with
+  `invalid_grant`, and the tokens issued from it are revoked, including the
+  access and refresh tokens obtained since by refreshing (RFC 6749 §4.1.2).
+  The `Authorization Code Replayed: Tokens Revoked` event lists the revoked
+  access token `jti` values.
 - Device code: polling interval, `authorization_pending` vs `slow_down`
 - private_key_jwt: assertion claims, signature algorithm/key binding, and the
   replay-protection event

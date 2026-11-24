@@ -405,7 +405,11 @@ The OpenID Provider Configuration is available at `/.well-known/openid-configura
   "grant_types_supported": ["authorization_code", "implicit", "refresh_token", "client_credentials"],
   "subject_types_supported": ["public", "pairwise"],
   "id_token_signing_alg_values_supported": ["RS256", "ES256"],
-  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "none"],
+  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "private_key_jwt", "none"],
+  "token_endpoint_auth_signing_alg_values_supported": ["RS256", "ES256", "EdDSA"],
+  "revocation_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post", "private_key_jwt", "none"],
+  "revocation_endpoint_auth_signing_alg_values_supported": ["RS256", "ES256", "EdDSA"],
+  "introspection_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
   "code_challenge_methods_supported": ["S256", "plain"],
   "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "nonce", "name", "email", "email_verified"]
 }

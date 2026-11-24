@@ -50,6 +50,13 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 
 - ID token claims: `iss`, `sub`, `aud`, `exp`, `iat`, `auth_time`, `nonce`, `at_hash`, `c_hash`, `acr`, `amr`
 - Discovery fields: `issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`
+- Client authentication metadata: `token_endpoint_auth_methods_supported` and
+  `token_endpoint_auth_signing_alg_values_supported` (OIDC Discovery 1.0
+  Section 3), plus the RFC 8414 Section 2 entries for `/oauth2/revoke` and
+  `/oauth2/introspect` (`revocation_endpoint_auth_methods_supported`,
+  `revocation_endpoint_auth_signing_alg_values_supported`,
+  `introspection_endpoint_auth_methods_supported`). The discovery document
+  and `/.well-known/oauth-authorization-server` carry the same values.
 - JWKS: RSA/EC key type, algorithm, and key ID alignment with the token header (`kid`)
 - Access token: `typ` header `at+jwt`, `iss` equal to the discovery `issuer`, `aud` equal to `{issuer}/oidc/userinfo`, and `client_id` naming the Relying Party (RFC 9068 §2)
 - UserInfo: scope-dependent claims, subject consistency with ID token; signed responses include `iss` (OP issuer) and `aud` (RP client ID)
@@ -86,9 +93,12 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
 - Authorization codes are bound to the client they were issued to; a different
   client redeeming a code is rejected with `invalid_grant`.
 - Authorization codes are single-use. Replaying a code is rejected with
-  `invalid_grant` and additionally revokes the access (and refresh) tokens that
-  code already issued; the revoked access token is then rejected at UserInfo with
-  `401 invalid_token` (RFC 6749 Section 4.1.2, RFC 6750 Section 3.1).
+  `invalid_grant` and additionally revokes the access and refresh tokens that
+  code already issued, including the ones obtained since by refreshing; a
+  revoked access token is then rejected at UserInfo with
+  `401 invalid_token` (RFC 6749 Section 4.1.2, RFC 6750 Section 3.1). Looking
+  Glass shows the revoked `jti` values in the
+  `Authorization Code Replayed: Tokens Revoked` event.
 - A token-endpoint client-authentication failure made over HTTP Basic returns
   `401` with a `WWW-Authenticate: Basic` challenge, and token-endpoint errors do
   not carry a Bearer challenge (RFC 6749 Section 5.2).
