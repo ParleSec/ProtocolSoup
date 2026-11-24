@@ -320,11 +320,27 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			"invalid_request", "code_challenge is required for public clients (PKCE, RFC 7636 Section 4.4.1)", responseIss)
 		return
 	}
-	// Reject unsupported code_challenge_method when a challenge is present.
-	if codeChallenge != "" && codeChallengeMethod != "" && codeChallengeMethod != "S256" && codeChallengeMethod != "plain" {
-		p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
-			"invalid_request", "unsupported code_challenge_method (supported: S256, plain) per RFC 7636 Section 4.3", responseIss)
-		return
+	// S256 is the only supported transformation. A code_challenge with any
+	// other code_challenge_method, or with none (which RFC 7636 Section 4.3
+	// defines as plain), is refused with invalid_request (Section 4.4.1).
+	if codeChallenge != "" {
+		if description := mockidp.PKCEMethodError(codeChallengeMethod); description != "" {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported PKCE Transformation", map[string]interface{}{
+				"error":                         "invalid_request",
+				"code_challenge_method":         codeChallengeMethod,
+				"code_challenge_method_present": query.Has("code_challenge_method"),
+				"supported":                     codeChallengeMethodsSupported,
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "PKCE Transformation Not Supported",
+				Description: `"If the server supporting PKCE does not support the requested transformation, the authorization endpoint MUST return the authorization error response with "error" value set to "invalid_request"." This server supports S256 only. A code_challenge with no code_challenge_method requests plain.`,
+				Severity:    "warning",
+				Reference:   "RFC 7636 Section 4.4.1",
+			})
+			p.redirectAuthError(w, r, redirectURI, responseType, responseMode, state,
+				"invalid_request", description, responseIss)
+			return
+		}
 	}
 
 	// Enforce registered response_types for dynamically registered clients
@@ -367,6 +383,30 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		IssuerState:                query.Get("_ps_issuer_state"),
 	}
 
+	// An Authentication Request is granted only the scope values the OP
+	// supports, and offline_access only with consent (OIDC Core 1.0 Sections
+	// 3.1.2.1 and 11). OID4VCI authorization requests share this endpoint and
+	// keep their scope: its values name Credential Configurations.
+	if len(credentialConfigurationIDs) == 0 {
+		requestedScope := scope
+		var ignored []ignoredScope
+		if scope, ignored = grantedScope(scope, prompts, responseType); len(ignored) > 0 {
+			params.Scope = scope
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityInfo, "Scope Values Ignored", map[string]interface{}{
+				"requested_scope": requestedScope,
+				"granted_scope":   scope,
+				"ignored":         ignored,
+				"prompt":          prompt,
+				"response_type":   responseType,
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeExplanation,
+				Title:       "Scope Values Ignored",
+				Description: `"Scope values used that are not understood by an implementation SHOULD be ignored." (Section 3.1.2.1) The Authorization Server "MUST ignore the offline_access request unless the Client is using a response_type value that would result in an Authorization Code being returned", and ignores it too unless the prompt parameter contains consent (Section 11). The Token Response's scope member names what was granted.`,
+				Reference:   "OIDC Core 1.0 Section 3.1.2.1",
+			})
+		}
+	}
+
 	// Interaction decision (OIDC Core 1.0 Section 3.1.2.1).
 	session, hasSession := p.currentAuthSession(r)
 	now := time.Now()
@@ -400,8 +440,13 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// leftover session cookie (or browser password-manager auto-submit on a
 	// password form) must not finish the first visit before the suite's
 	// intentional second visit.
+	//
+	// prompt=consent: "The Authorization Server SHOULD prompt the End-User for
+	// consent before returning information to the Client." The sign-in page
+	// names the client and the requested scopes and can be cancelled, so a
+	// request carrying it is never completed from a session alone.
 	parBacked := params.PARRequestURI != ""
-	if hasSession && !needReauth && maxAgePresent && !parBacked {
+	if hasSession && !needReauth && maxAgePresent && !parBacked && !containsValue(prompts, "consent") {
 		p.issueAuthorizationResponse(w, r, sessionID, params, session.UserID, session.CreatedAt)
 		return
 	}
@@ -1347,13 +1392,22 @@ func (p *Plugin) issueOIDCTokens(authCode *models.AuthorizationCode) (*models.To
 		// authenticated, captured at the authorization endpoint (Section 2).
 		// acr/amr reflect the password authentication performed at the
 		// authorization endpoint (OIDC Core 1.0 Section 2, RFC 8176).
+		//
+		// Claims the client asked for in the ID Token with the claims
+		// parameter are the exception: "id_token OPTIONAL. Requests that the
+		// listed individual Claims be returned in the ID Token." (Section 5.5)
+		// In this flow the ID Token comes from here, so they are added here.
+		var idClaims map[string]interface{}
+		if requested, _ := parseClaimsParameter(authCode.Claims); requested != nil && len(requested.idToken) > 0 {
+			idClaims = p.mockIdP.UserClaimsByNames(authCode.UserID, requested.idToken)
+		}
 		idToken, err := jwtService.CreateIDTokenWithOptions(
 			subject,
 			authCode.ClientID,
 			authCode.Nonce,
 			authCode.AuthTime,
 			time.Hour,
-			nil,
+			idClaims,
 			&crypto.IDTokenOptions{ACR: acrSingleFactorLogin, AMR: amrSingleFactorLogin},
 		)
 		if err != nil {

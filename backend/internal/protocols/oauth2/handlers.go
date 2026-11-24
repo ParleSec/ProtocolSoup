@@ -156,6 +156,28 @@ func (p *Plugin) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// S256 is the only supported transformation. A code_challenge with any
+	// other code_challenge_method, or with none (which RFC 7636 Section 4.3
+	// defines as plain), is refused with invalid_request (Section 4.4.1).
+	if codeChallenge != "" {
+		if description := mockidp.PKCEMethodError(codeChallengeMethod); description != "" {
+			p.emitEvent(sessionID, lookingglass.EventTypeSecurityWarning, "Unsupported PKCE Transformation", map[string]interface{}{
+				"error":                         "invalid_request",
+				"code_challenge_method":         codeChallengeMethod,
+				"code_challenge_method_present": query.Has("code_challenge_method"),
+				"supported":                     []string{mockidp.PKCEMethodS256},
+			}, lookingglass.Annotation{
+				Type:        lookingglass.AnnotationTypeSecurityHint,
+				Title:       "PKCE Transformation Not Supported",
+				Description: `"If the server supporting PKCE does not support the requested transformation, the authorization endpoint MUST return the authorization error response with "error" value set to "invalid_request"." This server supports S256 only. A code_challenge with no code_challenge_method requests plain.`,
+				Severity:    "warning",
+				Reference:   "RFC 7636 Section 4.4.1",
+			})
+			p.redirectAuthorizeQueryError(w, r, redirectURI, state, "invalid_request", description)
+			return
+		}
+	}
+
 	loginRequestID := p.storeLoginRequest(loginRequestInfo{
 		ClientID:            clientID,
 		RedirectURI:         redirectURI,

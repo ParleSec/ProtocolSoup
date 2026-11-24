@@ -277,6 +277,31 @@ func ValidatePKCEChallenge(challenge, method string) error {
 	return nil
 }
 
+// PKCEMethodS256 is the one code challenge method the authorization servers
+// support. RFC 7636 Section 4.2 makes it Mandatory To Implement on the
+// server, and RFC 9700 Section 2.1.1 says of methods that do not expose the
+// verifier in the authorization request: "Currently, S256 is the only such
+// method."
+const PKCEMethodS256 = "S256"
+
+// PKCEMethodError says why an authorization request's code_challenge_method
+// is refused, and returns "" for S256. RFC 7636 Section 4.3 says the
+// parameter "defaults to "plain" if not present in the request", so a
+// code_challenge sent without it asks for plain. Section 4.4.1: "If the
+// server supporting PKCE does not support the requested transformation, the
+// authorization endpoint MUST return the authorization error response with
+// "error" value set to "invalid_request"."
+func PKCEMethodError(method string) string {
+	switch method {
+	case PKCEMethodS256:
+		return ""
+	case "":
+		return "code_challenge_method is absent, which requests the plain transformation (RFC 7636 Section 4.3); this server supports S256 only"
+	default:
+		return "the requested code_challenge_method is not supported; this server supports S256 only (RFC 7636 Section 4.4.1)"
+	}
+}
+
 // ValidatePKCEWithError validates PKCE and returns detailed error for RFC compliance
 func ValidatePKCEWithError(verifier, challenge, method string) error {
 	if verifier == "" {
@@ -292,20 +317,17 @@ func ValidatePKCEWithError(verifier, challenge, method string) error {
 		return err
 	}
 
-	var computed string
-	switch method {
-	case "S256", "":
-		hash := sha256.Sum256([]byte(verifier))
-		computed = base64.RawURLEncoding.EncodeToString(hash[:])
-	case "plain":
-		computed = verifier
-	default:
+	// The authorization endpoints refuse every method but S256, so a code
+	// bound to another method was never issued.
+	if method != PKCEMethodS256 {
 		return &PKCEError{
 			Code:        "invalid_request",
-			Description: "unsupported code_challenge_method (only S256 and plain are supported per RFC 7636)",
-			RFCSection:  "RFC 7636 Section 4.2",
+			Description: PKCEMethodError(method),
+			RFCSection:  "RFC 7636 Section 4.4.1",
 		}
 	}
+	hash := sha256.Sum256([]byte(verifier))
+	computed := base64.RawURLEncoding.EncodeToString(hash[:])
 
 	if computed != challenge {
 		return &PKCEError{

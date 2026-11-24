@@ -46,8 +46,9 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// Every value here mirrors what the OpenID Provider configuration reports
-	// for the same issuer, because it describes the same server.
+	// Every value here is the one the OpenID Provider configuration reports
+	// for the same issuer (discovery.go), because it describes the same
+	// server.
 	metadata := map[string]interface{}{
 		"issuer":                                issuer,
 		"authorization_endpoint":                issuer + "/oidc/authorize",
@@ -57,11 +58,11 @@ func (p *Plugin) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		"revocation_endpoint":                   issuer + "/oauth2/revoke",
 		"introspection_endpoint":                issuer + "/oauth2/introspect",
 		"scopes_supported":                      scopesSupported,
-		"response_types_supported":              []string{"code", "token", "id_token", "code id_token", "code token", "id_token token", "code id_token token"},
-		"response_modes_supported":              []string{"query", "fragment", "form_post"},
-		"grant_types_supported":                 []string{"authorization_code", "implicit", "refresh_token"},
-		"token_endpoint_auth_methods_supported": []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
-		"code_challenge_methods_supported":      []string{"S256"},
+		"response_types_supported":              responseTypesSupported,
+		"response_modes_supported":              responseModesSupported,
+		"grant_types_supported":                 grantTypesSupported,
+		"token_endpoint_auth_methods_supported": tokenEndpointAuthMethods,
+		"code_challenge_methods_supported":      codeChallengeMethodsSupported,
 		// RFC 9207 Section 3 / FAPI 2.0 SP §5.3.2.2
 		"authorization_response_iss_parameter_supported": true,
 		"service_documentation":                          issuer + "/auth.md",

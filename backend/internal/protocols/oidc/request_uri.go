@@ -194,31 +194,56 @@ func (p *Plugin) fetchRequestObject(requestURI string) (string, error) {
 	return strings.TrimSpace(string(body)), nil
 }
 
+// Request Object alg values. OpenID Connect Core 1.0 Section 6.1: "The
+// Request Object MAY be signed or unsigned (unsecured). When it is unsecured,
+// this is indicated by use of the none algorithm [JWA] in the JOSE Header."
+const (
+	requestObjectAlgNone  = "none"
+	requestObjectAlgRS256 = "RS256"
+)
+
 func (p *Plugin) verifyRequestObjectJWT(raw string, client *models.Client) (map[string]interface{}, error) {
 	decoded, err := crypto.DecodeTokenWithoutValidation(raw)
 	if err != nil {
 		return nil, fmt.Errorf("malformed request object")
 	}
 	alg, _ := decoded.Header["alg"].(string)
-	if alg != "RS256" {
-		return nil, fmt.Errorf("request object must be signed with RS256")
-	}
-	if client.RequestObjectSigningAlg != "" && client.RequestObjectSigningAlg != alg {
-		return nil, fmt.Errorf("request object alg does not match registered request_object_signing_alg")
-	}
-
-	keyID, _ := decoded.Header["kid"].(string)
-	jwk, err := resolveClientJWK(client, keyID)
-	if err != nil {
-		return nil, err
-	}
-	publicKey, err := jwk.ToPublicKey()
-	if err != nil {
-		return nil, fmt.Errorf("invalid client signing key")
-	}
-	valid, err := crypto.VerifySignatureWithKey(raw, publicKey)
-	if err != nil || !valid {
-		return nil, fmt.Errorf("request object signature invalid")
+	// OpenID Connect Dynamic Client Registration 1.0 Section 2, on
+	// request_object_signing_alg: "All Request Objects from this Client MUST
+	// be rejected, if not signed with this algorithm." and "The value none
+	// MAY be used."
+	switch alg {
+	case requestObjectAlgRS256:
+		if client.RequestObjectSigningAlg != "" && client.RequestObjectSigningAlg != alg {
+			return nil, fmt.Errorf("request object alg does not match registered request_object_signing_alg")
+		}
+		keyID, _ := decoded.Header["kid"].(string)
+		jwk, err := resolveClientJWK(client, keyID)
+		if err != nil {
+			return nil, err
+		}
+		publicKey, err := jwk.ToPublicKey()
+		if err != nil {
+			return nil, fmt.Errorf("invalid client signing key")
+		}
+		valid, err := crypto.VerifySignatureWithKey(raw, publicKey)
+		if err != nil || !valid {
+			return nil, fmt.Errorf("request object signature invalid")
+		}
+	case requestObjectAlgNone:
+		// An unsigned Request Object carries no proof of who wrote it, so it
+		// is accepted only from a client that registered for none, never as
+		// the default for a client that registered no algorithm.
+		if client.RequestObjectSigningAlg != requestObjectAlgNone {
+			return nil, fmt.Errorf("an unsigned request object is accepted only from a client registered with request_object_signing_alg none")
+		}
+		// RFC 7519 Section 6: an Unsecured JWT has "the empty string for its
+		// JWS Signature value".
+		if !strings.HasSuffix(raw, ".") {
+			return nil, fmt.Errorf("an unsigned request object must have an empty signature")
+		}
+	default:
+		return nil, fmt.Errorf("request object alg must be RS256 or none")
 	}
 
 	issuer := strings.TrimRight(p.mockIdP.GetIssuer(), "/")

@@ -271,6 +271,48 @@ func parseMaxAge(raw string) (seconds int, present bool, errDesc string) {
 	return n, true, ""
 }
 
+// ignoredScope is a scope value of an Authentication Request the OP does not
+// grant, with the reason.
+type ignoredScope struct {
+	Value  string `json:"value"`
+	Reason string `json:"reason"`
+}
+
+// grantedScope narrows the scope of an OpenID Connect Authentication Request
+// to what the OP grants, keeping the request's order, and lists what it
+// ignored.
+//
+// OpenID Connect Core 1.0 Section 3.1.2.1: "Scope values used that are not
+// understood by an implementation SHOULD be ignored." The values this OP
+// understands are the ones it publishes in scopes_supported.
+//
+// Section 11, on a scope parameter containing the offline_access value, says
+// the Authorization Server "MUST ensure that the prompt parameter contains
+// consent unless other conditions for processing the request permitting
+// offline access to the requested resources are in place; unless one or both
+// of these conditions are fulfilled, then it MUST ignore the offline_access
+// request", and "MUST ignore the offline_access request unless the Client is
+// using a response_type value that would result in an Authorization Code
+// being returned". This OP has no other such conditions, so offline_access
+// needs prompt=consent on a request that returns a code.
+func grantedScope(scope string, prompts []string, responseType string) (string, []ignoredScope) {
+	var granted []string
+	var ignored []ignoredScope
+	for _, value := range strings.Fields(scope) {
+		switch {
+		case !containsValue(scopesSupported, value):
+			ignored = append(ignored, ignoredScope{Value: value, Reason: "not a scope value this OpenID Provider supports"})
+		case value == "offline_access" && !containsValue(strings.Fields(responseType), "code"):
+			ignored = append(ignored, ignoredScope{Value: value, Reason: "the response_type does not return an Authorization Code"})
+		case value == "offline_access" && !containsValue(prompts, "consent"):
+			ignored = append(ignored, ignoredScope{Value: value, Reason: "the prompt parameter does not contain consent"})
+		default:
+			granted = append(granted, value)
+		}
+	}
+	return strings.Join(granted, " "), ignored
+}
+
 // reauthRequired decides whether an existing session must be re-authenticated
 // given the prompt and max_age parameters.
 func reauthRequired(prompts []string, maxAge int, maxAgePresent bool, authTime time.Time, now time.Time) bool {

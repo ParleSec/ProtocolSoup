@@ -415,3 +415,29 @@ func TestAuthorizationCodeReplayRevokesRefreshedTokens(t *testing.T) {
 		t.Fatal("a second replay of the code was accepted")
 	}
 }
+
+// The authorization servers support the S256 code challenge method only
+// (RFC 7636 Section 4.4.1). A code_challenge sent without a method asks for
+// plain, by Section 4.3.
+func TestPKCEVerifiesS256AndNothingElse(t *testing.T) {
+	const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" // RFC 7636 Appendix B
+
+	if err := ValidatePKCEWithError(verifier, challenge, PKCEMethodS256); err != nil {
+		t.Fatalf("S256 with the Appendix B values: %v", err)
+	}
+	for name, method := range map[string]string{"plain": "plain", "absent": ""} {
+		// With plain the challenge is the verifier itself.
+		err := ValidatePKCEWithError(verifier, verifier, method)
+		var pkceErr *PKCEError
+		if !errors.As(err, &pkceErr) || pkceErr.Code != "invalid_request" {
+			t.Errorf("%s: err = %v, want invalid_request", name, err)
+		}
+		if PKCEMethodError(method) == "" {
+			t.Errorf("%s: the authorization endpoint must have a reason to refuse it", name)
+		}
+	}
+	if PKCEMethodError(PKCEMethodS256) != "" {
+		t.Error("S256 is supported")
+	}
+}
