@@ -71,6 +71,7 @@ const OID4VCI_CREDENTIAL_PROFILES = [
 ] as const
 type OID4VCICredentialFormat = (typeof OID4VCI_CREDENTIAL_PROFILES)[number]['format']
 type OID4VPClientIDScheme = 'redirect_uri' | 'verifier_attestation' | 'x509_san_dns' | 'x509_hash'
+type RevocationClientId = 'public-app' | 'machine-client' | 'private_key_jwt'
 
 function oid4vciProfileFor(format: OID4VCICredentialFormat, haip: boolean) {
   return OID4VCI_CREDENTIAL_PROFILES.find((profile) => profile.format === format && profile.haip === haip)
@@ -188,6 +189,9 @@ export function LookingGlass() {
   const [clientCredentialsAccessTokenMode, setClientCredentialsAccessTokenMode] = useState<ClientCredentialsAccessTokenMode>('bearer')
   // Token input for introspection/revocation/userinfo flows
   const [tokenInput, setTokenInput] = useState('')
+  // The client the revocation flow acts as. The server revokes a token only
+  // for the client it was issued to (RFC 7009 Section 2.1).
+  const [revocationClientId, setRevocationClientId] = useState<RevocationClientId>('public-app')
   const [scimBearerToken, setScimBearerToken] = useState('')
   const [scimTokenLoading, setScimTokenLoading] = useState(false)
   const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
@@ -343,15 +347,20 @@ export function LookingGlass() {
   const [machineClientSecret, setMachineClientSecret] = useState<string | null>(null)
   const [machineTokenEndpoint, setMachineTokenEndpoint] = useState<string | null>(null)
 
+  // machine-client authenticates with its client password in three flows:
+  // the client_credentials grant with client_secret_basic, token
+  // introspection, where a public client cannot authenticate (RFC 7662
+  // Section 2.1), and revocation of a token that was issued to it.
+  const usesMachineClientSecret =
+    (isClientCredentialsFlow && clientCredentialsAuthMethod === 'client_secret_basic') ||
+    isTokenIntrospectionFlow ||
+    (isTokenRevocationFlow && revocationClientId === 'machine-client')
+
   useEffect(() => {
-    if (!isClientCredentialsFlow) {
+    if (!usesMachineClientSecret) {
       setMachineClientSecret(null)
       setMachineTokenEndpoint(null)
       return
-    }
-    if (isClientCredentialsFlow && clientCredentialsAuthMethod !== 'client_secret_basic') {
-      setMachineClientSecret(null)
-      setMachineTokenEndpoint(null)
     }
 
     let cancelled = false
@@ -366,14 +375,12 @@ export function LookingGlass() {
         if (cancelled) return
         const clients = Array.isArray(data?.clients) ? data.clients : []
         const machineClient = clients.find((client: { id?: string }) => client?.id === 'machine-client')
-        if (isClientCredentialsFlow && clientCredentialsAuthMethod === 'client_secret_basic') {
-          setMachineClientSecret(machineClient?.secret || null)
-          setMachineTokenEndpoint(
-            typeof data?.token_endpoint === 'string' && data.token_endpoint.length > 0
-              ? data.token_endpoint
-              : null,
-          )
-        }
+        setMachineClientSecret(machineClient?.secret || null)
+        setMachineTokenEndpoint(
+          typeof data?.token_endpoint === 'string' && data.token_endpoint.length > 0
+            ? data.token_endpoint
+            : null,
+        )
       })
       .catch(() => {
         if (!cancelled) {
@@ -385,7 +392,7 @@ export function LookingGlass() {
     return () => {
       cancelled = true
     }
-  }, [isClientCredentialsFlow, clientCredentialsAuthMethod])
+  }, [usesMachineClientSecret])
 
   const clientConfig = useMemo(() => {
     if (isClientCredentialsFlow) {
@@ -394,9 +401,25 @@ export function LookingGlass() {
       }
       return { clientId: 'machine-client', clientSecret: machineClientSecret || undefined }
     }
+    // The introspection endpoint requires an authenticated caller (RFC 7662
+    // Section 2.1). public-app has no credential, so the flow authenticates
+    // as the confidential machine-client.
+    if (isTokenIntrospectionFlow) {
+      return { clientId: 'machine-client', clientSecret: machineClientSecret || undefined }
+    }
+    // Revocation is requested by the client the token was issued to (RFC
+    // 7009 Section 2.1): machine-client authenticates, public-app cannot.
+    if (isTokenRevocationFlow && revocationClientId === 'machine-client') {
+      return { clientId: 'machine-client', clientSecret: machineClientSecret || undefined }
+    }
+    // The private_key_jwt client has the client_id its registration
+    // assigned, which the executor holds together with the signing key.
+    if (isTokenRevocationFlow && revocationClientId === 'private_key_jwt') {
+      return { clientId: '', clientSecret: undefined }
+    }
     // Device authorization and other user-delegated flows use public-app
     return { clientId: 'public-app', clientSecret: undefined }
-  }, [isClientCredentialsFlow, clientCredentialsAuthMethod, machineClientSecret])
+  }, [isClientCredentialsFlow, isTokenIntrospectionFlow, isTokenRevocationFlow, revocationClientId, clientCredentialsAuthMethod, machineClientSecret])
 
   // Use stored token, input, or empty
   const activeRefreshToken = refreshTokenInput || storedRefreshToken || ''
@@ -775,9 +798,18 @@ export function LookingGlass() {
       }
       if (realExecutor.state.tokens.accessToken) {
         setStoredAccessToken(realExecutor.state.tokens.accessToken)
+        // Remember which client obtained the token, so the revocation flow
+        // asks as that client: Client Credentials runs as machine-client or,
+        // with private_key_jwt, as the client registered for its key; every
+        // user-delegated flow runs as public-app.
+        if (realExecutor.state.flowType !== 'client_credentials') {
+          setRevocationClientId('public-app')
+        } else {
+          setRevocationClientId(realExecutor.state.tokens.clientAssertion ? 'private_key_jwt' : 'machine-client')
+        }
       }
     }
-  }, [realExecutor.state?.status, realExecutor.state?.tokens.refreshToken, realExecutor.state?.tokens.accessToken])
+  }, [realExecutor.state?.status, realExecutor.state?.flowType, realExecutor.state?.tokens.refreshToken, realExecutor.state?.tokens.accessToken, realExecutor.state?.tokens.clientAssertion])
 
 
 
@@ -1121,6 +1153,7 @@ export function LookingGlass() {
     setInspectedToken('')
     setStoredRefreshToken(null)
     setStoredAccessToken(null)
+    setRevocationClientId('public-app')
     setClientCredentialsAuthMethod('client_secret_basic')
     setClientCredentialsAccessTokenMode('bearer')
     setRefreshTokenInput('')
@@ -1798,8 +1831,8 @@ export function LookingGlass() {
               )}
             </div>
             <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-              {isTokenIntrospectionFlow && 'Run Authorization Code or Client Credentials flow first, or paste a token below.'}
-              {isTokenRevocationFlow && 'Run an authorization flow first to get a token, or paste one below.'}
+              {isTokenIntrospectionFlow && 'Looking Glass authenticates as machine-client over HTTP Basic, so run Client Credentials first or paste a machine-client token. A token issued to another client is reported as not active (RFC 7662 Section 4).'}
+              {isTokenRevocationFlow && 'Run an authorization flow first to get a token, or paste one below. The server revokes a token only for the client it was issued to (RFC 7009 Section 2.1).'}
               {isUserInfoFlow && 'Run OIDC Authorization Code flow first (with openid scope), or paste a token below.'}
             </p>
             <div className="flex gap-2">
@@ -1832,6 +1865,31 @@ export function LookingGlass() {
               <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
                 ⚠️ No token available. Run Auth Code flow first.
               </p>
+            )}
+            {isTokenRevocationFlow && (
+              <div className="mt-3 sm:mt-4">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
+                  <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
+                  <span className="text-xs sm:text-sm font-medium text-surface-300">Revoke as</span>
+                </div>
+                <SegmentedChoice
+                  aria-label="Client making the revocation request"
+                  value={revocationClientId}
+                  onChange={setRevocationClientId}
+                  columns={3}
+                  options={[
+                    { id: 'public-app', label: 'public-app' },
+                    { id: 'machine-client', label: 'machine-client' },
+                    { id: 'private_key_jwt', label: 'private_key_jwt' },
+                  ]}
+                />
+                <p className="mt-2 text-[10px] sm:text-xs text-surface-500 leading-relaxed">
+                  {revocationClientId === 'machine-client' && 'machine-client authenticates over HTTP Basic. It can revoke the tokens it obtained with Client Credentials and client_secret_basic.'}
+                  {revocationClientId === 'private_key_jwt' && 'The private_key_jwt client this page registered signs a new assertion with its WebCrypto key. It can revoke the token it obtained with Client Credentials and private_key_jwt, until its registration expires after ten minutes.'}
+                  {revocationClientId === 'public-app' && 'public-app has no credentials and sends client_id. It can revoke the tokens of the user-delegated flows.'}
+                  {' '}A token issued to another client is refused with invalid_grant and stays valid.
+                </p>
+              </div>
             )}
           </motion.div>
         )}
