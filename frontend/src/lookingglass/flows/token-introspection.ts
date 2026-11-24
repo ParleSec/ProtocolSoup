@@ -13,7 +13,7 @@ export interface TokenIntrospectionConfig extends FlowExecutorConfig {
   token: string
   /** Hint about the token type (access_token or refresh_token) */
   tokenTypeHint?: 'access_token' | 'refresh_token'
-  /** Client secret for authentication */
+  /** Client password of the confidential client that calls the endpoint */
   clientSecret?: string
 }
 
@@ -98,15 +98,30 @@ export class TokenIntrospectionExecutor extends FlowExecutorBase {
     // Build the actual request body
     const body: Record<string, string> = {
       token: this.flowConfig.token,
-      client_id: this.config.clientId,
     }
 
     if (this.flowConfig.tokenTypeHint) {
       body.token_type_hint = this.flowConfig.tokenTypeHint
     }
 
+    // RFC 7662 Section 2.1: the endpoint requires authorization, and this
+    // server takes it as client authentication. RFC 6749 Section 2.3.1:
+    // clients with a password can authenticate with HTTP Basic; request-body
+    // password authentication is NOT RECOMMENDED. Without a client password
+    // the request goes out unauthenticated and the server's refusal is shown.
+    const headers: Record<string, string> = {}
     if (this.flowConfig.clientSecret) {
-      body.client_secret = this.flowConfig.clientSecret
+      headers.Authorization = `Basic ${btoa(`${this.config.clientId}:${this.flowConfig.clientSecret}`)}`
+      this.addEvent({
+        type: 'security',
+        title: 'Client Authentication',
+        description: `Authenticating as ${this.config.clientId} via HTTP Basic Authentication`,
+        rfcReference: 'RFC 6749 Section 2.3.1',
+        data: {
+          clientId: this.config.clientId,
+          authMethod: 'client_secret_basic',
+        },
+      })
     }
 
     // Make the request and capture traffic
@@ -114,6 +129,7 @@ export class TokenIntrospectionExecutor extends FlowExecutorBase {
       'POST',
       `${this.config.baseUrl}/introspect`,
       {
+        headers,
         body,
         step: 'Token Introspection Request',
         rfcReference: 'RFC 7662 Section 2.1',
@@ -143,7 +159,7 @@ export class TokenIntrospectionExecutor extends FlowExecutorBase {
       this.addEvent({
         type: 'security',
         title: 'Token Status: INACTIVE',
-        description: 'Token is invalid, expired, or revoked',
+        description: `Token is invalid, expired, revoked, or not one ${this.config.clientId} may learn about (RFC 7662 Section 4)`,
         data: introspectionResponse,
       })
     }

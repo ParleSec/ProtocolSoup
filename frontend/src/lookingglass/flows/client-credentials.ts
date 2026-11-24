@@ -46,6 +46,24 @@ interface PrivateKeyJWTRegistration {
   tokenEndpoint: string
 }
 
+/**
+ * The private_key_jwt client this page registered last: its client_id, the
+ * token endpoint URL its assertions name as audience, and its signing key,
+ * which is non-extractable and so exists only in this page. The Token
+ * Revocation flow authenticates as this client to revoke the token it
+ * obtained (RFC 7009 Section 2.1). The server drops the registration after
+ * ten minutes.
+ */
+export interface RegisteredPrivateKeyJWTClient extends PrivateKeyJWTRegistration {
+  signingMaterial: RS256SigningMaterial
+}
+
+let registeredPrivateKeyJWTClient: RegisteredPrivateKeyJWTClient | undefined
+
+export function getRegisteredPrivateKeyJWTClient(): RegisteredPrivateKeyJWTClient | undefined {
+  return registeredPrivateKeyJWTClient
+}
+
 export class ClientCredentialsExecutor extends FlowExecutorBase {
   readonly flowType = 'client_credentials'
   readonly flowName: string
@@ -200,6 +218,7 @@ export class ClientCredentialsExecutor extends FlowExecutorBase {
     if (authMethod === 'private_key_jwt') {
       const signingMaterial = await this.getSigningMaterial()
       const registration = await this.registerPublicKey(signingMaterial.publicJWK)
+      registeredPrivateKeyJWTClient = { ...registration, signingMaterial }
       const now = Math.floor(Date.now() / 1000)
       const claims = {
         iss: registration.clientId,

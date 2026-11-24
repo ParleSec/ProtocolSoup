@@ -271,9 +271,10 @@ await fetch('/oauth2/revoke', {
     token_type_hint: 'refresh_token',   // Advisory hint (§2.1)
   }),
 });
-// Server ALWAYS returns 200 OK regardless of whether the token existed,
-// was already revoked, or was unknown. This prevents token-existence
-// oracle attacks (RFC 7009 §2.2).
+// The server returns 200 OK when the token was revoked and when the token
+// was invalid: unknown, expired, or already revoked (RFC 7009 §2.2).
+// It revokes a token only for the client it was issued to. Another
+// client gets 400 invalid_grant and the token stays valid (§2.1).
 
 // Also revoke the access token for immediate effect
 await fetch('/oauth2/revoke', {
