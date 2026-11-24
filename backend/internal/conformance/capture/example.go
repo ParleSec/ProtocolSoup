@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
@@ -31,6 +34,16 @@ type ExampleResult struct {
 	// holding the key that verifies Value. It is nil for a value that
 	// carries its own public key in a jwk header parameter.
 	JWKSExchange *int
+	// ValueExpires is when Value stops being acceptable, for a value that
+	// cannot be revoked and outlives the run, such as an ID Token. The
+	// example is not published before then. It is zero for a value the
+	// scenario revoked or that is good for one use only.
+	ValueExpires time.Time
+	// IssuerMember and Issuer are for a metadata document: the member that
+	// names its issuer, and the issuer identifier the scenario built the
+	// request URL from.
+	IssuerMember string
+	Issuer       string
 }
 
 // kindExample labels a Mismatch that concerns an example rather than a
@@ -78,7 +91,12 @@ func captureExample(ctx context.Context, env *Env, recorder *Recorder, definitio
 	if err := definition.CheckExample(result.Value); err != nil {
 		return nil, err
 	}
-	verification, err := verifyExample(result.Value, exchanges, result.JWKSExchange)
+	var verification conformance.ExampleVerification
+	if definition.Format == conformance.ExampleFormatJSON {
+		verification, err = verifyDocument(result, exchanges)
+	} else {
+		verification, err = verifyExample(result.Value, exchanges, result.JWKSExchange)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +108,7 @@ func captureExample(ctx context.Context, env *Env, recorder *Recorder, definitio
 		Source:       result.Source,
 		Verification: verification,
 		Exchanges:    exchanges,
+		PublishAfter: result.ValueExpires.UTC(),
 	}, nil
 }
 
@@ -132,6 +151,56 @@ func payloadBytes(payload *lookingglass.CapturedPayload) ([]byte, error) {
 		return base64.StdEncoding.DecodeString(payload.Data)
 	}
 	return []byte(payload.Data), nil
+}
+
+// verifyDocument checks a metadata document the way its consumer must. The
+// document is the whole body of the response that carried it, the request
+// went to the issuer's own host at a well-known location, and the member
+// that names the issuer equals the issuer identifier the URL was built from
+// (RFC 8414 Section 3.3: "The "issuer" value returned MUST be identical to
+// the authorization server's issuer identifier value into which the
+// well-known URI string was inserted to create the URL used to retrieve the
+// metadata.").
+func verifyDocument(result ExampleResult, exchanges []lookingglass.CapturedExchange) (conformance.ExampleVerification, error) {
+	var none conformance.ExampleVerification
+	if result.Issuer == "" || result.IssuerMember == "" {
+		return none, fmt.Errorf("a document example needs the issuer its URL was built from and the member that names it")
+	}
+	if result.Source.Message != conformance.ExampleInResponse {
+		return none, fmt.Errorf("a document example is the body of a response, not of a %s", result.Source.Message)
+	}
+	exchange := exchanges[result.Source.Exchange]
+	body, err := payloadBytes(exchange.Response.Body)
+	if err != nil {
+		return none, err
+	}
+	if string(body) != result.Value {
+		return none, fmt.Errorf("the value is not the whole body of the response in exchange %d", result.Source.Exchange)
+	}
+	issuer, err := url.Parse(result.Issuer)
+	if err != nil {
+		return none, fmt.Errorf("parse the issuer: %w", err)
+	}
+	requested, err := url.Parse(exchange.Request.URL)
+	if err != nil {
+		return none, fmt.Errorf("parse the request URL: %w", err)
+	}
+	if requested.Scheme != issuer.Scheme || requested.Host != issuer.Host || !strings.Contains(requested.Path, "/.well-known/") {
+		return none, fmt.Errorf("the document was fetched from %s, not from a well-known location of issuer %s", exchange.Request.URL, result.Issuer)
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(body, &document); err != nil {
+		return none, fmt.Errorf("parse the document: %w", err)
+	}
+	var named string
+	if err := json.Unmarshal(document[result.IssuerMember], &named); err != nil || named != result.Issuer {
+		return none, fmt.Errorf("the document's %s is %s, not the issuer %q the URL was built from", result.IssuerMember, document[result.IssuerMember], result.Issuer)
+	}
+	return conformance.ExampleVerification{
+		Method:       conformance.VerifiedByIssuer,
+		IssuerMember: result.IssuerMember,
+		Issuer:       result.Issuer,
+	}, nil
 }
 
 // exampleSignatureAlgorithms are the asymmetric JWS algorithms an example

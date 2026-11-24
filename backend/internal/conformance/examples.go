@@ -23,10 +23,16 @@ import (
 // parts are the decoded JOSE Header ("header") and Claims Set ("payload").
 const ExampleFormatJWT = "jwt"
 
+// ExampleFormatJSON is a JSON object sent as the body of an HTTP message,
+// such as a metadata document. Its one part is the object itself
+// ("document").
+const ExampleFormatJSON = "json"
+
 // exampleParts lists, per format, the decoded parts a field path may start
 // with.
 var exampleParts = map[string][]string{
-	ExampleFormatJWT: {"header", "payload"},
+	ExampleFormatJWT:  {"header", "payload"},
+	ExampleFormatJSON: {"document"},
 }
 
 var exampleIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -60,6 +66,9 @@ type ExampleFlow struct {
 // RunURL is the Looking Glass deep link that opens the flow, in the shape
 // the palette's run_url has (frontend parseFlowDeepLink reads both).
 func (f ExampleFlow) RunURL() string {
+	if f.Protocol == "" {
+		return ""
+	}
 	url := "/looking-glass?protocol=" + f.Protocol + "&flow=" + f.Flow
 	if f.TokenMode != "" {
 		url += "&token_mode=" + f.TokenMode
@@ -129,11 +138,17 @@ func validateExamples(registry Registry, requirementIDs map[string]struct{}) []s
 		if !knownFormat {
 			issues = append(issues, prefix+": format is not supported")
 		}
-		if strings.TrimSpace(example.LookingGlass.Protocol) == "" || strings.TrimSpace(example.LookingGlass.Flow) == "" {
-			issues = append(issues, prefix+": looking_glass protocol and flow are required")
+		// A message no Looking Glass flow produces names none, and its page
+		// offers no flow to run.
+		if (strings.TrimSpace(example.LookingGlass.Protocol) == "") != (strings.TrimSpace(example.LookingGlass.Flow) == "") {
+			issues = append(issues, prefix+": looking_glass needs both protocol and flow, or neither")
 		}
 		switch example.LookingGlass.TokenMode {
-		case "", "bearer", "dpop":
+		case "":
+		case "bearer", "dpop":
+			if strings.TrimSpace(example.LookingGlass.Flow) == "" {
+				issues = append(issues, prefix+": looking_glass token_mode needs a flow")
+			}
 		default:
 			issues = append(issues, prefix+": looking_glass token_mode must be bearer or dpop")
 		}
@@ -205,34 +220,51 @@ type ExampleMember struct {
 // re-serialises a part, so member order and number formatting are the
 // sender's.
 func (e Example) DecodeExample(value string) ([]ExamplePart, error) {
-	if e.Format != ExampleFormatJWT {
-		return nil, fmt.Errorf("example format %q is not supported", e.Format)
-	}
-	segments := strings.Split(value, ".")
-	if len(segments) != 3 {
-		return nil, fmt.Errorf("value is not a compact JWS: %d segments", len(segments))
-	}
 	annotated := make(map[string]struct{}, len(e.Fields))
 	for _, field := range e.Fields {
 		annotated[field.Path] = struct{}{}
 	}
-	parts := make([]ExamplePart, 0, 2)
-	for i, name := range exampleParts[ExampleFormatJWT] {
-		decoded, err := base64.RawURLEncoding.DecodeString(segments[i])
+	switch e.Format {
+	case ExampleFormatJWT:
+		segments := strings.Split(value, ".")
+		if len(segments) != 3 {
+			return nil, fmt.Errorf("value is not a compact JWS: %d segments", len(segments))
+		}
+		parts := make([]ExamplePart, 0, 2)
+		for i, name := range exampleParts[ExampleFormatJWT] {
+			decoded, err := base64.RawURLEncoding.DecodeString(segments[i])
+			if err != nil {
+				return nil, fmt.Errorf("decode %s: %w", name, err)
+			}
+			part, err := examplePart(name, decoded, annotated)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
+		}
+		return parts, nil
+	case ExampleFormatJSON:
+		part, err := examplePart(exampleParts[ExampleFormatJSON][0], []byte(value), annotated)
 		if err != nil {
-			return nil, fmt.Errorf("decode %s: %w", name, err)
+			return nil, err
 		}
-		members, err := exampleMembers(name, decoded, annotated)
-		if err != nil {
-			return nil, fmt.Errorf("decode %s: %w", name, err)
-		}
-		var indented bytes.Buffer
-		if err := json.Indent(&indented, decoded, "", "  "); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", name, err)
-		}
-		parts = append(parts, ExamplePart{Name: name, JSON: string(decoded), Indented: indented.String(), Members: members})
+		return []ExamplePart{part}, nil
+	default:
+		return nil, fmt.Errorf("example format %q is not supported", e.Format)
 	}
-	return parts, nil
+}
+
+// examplePart lists the members of one decoded part and indents it.
+func examplePart(name string, decoded []byte, annotated map[string]struct{}) (ExamplePart, error) {
+	members, err := exampleMembers(name, decoded, annotated)
+	if err != nil {
+		return ExamplePart{}, fmt.Errorf("decode %s: %w", name, err)
+	}
+	var indented bytes.Buffer
+	if err := json.Indent(&indented, decoded, "", "  "); err != nil {
+		return ExamplePart{}, fmt.Errorf("decode %s: %w", name, err)
+	}
+	return ExamplePart{Name: name, JSON: string(decoded), Indented: indented.String(), Members: members}, nil
 }
 
 // exampleMembers lists the members of the JSON object raw under prefix, in
@@ -430,7 +462,8 @@ type ExampleFieldResponse struct {
 type ExampleResponse struct {
 	ExampleSummary
 	// RunURL opens the Looking Glass flow that produces this message live.
-	RunURL string                 `json:"run_url"`
+	// It is absent for a message no flow produces.
+	RunURL string                 `json:"run_url,omitempty"`
 	Fields []ExampleFieldResponse `json:"fields"`
 
 	Status       ArtefactStatus `json:"status"`
@@ -498,10 +531,16 @@ func (c *Catalogue) exampleResponse(example Example, now time.Time) (ExampleResp
 		return response, nil
 	}
 	set := c.artefacts
+	// A value that cannot be revoked is published only once it has expired,
+	// which can be later than the rest of the set.
+	publishAfter := set.PublishAfter
+	if captured.PublishAfter.After(publishAfter) {
+		publishAfter = captured.PublishAfter
+	}
 	response.Commit = set.Commit
 	response.CapturedAt = set.CapturedAt.UTC().Format(time.RFC3339)
-	response.PublishAfter = set.PublishAfter.UTC().Format(time.RFC3339)
-	if now.Before(set.PublishAfter) {
+	response.PublishAfter = publishAfter.UTC().Format(time.RFC3339)
+	if now.Before(publishAfter) {
 		response.Status = ArtefactsPending
 		return response, nil
 	}

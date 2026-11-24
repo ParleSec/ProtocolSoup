@@ -10,6 +10,7 @@ import (
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oid4vciwallet"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oid4vp"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oid4vpwallet"
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oidc"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/rfc9449"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/rfc9901"
 )

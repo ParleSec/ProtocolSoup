@@ -103,7 +103,7 @@ export interface ConformanceExampleLink {
 
 export interface ConformanceExampleSummary extends ConformanceExampleLink {
   summary: string
-  format: 'jwt'
+  format: 'jwt' | 'json'
   indexable: boolean
 }
 
@@ -150,10 +150,14 @@ export interface ConformanceExampleSource {
 }
 
 export interface ConformanceExampleVerification {
-  method: 'embedded_jwk' | 'jwks'
-  algorithm: string
+  method: 'embedded_jwk' | 'jwks' | 'issuer'
+  /** JWS alg of a signed value. */
+  algorithm?: string
   key_id?: string
   jwks_exchange?: number
+  /** For method issuer: the member that names the issuer, and its value. */
+  issuer_member?: string
+  issuer?: string
 }
 
 /**
@@ -161,7 +165,8 @@ export interface ConformanceExampleVerification {
  * value and everything derived from it only when status is published.
  */
 export interface ConformanceExampleResponse extends ConformanceExampleSummary {
-  run_url: string
+  /** Absent for a message no Looking Glass flow produces. */
+  run_url?: string
   fields: ConformanceExampleField[]
   status: 'published' | 'pending' | 'not_captured'
   commit?: string

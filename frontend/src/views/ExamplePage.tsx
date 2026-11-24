@@ -32,10 +32,14 @@ const SENDERS: Record<ConformanceArtefactActor, string> = {
   counterparty: 'Messages from the conformance counterparty.',
 }
 
-/** The decoded parts of a compact JWS, in the terms of RFC 7515 and RFC 7519. */
+/**
+ * The decoded parts of a value: of a compact JWS in the terms of RFC 7515
+ * and RFC 7519, and the one part of a JSON document.
+ */
 const PART_TITLES: Record<string, string> = {
   header: 'JOSE Header',
   payload: 'JWT Claims Set',
+  document: 'JSON document, indented',
 }
 
 /** How a message format is named on the page. */
@@ -43,6 +47,8 @@ function formatLabel(format: ConformanceExampleResponse['format']): string {
   switch (format) {
     case 'jwt':
       return 'JWT, compact serialization'
+    case 'json':
+      return 'JSON document'
   }
 }
 
@@ -113,17 +119,24 @@ function PartView({ part, fields }: { part: ConformanceExamplePart; fields: Map<
   )
 }
 
-/** Status is icon + label + colour: the signature check is an outcome. */
+/** Status is icon + label + colour: the check is an outcome. */
 function VerificationView({ verification }: { verification: ConformanceExampleVerification }) {
   return (
     <div className="space-y-3">
       <p>
         <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300">
           <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-          Signature verified when captured
+          {verification.method === 'issuer' ? 'Issuer checked when captured' : 'Signature verified when captured'}
         </span>
       </p>
-      {verification.method === 'jwks' ? (
+      {verification.method === 'issuer' ? (
+        <p className="text-sm leading-relaxed text-surface-200">
+          The capture run checked that the document&apos;s <code>{verification.issuer_member}</code> member is exactly{' '}
+          <code className="break-all">{verification.issuer}</code>, the issuer identifier the request URL was built
+          from, and that the request went to that issuer&apos;s own host. The document is not signed, so there is no
+          signature to verify.
+        </p>
+      ) : verification.method === 'jwks' ? (
         <p className="text-sm leading-relaxed text-surface-200">
           The capture run verified the {verification.algorithm} signature with the key whose <code>kid</code> is{' '}
           <code className="break-all">{verification.key_id}</code>, from the JWK Set fetched in exchange{' '}
@@ -254,18 +267,21 @@ export function ExamplePage({ example }: { example: ConformanceExampleResponse }
         </Section>
       )}
 
-      <Section title="Run it live">
-        <p className="text-sm text-surface-200 leading-relaxed mb-3">
-          Looking Glass runs the flow that produces this message against the same server and decodes it as it happens.
-        </p>
-        <Link
-          href={example.run_url}
-          className="inline-flex items-center gap-1.5 text-sm text-amber-300 underline-offset-2 hover:underline"
-        >
-          <Play className="w-3.5 h-3.5" aria-hidden="true" />
-          Open the flow in Looking Glass
-        </Link>
-      </Section>
+      {example.run_url && (
+        <Section title="Run it live">
+          <p className="text-sm text-surface-200 leading-relaxed mb-3">
+            Looking Glass runs the flow that produces this message against the same server and decodes it as it
+            happens.
+          </p>
+          <Link
+            href={example.run_url}
+            className="inline-flex items-center gap-1.5 text-sm text-amber-300 underline-offset-2 hover:underline"
+          >
+            <Play className="w-3.5 h-3.5" aria-hidden="true" />
+            Open the flow in Looking Glass
+          </Link>
+        </Section>
+      )}
     </article>
   )
 }
