@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -28,11 +29,22 @@ const ExampleFormatJWT = "jwt"
 // ("document").
 const ExampleFormatJSON = "json"
 
+// ExampleFormatSDJWT is an SD-JWT as an Issuer sends it (RFC 9901 Section
+// 4): an Issuer-signed JWT and its Disclosures, each followed by "~". Its
+// parts are the JOSE Header ("header"), the JWT Claims Set ("payload") and
+// one "disclosure" per Disclosure, whose members are the three elements of
+// the Disclosure's array: "salt", "name" and "value".
+const ExampleFormatSDJWT = "sd-jwt"
+
+// exampleDisclosurePart names the part each Disclosure of an SD-JWT becomes.
+const exampleDisclosurePart = "disclosure"
+
 // exampleParts lists, per format, the decoded parts a field path may start
 // with.
 var exampleParts = map[string][]string{
-	ExampleFormatJWT:  {"header", "payload"},
-	ExampleFormatJSON: {"document"},
+	ExampleFormatJWT:   {"header", "payload"},
+	ExampleFormatJSON:  {"document"},
+	ExampleFormatSDJWT: {"header", "payload", exampleDisclosurePart},
 }
 
 var exampleIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -206,6 +218,10 @@ type ExamplePart struct {
 	// Members are the part's members in the order they appear, each nested
 	// member a field annotates following its parent.
 	Members []ExampleMember `json:"members"`
+	// Digest is set for a Disclosure: the base64url SHA-256 digest of the
+	// Disclosure as it was sent, which is the value the Issuer-signed JWT
+	// carries for it in _sd (RFC 9901 Section 4.2.3).
+	Digest string `json:"digest,omitempty"`
 }
 
 // ExampleMember is one member of a decoded part. Value is the member's JSON
@@ -226,17 +242,20 @@ func (e Example) DecodeExample(value string) ([]ExamplePart, error) {
 	}
 	switch e.Format {
 	case ExampleFormatJWT:
-		segments := strings.Split(value, ".")
-		if len(segments) != 3 {
-			return nil, fmt.Errorf("value is not a compact JWS: %d segments", len(segments))
+		return jwsParts(value, annotated)
+	case ExampleFormatSDJWT:
+		// RFC 9901 Section 4: an SD-JWT with no Key Binding JWT is the
+		// Issuer-signed JWT and each Disclosure, every one followed by "~".
+		segments := strings.Split(value, "~")
+		if len(segments) < 2 || segments[len(segments)-1] != "" {
+			return nil, fmt.Errorf("value is not an SD-JWT without a Key Binding JWT: it does not end with ~")
 		}
-		parts := make([]ExamplePart, 0, 2)
-		for i, name := range exampleParts[ExampleFormatJWT] {
-			decoded, err := base64.RawURLEncoding.DecodeString(segments[i])
-			if err != nil {
-				return nil, fmt.Errorf("decode %s: %w", name, err)
-			}
-			part, err := examplePart(name, decoded, annotated)
+		parts, err := jwsParts(segments[0], annotated)
+		if err != nil {
+			return nil, err
+		}
+		for _, disclosure := range segments[1 : len(segments)-1] {
+			part, err := disclosurePart(disclosure)
 			if err != nil {
 				return nil, err
 			}
@@ -252,6 +271,68 @@ func (e Example) DecodeExample(value string) ([]ExamplePart, error) {
 	default:
 		return nil, fmt.Errorf("example format %q is not supported", e.Format)
 	}
+}
+
+// jwsParts decodes the JOSE Header and the payload of a compact JWS.
+func jwsParts(compact string, annotated map[string]struct{}) ([]ExamplePart, error) {
+	segments := strings.Split(compact, ".")
+	if len(segments) != 3 {
+		return nil, fmt.Errorf("value is not a compact JWS: %d segments", len(segments))
+	}
+	parts := make([]ExamplePart, 0, 2)
+	for i, name := range exampleParts[ExampleFormatJWT] {
+		decoded, err := base64.RawURLEncoding.DecodeString(segments[i])
+		if err != nil {
+			return nil, fmt.Errorf("decode %s: %w", name, err)
+		}
+		part, err := examplePart(name, decoded, annotated)
+		if err != nil {
+			return nil, err
+		}
+		parts = append(parts, part)
+	}
+	return parts, nil
+}
+
+// disclosureElements names the elements of a Disclosure for an object
+// property, in the order RFC 9901 Section 4.2.1 gives them: "Create a JSON
+// array of three elements".
+var disclosureElements = []string{"salt", "name", "value"}
+
+// disclosurePart decodes one Disclosure. Its members are the array's
+// elements, each as the Issuer wrote it. A Disclosure for an array element
+// has two elements (Section 4.2.2) and is not supported: no registered
+// example carries one.
+func disclosurePart(encoded string) (ExamplePart, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return ExamplePart{}, fmt.Errorf("decode disclosure: %w", err)
+	}
+	var elements []json.RawMessage
+	if err := json.Unmarshal(decoded, &elements); err != nil {
+		return ExamplePart{}, fmt.Errorf("decode disclosure: %w", err)
+	}
+	if len(elements) != len(disclosureElements) {
+		return ExamplePart{}, fmt.Errorf("disclosure has %d elements, want the %d of an object property", len(elements), len(disclosureElements))
+	}
+	members := make([]ExampleMember, 0, len(elements))
+	for i, element := range elements {
+		members = append(members, ExampleMember{Path: exampleDisclosurePart + "." + disclosureElements[i], Value: string(element)})
+	}
+	var indented bytes.Buffer
+	if err := json.Indent(&indented, decoded, "", "  "); err != nil {
+		return ExamplePart{}, fmt.Errorf("decode disclosure: %w", err)
+	}
+	// RFC 9901 Section 4.2.3: "The digest MUST be computed over the US-ASCII
+	// bytes of the base64url-encoded value that is the Disclosure."
+	digest := sha256.Sum256([]byte(encoded))
+	return ExamplePart{
+		Name:     exampleDisclosurePart,
+		JSON:     string(decoded),
+		Indented: indented.String(),
+		Members:  members,
+		Digest:   base64.RawURLEncoding.EncodeToString(digest[:]),
+	}, nil
 }
 
 // examplePart lists the members of one decoded part and indents it.

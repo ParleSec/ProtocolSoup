@@ -3,6 +3,9 @@ package capture
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -30,9 +33,10 @@ type ExampleResult struct {
 	Value string
 	// Source locates Value in the exchanges the scenario recorded.
 	Source conformance.ExampleSource
-	// JWKSExchange indexes the recorded exchange that fetched the JWK Set
-	// holding the key that verifies Value. It is nil for a value that
-	// carries its own public key in a jwk header parameter.
+	// JWKSExchange indexes the recorded exchange that fetched the keys that
+	// verify Value: a JWK Set, or for an SD-JWT VC the Issuer's JWT VC Issuer
+	// Metadata. It is nil for a value that carries its own public key in a
+	// jwk header parameter.
 	JWKSExchange *int
 	// ValueExpires is when Value stops being acceptable, for a value that
 	// cannot be revoked and outlives the run, such as an ID Token. The
@@ -92,9 +96,12 @@ func captureExample(ctx context.Context, env *Env, recorder *Recorder, definitio
 		return nil, err
 	}
 	var verification conformance.ExampleVerification
-	if definition.Format == conformance.ExampleFormatJSON {
+	switch definition.Format {
+	case conformance.ExampleFormatJSON:
 		verification, err = verifyDocument(result, exchanges)
-	} else {
+	case conformance.ExampleFormatSDJWT:
+		verification, err = verifySDJWTVC(result.Value, exchanges, result.JWKSExchange)
+	default:
 		verification, err = verifyExample(result.Value, exchanges, result.JWKSExchange)
 	}
 	if err != nil {
@@ -151,6 +158,112 @@ func payloadBytes(payload *lookingglass.CapturedPayload) ([]byte, error) {
 		return base64.StdEncoding.DecodeString(payload.Data)
 	}
 	return []byte(payload.Data), nil
+}
+
+// verifySDJWTVC checks an SD-JWT VC the way a recipient must before using
+// it, with the key found through JWT VC Issuer Metadata (SD-JWT VC draft 11
+// Section 3.5). Section 5.3: "The issuer value returned MUST be identical to
+// the iss value of the JWT. If these values are not identical, the data
+// contained in the response MUST NOT be used." It also holds the Issuer to
+// what it claims by carrying x5c, that the end-entity certificate has the
+// same key, and checks every Disclosure against the signed digests: RFC 9901
+// Section 7.1 rejects an SD-JWT when a Disclosure's digest is not in the
+// payload or is found more than once.
+func verifySDJWTVC(value string, exchanges []lookingglass.CapturedExchange, metadataExchange *int) (conformance.ExampleVerification, error) {
+	var none conformance.ExampleVerification
+	if metadataExchange == nil || *metadataExchange < 0 || *metadataExchange >= len(exchanges) {
+		return none, fmt.Errorf("the scenario did not name the exchange that fetched the JWT VC Issuer Metadata")
+	}
+	segments := strings.Split(value, "~")
+	if len(segments) < 2 || segments[len(segments)-1] != "" {
+		return none, fmt.Errorf("the value is not an SD-JWT without a Key Binding JWT: it does not end with ~")
+	}
+	issuerSigned := segments[0]
+	signed, err := jose.ParseSigned(issuerSigned, exampleSignatureAlgorithms)
+	if err != nil {
+		return none, fmt.Errorf("parse the Issuer-signed JWT: %w", err)
+	}
+	if len(signed.Signatures) != 1 {
+		return none, fmt.Errorf("the Issuer-signed JWT carries %d signatures, want 1", len(signed.Signatures))
+	}
+	header := signed.Signatures[0].Header
+	rawHeader, claims, err := JWTParts(issuerSigned)
+	if err != nil {
+		return none, err
+	}
+
+	body, err := payloadBytes(exchanges[*metadataExchange].Response.Body)
+	if err != nil {
+		return none, err
+	}
+	var metadata struct {
+		Issuer string             `json:"issuer"`
+		JWKS   jose.JSONWebKeySet `json:"jwks"`
+	}
+	if err := json.Unmarshal(body, &metadata); err != nil {
+		return none, fmt.Errorf("parse the JWT VC Issuer Metadata from exchange %d: %w", *metadataExchange, err)
+	}
+	if iss, _ := claims["iss"].(string); iss == "" || iss != metadata.Issuer {
+		return none, fmt.Errorf("the JWT VC Issuer Metadata issuer %q is not the credential's iss %q", metadata.Issuer, iss)
+	}
+	matches := metadata.JWKS.Key(header.KeyID)
+	if header.KeyID == "" || len(matches) != 1 {
+		return none, fmt.Errorf("kid %q selects %d keys in the JWT VC Issuer Metadata, want 1", header.KeyID, len(matches))
+	}
+	key := matches[0]
+	if _, err := signed.Verify(&key); err != nil {
+		return none, fmt.Errorf("the Issuer-signed JWT's signature does not verify: %w", err)
+	}
+
+	chain, _ := rawHeader["x5c"].([]any)
+	if len(chain) == 0 {
+		return none, fmt.Errorf("the Issuer-signed JWT carries no x5c")
+	}
+	leafText, _ := chain[0].(string)
+	leafDER, err := base64.StdEncoding.DecodeString(leafText)
+	if err != nil {
+		return none, fmt.Errorf("decode the x5c end-entity certificate: %w", err)
+	}
+	leaf, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		return none, fmt.Errorf("parse the x5c end-entity certificate: %w", err)
+	}
+	certified, err := (&jose.JSONWebKey{Key: leaf.PublicKey}).Thumbprint(crypto.SHA256)
+	if err != nil {
+		return none, err
+	}
+	published, err := key.Thumbprint(crypto.SHA256)
+	if err != nil {
+		return none, err
+	}
+	if !bytes.Equal(certified, published) {
+		return none, fmt.Errorf("the x5c end-entity certificate does not carry the key the JWT VC Issuer Metadata publishes")
+	}
+
+	if alg, present := claims["_sd_alg"]; present && alg != "sha-256" {
+		return none, fmt.Errorf("_sd_alg is %v; only sha-256 Disclosures can be checked", alg)
+	}
+	committed := map[string]int{}
+	digests, _ := claims["_sd"].([]any)
+	for _, digest := range digests {
+		text, _ := digest.(string)
+		committed[text]++
+	}
+	for _, disclosure := range segments[1 : len(segments)-1] {
+		sum := sha256.Sum256([]byte(disclosure))
+		digest := base64.RawURLEncoding.EncodeToString(sum[:])
+		if committed[digest] != 1 {
+			return none, fmt.Errorf("a Disclosure's digest %s appears %d times in _sd, want 1", digest, committed[digest])
+		}
+	}
+
+	index := *metadataExchange
+	return conformance.ExampleVerification{
+		Method:       conformance.VerifiedByIssuerMetadata,
+		Algorithm:    header.Algorithm,
+		KeyID:        header.KeyID,
+		JWKSExchange: &index,
+	}, nil
 }
 
 // verifyDocument checks a metadata document the way its consumer must. The

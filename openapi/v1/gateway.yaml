@@ -1510,12 +1510,15 @@ components:
               description: What the message is, in one or two sentences.
             format:
               type: string
-              enum: [jwt, json]
+              enum: [jwt, json, sd-jwt]
               description: >-
                 `jwt` is a compact JWS whose payload is a JWT Claims Set. Its
                 decoded parts are `header` and `payload`. `json` is a JSON
                 object sent as the body of an HTTP message, such as a metadata
-                document. Its one part is `document`.
+                document. Its one part is `document`. `sd-jwt` is an SD-JWT as
+                an Issuer sends it: its parts are `header`, `payload` and one
+                `disclosure` per Disclosure, whose members are `salt`, `name`
+                and `value`.
             indexable:
               type: boolean
     ConformanceExamplesResponse:
@@ -1576,6 +1579,12 @@ components:
           description: >-
             `json` with line breaks and indentation added between its tokens.
             No token is changed or moved.
+        digest:
+          type: string
+          description: >-
+            For a `disclosure` part: the base64url SHA-256 digest of the
+            Disclosure as it was sent, which is the value the Issuer-signed
+            JWT carries for it in `_sd` (RFC 9901 Section 4.2.3).
         members:
           type: array
           description: >-
@@ -1663,12 +1672,18 @@ components:
               properties:
                 method:
                   type: string
-                  enum: [embedded_jwk, jwks, issuer]
+                  enum: [embedded_jwk, jwks, issuer, jwt_vc_issuer_metadata]
                   description: >-
                     `embedded_jwk` means the signature verified under the
                     public key in the value's own `jwk` header parameter.
                     `jwks` means it verified under the key its `kid` selects
                     from the JWK Set fetched in exchange `jwks_exchange`.
+                    `jwt_vc_issuer_metadata` is for an SD-JWT VC: the signature
+                    verified under the key its `kid` selects from the JWT VC
+                    Issuer Metadata fetched in exchange `jwks_exchange`, whose
+                    `issuer` equals the credential's `iss`; the end-entity
+                    certificate in `x5c` carries the same key; and each
+                    Disclosure's digest appears once in `_sd`.
                     `issuer` is for a metadata document, which is not signed:
                     its `issuer_member` equals `issuer`, the issuer identifier
                     the request URL was built from, and the request went to

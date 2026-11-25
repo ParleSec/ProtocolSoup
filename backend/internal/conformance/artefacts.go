@@ -83,6 +83,12 @@ type ExampleSource struct {
 
 // How an example was checked when it was captured.
 const (
+	// VerifiedByIssuerMetadata is for an SD-JWT VC: the signature verified
+	// under the key, selected by kid, in the JWT VC Issuer Metadata one of
+	// the example's exchanges fetched, whose issuer equals the credential's
+	// iss. The end-entity certificate in x5c carries the same key, and each
+	// Disclosure's digest appears once in _sd.
+	VerifiedByIssuerMetadata = "jwt_vc_issuer_metadata"
 	// VerifiedByIssuer is for a metadata document, which carries no
 	// signature: the member that names its issuer equals the issuer
 	// identifier the request URL was built from.
@@ -102,8 +108,9 @@ type ExampleVerification struct {
 	// Algorithm is the JWS alg of a signed value.
 	Algorithm string `json:"algorithm,omitempty"`
 	KeyID     string `json:"key_id,omitempty"`
-	// JWKSExchange indexes the exchange that fetched the JWK Set, for
-	// VerifiedByJWKS.
+	// JWKSExchange indexes the exchange that fetched the keys: the JWK Set
+	// for VerifiedByJWKS, the JWT VC Issuer Metadata for
+	// VerifiedByIssuerMetadata.
 	JWKSExchange *int `json:"jwks_exchange,omitempty"`
 	// IssuerMember names the member that carries the issuer, and Issuer is
 	// its value, for VerifiedByIssuer.

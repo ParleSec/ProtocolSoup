@@ -71,6 +71,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OAuthError"
+  /.well-known/jwt-vc-issuer/oid4vci:
+    get:
+      tags: [OID4VCI]
+      summary: JWT VC Issuer Metadata
+      description: >-
+        Where a recipient of an SD-JWT VC finds the Issuer's public keys
+        (SD-JWT VC draft 11 Section 5). The path is the well-known string
+        inserted between the host and the path of the credential's `iss`.
+      operationId: getJwtVcIssuerMetadata
+      responses:
+        "200":
+          description: JWT VC Issuer Metadata configuration.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issuer, jwks]
+                properties:
+                  issuer:
+                    type: string
+                    description: The Issuer identifier, identical to the `iss` of the SD-JWT VCs it signs.
+                  jwks:
+                    type: object
+                    description: JWK Set holding the Issuer's public keys. A credential's `kid` selects one.
+                    required: [keys]
+                    properties:
+                      keys:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: true
+        "404":
+          description: Not the JWT VC Issuer Metadata location of this Issuer.
   /oid4vci/.well-known/openid-credential-issuer:
     get:
       tags: [OID4VCI]

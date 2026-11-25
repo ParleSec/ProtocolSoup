@@ -168,6 +168,11 @@ func (s *Server) setupRouter() {
 			// authorization_endpoint. The bare path belongs to the origin
 			// issuer and is claimed by the OIDC plugin below.
 			r.Method(http.MethodGet, "/.well-known/oauth-authorization-server/*", protocolRouter)
+
+			// SD-JWT VC draft 11 Section 5: JWT VC Issuer Metadata for an
+			// Issuer whose iss is https://{host}/oid4vci lives at the root
+			// well-known path with the iss path component appended.
+			r.Method(http.MethodGet, "/.well-known/jwt-vc-issuer/*", protocolRouter)
 		}
 
 		if info.ID == "agentauth" {

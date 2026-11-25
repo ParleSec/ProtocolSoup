@@ -63,7 +63,11 @@ OpenID for Verifiable Credential Issuance (OID4VCI 1.0) endpoints exposed by the
 - Authorization-details state bound through authorization code, access token,
   `credential_identifiers`, and credential request
 - Access-token-bound, idempotent credential status notifications
-- Signed Credential Issuer Metadata and certificate-backed ES256 HAIP SD-JWT
+- JWT VC Issuer Metadata at `/.well-known/jwt-vc-issuer/oid4vci`, and every
+  SD-JWT VC signed with the certificate-backed ES256 key and carrying `x5c`,
+  so a recipient can validate the key by either Issuer Signature Mechanism of
+  SD-JWT VC draft 11 Section 3.5
+- Signed Credential Issuer Metadata and HAIP SD-JWT
   VC issuance with OAuth Status List references. The OID4VP verifier fetches
   that list at presentation time and checks it with the same issuer key
   already accepted for the credential.

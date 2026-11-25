@@ -56,10 +56,9 @@ type credentialConfiguration struct {
 	CredentialSigningAlgs       []interface{}
 	SupportedDisplayName        string
 	SupportsSelectiveDisclosure bool
-	// UseX509CredentialSigner selects the persistent ES256 certificate-backed
-	// issuer key and emits its leaf-first chain in x5c. HAIP 1.0 Section 6.1.1
-	// requires this key-resolution method for SD-JWT VC credentials.
-	UseX509CredentialSigner bool
+	// ReferencesStatusList adds a status claim that references the Issuer's
+	// Token Status List to an SD-JWT VC of this configuration.
+	ReferencesStatusList bool
 
 	// RequireKeyAttestation gates OID4VCI 1.0 Appendix D key attestation
 	// enforcement (key_attestation.go) for this configuration only, so the
@@ -169,7 +168,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			CredentialTypes:             []string{"VerifiableCredential", "UniversityDegreeCredential"},
 			BindingMethodsSupported:     []string{"jwk"},
 			ProofSigningAlgsSupported:   []string{"ES256", "RS256"},
-			CredentialSigningAlgs:       []interface{}{"RS256"},
+			CredentialSigningAlgs:       []interface{}{"ES256"},
 			SupportedDisplayName:        "University Degree (SD-JWT VC)",
 			SupportsSelectiveDisclosure: true,
 		},
@@ -185,7 +184,7 @@ func defaultCredentialConfigurationRegistry() map[string]credentialConfiguration
 			CredentialSigningAlgs:       []interface{}{"ES256"},
 			SupportedDisplayName:        "University Degree (SD-JWT VC, HAIP)",
 			SupportsSelectiveDisclosure: true,
-			UseX509CredentialSigner:     true,
+			ReferencesStatusList:        true,
 			RequireKeyAttestation:       true,
 		},
 		"UniversityDegreeCredentialJWT": {

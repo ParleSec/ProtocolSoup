@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -98,4 +99,28 @@ func JWTClaim(compact, name string) (string, error) {
 	}
 	value, _ := claims[name].(string)
 	return value, nil
+}
+
+// FetchMetadata records a GET for a metadata document and requires the
+// response a client may use: 200 with the application/json media type. It
+// names that media type in an Accept header, which OpenID4VCI 1.0 Section
+// 12.2.2 recommends: "The Wallet is RECOMMENDED to send an Accept header in
+// the HTTP GET request to indicate the Content Type(s) it supports".
+func FetchMetadata(ctx context.Context, env *Env, target string) (*Response, error) {
+	req, err := http.NewRequest(http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := env.Do(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Status != http.StatusOK {
+		return nil, fmt.Errorf("%s was answered %d %s", target, resp.Status, Truncate(resp.Body))
+	}
+	if mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
+		return nil, fmt.Errorf("%s was answered with content type %q, not application/json", target, resp.Header.Get("Content-Type"))
+	}
+	return resp, nil
 }

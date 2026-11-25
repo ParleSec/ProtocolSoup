@@ -103,7 +103,7 @@ export interface ConformanceExampleLink {
 
 export interface ConformanceExampleSummary extends ConformanceExampleLink {
   summary: string
-  format: 'jwt' | 'json'
+  format: 'jwt' | 'json' | 'sd-jwt'
   indexable: boolean
 }
 
@@ -141,6 +141,8 @@ export interface ConformanceExamplePart {
   /** The same tokens with line breaks and indentation between them. */
   indented: string
   members: ConformanceExampleMember[]
+  /** For a Disclosure: the digest the signed JWT carries for it in _sd. */
+  digest?: string
 }
 
 export interface ConformanceExampleSource {
@@ -150,7 +152,7 @@ export interface ConformanceExampleSource {
 }
 
 export interface ConformanceExampleVerification {
-  method: 'embedded_jwk' | 'jwks' | 'issuer'
+  method: 'embedded_jwk' | 'jwks' | 'issuer' | 'jwt_vc_issuer_metadata'
   /** JWS alg of a signed value. */
   algorithm?: string
   key_id?: string

@@ -160,7 +160,7 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 		"jti":     credentialID,
 		"vct":     configuration.VCT,
 	}
-	if configuration.UseX509CredentialSigner {
+	if configuration.ReferencesStatusList {
 		statusListIndex, err := d.plugin.allocateStatusListIndex()
 		if err != nil {
 			return nil, err
@@ -178,48 +178,33 @@ func (d *sdJWTCredentialIssuerDriver) IssueCredential(subject string, configurat
 		}
 	}
 
-	var (
-		issuerSignedJWT string
-		issuerJWK       crypto.JWK
-		err             error
-	)
-	if configuration.UseX509CredentialSigner {
-		if d.plugin.mdocPKI == nil || d.plugin.mdocPKI.DocumentSignerKey() == nil {
-			return nil, fmt.Errorf("certificate-backed credential signer is unavailable")
+	// Every SD-JWT VC is signed with the certificate-backed ES256 key, so a
+	// recipient can validate the key by either Issuer Signature Mechanism of
+	// SD-JWT VC draft 11 Section 3.5: the chain in x5c, leaf first and
+	// without the trust anchor, or the key kid selects from JWT VC Issuer
+	// Metadata (jwt_vc_issuer_metadata.go).
+	issuerJWK, err := d.plugin.sdJWTVCSignerJWK()
+	if err != nil {
+		return nil, err
+	}
+	chain := d.plugin.mdocPKI.DocumentSignerChain()
+	if len(chain) == 0 || chain[0] == nil {
+		return nil, fmt.Errorf("certificate-backed credential signer chain is unavailable")
+	}
+	x5c := make([]string, 0, len(chain))
+	for _, certificate := range chain {
+		if certificate == nil {
+			return nil, fmt.Errorf("certificate-backed credential signer chain contains an empty certificate")
 		}
-		signerKey := d.plugin.mdocPKI.DocumentSignerKey()
-		chain := d.plugin.mdocPKI.DocumentSignerChain()
-		if len(chain) == 0 || chain[0] == nil {
-			return nil, fmt.Errorf("certificate-backed credential signer chain is unavailable")
-		}
-		token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
-		token.Header["typ"] = "dc+sd-jwt"
-		x5c := make([]string, 0, len(chain))
-		for _, certificate := range chain {
-			if certificate == nil {
-				return nil, fmt.Errorf("certificate-backed credential signer chain contains an empty certificate")
-			}
-			x5c = append(x5c, base64.StdEncoding.EncodeToString(certificate.Raw))
-		}
-		token.Header["x5c"] = x5c
-		issuerSignedJWT, err = token.SignedString(signerKey)
-		if err != nil {
-			return nil, err
-		}
-		issuerJWK = crypto.JWKFromECPublicKey(&signerKey.PublicKey, "")
-	} else {
-		token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-		token.Header["typ"] = "dc+sd-jwt"
-		token.Header["kid"] = d.plugin.keySet.RSAKeyID()
-		issuerSignedJWT, err = token.SignedString(d.plugin.keySet.RSAPrivateKey())
-		if err != nil {
-			return nil, err
-		}
-		var ok bool
-		issuerJWK, ok = d.plugin.keySet.GetJWKByID(d.plugin.keySet.RSAKeyID())
-		if !ok {
-			return nil, fmt.Errorf("issuer rsa jwk is unavailable")
-		}
+		x5c = append(x5c, base64.StdEncoding.EncodeToString(certificate.Raw))
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, claims)
+	token.Header["typ"] = "dc+sd-jwt"
+	token.Header["kid"] = issuerJWK.Kid
+	token.Header["x5c"] = x5c
+	issuerSignedJWT, err := token.SignedString(d.plugin.mdocPKI.DocumentSignerKey())
+	if err != nil {
+		return nil, err
 	}
 
 	serialized := vc.BuildSDJWTSerialization(issuerSignedJWT, disclosureSegments, "")

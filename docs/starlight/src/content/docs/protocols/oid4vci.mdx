@@ -251,8 +251,9 @@ flow remains unaffected by default.
 - **Signed metadata and HAIP SD-JWT VC.** Requesting Credential Issuer
   Metadata with `Accept: application/jwt` returns an ES256 JWT with
   `typ: openidvci-issuer-metadata+jwt`, top-level metadata claims, and a
-  leaf-only `x5c`. The HAIP SD-JWT configuration uses the same persistent
-  certificate-backed signer and assigns each credential a unique OAuth Status
+  leaf-only `x5c`. Every SD-JWT VC is signed with the same persistent
+  certificate-backed ES256 key, and the HAIP SD-JWT configuration also
+  assigns each credential a unique OAuth Status
   List index served as a signed `statuslist+jwt`. The OID4VP verifier fetches
   that list during presentation and checks it with the same issuer key already
   accepted for the credential. The HAIP SD-JWT configuration's
@@ -285,13 +286,31 @@ reference client when HAIP attestation env is configured.
   Annex B document-signer profile. Revocation requires external CRL/OCSP state
   and is not inferred from local certificate-path validation.
 
+## SD-JWT VC Issuer Key
+
+SD-JWT VC draft 11 Section 3.5 defines two Issuer Signature Mechanisms, and
+says: "If a recipient cannot validate that the public verification key
+corresponds the Issuer of the Issuer-signed JWT using a permitted Issuer
+Signature Mechanism, the SD-JWT VC MUST be rejected." Every SD-JWT VC this
+issuer signs supports both, and both lead to the same ES256 key:
+
+- **X.509 Certificates.** The JOSE header carries `x5c`: the signer's
+  certificate, leaf first, without the trust anchor. It chains to the issuer's
+  IACA root, which a wallet or verifier configures as a trust anchor.
+- **JWT VC Issuer Metadata.** `iss` is an HTTPS URL, and
+  `/.well-known/jwt-vc-issuer/oid4vci` returns `issuer` and a `jwks` holding
+  the key. The header's `kid` is that key's RFC 7638 thumbprint.
+
+The hosted wallet and the OID4VP verifier validate through `x5c`.
+
 ## Endpoints
 
 | Endpoint Role | Discovery Source | Purpose |
 |---------------|------------------|---------|
 | Credential Issuer Metadata Endpoint | `/.well-known/openid-credential-issuer/{issuer-path}` | Discover issuer metadata, credential configurations, and endpoint URLs |
 | Authorization Server Metadata Endpoint | `/.well-known/oauth-authorization-server/{issuer-path}` (RFC 8414) | Discover `authorization_endpoint`, `token_endpoint`, `jwks_uri`, and supported grant/auth methods for `authorization_code` |
-| Authorization Server JWKS | `jwks_uri` from AS metadata (`/oid4vci/.well-known/jwks.json`) | Verify JWT/SD-JWT credential signatures (RFC 8414 / RFC 7517) |
+| Authorization Server JWKS | `jwks_uri` from AS metadata (`/oid4vci/.well-known/jwks.json`) | Verify access tokens and JWT VC credential signatures (RFC 8414 / RFC 7517) |
+| JWT VC Issuer Metadata | `/.well-known/jwt-vc-issuer/{issuer-path}`, built from the SD-JWT VC's `iss` (SD-JWT VC draft 11 Section 5) | Find the key that verifies an SD-JWT VC: `issuer` equals the credential's `iss`, and the credential's `kid` selects one key in `jwks` |
 | Pushed Authorization Request Endpoint | `pushed_authorization_request_endpoint` from AS metadata | Validate and bind a short-lived HAIP authorization request |
 | Credential Offer URI | `credential_offer_uri` | Retrieve a credential offer by reference |
 | Token Endpoint | Issuer/Authorization Server metadata | Exchange `pre-authorized_code` or `authorization_code` for an access token; accepts client attestation headers |
