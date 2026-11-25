@@ -6,8 +6,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -224,6 +227,166 @@ func TestCaptureExampleChecksADocumentAgainstTheIssuerItsURLWasBuiltFrom(t *test
 		"a scenario that names no issuer to compare": withoutIssuer(documentScenario("/.well-known/sample", "")),
 	} {
 		if _, err := capture(scenario); err == nil {
+			t.Errorf("%s must not be captured", name)
+		}
+	}
+}
+
+// sdJWTIssuer is a test SD-JWT VC Issuer: it serves a Credential Response
+// and its JWT VC Issuer Metadata, and signs with a certified ES256 key.
+type sdJWTIssuer struct {
+	server *httptest.Server
+	key    *ecdsa.PrivateKey
+	leaf   []byte
+	// Overrides a test sets to make the Issuer misbehave.
+	metadataIssuer string
+	metadataKey    *ecdsa.PublicKey
+	extra          string
+}
+
+func newSDJWTIssuer(t *testing.T) *sdJWTIssuer {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	leaf, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := &sdJWTIssuer{key: key, leaf: leaf}
+	issuer.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/credential" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"credentials": []map[string]string{{"credential": issuer.credential(t)}}})
+			return
+		}
+		named, published := issuer.server.URL, &issuer.key.PublicKey
+		if issuer.metadataIssuer != "" {
+			named = issuer.metadataIssuer
+		}
+		if issuer.metadataKey != nil {
+			published = issuer.metadataKey
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": named,
+			"jwks":   jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: published, KeyID: "signer", Algorithm: "ES256"}}},
+		})
+	}))
+	t.Cleanup(issuer.server.Close)
+	return issuer
+}
+
+// credential signs an SD-JWT VC with two Disclosures, then appends extra.
+func (i *sdJWTIssuer) credential(t *testing.T) string {
+	t.Helper()
+	encode := base64.RawURLEncoding.EncodeToString
+	disclosures := []string{encode([]byte(`["c2FsdC0x","given_name","Alice"]`)), encode([]byte(`["c2FsdC0y","graduation_year",2018]`))}
+	digests := make([]string, 0, len(disclosures))
+	for _, disclosure := range disclosures {
+		sum := sha256.Sum256([]byte(disclosure))
+		digests = append(digests, encode(sum[:]))
+	}
+	payload, err := json.Marshal(map[string]any{"iss": i.server.URL, "vct": "https://example.test/degree", "_sd_alg": "sha-256", "_sd": digests})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := (&jose.SignerOptions{}).WithType("dc+sd-jwt").WithHeader("kid", "signer").
+		WithHeader("x5c", []string{base64.StdEncoding.EncodeToString(i.leaf)})
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.ES256, Key: i.key}, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := signer.Sign(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := signed.CompactSerialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return compact + "~" + strings.Join(disclosures, "~") + "~" + i.extra
+}
+
+func sdJWTScenario() ExampleScenario {
+	return ExampleScenario{
+		Description: "A test wallet requests a credential and reads the Issuer's metadata.",
+		Actor:       conformance.ActorConformanceClient,
+		Run: func(ctx context.Context, env *Env) (ExampleResult, error) {
+			get := func(path string) (*Response, error) {
+				req, err := http.NewRequest(http.MethodGet, env.BaseURL+path, nil)
+				if err != nil {
+					return nil, err
+				}
+				return env.Do(ctx, req)
+			}
+			resp, err := get("/credential")
+			if err != nil {
+				return ExampleResult{}, err
+			}
+			body, err := resp.JSON()
+			if err != nil {
+				return ExampleResult{}, err
+			}
+			credentials, err := IssuedCredentials(body)
+			if err != nil {
+				return ExampleResult{}, err
+			}
+			if _, err := get("/.well-known/jwt-vc-issuer"); err != nil {
+				return ExampleResult{}, err
+			}
+			metadataExchange := 1
+			return ExampleResult{
+				Value:        credentials[0],
+				Source:       conformance.ExampleSource{Exchange: 0, Message: conformance.ExampleInResponse, Location: "the credential member"},
+				JWKSExchange: &metadataExchange,
+			}, nil
+		},
+	}
+}
+
+func TestCaptureExampleVerifiesAnSDJWTVCThroughItsIssuersMetadata(t *testing.T) {
+	field := func(path string) conformance.ExampleField {
+		return conformance.ExampleField{Path: path, Reference: "Test Section 1", URL: "https://example.test/spec", Statement: "s"}
+	}
+	definition := conformance.Example{
+		ID:     "test-sd-jwt",
+		Format: conformance.ExampleFormatSDJWT,
+		Fields: []conformance.ExampleField{
+			field("header.alg"), field("header.kid"), field("header.typ"), field("header.x5c"),
+			field("payload._sd"), field("payload._sd_alg"), field("payload.iss"), field("payload.vct"),
+			field("disclosure.salt"), field("disclosure.name"), field("disclosure.value"),
+		},
+	}
+	capture := func(issuer *sdJWTIssuer) (*conformance.CapturedExample, error) {
+		recorder := NewRecorder(nil)
+		return captureExample(context.Background(), NewEnv(issuer.server.URL, "", "", recorder, 6000), recorder, definition, sdJWTScenario())
+	}
+
+	captured, err := capture(newSDJWTIssuer(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verification := captured.Verification
+	if verification.Method != conformance.VerifiedByIssuerMetadata || verification.Algorithm != "ES256" || verification.KeyID != "signer" ||
+		verification.JWKSExchange == nil || *verification.JWKSExchange != 1 {
+		t.Fatalf("verification = %+v", verification)
+	}
+
+	other, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uncommitted := base64.RawURLEncoding.EncodeToString([]byte(`["c2FsdC0z","degree","Forged"]`)) + "~"
+	for name, misbehave := range map[string]func(*sdJWTIssuer){
+		"metadata that names another issuer":             func(i *sdJWTIssuer) { i.metadataIssuer = "https://someone-else.example" },
+		"metadata whose key did not sign the JWT":        func(i *sdJWTIssuer) { i.metadataKey = &other.PublicKey },
+		"a Disclosure the signed JWT does not commit to": func(i *sdJWTIssuer) { i.extra = uncommitted },
+	} {
+		issuer := newSDJWTIssuer(t)
+		misbehave(issuer)
+		if _, err := capture(issuer); err == nil {
 			t.Errorf("%s must not be captured", name)
 		}
 	}

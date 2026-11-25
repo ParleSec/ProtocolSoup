@@ -2685,3 +2685,336 @@ examples:
         note: >-
           This issuer is also an OpenID Provider, so its OAuth 2.0 metadata
           names the UserInfo Endpoint as well.
+
+  - id: openid-credential-issuer
+    title: OpenID4VCI Credential Issuer metadata document
+    question: "What does OpenID4VCI Credential Issuer metadata look like?"
+    summary: >-
+      Credential Issuer metadata is the JSON document a Credential Issuer
+      publishes at /.well-known/openid-credential-issuer. It names the
+      issuer's endpoints and describes each Credential it can issue, which is
+      what a Wallet needs to request one (OpenID for Verifiable Credential
+      Issuance 1.0 Section 12.2).
+    format: json
+    looking_glass:
+      protocol: oid4vci
+      flow: oid4vci-pre-authorized
+    fields:
+      - path: document.authorization_servers
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          authorization_servers: OPTIONAL. A non-empty array of strings, where
+          each string is an identifier of the OAuth 2.0 Authorization Server
+          (as defined in [RFC8414]) the Credential Issuer relies on for
+          authorization. If this parameter is omitted, the entity providing
+          the Credential Issuer is also acting as the Authorization Server,
+          i.e., the Credential Issuer's identifier is used to obtain the
+          Authorization Server metadata. The actual OAuth 2.0 Authorization
+          Server metadata is obtained from the oauth-authorization-server
+          well-known location as defined in Section 3 of [RFC8414]. When there
+          are multiple entries in the array, the Wallet may be able to
+          determine which Authorization Server to use by querying the
+          metadata; for example, by examining the grant_types_supported
+          values, the Wallet can filter the server to use based on the grant
+          type it plans to use. When the Wallet is using authorization_server
+          parameter in the Credential Offer as a hint to determine which
+          Authorization Server to use out of multiple, the Wallet MUST NOT
+          proceed with the flow if the authorization_server Credential Offer
+          parameter value does not match any of the entries in the
+          authorization_servers array.
+        note: >-
+          The one authorization server is the Credential Issuer itself. Its
+          RFC 8414 metadata is at
+          /.well-known/oauth-authorization-server/oid4vci.
+      - path: document.batch_credential_issuance
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          batch_credential_issuance: OPTIONAL. Object containing information
+          about the Credential Issuer's support for issuance of multiple
+          Credentials in a batch in the Credential Endpoint. The presence of
+          this parameter means that the issuer supports more than one key
+          proof in the proofs parameter in the Credential Request so can issue
+          more than one Verifiable Credential for the same Credential Dataset
+          in a single request/response.
+        requirements: [CI-017]
+      - path: document.credential_configurations_supported
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          credential_configurations_supported: REQUIRED. Object that describes
+          specifics of the Credential that the Credential Issuer supports
+          issuance of. This object contains a list of name/value pairs, where
+          each name is a unique identifier of the supported Credential being
+          described. This identifier is used in the Credential Offer as
+          defined in Section 4.1.1 to communicate to the Wallet which
+          Credential is being offered. The value is an object that contains
+          metadata about a specific Credential and contains the following
+          parameters defined by this specification:
+        note: >-
+          Each name in this object is a Credential Configuration identifier a
+          Credential Offer can carry.
+        requirements: [CI-018]
+      - path: document.credential_endpoint
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          credential_endpoint: REQUIRED. URL of the Credential Issuer's
+          Credential Endpoint, as defined in Section 8.2. This URL MUST use
+          the https scheme and MAY contain port, path, and query parameter
+          components.
+      - path: document.credential_issuer
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          credential_issuer: REQUIRED. The Credential Issuer's identifier, as
+          defined in Section 12.2.1. The value MUST be identical to the
+          Credential Issuer's identifier value into which the well-known URI
+          string was inserted to create the URL used to retrieve the metadata.
+          If these values are not identical (when compared using a simple
+          string comparison with no normalization), the data contained in the
+          response MUST NOT be used.
+        requirements: [CW-024]
+      - path: document.credential_request_encryption
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          credential_request_encryption: OPTIONAL. Object containing
+          information about whether the Credential Issuer supports encryption
+          of the Credential Request on top of TLS.
+        requirements: [CI-022]
+      - path: document.credential_response_encryption
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          credential_response_encryption: OPTIONAL. Object containing
+          information about whether the Credential Issuer supports encryption
+          of the Credential Response on top of TLS.
+      - path: document.deferred_credential_endpoint
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          deferred_credential_endpoint: OPTIONAL. URL of the Credential
+          Issuer's Deferred Credential Endpoint, as defined in Section 9. This
+          URL MUST use the https scheme and MAY contain port, path, and query
+          parameter components. If omitted, the Credential Issuer does not
+          support the Deferred Credential Endpoint.
+      - path: document.display
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          display: OPTIONAL. A non-empty array of objects, where each object
+          contains display properties of a Credential Issuer for a certain
+          language. Below is a non-exhaustive list of valid parameters that
+          MAY be included:
+      - path: document.nonce_endpoint
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          nonce_endpoint: OPTIONAL. URL of the Credential Issuer's Nonce
+          Endpoint, as defined in Section 7. This URL MUST use the https
+          scheme and MAY contain port, path, and query parameter components.
+          If omitted, the Credential Issuer does not require the use of
+          c_nonce.
+        requirements: [CI-009]
+      - path: document.notification_endpoint
+        reference: OID4VCI 1.0 Section 12.2.4
+        url: https://openid.net/specs/openid-4-verifiable-credential-issuance-1_0-final.html#section-12.2.4
+        statement: >-
+          notification_endpoint: OPTIONAL. URL of the Credential Issuer's
+          Notification Endpoint, as defined in Section 11. This URL MUST use
+          the https scheme and MAY contain port, path, and query parameter
+          components. If omitted, the Credential Issuer does not support the
+          Notification Endpoint.
+        requirements: [CI-008]
+
+  - id: sd-jwt-vc
+    title: SD-JWT VC
+    question: "What does an SD-JWT VC look like?"
+    summary: >-
+      An SD-JWT VC is a Verifiable Credential in the SD-JWT format: a JWT the
+      Issuer signs, followed by one Disclosure for each claim the Holder can
+      choose to reveal. The signed JWT carries only a digest of each
+      Disclosure (RFC 9901 Section 4, SD-JWT VC draft 11 Section 3).
+    format: sd-jwt
+    looking_glass:
+      protocol: oid4vci
+      flow: oid4vci-pre-authorized
+    fields:
+      - path: header.alg
+        reference: RFC 7515 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.1
+        statement: >-
+          The "alg" (algorithm) Header Parameter identifies the cryptographic
+          algorithm used to secure the JWS. The JWS Signature value is not
+          valid if the "alg" value does not represent a supported algorithm or
+          if there is not a key for use with that algorithm associated with
+          the party that digitally signed or MACed the content. "alg" values
+          should either be registered in the IANA "JSON Web Signature and
+          Encryption Algorithms" registry established by [JWA] or be a value
+          that contains a Collision-Resistant Name. The "alg" value is a
+          case-sensitive ASCII string containing a StringOrURI value. This
+          Header Parameter MUST be present and MUST be understood and
+          processed by implementations.
+        note: >-
+          The Issuer lists this value in
+          credential_signing_alg_values_supported of the Credential
+          Configuration in its metadata.
+      - path: header.kid
+        reference: RFC 7515 Section 4.1.4
+        url: https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.4
+        statement: >-
+          The "kid" (key ID) Header Parameter is a hint indicating which key
+          was used to secure the JWS. This parameter allows originators to
+          explicitly signal a change of key to recipients. The structure of
+          the "kid" value is unspecified. Its value MUST be a case-sensitive
+          string. Use of this Header Parameter is OPTIONAL.
+        note: >-
+          The value selects the key in the jwks of the Issuer's JWT VC Issuer
+          Metadata, which is among the exchanges below. SD-JWT VC draft 11
+          Section 5.2 recommends it: "It is RECOMMENDED that the JWT contains
+          a kid JWT header parameter that can be used to look up the public
+          key in the JWK Set included by value or referenced in the JWT VC
+          Issuer Metadata."
+      - path: header.typ
+        reference: SD-JWT VC draft 11 Section 3.2.1
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.1
+        statement: >-
+          The typ header parameter of the SD-JWT MUST be present. The typ
+          value MUST use dc+sd-jwt. This indicates that the payload of the
+          SD-JWT contains plain JSON and follows the rules as defined in this
+          specification. It further indicates that the SD-JWT is a SD-JWT
+          component of a SD-JWT VC.
+      - path: header.x5c
+        reference: RFC 7515 Section 4.1.6
+        url: https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.6
+        statement: >-
+          The "x5c" (X.509 certificate chain) Header Parameter contains the
+          X.509 public key certificate or certificate chain [RFC5280]
+          corresponding to the key used to digitally sign the JWS.
+        note: >-
+          This is the second way to find the Issuer's key. SD-JWT VC draft 11
+          Section 3.5: "the recipient uses the public key from the end-entity
+          certificate of the certificates from the x5c header parameter and
+          validates the X.509 certificate chain accordingly." The chain holds
+          the end-entity certificate only. The trust anchor it chains to is
+          the Issuer's root certificate, which a recipient configures.
+      - path: payload._sd
+        reference: RFC 9901 Section 4.2.4.1
+        url: https://www.rfc-editor.org/rfc/rfc9901.html#section-4.2.4.1
+        statement: >-
+          Digests of Disclosures for object properties are added to an array
+          under the new key _sd in the object. The _sd key MUST refer to an
+          array of strings, each string being a digest of a Disclosure or a
+          decoy digest as described in Section 4.2.5.
+        note: >-
+          Each Disclosure below hashes to one of these digests. The order of
+          the digests is not the order of the Disclosures.
+        requirements: [SDJWT-001, SDJWT-004]
+      - path: payload._sd_alg
+        reference: RFC 9901 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc9901.html#section-4.1.1
+        statement: >-
+          The claim _sd_alg indicates the hash algorithm used by the Issuer to
+          generate the digests as described in Section 4.2. When used, this
+          claim MUST appear at the top level of the SD-JWT payload. It MUST
+          NOT be used in any object nested within the payload. If the _sd_alg
+          claim is not present at the top level, a default value of sha-256
+          MUST be used.
+        requirements: [SDJWT-002]
+      - path: payload.cnf
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          cnf - OPTIONAL unless cryptographic Key Binding is to be supported,
+          in which case it is REQUIRED. Contains the confirmation method
+          identifying the proof of possession key as defined in [RFC7800]. It
+          is RECOMMENDED that this contains a JWK as defined in Section 3.2 of
+          [RFC7800]. For proof of cryptographic Key Binding, the KB-JWT in the
+          presentation of the SD-JWT MUST be secured by the key identified in
+          this claim.
+        note: >-
+          The key is the holder key the conformance client proved possession
+          of in the Credential Request.
+      - path: payload.exp
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          exp - OPTIONAL. The expiry time of the Verifiable Credential after
+          which the Verifiable Credential is no longer valid. See [RFC7519]
+          for more information.
+      - path: payload.iat
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          iat - OPTIONAL. The time of issuance of the Verifiable Credential.
+          See [RFC7519] for more information.
+      - path: payload.iss
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          iss - OPTIONAL. As defined in Section 4.1.1 of [RFC7519] this claim
+          explicitly indicates the Issuer of the Verifiable Credential when it
+          is not conveyed by other means (e.g., the subject of the end-entity
+          certificate of an x5c header).
+        note: >-
+          The value is the Credential Issuer Identifier. A recipient builds
+          the JWT VC Issuer Metadata location from it.
+      - path: payload.jti
+        reference: RFC 7519 Section 4.1.7
+        url: https://www.rfc-editor.org/rfc/rfc7519.html#section-4.1.7
+        statement: >-
+          The "jti" (JWT ID) claim provides a unique identifier for the JWT.
+          The identifier value MUST be assigned in a manner that ensures that
+          there is a negligible probability that the same value will be
+          accidentally assigned to a different data object; if the application
+          uses multiple issuers, collisions MUST be prevented among values
+          produced by different issuers as well.
+      - path: payload.nbf
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          nbf - OPTIONAL. The time before which the Verifiable Credential MUST
+          NOT be accepted before validating. See [RFC7519] for more
+          information.
+      - path: payload.sub
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          sub - OPTIONAL. The identifier of the Subject of the Verifiable
+          Credential. The Issuer MAY use it to provide the Subject identifier
+          known by the Issuer. There is no requirement for a binding to exist
+          between sub and cnf claims.
+      - path: payload.vct
+        reference: SD-JWT VC draft 11 Section 3.2.2.2
+        url: https://www.ietf.org/archive/id/draft-ietf-oauth-sd-jwt-vc-11.html#section-3.2.2.2
+        statement: >-
+          vct - REQUIRED. The type of the Verifiable Credential, e.g.,
+          https://credentials.example.com/identity_credential, as defined in
+          Section 3.2.2.1.
+      - path: disclosure.salt
+        reference: RFC 9901 Section 4.2.1
+        url: https://www.rfc-editor.org/rfc/rfc9901.html#section-4.2.1
+        statement: >-
+          A salt value. MUST be a string. See Section 9.3 for security
+          considerations. To achieve the recommended entropy of the salt, the
+          Issuer can base64url-encode 128 bits of cryptographically secure
+          random data, producing a string. The salt value MUST be unique for
+          each claim that is to be selectively disclosed. The Issuer MUST NOT
+          reveal the salt value to any party other than the Holder.
+      - path: disclosure.name
+        reference: RFC 9901 Section 4.2.1
+        url: https://www.rfc-editor.org/rfc/rfc9901.html#section-4.2.1
+        statement: >-
+          The claim name, or key, as it would be used in a regular JWT
+          payload. It MUST be a string and MUST NOT be _sd, ..., or a claim
+          name existing in the object as a permanently disclosed claim.
+        requirements: [SDJWT-003]
+      - path: disclosure.value
+        reference: RFC 9901 Section 4.2.1
+        url: https://www.rfc-editor.org/rfc/rfc9901.html#section-4.2.1
+        statement: >-
+          The claim value, as it would be used in a regular JWT payload. The
+          value can be of any type that is allowed in JSON, including numbers,
+          strings, booleans, arrays, null, and objects.

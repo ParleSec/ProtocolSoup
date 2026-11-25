@@ -49,6 +49,8 @@ function formatLabel(format: ConformanceExampleResponse['format']): string {
       return 'JWT, compact serialization'
     case 'json':
       return 'JSON document'
+    case 'sd-jwt':
+      return 'SD-JWT, Issuer-signed JWT and Disclosures'
   }
 }
 
@@ -119,6 +121,49 @@ function PartView({ part, fields }: { part: ConformanceExamplePart; fields: Map<
   )
 }
 
+/** The part name each Disclosure of an SD-JWT arrives under. */
+const DISCLOSURE_PART = 'disclosure'
+
+/**
+ * The Disclosures of an SD-JWT. Every Disclosure has the same three
+ * elements, so their specification text is shown once, followed by each
+ * Disclosure as it was sent and the digest that ties it to the signed JWT.
+ */
+function DisclosuresView({
+  parts,
+  fields,
+}: {
+  parts: ConformanceExamplePart[]
+  fields: Map<string, ConformanceExampleField>
+}) {
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-white">Disclosures</h3>
+      <p className="text-sm leading-relaxed text-surface-300">
+        Each Disclosure is a JSON array of three elements, sent base64url-encoded after the signed JWT. The signed
+        JWT carries only its digest, in <code>_sd</code>.
+      </p>
+      <ul className="space-y-2">
+        {parts[0].members.map((member) => (
+          <MemberRow key={member.path} path={member.path} field={fields.get(member.path)} />
+        ))}
+      </ul>
+      <ol className="space-y-2">
+        {parts.map((part) => (
+          <li key={part.digest} className="rounded-lg border border-white/10 bg-surface-950/40 p-3 space-y-2">
+            <pre className="rounded-lg border border-white/10 bg-surface-950 p-3 text-xs leading-relaxed text-surface-100 overflow-x-auto whitespace-pre">
+              {part.json}
+            </pre>
+            <p className="text-xs text-surface-400">
+              Digest in <code>_sd</code>: <code className="break-all text-surface-200">{part.digest}</code>
+            </p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
 /** Status is icon + label + colour: the check is an outcome. */
 function VerificationView({ verification }: { verification: ConformanceExampleVerification }) {
   return (
@@ -135,6 +180,15 @@ function VerificationView({ verification }: { verification: ConformanceExampleVe
           <code className="break-all">{verification.issuer}</code>, the issuer identifier the request URL was built
           from, and that the request went to that issuer&apos;s own host. The document is not signed, so there is no
           signature to verify.
+        </p>
+      ) : verification.method === 'jwt_vc_issuer_metadata' ? (
+        <p className="text-sm leading-relaxed text-surface-200">
+          The capture run verified the {verification.algorithm} signature with the key whose <code>kid</code> is{' '}
+          <code className="break-all">{verification.key_id}</code>, from the JWT VC Issuer Metadata fetched in exchange{' '}
+          {(verification.jwks_exchange ?? 0) + 1} below, after checking that its <code>issuer</code> equals the
+          credential&apos;s <code>iss</code>. It also checked that the end-entity certificate in <code>x5c</code>{' '}
+          carries the same key, and that each Disclosure&apos;s digest appears once in <code>_sd</code>. Keys rotate,
+          so check this credential against that document, not against the one published today.
         </p>
       ) : verification.method === 'jwks' ? (
         <p className="text-sm leading-relaxed text-surface-200">
@@ -229,9 +283,17 @@ export function ExamplePage({ example }: { example: ConformanceExampleResponse }
       <Section title="Every field, with the specification text that defines it">
         {published && example.parts ? (
           <div className="space-y-6">
-            {example.parts.map((part) => (
-              <PartView key={part.name} part={part} fields={fields} />
-            ))}
+            {example.parts
+              .filter((part) => part.name !== DISCLOSURE_PART)
+              .map((part) => (
+                <PartView key={part.name} part={part} fields={fields} />
+              ))}
+            {example.parts.some((part) => part.name === DISCLOSURE_PART) && (
+              <DisclosuresView
+                parts={example.parts.filter((part) => part.name === DISCLOSURE_PART)}
+                fields={fields}
+              />
+            )}
           </div>
         ) : (
           <ul className="space-y-2">

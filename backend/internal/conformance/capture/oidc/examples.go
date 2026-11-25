@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -65,7 +64,7 @@ const (
 // against the Issuer the URL was built from.
 func metadataExample(ctx context.Context, env *capture.Env, wellKnownPath string) (capture.ExampleResult, error) {
 	issuer := env.BaseURL
-	resp, err := fetchMetadata(ctx, env, issuer+wellKnownPath)
+	resp, err := capture.FetchMetadata(ctx, env, issuer+wellKnownPath)
 	if err != nil {
 		return capture.ExampleResult{}, err
 	}
@@ -79,26 +78,6 @@ func metadataExample(ctx context.Context, env *capture.Env, wellKnownPath string
 		IssuerMember: "issuer",
 		Issuer:       issuer,
 	}, nil
-}
-
-// fetchMetadata records a GET for a metadata document and requires the
-// response a client may use: 200 with a JSON content type.
-func fetchMetadata(ctx context.Context, env *capture.Env, target string) (*capture.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, target, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := env.Do(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.Status != http.StatusOK {
-		return nil, fmt.Errorf("%s was answered %d %s", target, resp.Status, capture.Truncate(resp.Body))
-	}
-	if mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
-		return nil, fmt.Errorf("%s was answered with content type %q, not application/json", target, resp.Header.Get("Content-Type"))
-	}
-	return resp, nil
 }
 
 // clientID is the Mock IdP's seeded public client. A public client has no
@@ -135,7 +114,7 @@ type provider struct {
 // app under capture: a run never follows a URL to another host.
 func discover(ctx context.Context, env *capture.Env) (*provider, error) {
 	issuer := env.BaseURL
-	resp, err := fetchMetadata(ctx, env, issuer+providerConfigurationPath)
+	resp, err := capture.FetchMetadata(ctx, env, issuer+providerConfigurationPath)
 	if err != nil {
 		return nil, err
 	}

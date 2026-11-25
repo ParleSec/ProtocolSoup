@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -209,6 +210,61 @@ func TestDocumentExampleIsOnePartInTheSendersBytes(t *testing.T) {
 	example.Fields = example.Fields[:2]
 	if err := example.CheckExample(body); err == nil || !strings.Contains(err.Error(), "no field annotates document.extension") {
 		t.Fatalf("err = %v, want the unannotated member named", err)
+	}
+}
+
+func TestSDJWTExampleKeepsEachDisclosureAsItWasSent(t *testing.T) {
+	encode := base64.RawURLEncoding.EncodeToString
+	// The spacing inside the first Disclosure is the sender's and stays.
+	first := encode([]byte(`["c2FsdC0x", "given_name", "Alice"]`))
+	second := encode([]byte(`["c2FsdC0y","graduation_year",2018]`))
+	value := exampleJWS(`{"alg":"ES256","typ":"dc+sd-jwt"}`, `{"_sd":["a","b"],"vct":"https://example.test/degree"}`) + "~" + first + "~" + second + "~"
+	field := func(path string) ExampleField {
+		return ExampleField{Path: path, Reference: "Test Section 1", URL: "https://example.test/spec", Statement: "s"}
+	}
+	example := Example{
+		ID:     "sample-sd-jwt",
+		Format: ExampleFormatSDJWT,
+		Fields: []ExampleField{
+			field("header.alg"), field("header.typ"), field("payload._sd"), field("payload.vct"),
+			field("disclosure.salt"), field("disclosure.name"), field("disclosure.value"),
+		},
+	}
+	parts, err := example.DecodeExample(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 4 || parts[0].Name != "header" || parts[1].Name != "payload" || parts[2].Name != "disclosure" || parts[3].Name != "disclosure" {
+		t.Fatalf("parts = %+v", parts)
+	}
+	if parts[2].JSON != `["c2FsdC0x", "given_name", "Alice"]` {
+		t.Fatalf("disclosure = %q, want the sender's bytes", parts[2].JSON)
+	}
+	want := []ExampleMember{
+		{Path: "disclosure.salt", Value: `"c2FsdC0y"`},
+		{Path: "disclosure.name", Value: `"graduation_year"`},
+		{Path: "disclosure.value", Value: `2018`},
+	}
+	if !reflect.DeepEqual(parts[3].Members, want) {
+		t.Fatalf("members = %+v, want %+v", parts[3].Members, want)
+	}
+	// RFC 9901 Section 4.2.3: the digest is over the encoded Disclosure.
+	sum := sha256.Sum256([]byte(second))
+	if parts[3].Digest != encode(sum[:]) || parts[0].Digest != "" {
+		t.Fatalf("digest = %q, header digest = %q", parts[3].Digest, parts[0].Digest)
+	}
+	if err := example.CheckExample(value); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, broken := range map[string]string{
+		"no final tilde":                    strings.TrimSuffix(value, "~"),
+		"an array element disclosure":       exampleJWS(`{"alg":"ES256"}`, `{}`) + "~" + encode([]byte(`["c2FsdA","FR"]`)) + "~",
+		"a disclosure that is not an array": exampleJWS(`{"alg":"ES256"}`, `{}`) + "~" + encode([]byte(`{"a":1}`)) + "~",
+	} {
+		if _, err := example.DecodeExample(broken); err == nil {
+			t.Errorf("%s must not decode", name)
+		}
 	}
 }
 

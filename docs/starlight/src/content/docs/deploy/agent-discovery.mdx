@@ -211,10 +211,14 @@ does a valid DPoP proof look like?") and opens by saying what the message is.
 It then shows a real one: a message the deployed server issued or accepted in
 an exchange CI captured after the deploy, exactly as it was sent.
 
-A page shows one of two formats. A JWT is decoded into its JOSE Header and
-JWT Claims Set. A JSON document, such as the OpenID Provider configuration at
-`/example/openid-configuration` or the authorization server metadata at
-`/example/oauth-authorization-server`, is one part.
+A page shows one of three formats. A JWT is decoded into its JOSE Header and
+JWT Claims Set. An SD-JWT, at `/example/sd-jwt-vc`, adds its Disclosures: each
+is shown as the array the Issuer sent, with the digest that ties it to `_sd`
+in the signed JWT. A JSON document is one part. The three metadata documents are
+shown this way: the OpenID Provider configuration at
+`/example/openid-configuration`, the authorization server metadata at
+`/example/oauth-authorization-server`, and the OpenID4VCI Credential Issuer
+metadata at `/example/openid-credential-issuer`.
 
 Below the message, every member of its decoded parts is listed in the order
 the sender wrote it. Each member has its value as sent, the specification's
@@ -233,17 +237,22 @@ fails the run otherwise:
 - Every top-level member of the value has a field in the registry, and every
   registry field is present in the value.
 - The value passes the check its format allows. A metadata document is not
-  signed, so the run checks that its `issuer` member is exactly the issuer
+  signed, so the run checks that the member naming its issuer (`issuer`, or
+  `credential_issuer` in Credential Issuer metadata) is exactly the issuer
   identifier the request URL was built from, that the request went to that
   issuer's host at a well-known location, and that the value is the whole
   response body (RFC 8414 Section 3.3, OpenID Connect Discovery 1.0
-  Section 4.3). A signed value must verify. A DPoP proof verifies under the
-  public key in its
-  own `jwk` header parameter. An access token verifies under the key its
+  Section 4.3, OpenID4VCI 1.0 Section 12.2.4). A signed value must verify. A
+  DPoP proof verifies under the public key in its own `jwk` header
+  parameter. An access token verifies under the key its
   `kid` selects from the JWK Set the run fetches from the `jwks_uri` in the
   token issuer's RFC 8414 metadata. An ID Token verifies under the key its
   `kid` selects from the JWK Set at the `jwks_uri` of the OpenID Provider's
-  discovery document.
+  discovery document. An SD-JWT VC verifies under the key its `kid` selects
+  from the Issuer's JWT VC Issuer Metadata, whose `issuer` must equal the
+  credential's `iss`. The run also requires the end-entity certificate in
+  `x5c` to carry that key, and each Disclosure's digest to appear once in
+  `_sd`.
 
 The metadata and JWK Set requests are recorded and shown on the page, because
 keys rotate and the JWK Set published later might no longer hold the key. The
