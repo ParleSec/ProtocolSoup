@@ -35,6 +35,8 @@ description: "Delegated authorization flows with PKCE, private_key_jwt, introspe
 
 The implicit grant is implemented for the public `public-app` client so the fragment response can be compared with authorization code + PKCE. RFC 9700 §2.1.2: "Clients SHOULD NOT use the implicit grant." The authorization server returns `access_token` and `token_type` in the redirect fragment and does not issue a refresh token. Confidential clients receive `unauthorized_client`. `grant_type=implicit` is not accepted at the token endpoint.
 
+`S256` is the only PKCE transformation `/oauth2/authorize` supports. A `code_challenge` sent with `code_challenge_method=plain`, or with no `code_challenge_method` (which RFC 7636 Section 4.3 defines as `plain`), is refused with `invalid_request` (RFC 7636 Section 4.4.1). RFC 9700 §2.1.1 on methods that keep the verifier out of the authorization request: "Currently, S256 is the only such method."
+
 Resource Owner Password Credentials (`grant_type=password`) is not implemented. RFC 9700 §2.4: "The resource owner password credentials grant MUST NOT be used." Use authorization code + PKCE instead.
 
 ## Demo Scenarios

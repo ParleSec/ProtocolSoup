@@ -12,8 +12,9 @@ import (
 
 // ArtefactSchemaVersion is the artefacts.json format this build reads.
 // Version 2 made failing a list, one artefact per way a requirement was
-// broken and refused. Version 3 added examples.
-const ArtefactSchemaVersion = 3
+// broken and refused. Version 3 added examples. Version 4 gave an example
+// its own publish time.
+const ArtefactSchemaVersion = 4
 
 // ArtefactActor names who sent the requests in an artefact. The hosted wallet
 // only ever behaves as a conformant wallet; malformed requests come from the
@@ -80,8 +81,12 @@ type ExampleSource struct {
 	Location string `json:"location"`
 }
 
-// How an example's signature was checked when it was captured.
+// How an example was checked when it was captured.
 const (
+	// VerifiedByIssuer is for a metadata document, which carries no
+	// signature: the member that names its issuer equals the issuer
+	// identifier the request URL was built from.
+	VerifiedByIssuer = "issuer"
 	// VerifiedByEmbeddedJWK means the signature verified under the public
 	// key in the value's own jwk header parameter.
 	VerifiedByEmbeddedJWK = "embedded_jwk"
@@ -90,16 +95,20 @@ const (
 	VerifiedByJWKS = "jwks"
 )
 
-// ExampleVerification records the signature check the capture run made on
-// an example value. The run fails rather than record a value that does not
-// verify.
+// ExampleVerification records the check the capture run made on an example
+// value. The run fails rather than record a value that does not pass it.
 type ExampleVerification struct {
-	Method    string `json:"method"`
-	Algorithm string `json:"algorithm"`
+	Method string `json:"method"`
+	// Algorithm is the JWS alg of a signed value.
+	Algorithm string `json:"algorithm,omitempty"`
 	KeyID     string `json:"key_id,omitempty"`
 	// JWKSExchange indexes the exchange that fetched the JWK Set, for
 	// VerifiedByJWKS.
 	JWKSExchange *int `json:"jwks_exchange,omitempty"`
+	// IssuerMember names the member that carries the issuer, and Issuer is
+	// its value, for VerifiedByIssuer.
+	IssuerMember string `json:"issuer_member,omitempty"`
+	Issuer       string `json:"issuer,omitempty"`
 }
 
 // CapturedExample is one example value with the exchanges that carried and
@@ -112,6 +121,11 @@ type CapturedExample struct {
 	Source       ExampleSource                   `json:"source"`
 	Verification ExampleVerification             `json:"verification"`
 	Exchanges    []lookingglass.CapturedExchange `json:"exchanges"`
+	// PublishAfter is when the value itself stops being acceptable, for a
+	// value that cannot be revoked. The example is published at the later of
+	// this and the set's PublishAfter. It is zero when the value was revoked
+	// or is good for one use only.
+	PublishAfter time.Time `json:"publish_after,omitzero"`
 }
 
 // ArtefactSet is the output of cmd/conformance-capture for one deployed build.

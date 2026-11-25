@@ -1510,10 +1510,12 @@ components:
               description: What the message is, in one or two sentences.
             format:
               type: string
-              enum: [jwt]
+              enum: [jwt, json]
               description: >-
                 `jwt` is a compact JWS whose payload is a JWT Claims Set. Its
-                decoded parts are `header` and `payload`.
+                decoded parts are `header` and `payload`. `json` is a JSON
+                object sent as the body of an HTTP message, such as a metadata
+                document. Its one part is `document`.
             indexable:
               type: boolean
     ConformanceExamplesResponse:
@@ -1595,11 +1597,13 @@ components:
       allOf:
         - $ref: "#/components/schemas/ConformanceExampleSummary"
         - type: object
-          required: [run_url, fields, status]
+          required: [fields, status]
           properties:
             run_url:
               type: string
-              description: Looking Glass deep link to the flow that produces this message live.
+              description: >-
+                Looking Glass deep link to the flow that produces this message
+                live. Absent for a message no Looking Glass flow produces.
               example: /looking-glass?protocol=oauth2&flow=client_credentials&token_mode=dpop
             fields:
               type: array
@@ -1617,6 +1621,10 @@ components:
             publish_after:
               type: string
               format: date-time
+              description: >-
+                When the example is published: the artefact set's publish
+                time, or the expiry of the value itself when the value cannot
+                be revoked and expires later, as an ID Token does.
             actor:
               type: string
               enum: [conformance_client, hosted_wallet, counterparty]
@@ -1650,25 +1658,37 @@ components:
                   example: the DPoP header
             verification:
               type: object
-              description: The signature check the capture run made on the value.
-              required: [method, algorithm]
+              description: The check the capture run made on the value.
+              required: [method]
               properties:
                 method:
                   type: string
-                  enum: [embedded_jwk, jwks]
+                  enum: [embedded_jwk, jwks, issuer]
                   description: >-
                     `embedded_jwk` means the signature verified under the
                     public key in the value's own `jwk` header parameter.
                     `jwks` means it verified under the key its `kid` selects
                     from the JWK Set fetched in exchange `jwks_exchange`.
+                    `issuer` is for a metadata document, which is not signed:
+                    its `issuer_member` equals `issuer`, the issuer identifier
+                    the request URL was built from, and the request went to
+                    that issuer's host.
                 algorithm:
                   type: string
+                  description: JWS `alg` of a signed value.
                   example: ES256
                 key_id:
                   type: string
                 jwks_exchange:
                   type: integer
                   description: Zero-based index into `exchanges`.
+                issuer_member:
+                  type: string
+                  description: The member that names the issuer, for method `issuer`.
+                  example: issuer
+                issuer:
+                  type: string
+                  description: The issuer identifier the request URL was built from, for method `issuer`.
             exchanges:
               type: array
               items:

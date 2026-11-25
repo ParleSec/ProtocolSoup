@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
+	"github.com/ParleSec/ProtocolSoup/internal/mockidp"
 	"github.com/ParleSec/ProtocolSoup/pkg/models"
 )
 
@@ -13,9 +14,35 @@ import (
 // the protected resource metadata (RFC 9728) advertises the same list.
 var scopesSupported = []string{"openid", "profile", "email", "address", "phone", "roles", "offline_access"}
 
-// Client authentication metadata that the OpenID Provider configuration and
-// the RFC 8414 authorization server metadata both publish for this issuer.
+// Metadata that the OpenID Provider configuration and the RFC 8414
+// authorization server metadata both publish for this issuer. The two
+// documents describe one server, so both read these values and cannot
+// disagree.
 var (
+	// responseTypesSupported are the response_type sets the authorization
+	// endpoint handles (OIDC Core 1.0 Section 3). response_type is an
+	// unordered space-delimited set, so each set is listed once.
+	responseTypesSupported = []string{"code", "token", "id_token", "id_token token", "code id_token", "code token", "code id_token token"}
+	// responseModesSupported: query and fragment are the OAuth 2.0 defaults;
+	// form_post delivers the response in an HTTP POST body for every response
+	// type (OAuth 2.0 Form Post Response Mode).
+	responseModesSupported = []string{"query", "fragment", "form_post"}
+	// grantTypesSupported are the grants this issuer's token endpoint
+	// accepts, with implicit for the flows the authorization endpoint
+	// completes alone. client_credentials is served by the OAuth 2.0 issuer
+	// at /oauth2, which publishes its own metadata.
+	grantTypesSupported = []string{"authorization_code", "implicit", "refresh_token"}
+	// tokenEndpointAuthMethods are the client authentication methods
+	// /oidc/token accepts (clientauth.go).
+	tokenEndpointAuthMethods = []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"}
+	// codeChallengeMethodsSupported: the authorization endpoint refuses every
+	// PKCE transformation but S256 (RFC 7636 Section 4.4.1).
+	codeChallengeMethodsSupported = []string{mockidp.PKCEMethodS256}
+	// requestObjectSigningAlgs are the alg values a Request Object passed by
+	// reference may use. OpenID Connect Discovery 1.0 Section 3: "Servers
+	// SHOULD support none and RS256." An unsigned Request Object is accepted
+	// only from a client registered with request_object_signing_alg none.
+	requestObjectSigningAlgs = []string{requestObjectAlgNone, requestObjectAlgRS256}
 	// clientAssertionSigningAlgs are the algorithms a private_key_jwt client
 	// assertion may be signed with, at the token endpoint and at the
 	// revocation endpoint. RFC 8414 Section 2 on each
@@ -39,28 +66,18 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 	issuer := p.mockIdP.GetIssuer()
 
 	discovery := models.DiscoveryDocument{
-		Issuer:                issuer,
-		AuthorizationEndpoint: issuer + "/oidc/authorize",
-		TokenEndpoint:         issuer + "/oidc/token",
-		UserinfoEndpoint:      issuer + "/oidc/userinfo",
-		JwksURI:               issuer + "/oidc/.well-known/jwks.json",
-		RevocationEndpoint:    issuer + "/oauth2/revoke",
-		IntrospectionEndpoint: issuer + "/oauth2/introspect",
-		ScopesSupported:       scopesSupported,
-		// Canonical response_type sets actually handled by the authorization
-		// endpoint (OIDC Core 1.0 Section 3). response_type is an unordered
-		// space-delimited set, so canonical response_type orderings are advertised.
-		ResponseTypesSupported: []string{"code", "token", "id_token", "id_token token", "code id_token", "code token", "code id_token token"},
-		// query and fragment are the OAuth 2.0 defaults; form_post is supported
-		// for every response type and delivers the response in an HTTP POST body
-		// (OAuth 2.0 Form Post Response Mode), enabling the Form Post OP profiles.
-		ResponseModesSupported: []string{"query", "fragment", "form_post"},
-		// Only grant types the OIDC token endpoint actually accepts. The
-		// client_credentials grant lives on the OAuth 2.0 token endpoint, not
-		// here, so advertising it would be false metadata (OIDC Discovery 1.0
-		// Section 3 requires metadata to reflect the OP's real behaviour).
-		GrantTypesSupported:   []string{"authorization_code", "implicit", "refresh_token"},
-		SubjectTypesSupported: []string{"public", "pairwise"},
+		Issuer:                 issuer,
+		AuthorizationEndpoint:  issuer + "/oidc/authorize",
+		TokenEndpoint:          issuer + "/oidc/token",
+		UserinfoEndpoint:       issuer + "/oidc/userinfo",
+		JwksURI:                issuer + "/oidc/.well-known/jwks.json",
+		RevocationEndpoint:     issuer + "/oauth2/revoke",
+		IntrospectionEndpoint:  issuer + "/oauth2/introspect",
+		ScopesSupported:        scopesSupported,
+		ResponseTypesSupported: responseTypesSupported,
+		ResponseModesSupported: responseModesSupported,
+		GrantTypesSupported:    grantTypesSupported,
+		SubjectTypesSupported:  []string{"public", "pairwise"},
 		// ID Tokens are signed with RS256 only (crypto/jwt.go). ES256 keys are
 		// published in JWKS but never used to sign ID Tokens, so RS256 is the
 		// only honest advertisement here (OIDC Core 1.0 Section 3.1.3.7).
@@ -69,8 +86,8 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// userinfo_signed_response_alg=RS256 (OIDC Core 1.0 Section 5.3.2).
 		UserinfoSigningAlgValuesSupported: []string{"RS256"},
 		// Dynamic OPs MUST support Request Objects by reference (OIDC Core §15.2).
-		RequestObjectSigningAlgValuesSupported: []string{"RS256"},
-		TokenEndpointAuthMethodsSupported:      []string{"client_secret_basic", "client_secret_post", "private_key_jwt", "none"},
+		RequestObjectSigningAlgValuesSupported: requestObjectSigningAlgs,
+		TokenEndpointAuthMethodsSupported:      tokenEndpointAuthMethods,
 		// Every claim listed here is genuinely returned in an ID Token or from
 		// UserInfo for some granted scope. at_hash and c_hash are emitted from
 		// the authorization endpoint for implicit and hybrid flows.
@@ -87,7 +104,7 @@ func (p *Plugin) handleDiscovery(w http.ResponseWriter, r *http.Request) {
 		// receive it back truthfully (OIDC Core 1.0 Section 2). No higher assurance
 		// level is advertised because none is performed.
 		ACRValuesSupported:            []string{acrSingleFactorLogin},
-		CodeChallengeMethodsSupported: []string{"S256", "plain"},
+		CodeChallengeMethodsSupported: codeChallengeMethodsSupported,
 		// By-value request objects remain unsupported. request_uri is supported for
 		// Dynamic OP certification (OIDC Core 1.0 Section 15.2) and is advertised
 		// true only when Dynamic Registration is enabled, matching live behaviour.

@@ -283,3 +283,47 @@ func noRedirectClient() *http.Client {
 		},
 	}
 }
+
+// RFC 7636 Section 4.4.1: "If the server supporting PKCE does not support the
+// requested transformation, the authorization endpoint MUST return the
+// authorization error response with "error" value set to "invalid_request"."
+// Section 4.3 makes an absent code_challenge_method a request for plain.
+func TestAuthorizationCodeRequestRefusesEveryPKCETransformationButS256(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	const redirectURI = "http://localhost:3000/callback"
+	authorize := func(method []string) *http.Response {
+		t.Helper()
+		query := url.Values{
+			"response_type":  {"code"},
+			"client_id":      {"public-app"},
+			"redirect_uri":   {redirectURI},
+			"scope":          {"profile"},
+			"state":          {"csrf-state"},
+			"code_challenge": {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
+		}
+		if method != nil {
+			query["code_challenge_method"] = method
+		}
+		response, err := noRedirectClient().Get(server.server.URL + "/oauth2/authorize?" + query.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = response.Body.Close() })
+		return response
+	}
+
+	for name, method := range map[string][]string{"plain": {"plain"}, "absent": nil, "unregistered": {"S512"}} {
+		response := authorize(method)
+		location, err := url.Parse(response.Header.Get("Location"))
+		if err != nil || response.StatusCode != http.StatusFound {
+			t.Fatalf("%s: status = %d, Location = %q", name, response.StatusCode, response.Header.Get("Location"))
+		}
+		if !strings.HasPrefix(location.String(), redirectURI) || location.Query().Get("error") != "invalid_request" || location.Query().Get("state") != "csrf-state" {
+			t.Errorf("%s: Location = %s, want invalid_request at the redirect_uri with state", name, location)
+		}
+	}
+	if response := authorize([]string{"S256"}); response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("S256: status = %d, want the sign-in page; body=%s", response.StatusCode, body)
+	}
+}

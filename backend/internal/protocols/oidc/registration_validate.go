@@ -149,8 +149,8 @@ func validateRegistrationRequest(req *registrationRequest) error {
 	if alg := strings.TrimSpace(req.UserinfoSignedResponseAlg); alg != "" && alg != "RS256" {
 		return invalidClientMetadata("userinfo_signed_response_alg must be RS256 when requested")
 	}
-	if alg := strings.TrimSpace(req.RequestObjectSigningAlg); alg != "" && alg != "RS256" {
-		return invalidClientMetadata("request_object_signing_alg must be RS256 when requested")
+	if alg := strings.TrimSpace(req.RequestObjectSigningAlg); alg != "" && !containsValue(requestObjectSigningAlgs, alg) {
+		return invalidClientMetadata("request_object_signing_alg must be RS256 or none when requested")
 	}
 	if alg := strings.TrimSpace(req.TokenEndpointAuthSigningAlg); alg != "" {
 		switch alg {

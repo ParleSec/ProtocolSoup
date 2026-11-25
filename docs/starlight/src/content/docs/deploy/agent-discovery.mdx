@@ -211,6 +211,11 @@ does a valid DPoP proof look like?") and opens by saying what the message is.
 It then shows a real one: a message the deployed server issued or accepted in
 an exchange CI captured after the deploy, exactly as it was sent.
 
+A page shows one of two formats. A JWT is decoded into its JOSE Header and
+JWT Claims Set. A JSON document, such as the OpenID Provider configuration at
+`/example/openid-configuration` or the authorization server metadata at
+`/example/oauth-authorization-server`, is one part.
+
 Below the message, every member of its decoded parts is listed in the order
 the sender wrote it. Each member has its value as sent, the specification's
 own text for it, a link to that section, and a link to each
@@ -227,20 +232,32 @@ fails the run otherwise:
   to.
 - Every top-level member of the value has a field in the registry, and every
   registry field is present in the value.
-- The signature verifies. A DPoP proof verifies under the public key in its
+- The value passes the check its format allows. A metadata document is not
+  signed, so the run checks that its `issuer` member is exactly the issuer
+  identifier the request URL was built from, that the request went to that
+  issuer's host at a well-known location, and that the value is the whole
+  response body (RFC 8414 Section 3.3, OpenID Connect Discovery 1.0
+  Section 4.3). A signed value must verify. A DPoP proof verifies under the
+  public key in its
   own `jwk` header parameter. An access token verifies under the key its
   `kid` selects from the JWK Set the run fetches from the `jwks_uri` in the
-  token issuer's RFC 8414 metadata.
+  token issuer's RFC 8414 metadata. An ID Token verifies under the key its
+  `kid` selects from the JWK Set at the `jwks_uri` of the OpenID Provider's
+  discovery document.
 
 The metadata and JWK Set requests are recorded and shown on the page, because
 keys rotate and the JWK Set published later might no longer hold the key. The
 page states when the message was issued and the commit that issued it, and
-links to the Looking Glass flow that produces the message live.
+links to the Looking Glass flow that produces the message live when there is
+one.
 
 Example values are part of the same artefact set as the requirement exchanges
 (`CONFORMANCE_ARTEFACTS`), so the same rules hold: a value is only shown for
 the build that captured it, and only once every token, code and nonce in its
-exchanges has expired or been revoked. A page is indexable, and listed in
+exchanges has expired or been revoked. A value that cannot be revoked waits
+for its own expiry: the ID Token page publishes one hour after the capture,
+when the token's `exp` has passed, while the other pages publish with the
+rest of the set. A page is indexable, and listed in
 `/sitemap.xml` and `/llms.txt`, once the launch gate is open and the build's
 artefact set holds its value.
 

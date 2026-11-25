@@ -149,10 +149,27 @@ description: "Identity layer on OAuth 2.0 with ID tokens, discovery, and UserInf
   HTML form that `POST`s the response parameters (success or error) to the
   redirect URI, so nothing is placed in a URL (OAuth 2.0 Form Post Response
   Mode). This enables the Form Post OP profiles.
+- `S256` is the only PKCE transformation the authorization endpoint supports,
+  and both metadata documents list it alone in
+  `code_challenge_methods_supported`. A `code_challenge` sent with
+  `code_challenge_method=plain`, or with no `code_challenge_method` (which
+  RFC 7636 Section 4.3 defines as `plain`), is refused with `invalid_request`
+  (RFC 7636 Section 4.4.1).
+- An Authentication Request is granted only the scope values the OP lists in
+  `scopes_supported`. Any other value is ignored (OIDC Core 1.0
+  Section 3.1.2.1). `offline_access` is granted only when `prompt` contains
+  `consent` and the `response_type` returns a code, and is ignored otherwise
+  (Section 11). The Token Response's `scope` names what was granted. Refresh
+  tokens are issued with or without `offline_access`, which Section 11
+  permits.
+- A request with `prompt=consent` always shows the sign-in page, which names
+  the client and the requested scopes and can be cancelled. It is never
+  completed from an existing session alone (OIDC Core 1.0 Section 3.1.2.1).
 - The `claims` request parameter is supported (OIDC Core 1.0 Section 5.5), and
   discovery advertises `claims_parameter_supported` as `true`. Claims requested
   under the `userinfo` member are returned from the UserInfo endpoint; claims
-  requested under the `id_token` member are returned in the ID token. Every
+  requested under the `id_token` member are returned in the ID token, whether
+  it comes from the authorization endpoint or the token endpoint. Every
   returned value is real data from the user record, and a value the user does
   not have is omitted rather than erroring (Section 5.5.1). A `claims` value that
   is not a valid JSON object is rejected with `invalid_request`.
@@ -228,8 +245,12 @@ redirect URI hosts, a pairwise client must supply an HTTPS
 `sector_identifier_uri`. At registration time the OP fetches its JSON array
 without following redirects, rejects private-network addresses, and requires it
 to contain every registered redirect URI (OIDC Core §8.1; OIDC Registration
-§5). Unsigned ID Tokens, unsigned Request Objects, and by-value `request`
-objects are not advertised and are rejected when explicitly requested.
+§5). A client that registers `request_object_signing_alg: "none"` may pass an
+unsigned Request Object by reference (OIDC Core §6.1), and discovery lists
+`none` and `RS256` in `request_object_signing_alg_values_supported`. An
+unsigned Request Object from any other client is refused, including one that
+registered no algorithm. Unsigned ID Tokens and by-value `request` objects are
+not advertised and are rejected when explicitly requested.
 
 ## Third-Party Initiated Login
 

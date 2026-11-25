@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/conformance"
 	"github.com/go-jose/go-jose/v4"
@@ -143,6 +144,119 @@ func TestCaptureExampleVerifiesAgainstTheFetchedJWKSet(t *testing.T) {
 	}
 	if !strings.Contains(captured.Exchanges[0].Response.Body.Data, captured.Value) {
 		t.Fatal("the captured value must be the one the token response carried")
+	}
+	if !captured.PublishAfter.IsZero() {
+		t.Fatalf("a scenario that names no expiry sets no publish time, got %v", captured.PublishAfter)
+	}
+}
+
+// documentScenario fetches a metadata document from wellKnownPath of a test
+// server and reports issuer as the issuer its URL was built from.
+func documentScenario(wellKnownPath, issuer string) ExampleScenario {
+	return ExampleScenario{
+		Description: "A test client reads a metadata document.",
+		Actor:       conformance.ActorConformanceClient,
+		Run: func(ctx context.Context, env *Env) (ExampleResult, error) {
+			req, err := http.NewRequest(http.MethodGet, env.BaseURL+wellKnownPath, nil)
+			if err != nil {
+				return ExampleResult{}, err
+			}
+			resp, err := env.Do(ctx, req)
+			if err != nil {
+				return ExampleResult{}, err
+			}
+			if issuer == "" {
+				issuer = env.BaseURL
+			}
+			return ExampleResult{
+				Value:        string(resp.Body),
+				Source:       conformance.ExampleSource{Exchange: 0, Message: conformance.ExampleInResponse, Location: "the body"},
+				IssuerMember: "issuer",
+				Issuer:       issuer,
+			}, nil
+		},
+	}
+}
+
+func TestCaptureExampleChecksADocumentAgainstTheIssuerItsURLWasBuiltFrom(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/sample":
+			_, _ = w.Write([]byte(`{"issuer":"` + server.URL + `","token_endpoint":"` + server.URL + `/token"}` + "\n"))
+		case "/.well-known/other-issuer":
+			_, _ = w.Write([]byte(`{"issuer":"https://someone-else.example","token_endpoint":"` + server.URL + `/token"}`))
+		default:
+			_, _ = w.Write([]byte(`{"issuer":"` + server.URL + `","token_endpoint":"` + server.URL + `/token"}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+	field := func(path string) conformance.ExampleField {
+		return conformance.ExampleField{Path: path, Reference: "Test Section 1", URL: "https://example.test/spec", Statement: "s"}
+	}
+	definition := conformance.Example{
+		ID:     "test-document",
+		Format: conformance.ExampleFormatJSON,
+		Fields: []conformance.ExampleField{field("document.issuer"), field("document.token_endpoint")},
+	}
+	capture := func(scenario ExampleScenario) (*conformance.CapturedExample, error) {
+		recorder := NewRecorder(nil)
+		return captureExample(context.Background(), NewEnv(server.URL, "", "", recorder, 6000), recorder, definition, scenario)
+	}
+
+	captured, err := capture(documentScenario("/.well-known/sample", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := conformance.ExampleVerification{Method: conformance.VerifiedByIssuer, IssuerMember: "issuer", Issuer: server.URL}
+	if captured.Verification != want {
+		t.Fatalf("verification = %+v, want %+v", captured.Verification, want)
+	}
+	if !strings.HasSuffix(captured.Value, "\n") || captured.Value != captured.Exchanges[0].Response.Body.Data {
+		t.Fatal("the value must be the response body exactly as it was sent")
+	}
+
+	for name, scenario := range map[string]ExampleScenario{
+		"a document that names another issuer":       documentScenario("/.well-known/other-issuer", ""),
+		"a document not at a well-known location":    documentScenario("/metadata", ""),
+		"a document fetched from another host":       documentScenario("/.well-known/sample", "https://someone-else.example"),
+		"a scenario that names no issuer to compare": withoutIssuer(documentScenario("/.well-known/sample", "")),
+	} {
+		if _, err := capture(scenario); err == nil {
+			t.Errorf("%s must not be captured", name)
+		}
+	}
+}
+
+// withoutIssuer drops what a scenario said about the issuer.
+func withoutIssuer(scenario ExampleScenario) ExampleScenario {
+	run := scenario.Run
+	scenario.Run = func(ctx context.Context, env *Env) (ExampleResult, error) {
+		result, err := run(ctx, env)
+		result.Issuer, result.IssuerMember = "", ""
+		return result, err
+	}
+	return scenario
+}
+
+func TestCaptureExampleCarriesTheExpiryOfAValueThatCannotBeRevoked(t *testing.T) {
+	issuer := newExampleIssuer(t)
+	env, recorder := issuer.env()
+	expires := time.Date(2026, 11, 24, 12, 0, 0, 0, time.FixedZone("AEDT", 11*60*60))
+	scenario := tokenScenario()
+	run := scenario.Run
+	scenario.Run = func(ctx context.Context, env *Env) (ExampleResult, error) {
+		result, err := run(ctx, env)
+		result.ValueExpires = expires
+		return result, err
+	}
+	captured, err := captureExample(context.Background(), env, recorder, tokenDefinition(), scenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !captured.PublishAfter.Equal(expires) || captured.PublishAfter.Location() != time.UTC {
+		t.Fatalf("publish_after = %v, want %v in UTC", captured.PublishAfter, expires.UTC())
 	}
 }
 

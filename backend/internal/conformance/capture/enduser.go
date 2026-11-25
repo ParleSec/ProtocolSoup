@@ -36,18 +36,7 @@ var loginRequestIDPattern = regexp.MustCompile(`name="login_request_id" value="(
 // redeeming the code, and the Authorization Response parameters as the
 // authorization server delivered them.
 func AuthorizeAsEndUser(ctx context.Context, env *Env, authorizationURL, session string) (*WalletResult, url.Values, error) {
-	if !strings.HasPrefix(authorizationURL, env.BaseURL+"/") {
-		return nil, nil, fmt.Errorf("the wallet's authorization_url %q is not at the main app", authorizationURL)
-	}
-	loginRequestID, err := openAuthorizationRequest(ctx, env, authorizationURL)
-	if err != nil {
-		return nil, nil, err
-	}
-	email, password, err := demoUser(ctx, env)
-	if err != nil {
-		return nil, nil, err
-	}
-	callbackURL, err := signIn(ctx, env, loginRequestID, email, password)
+	callbackURL, err := AuthenticateEndUser(ctx, env, authorizationURL, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -71,15 +60,39 @@ func AuthorizeAsEndUser(ctx context.Context, env *Env, authorizationURL, session
 	return result, response, nil
 }
 
+// AuthenticateEndUser sends the Authorization Request at authorizationURL
+// as the End-User's user agent, signs in at the Mock IdP as a demo user, and
+// returns the URL the authorization server redirects the user agent to: the
+// Authorization Response. With record set, the Authorization Request and the
+// login page that answers it are recorded. The sign-in never is.
+func AuthenticateEndUser(ctx context.Context, env *Env, authorizationURL string, record bool) (string, error) {
+	if !strings.HasPrefix(authorizationURL, env.BaseURL+"/") {
+		return "", fmt.Errorf("the authorization URL %q is not at the main app", authorizationURL)
+	}
+	loginRequestID, err := openAuthorizationRequest(ctx, env, authorizationURL, record)
+	if err != nil {
+		return "", err
+	}
+	email, password, err := demoUser(ctx, env)
+	if err != nil {
+		return "", err
+	}
+	return signIn(ctx, env, loginRequestID, email, password)
+}
+
 // openAuthorizationRequest fetches the Authorization Request as a browser
 // would and returns the login request the Mock IdP opened for it.
-func openAuthorizationRequest(ctx context.Context, env *Env, authorizationURL string) (string, error) {
+func openAuthorizationRequest(ctx context.Context, env *Env, authorizationURL string, record bool) (string, error) {
 	req, err := http.NewRequest(http.MethodGet, authorizationURL, nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Accept", "text/html")
-	resp, err := env.Setup(ctx, req)
+	do := env.Setup
+	if record {
+		do = env.Do
+	}
+	resp, err := do(ctx, req)
 	if err != nil {
 		return "", err
 	}

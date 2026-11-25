@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,12 @@ func TestRegistryValidationExampleRules(t *testing.T) {
 	}
 
 	registry, root := valid(t)
+	registry.Examples[0].LookingGlass = ExampleFlow{}
+	if err := Validate(registry, root); err != nil {
+		t.Fatalf("an example no Looking Glass flow produces must validate: %v", err)
+	}
+
+	registry, root = valid(t)
 	if err := Validate(registry, root); err != nil {
 		t.Fatalf("a well-formed example must validate: %v", err)
 	}
@@ -78,7 +85,8 @@ func TestRegistryValidationExampleRules(t *testing.T) {
 		{"question without question mark", func(e *Example) { e.Question = "A sample proof" }, "question must end with a question mark"},
 		{"no summary", func(e *Example) { e.Summary = " " }, "summary is required"},
 		{"unsupported format", func(e *Example) { e.Format = "xml" }, "format is not supported"},
-		{"no flow", func(e *Example) { e.LookingGlass.Flow = "" }, "looking_glass protocol and flow are required"},
+		{"a protocol without a flow", func(e *Example) { e.LookingGlass.Flow = "" }, "looking_glass needs both protocol and flow, or neither"},
+		{"a token mode without a flow", func(e *Example) { e.LookingGlass = ExampleFlow{TokenMode: "dpop"} }, "looking_glass token_mode needs a flow"},
 		{"unknown token mode", func(e *Example) { e.LookingGlass.TokenMode = "mtls" }, "token_mode must be bearer or dpop"},
 		{"no fields", func(e *Example) { e.Fields = nil }, "at least one field is required"},
 		{"path outside the format's parts", func(e *Example) { e.Fields[0].Path = "body.typ" }, "path must be a part of the format and a member"},
@@ -166,6 +174,53 @@ func TestCheckExampleFindsUnannotatedAndAbsentMembers(t *testing.T) {
 	missing := exampleJWS(exampleHeaderJSON, `{"zeta":1.0,"cnf":{"other":2},"iat":1}`)
 	if err := example.CheckExample(missing); err == nil || !strings.Contains(err.Error(), "the value has no payload.cnf.jkt") {
 		t.Fatalf("a field whose member is absent must be reported: %v", err)
+	}
+}
+
+func TestDocumentExampleIsOnePartInTheSendersBytes(t *testing.T) {
+	// A trailing newline and odd spacing are the sender's and stay.
+	const body = `{"issuer":"https://as.example", "scopes_supported":["openid","profile"],"extension":{"a":1}}` + "\n"
+	field := func(path string) ExampleField {
+		return ExampleField{Path: path, Reference: "Test Section 1", URL: "https://example.test/spec", Statement: "s"}
+	}
+	example := Example{
+		ID:     "sample-document",
+		Format: ExampleFormatJSON,
+		Fields: []ExampleField{field("document.issuer"), field("document.scopes_supported"), field("document.extension")},
+	}
+	parts, err := example.DecodeExample(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 1 || parts[0].Name != "document" || parts[0].JSON != body {
+		t.Fatalf("parts = %+v", parts)
+	}
+	want := []ExampleMember{
+		{Path: "document.issuer", Value: `"https://as.example"`},
+		{Path: "document.scopes_supported", Value: `["openid","profile"]`},
+		{Path: "document.extension", Value: `{"a":1}`},
+	}
+	if !reflect.DeepEqual(parts[0].Members, want) {
+		t.Fatalf("members = %+v, want %+v", parts[0].Members, want)
+	}
+	if err := example.CheckExample(body); err != nil {
+		t.Fatal(err)
+	}
+	example.Fields = example.Fields[:2]
+	if err := example.CheckExample(body); err == nil || !strings.Contains(err.Error(), "no field annotates document.extension") {
+		t.Fatalf("err = %v, want the unannotated member named", err)
+	}
+}
+
+func TestExampleWithoutAFlowOffersNoneToRun(t *testing.T) {
+	registry := catalogueRegistry()
+	example := exampleFixture()
+	example.LookingGlass = ExampleFlow{}
+	registry.Examples = []Example{example}
+	c := NewCatalogue(registry, nil, testBuildCommit, mapExplainers{"al-010": "x"})
+	_, body := serve(t, c, "/examples/sample-proof")
+	if _, present := body["run_url"]; present {
+		t.Fatalf("run_url = %v, want it absent", body["run_url"])
 	}
 }
 
@@ -268,6 +323,36 @@ func TestExampleRoute(t *testing.T) {
 		}
 		if body["indexable"] != true {
 			t.Fatal("a captured example stays indexable while it waits to publish")
+		}
+	})
+
+	t.Run("a value that cannot be revoked waits for its own expiry", func(t *testing.T) {
+		expires := publishAfter.Add(40 * time.Minute)
+		set := capturedExampleFixture(testBuildCommit, publishAfter)
+		set.Examples[0].PublishAfter = expires
+		c := exampleCatalogue(true, set)
+
+		c.now = func() time.Time { return expires.Add(-time.Second) }
+		_, body := serve(t, c, "/examples/sample-proof")
+		if body["status"] != string(ArtefactsPending) || body["publish_after"] != "2026-11-22T04:40:00Z" || body["value"] != nil {
+			t.Fatalf("the set's publish time passed but the value has not expired: %+v", body)
+		}
+
+		c.now = func() time.Time { return expires }
+		_, body = serve(t, c, "/examples/sample-proof")
+		if body["status"] != string(ArtefactsPublished) || body["value"] == nil {
+			t.Fatalf("body = %+v", body)
+		}
+	})
+
+	t.Run("an expiry before the set's publish time does not bring it forward", func(t *testing.T) {
+		set := capturedExampleFixture(testBuildCommit, publishAfter)
+		set.Examples[0].PublishAfter = publishAfter.Add(-time.Hour)
+		c := exampleCatalogue(true, set)
+		c.now = func() time.Time { return publishAfter.Add(-time.Second) }
+		_, body := serve(t, c, "/examples/sample-proof")
+		if body["status"] != string(ArtefactsPending) || body["publish_after"] != "2026-11-22T04:00:00Z" {
+			t.Fatalf("body = %+v", body)
 		}
 	})
 
