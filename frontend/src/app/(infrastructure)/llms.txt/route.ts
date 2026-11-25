@@ -72,6 +72,7 @@ export async function GET() {
     '- To read OAuth 2.0 Protected Resource Metadata (RFC 9728), `GET /.well-known/oauth-protected-resource`.',
     '- To read the OID4VCI Credential Issuer metadata, `GET /.well-known/openid-credential-issuer/oid4vci`. Send `Accept: application/jwt` for the signed form.',
     '- To read the OID4VCI issuer\'s Authorization Server metadata, `GET /.well-known/oauth-authorization-server/oid4vci`.',
+    '- To find the key that verifies an SD-JWT VC from this issuer, `GET /.well-known/jwt-vc-issuer/oid4vci` and select the key whose `kid` the credential names.',
     '- To fetch the OID4VCI issuer signing keys, `GET /oid4vci/.well-known/jwks.json`.',
     '- To list the HTTP APIs on this origin (RFC 9727), `GET /.well-known/api-catalog`.',
     '- To list the agent skills and their `sha256` digests, `GET /.well-known/agent-skills/index.json`.',
