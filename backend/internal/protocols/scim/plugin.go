@@ -2,7 +2,6 @@ package scim
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/crypto"
 	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/ParleSec/ProtocolSoup/internal/plugin"
 	"github.com/go-chi/chi/v5"
@@ -22,8 +22,19 @@ type Plugin struct {
 	lookingGlass *lookingglass.Engine
 	baseURL      string
 	client       *Client
-	retentionStop context.CancelFunc
-	retentionWG   sync.WaitGroup
+
+	// How access tokens are validated (see auth.go). authorizationServer is
+	// set when the authorization server runs in this process; otherwise
+	// asJWKSURI names the JWK Set it publishes.
+	authorizationServer authorizationServer
+	asIssuer            string
+	resource            string
+	asJWKSURI           string
+	jwksFetch           *crypto.JWKSFetcher
+	introspectURL       string
+	introspectSecret    string
+	retentionStop       context.CancelFunc
+	retentionWG         sync.WaitGroup
 }
 
 // NewPlugin creates a new SCIM 2.0 plugin
@@ -44,8 +55,8 @@ func NewPlugin() *Plugin {
 func (p *Plugin) Initialize(ctx context.Context, config plugin.PluginConfig) error {
 	p.SetConfig(config)
 	p.baseURL = config.BaseURL
-	if config.Environment == "production" && strings.TrimSpace(os.Getenv("SCIM_API_TOKEN")) == "" {
-		return fmt.Errorf("SCIM_API_TOKEN is required in production")
+	if err := p.configureAuthorization(config); err != nil {
+		return err
 	}
 
 	// Set up Looking Glass
@@ -150,18 +161,24 @@ func (p *Plugin) sweepRetention(ctx context.Context, retention time.Duration) {
 func (p *Plugin) RegisterRoutes(router chi.Router) {
 	// SCIM 2.0 routes at /v2/* (mounted under /scim by server)
 	router.Route("/v2", func(r chi.Router) {
-		// Apply authentication middleware to all SCIM endpoints
-		// This validates Bearer tokens from Okta/Azure AD/etc.
-		r.Use(AuthMiddleware)
+		r.Use(acceptJSON)
 
-		// Discovery endpoints (these are typically public in SCIM spec)
+		// RFC 7643 Section 5, authenticationSchemes: "To enable seamless
+		// discovery of configurations, the service provider SHOULD, with the
+		// appropriate security considerations, make the authenticationSchemes
+		// attribute publicly accessible without prior authentication." The
+		// document names features and no resource, so it is served to anyone.
 		r.Get("/ServiceProviderConfig", p.handleServiceProviderConfig)
+
+		// Every other endpoint needs an access token (auth.go).
+		r = r.With(p.authorize)
+
 		r.Get("/ResourceTypes", p.handleResourceTypes)
 		r.Get("/ResourceTypes/{id}", p.handleResourceType)
 		r.Get("/Schemas", p.handleSchemas)
 		r.Get("/Schemas/{id}", p.handleSchema)
 
-		// User endpoints - protected, require valid Bearer token
+		// User endpoints
 		r.Get("/Users", p.handleListUsers)
 		r.Post("/Users", p.handleCreateUser)
 		r.Get("/Users/{id}", p.handleGetUser)
@@ -169,7 +186,7 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 		r.Patch("/Users/{id}", p.handlePatchUser)
 		r.Delete("/Users/{id}", p.handleDeleteUser)
 
-		// Group endpoints - protected
+		// Group endpoints
 		r.Get("/Groups", p.handleListGroups)
 		r.Post("/Groups", p.handleCreateGroup)
 		r.Get("/Groups/{id}", p.handleGetGroup)
@@ -177,29 +194,26 @@ func (p *Plugin) RegisterRoutes(router chi.Router) {
 		r.Patch("/Groups/{id}", p.handlePatchGroup)
 		r.Delete("/Groups/{id}", p.handleDeleteGroup)
 
-		// Bulk operations - protected
+		// Bulk operations
 		r.Post("/Bulk", p.handleBulk)
 
-		// Search via POST - protected
+		// Search via POST
 		r.Post("/.search", p.handleSearch)
 	})
 
 	// API info endpoint (mounted under /scim, so this becomes /scim/info)
 	router.Get("/info", p.handleInfo)
 
-	// Provisioning events log (for Looking Glass to display)
-	router.Get("/events", p.handleProvisioningEvents)
+	// Provisioning events log. Each event carries attributes of the User it
+	// concerns, so reading it needs the scope that retrieving Users needs.
+	router.With(p.authorize).Get("/events", p.handleProvisioningEvents)
 
 	// Connection status (for frontend to check Okta connection)
 	router.Get("/status", p.handleConnectionStatus)
 
-	// Internal token endpoint for Looking Glass (same-origin only)
-	// This allows the frontend to autofill the bearer token for SCIM flows
-	router.Get("/internal/token", HandleInternalToken)
-
 	// Client provisioning endpoints (for demo)
 	router.Route("/client", func(r chi.Router) {
-		r.Use(AuthMiddleware)
+		r.Use(p.authorize)
 		r.Post("/provision", p.handleClientProvision)
 		r.Post("/sync", p.handleClientSync)
 	})
@@ -257,7 +271,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"active":       "true (default) - account status flag",
 					},
 					Security: []string{
-						"Client MUST be authorized with a valid Bearer token (RFC 7644 §2)",
+						"This service provider requires an OAuth 2.0 access token that grants scim.write; RFC 7644 §2 leaves the scheme to HTTP and requires a WWW-Authenticate challenge",
 						"userName uniqueness MUST be enforced by the server (RFC 7643 §4.1.1)",
 						"HTTPS is REQUIRED for all SCIM operations to protect PII in transit",
 					},
@@ -752,11 +766,11 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"changePassword.supported": "Boolean - whether password changes via SCIM are supported",
 						"sort.supported":           "Boolean - whether sortBy/sortOrder parameters are supported",
 						"etag.supported":           "Boolean - whether ETags for concurrency control are supported",
-						"authenticationSchemes":    "Array of supported auth methods (e.g., Bearer token, Basic)",
+						"authenticationSchemes":    "Array of supported authentication schemes (this service provider: oauthbearertoken)",
 					},
 					Security: []string{
 						"Client MUST respect server-declared limits (maxOperations, maxResults, maxPayloadSize)",
-						"authenticationSchemes describes supported methods - OAuth 2.0 Bearer (RFC 6750) is RECOMMENDED",
+						"authenticationSchemes SHOULD be readable without prior authentication (RFC 7643 §5), so this endpoint needs no access token",
 					},
 				},
 				{
@@ -844,20 +858,20 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       1,
 					Name:        "Configure Target",
-					Description: "Administrator configures the SCIM client with the target application's SCIM endpoint URL and authentication credentials. This typically involves generating a long-lived Bearer token or configuring OAuth 2.0 client credentials for the SCIM client to authenticate with the target server.",
+					Description: "Administrator configures the SCIM client with the target application's SCIM endpoint URL and authentication credentials. This means configuring OAuth 2.0 client credentials, with which the SCIM client obtains access tokens of limited lifetime for the target server.",
 					From:        "Admin",
 					To:          "SCIM Client",
 					Type:        "internal",
 					Parameters: map[string]string{
 						"base_url":      "Target SCIM server URL (e.g., https://app.example.com/scim/v2)",
-						"auth_type":     "Bearer token or OAuth 2.0 client credentials",
-						"bearer_token":  "Long-lived API token for SCIM authentication",
+						"auth_type":     "OAuth 2.0 client credentials",
+						"access_token":  "Bearer access token obtained from the target's authorization server",
 						"mapping_rules": "Attribute mappings from source to target schema",
 					},
 					Security: []string{
-						"Bearer tokens for SCIM provisioning should be long-lived but rotatable",
+						"Bearer tokens MUST have a limited lifetime that the service provider can determine (RFC 7644 §7.4)",
 						"Store credentials securely using a secrets vault, not in configuration files",
-						"HTTPS is REQUIRED for the target endpoint (RFC 7644 §2)",
+						"TLS is REQUIRED for the target endpoint (RFC 7644 §7.2)",
 					},
 				},
 				{

@@ -324,8 +324,6 @@ export interface UseRealFlowExecutorOptions {
   scopes: string[]
   /** Refresh token (for refresh-token flow) */
   refreshToken?: string
-  /** Bearer token (for SCIM flows) */
-  bearerToken?: string
   /** Token to introspect or revoke */
   token?: string
   /** Access token (for UserInfo endpoint) */
@@ -621,7 +619,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
       redirectUri: options.redirectUri,
       scopes: options.scopes,
       refreshToken: options.refreshToken,
-      bearerToken: options.bearerToken,
       token: options.token,
       accessToken: options.accessToken,
       oid4vciCredentialConfigurationID: options.oid4vciCredentialConfigurationID,
@@ -674,7 +671,6 @@ export function useRealFlowExecutor(options: UseRealFlowExecutorOptions): RealFl
     // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(options.scopes),
     options.refreshToken,
-    options.bearerToken,
     options.flowId,
     options.token,
     options.accessToken,

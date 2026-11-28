@@ -402,8 +402,6 @@ export interface ExecutorFactoryConfig {
   scopes: string[]
   /** Refresh token (for refresh-token flow) */
   refreshToken?: string
-  /** Bearer token (for SCIM flows) */
-  bearerToken?: string
   /** Access token (for introspection, revocation, userinfo) */
   accessToken?: string
   /** Token to introspect or revoke */
@@ -524,13 +522,11 @@ export function createFlowExecutor(
     }
   }
 
-  // Handle SCIM flows - require bearer token for real authentication
+  // SCIM flows request their own access token at the token endpoint
   if (flowId === 'user-lifecycle' || flowId === 'group-membership' || flowId === 'user-discovery' || 
       flowId === 'schema-discovery') {
     (fullConfig as SCIMProvisioningConfig).scimBaseUrl = (flowConfig.additionalConfig?.scimBaseUrl as string) || '/scim/v2'
-    if (config.bearerToken) {
-      (fullConfig as SCIMProvisioningConfig).bearerToken = config.bearerToken
-    }
+    ;(fullConfig as SCIMProvisioningConfig).tokenEndpoint = config.clientCredentialsTokenEndpoint
   }
 
   // Handle OID4VCI credential configuration overrides

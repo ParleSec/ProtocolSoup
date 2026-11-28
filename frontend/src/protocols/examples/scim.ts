@@ -9,8 +9,24 @@ export const SCIM_EXAMPLES: Record<string, CodeExample> = {
 // Demonstrates the full create → read → update → deactivate → delete cycle.
 
 const SCIM_BASE = '/scim/v2';
+
+// 0. Get an access token for the SCIM service provider (RFC 6749 §4.4).
+//    RFC 7644 §7.4: bearer tokens MUST have a limited lifetime, so the
+//    client requests one instead of holding a static secret.
+const { access_token: accessToken } = await fetch('/oauth2/token', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Basic ' + btoa('scim-client:' + SCIM_CLIENT_SECRET),
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: new URLSearchParams({
+    grant_type: 'client_credentials',
+    scope: 'scim.read scim.write',
+  }),
+}).then(r => r.json());
+
 const headers = {
-  'Authorization': 'Bearer ' + SCIM_API_TOKEN,
+  'Authorization': 'Bearer ' + accessToken,
   'Content-Type': 'application/scim+json',
 };
 
@@ -71,7 +87,7 @@ await fetch(SCIM_BASE + '/Users/' + userId, {
 // 5. Hard delete (RFC 7644 §3.6) — returns 204 No Content
 await fetch(SCIM_BASE + '/Users/' + userId, {
   method: 'DELETE',
-  headers: { 'Authorization': 'Bearer ' + SCIM_API_TOKEN },
+  headers: { 'Authorization': 'Bearer ' + accessToken },
 });`,
   },
 
@@ -80,9 +96,11 @@ await fetch(SCIM_BASE + '/Users/' + userId, {
     language: 'javascript',
     label: 'JavaScript (IdP / Provisioning Client)',
     code: `// SCIM 2.0 Group Membership Management (RFC 7644 §3.3, §3.5.2)
+// accessToken: an OAuth 2.0 access token with scim.read and scim.write,
+// requested from /oauth2/token as in the User Lifecycle example.
 const SCIM_BASE = '/scim/v2';
 const headers = {
-  'Authorization': 'Bearer ' + SCIM_API_TOKEN,
+  'Authorization': 'Bearer ' + accessToken,
   'Content-Type': 'application/scim+json',
 };
 
@@ -148,6 +166,8 @@ await fetch(SCIM_BASE + '/Groups/' + group.id, {
     label: 'HTTP (Filter Queries)',
     code: `# SCIM 2.0 Filter Queries (RFC 7644 §3.4.2)
 # The filter grammar supports complex expressions with logical operators.
+# Every request carries "Authorization: Bearer <access token>", where the
+# access token grants scim.read.
 
 # Equality filter — exact match
 GET /scim/v2/Users?filter=userName eq "j.doe@corp.example"
@@ -204,7 +224,9 @@ GET /scim/v2/Users?sortBy=name.familyName&sortOrder=ascending
 
 const SCIM_BASE = '/scim/v2';
 
-// 1. ServiceProviderConfig — server capabilities (RFC 7644 §4)
+// 1. ServiceProviderConfig — server capabilities (RFC 7644 §4).
+//    It needs no credentials: RFC 7643 §5 has authenticationSchemes readable
+//    "without prior authentication", so a client learns here how to sign in.
 const config = await fetch(SCIM_BASE + '/ServiceProviderConfig')
   .then(r => r.json());
 
@@ -219,8 +241,12 @@ console.log('Sort supported:',       config.sort.supported);
 console.log('ETag supported:',       config.etag.supported);
 console.log('Auth schemes:',         config.authenticationSchemes.map(s => s.type));
 
+// accessToken: an OAuth 2.0 access token with scim.read, requested from
+// /oauth2/token as in the User Lifecycle example.
+const headers = { 'Authorization': 'Bearer ' + accessToken };
+
 // 2. ResourceTypes — what resources this server manages (RFC 7644 §4)
-const resourceTypes = await fetch(SCIM_BASE + '/ResourceTypes')
+const resourceTypes = await fetch(SCIM_BASE + '/ResourceTypes', { headers })
   .then(r => r.json());
 
 for (const rt of resourceTypes.Resources) {
@@ -235,7 +261,8 @@ for (const rt of resourceTypes.Resources) {
 
 // 3. Schemas — detailed attribute definitions (RFC 7643 §7)
 const userSchema = await fetch(
-  SCIM_BASE + '/Schemas/urn:ietf:params:scim:schemas:core:2.0:User'
+  SCIM_BASE + '/Schemas/urn:ietf:params:scim:schemas:core:2.0:User',
+  { headers }
 ).then(r => r.json());
 
 for (const attr of userSchema.attributes) {
@@ -256,13 +283,15 @@ for (const attr of userSchema.attributes) {
     code: `// SCIM 2.0 Bulk Operations (RFC 7644 §3.7)
 // Create multiple resources in a single HTTP request.
 // Supports cross-references via bulkId for dependent resources.
+// accessToken: an OAuth 2.0 access token with scim.write, requested from
+// /oauth2/token as in the User Lifecycle example.
 
 const SCIM_BASE = '/scim/v2';
 
 const bulkResponse = await fetch(SCIM_BASE + '/Bulk', {
   method: 'POST',
   headers: {
-    'Authorization': 'Bearer ' + SCIM_API_TOKEN,
+    'Authorization': 'Bearer ' + accessToken,
     'Content-Type': 'application/scim+json',
   },
   body: JSON.stringify({

@@ -31,7 +31,7 @@ The reference includes **Gateway** (health, discovery, sessions, Looking Glass),
 
 Most endpoints are unauthenticated for demo purposes. Exceptions:
 
-- **SCIM endpoints** require a `Bearer` token via the `Authorization` header. Set `SCIM_API_TOKEN` on the SCIM service, then send `Authorization: Bearer <your-token>` with every request.
+- **SCIM endpoints** require an OAuth 2.0 access token, except `GET /scim/v2/ServiceProviderConfig`. Request one from `POST /oauth2/token` with `grant_type=client_credentials` as the seeded client `scim-client`, with scope `scim.read` to retrieve and `scim.write` to create, modify or delete, then send `Authorization: Bearer <access_token>`.
 - **OIDC UserInfo** requires a valid access token. Obtain one by running an OIDC Authorization Code flow, then send `Authorization: Bearer <access_token>` to `GET /oidc/userinfo`.
 - **OID4VCI credential and nonce endpoints** require a bearer token from the OID4VCI token exchange. Call `POST /oid4vci/token` first to get an access token, then use it on `POST /oid4vci/credential` and `POST /oid4vci/nonce`.
 

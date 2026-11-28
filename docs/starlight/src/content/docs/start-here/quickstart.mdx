@@ -57,10 +57,13 @@ docker run -p 8080:8080 \
 
 ### SCIM
 
+The SCIM service provider accepts OAuth 2.0 access tokens, so it runs beside a federation service that issues them. Start federation as above with `-e SCIM_RESOURCE=http://localhost:8081/scim/v2`, then:
+
 ```bash
-docker run -p 8080:8080 \
-  -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  -e SCIM_API_TOKEN=change-me \
+docker run -p 8081:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8081 \
+  -e SCIM_AS_ISSUER=http://localhost:8080/oauth2 \
+  -e SCIM_AS_JWKS_URI=http://host.docker.internal:8080/api/.well-known/jwks.json \
   ghcr.io/parlesec/protocolsoup-scim:latest
 ```
 

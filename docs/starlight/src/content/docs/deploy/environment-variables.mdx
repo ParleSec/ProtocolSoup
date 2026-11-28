@@ -31,6 +31,9 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 | `SHOWCASE_DPOP_RESOURCE_NONCE_REQUIRED` | `false` | Enables the RFC 9449 §9 resource-server nonce challenge, as a separate nonce space, at the endpoints that accept DPoP-bound access tokens: `/oauth2/resource`, `/oid4vci/credential`, `/oid4vci/deferred_credential`, and `/oid4vci/notification`. The challenge is HTTP 401 with `WWW-Authenticate: DPoP error="use_dpop_nonce"` and a `DPoP-Nonce` header. The OID4VCI Nonce Endpoint (`/oid4vci/nonce`) takes no access token, so it never sends this challenge. It is a separate switch from `SHOWCASE_DPOP_NONCE_REQUIRED` because RFC 9449 §9 says "nonces will be only accepted by the server that issued them", which holds here even though both roles run in one process. Defaults to `false`; the hosted deployment (`fly.toml`) sets it to `true`, so Looking Glass also shows the resource-server challenge and retry there. |
 | `SSF_STREAM_CLIENT_SECRET` | *(auto-generated)* | Secret for the seeded `ssf-stream-client` confidential client (`client_credentials`, `ssf.read` / `ssf.manage`). Pin as a platform secret in production so Stream Management tokens stay usable across restarts. The current secret is listed at `GET /oauth2/demo/clients`. |
 | `SSF_TRANSMITTER_CLIENT_SECRET` | *(auto-generated)* | Secret for the seeded resource server registration `ssf-transmitter`. It has no grant types; it authenticates the split SSF Transmitter at `/oauth2/introspect`, which answers it only for tokens whose `aud` is `SSF_RESOURCE` (RFC 7662 §4). Set it to the same value as `SSF_AS_INTROSPECT_CLIENT_SECRET` on the SSF service. Not needed on the monolith, where the Transmitter reads revocation state in process. |
+| `SCIM_CLIENT_SECRET` | *(auto-generated)* | Secret for the seeded `scim-client` confidential client (`client_credentials`, scopes `scim.read` and `scim.write`). Pin it in production so the secret survives restarts. |
+| `SCIM_SERVICE_PROVIDER_CLIENT_SECRET` | *(auto-generated)* | Secret for the seeded resource server registration `scim-service-provider`. It has no grant types; a split SCIM service authenticates with it at `/oauth2/introspect`. Set the same value as `SCIM_AS_INTROSPECT_CLIENT_SECRET` on that service. |
+| `SCIM_RESOURCE` | `{SHOWCASE_BASE_URL}/scim/v2` | Resource indicator placed in `aud` of access tokens issued for `scim.read` and `scim.write`. Set it when the SCIM service provider has another base URI. |
 
 ## OpenID Connect (Federation / Showcase)
 
@@ -58,7 +61,11 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SCIM_API_TOKEN` | - | Bearer token required for all SCIM API requests and outbound client operations. The SCIM service refuses to start without it in production. |
+| `SCIM_AS_JWKS_URI` | - | JWK Set URL of the authorization server that issues the access tokens. Required when no authorization server runs in the process (the standalone SCIM image); the monolith validates in process. |
+| `SCIM_AS_ISSUER` | `{SHOWCASE_BASE_URL}/oauth2` | Issuer identifier the access token's `iss` must equal (RFC 9068 Section 4). |
+| `SCIM_RESOURCE` | `{SHOWCASE_BASE_URL}/scim/v2` | Resource indicator the access token's `aud` must contain. |
+| `SCIM_AS_INTROSPECT_URI` | - | RFC 7662 introspection endpoint the split service asks whether a token is still active. |
+| `SCIM_AS_INTROSPECT_CLIENT_SECRET` | - | Secret the split service uses to authenticate to that endpoint as the resource server registration `scim-service-provider`. Required with `SCIM_AS_INTROSPECT_URI`. |
 | `SCIM_RETENTION` | `24h` | Go duration after which visitor-created SCIM users and groups are deleted, based on `updated_at`. `0` disables the reaper. After each sweep, demo users and groups are re-seeded. |
 
 ## Looking Glass
@@ -141,7 +148,7 @@ All ProtocolSoup backend services share a common set of core variables. Individu
 - Production OAuth deployments must set `OAUTH2_REPLAY_REDIS_URL` as a secret using `rediss://`. Do not place Redis credentials in Compose files, `fly.toml`, or source control.
 - When running behind a reverse proxy or load balancer, set `SHOWCASE_BASE_URL` to the external URL (e.g. `https://protocolsoup.example.com`) rather than the internal address.
 - `SHOWCASE_CORS_ORIGINS` must include the origin of your frontend. If the UI is at `https://app.example.com`, add that origin.
-- For SCIM, set `SCIM_API_TOKEN` to any secret string. Clients must include `Authorization: Bearer <your-token>` on every request.
+- SCIM clients authenticate with an OAuth 2.0 access token from `/oauth2/token` (seeded client `scim-client`, scopes `scim.read` and `scim.write`). `SCIM_API_TOKEN` no longer exists: RFC 7644 Section 7.4 requires bearer tokens to have a limited lifetime, which a static secret does not have. Removing it is a breaking change to the deployment contract.
 - To enable real `verifier_attestation` OID4VP flows, publish the verifier issuer URL from the verifier service and add that issuer to the wallet's `WALLET_TRUSTED_VERIFIER_ATTESTATION_ISSUERS` allow-list.
 - `x509_san_dns` and the HAIP `x509_hash` prefix work out of the box. When the PEM env vars are unset, an ECDSA P-256 CA + leaf certificate chain is auto-provisioned with the leaf SAN bound to the deployment hostname from `SHOWCASE_BASE_URL`; with a data dir it is persisted under `{DataDir}/oid4vp` and reloaded on restart so the `x509_hash` `client_id` stays stable across restarts (wallets that pin by leaf hash keep a consistent verifier identity). Provide your own PEM chain and key to pin an externally issued certificate.
 - To verify `mso_mdoc` (ISO/IEC 18013-5) presentations, point the verifier at the issuer's IACA root via `MDOC_IACA_ROOT_PEM` (or `MDOC_IACA_ROOT_PEM_FILE`). The trust anchor is the IACA root, never the document-signer certificate. When the issuer and verifier run in the same deployment, set `SHOWCASE_MDOC_PKI_PATH` (or `SHOWCASE_DATA_DIR`) to a durable volume so the issuer persists `iaca_root.pem` and the verifier loads it automatically as its trust anchor; without it the PKI is ephemeral and presentations are denied with `mdoc_trust_anchor_unavailable`.

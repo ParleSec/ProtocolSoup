@@ -192,9 +192,6 @@ export function LookingGlass() {
   // The client the revocation flow acts as. The server revokes a token only
   // for the client it was issued to (RFC 7009 Section 2.1).
   const [revocationClientId, setRevocationClientId] = useState<RevocationClientId>('public-app')
-  const [scimBearerToken, setScimBearerToken] = useState('')
-  const [scimTokenLoading, setScimTokenLoading] = useState(false)
-  const [scimAuthEnabled, setScimAuthEnabled] = useState(true)
   const [oid4vciCredentialFormat, setOID4VCICredentialFormat] = useState<OID4VCICredentialFormat>('mso_mdoc')
   const [oid4vciHaip, setOID4VCIHaip] = useState(false)
   const [oid4vciWalletOfferEndpoint, setOID4VCIWalletOfferEndpoint] = useState('')
@@ -239,27 +236,6 @@ export function LookingGlass() {
     connected: wireConnected,
     clearEvents: clearWireEvents,
   } = useLookingGlassSession(wireSessionId, wireSessionToken)
-
-  // Fetch SCIM token when SCIM protocol is selected
-  useEffect(() => {
-    if (selectedProtocol?.id === 'scim' && !scimBearerToken) {
-      setScimTokenLoading(true)
-      fetch('/scim/internal/token')
-        .then(res => res.json())
-        .then(data => {
-          if (data.token) {
-            setScimBearerToken(data.token)
-          }
-          setScimAuthEnabled(data.authEnabled ?? true)
-        })
-        .catch(err => {
-          console.error('Failed to fetch SCIM token:', err)
-        })
-        .finally(() => {
-          setScimTokenLoading(false)
-        })
-    }
-  }, [selectedProtocol?.id, scimBearerToken])
 
   const scopes = useMemo(() => {
     // Client Credentials uses machine-client scopes regardless of the
@@ -328,7 +304,7 @@ export function LookingGlass() {
   const isOID4VPFlow = selectedProtocol?.id === 'oid4vp'
   const surface = useMemo(() => getLookingGlassSurface(selectedProtocol?.id), [selectedProtocol?.id])
   const SurfaceChrome = surface?.chrome
-  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isDeviceCodeFlow || isTokenBasedFlow || isSCIMFlow || isOID4VCIFlow || isOID4VPFlow || Boolean(SurfaceChrome)
+  const hasFlowConfigurationInputs = isClientCredentialsFlow || isRefreshTokenFlow || isDeviceCodeFlow || isTokenBasedFlow || isOID4VCIFlow || isOID4VPFlow || Boolean(SurfaceChrome)
   const showVCTab = selectedProtocol?.id === 'oid4vci' || selectedProtocol?.id === 'oid4vp'
   const wasOID4VCIIssuerInitiatedFlowRef = useRef(false)
 
@@ -345,6 +321,7 @@ export function LookingGlass() {
   const activeToken = tokenInput || storedAccessToken || ''
 
   const [machineClientSecret, setMachineClientSecret] = useState<string | null>(null)
+  const [scimClientSecret, setScimClientSecret] = useState<string | null>(null)
   const [machineTokenEndpoint, setMachineTokenEndpoint] = useState<string | null>(null)
 
   // machine-client authenticates with its client password in three flows:
@@ -356,9 +333,14 @@ export function LookingGlass() {
     isTokenIntrospectionFlow ||
     (isTokenRevocationFlow && revocationClientId === 'machine-client')
 
+  // The Mock IdP publishes its demo clients for inspection. A SCIM flow
+  // requests its access token as scim-client (RFC 6749 Section 4.4).
+  const usesDemoClientSecret = usesMachineClientSecret || isSCIMFlow
+
   useEffect(() => {
-    if (!usesMachineClientSecret) {
+    if (!usesDemoClientSecret) {
       setMachineClientSecret(null)
+      setScimClientSecret(null)
       setMachineTokenEndpoint(null)
       return
     }
@@ -376,6 +358,8 @@ export function LookingGlass() {
         const clients = Array.isArray(data?.clients) ? data.clients : []
         const machineClient = clients.find((client: { id?: string }) => client?.id === 'machine-client')
         setMachineClientSecret(machineClient?.secret || null)
+        const scimClient = clients.find((client: { id?: string }) => client?.id === 'scim-client')
+        setScimClientSecret(scimClient?.secret || null)
         setMachineTokenEndpoint(
           typeof data?.token_endpoint === 'string' && data.token_endpoint.length > 0
             ? data.token_endpoint
@@ -385,6 +369,7 @@ export function LookingGlass() {
       .catch(() => {
         if (!cancelled) {
           setMachineClientSecret(null)
+          setScimClientSecret(null)
           setMachineTokenEndpoint(null)
         }
       })
@@ -392,7 +377,7 @@ export function LookingGlass() {
     return () => {
       cancelled = true
     }
-  }, [usesMachineClientSecret])
+  }, [usesDemoClientSecret])
 
   const clientConfig = useMemo(() => {
     if (isClientCredentialsFlow) {
@@ -417,9 +402,14 @@ export function LookingGlass() {
     if (isTokenRevocationFlow && revocationClientId === 'private_key_jwt') {
       return { clientId: '', clientSecret: undefined }
     }
+    // A SCIM flow authenticates to the token endpoint as scim-client, the
+    // client registered for the scim.read and scim.write scopes.
+    if (isSCIMFlow) {
+      return { clientId: 'scim-client', clientSecret: scimClientSecret || undefined }
+    }
     // Device authorization and other user-delegated flows use public-app
     return { clientId: 'public-app', clientSecret: undefined }
-  }, [isClientCredentialsFlow, isTokenIntrospectionFlow, isTokenRevocationFlow, revocationClientId, clientCredentialsAuthMethod, machineClientSecret])
+  }, [isClientCredentialsFlow, isTokenIntrospectionFlow, isTokenRevocationFlow, isSCIMFlow, revocationClientId, clientCredentialsAuthMethod, machineClientSecret, scimClientSecret])
 
   // Use stored token, input, or empty
   const activeRefreshToken = refreshTokenInput || storedRefreshToken || ''
@@ -510,13 +500,12 @@ export function LookingGlass() {
     clientSecret: clientConfig.clientSecret,
     clientCredentialsAuthMethod: isClientCredentialsFlow ? clientCredentialsAuthMethod : undefined,
     clientCredentialsAccessTokenMode: isClientCredentialsFlow ? clientCredentialsAccessTokenMode : undefined,
-    clientCredentialsTokenEndpoint: isClientCredentialsFlow ? machineTokenEndpoint || undefined : undefined,
+    clientCredentialsTokenEndpoint: (isClientCredentialsFlow || isSCIMFlow) ? machineTokenEndpoint || undefined : undefined,
     redirectUri: `${window.location.origin}/callback`,
     scopes,
     refreshToken: isRefreshTokenFlow ? activeRefreshToken : undefined,
     token: (isTokenIntrospectionFlow || isTokenRevocationFlow) ? activeToken : undefined,
     accessToken: isUserInfoFlow ? activeToken : undefined,
-    bearerToken: isSCIMFlow ? scimBearerToken : undefined,
     oid4vciCredentialConfigurationID: isOID4VCIFlow ? selectedOID4VCICredentialProfile.id : undefined,
     oid4vciCredentialFormat: isOID4VCIFlow ? selectedOID4VCICredentialProfile.format : undefined,
     oid4vciWalletOfferEndpoint: isOID4VCIIssuerInitiatedFlow ? oid4vciWalletOfferEndpoint.trim() || undefined : undefined,
@@ -1158,7 +1147,6 @@ export function LookingGlass() {
     setClientCredentialsAccessTokenMode('bearer')
     setRefreshTokenInput('')
     setTokenInput('')
-    setScimBearerToken('')
     setOID4VPWalletModalOpen(false)
     setOID4VPLastPromptedRequestID('')
     setOID4VPWalletSubmitPending(false)
@@ -1893,61 +1881,6 @@ export function LookingGlass() {
             )}
           </motion.div>
         )}
-
-        {/* SCIM Bearer Token Input - shown when SCIM protocol is selected */}
-        {isSCIMFlow && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-white/10"
-          >
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
-              <KeyRound className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-400" />
-              <span className="text-xs sm:text-sm font-medium text-surface-300">SCIM Bearer Token</span>
-              {scimTokenLoading && (
-                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-blue-500/10 text-blue-400 animate-pulse">
-                  Loading...
-                </span>
-              )}
-              {!scimTokenLoading && scimBearerToken && (
-                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-green-500/10 text-green-400">
-                  Auto-configured ✓
-                </span>
-              )}
-              {!scimTokenLoading && !scimAuthEnabled && (
-                <span className="px-1.5 sm:px-2 py-0.5 rounded text-[10px] sm:text-xs bg-amber-500/10 text-amber-400">
-                  Auth Disabled
-                </span>
-              )}
-            </div>
-            {scimAuthEnabled ? (
-              <>
-                <p className="text-[10px] sm:text-xs text-surface-400 mb-2 sm:mb-3 leading-relaxed">
-                  Bearer token for SCIM API authentication. This is the same token configured for external IdPs like Okta.
-                </p>
-                <input
-                  type="password"
-                  value={scimBearerToken}
-                  onChange={(e) => setScimBearerToken(e.target.value)}
-                  placeholder={scimTokenLoading ? "Loading token..." : "Enter your SCIM bearer token..."}
-                  disabled={scimTokenLoading}
-                  className="w-full px-2.5 sm:px-3 py-2 rounded-lg bg-surface-900 border border-white/10 text-xs sm:text-sm font-mono text-white placeholder-surface-600 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-all disabled:opacity-50"
-                />
-                {!scimBearerToken && !scimTokenLoading && (
-                  <p className="mt-2 text-[10px] sm:text-xs text-amber-400 leading-relaxed">
-                    ⚠️ Bearer token required. Set SCIM_API_TOKEN in production or enter manually.
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-[10px] sm:text-xs text-surface-400 leading-relaxed">
-                SCIM authentication is disabled. Set <code className="text-purple-400">SCIM_API_TOKEN</code> environment variable to enable.
-              </p>
-            )}
-          </motion.div>
-        )}
-
 
         {showVCTab && (
           <motion.div

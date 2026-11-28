@@ -121,6 +121,8 @@ func TestPurgeExpiredThenSeedDemoDataRestoresDemoSet(t *testing.T) {
 func TestSCIMRetentionZeroLeavesReaperStopped(t *testing.T) {
 	t.Setenv("SCIM_RETENTION", "0")
 	t.Setenv("SCIM_DATA_DIR", t.TempDir())
+	// The service provider does not start without an authorization server.
+	t.Setenv("SCIM_AS_JWKS_URI", "http://localhost:8080/api/.well-known/jwks.json")
 	p := NewPlugin()
 	if err := p.Initialize(context.Background(), plugin.PluginConfig{
 		BaseURL:     "http://localhost:8080",

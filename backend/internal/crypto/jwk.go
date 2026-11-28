@@ -13,10 +13,53 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"net/url"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
+
+// IntrospectAccessToken asks an RFC 7662 introspection endpoint whether a
+// token is active, and returns an error when it is not or the answer could
+// not be had. A resource server that runs apart from its authorization server
+// learns of a revocation this way.
+//
+// RFC 7662 Section 2.1: the endpoint requires "some form of authorization",
+// and Section 4 has the authorization server decide whether the token can be
+// used at the resource server that is calling. The caller therefore
+// authenticates as its own resource server registration; the token under
+// introspection is not a credential.
+func IntrospectAccessToken(introspectURL, clientID, clientSecret, tokenString string) error {
+	form := url.Values{}
+	form.Set("token", tokenString)
+	req, err := http.NewRequest(http.MethodPost, introspectURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(clientID, clientSecret)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("token introspection failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("token introspection HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		Active bool `json:"active"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return fmt.Errorf("token introspection response: %w", err)
+	}
+	if !out.Active {
+		return fmt.Errorf("access token is not active")
+	}
+	return nil
+}
 
 // JWKSFetcher fetches and caches JWKS from remote endpoints
 type JWKSFetcher struct {

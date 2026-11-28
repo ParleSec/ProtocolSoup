@@ -106,7 +106,6 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		DPoPNonceRequired:                 cfg.DPoPNonceRequired,
 		DPoPResourceNonceRequired:         cfg.DPoPResourceNonceRequired,
 		KeySet:                            keySet,
-		MockIdP:                           idp,
 		LookingGlass:                      lg,
 		OIDCDynamicRegistrationEnabled:    cfg.OIDCDynamicRegistrationEnabled,
 		OIDCDynamicRegistrationTTL:        cfg.OIDCDynamicRegistrationTTL,
@@ -115,6 +114,12 @@ func Bootstrap(opts BootstrapOptions) (*BootstrapResult, error) {
 		OIDCDynamicRegistrationRateWindow: cfg.OIDCDynamicRegistrationRateWindow,
 		OIDCPairwiseSubjectSalt:           cfg.OIDCPairwiseSubjectSalt,
 		OIDCKeyRotationToken:              cfg.OIDCKeyRotationToken,
+	}
+	// MockIdP is an interface field: a nil *mockidp.MockIdP stored in it would
+	// still satisfy a plugin's type assertion, and the plugin would call
+	// methods on nil. It is set only when the authorization server runs here.
+	if idp != nil {
+		pluginConfig.MockIdP = idp
 	}
 
 	return &BootstrapResult{

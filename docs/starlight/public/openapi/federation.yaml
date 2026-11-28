@@ -319,8 +319,10 @@ paths:
                     RFC 8707 Section 2 resource indicator: the protected
                     resource the access token is for, which becomes its aud
                     claim (RFC 9068 Section 3). Without it the granted scope
-                    decides: {base}/oauth2/resource, or the SSF resource for
-                    ssf.read and ssf.manage. Refused with invalid_target when
+                    decides: {base}/oauth2/resource, the SSF resource for
+                    ssf.read and ssf.manage, or the SCIM base URI
+                    {base}/scim/v2 for scim.read and scim.write. Refused with
+                    invalid_target when
                     it is not an absolute URI without a fragment, names a
                     resource this server does not issue tokens for, or does
                     not fit the granted scope.

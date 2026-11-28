@@ -32,6 +32,27 @@ Use SCIM service for identity provisioning testing with SCIM-compatible IdPs, in
 - `POST /scim/client/provision` — create a single user on an external SCIM service
 - `POST /scim/client/sync` — reconcile local users to an external SCIM service
 
+## Authentication
+
+RFC 7644 Section 2 defines no SCIM-specific scheme and leaves authentication to HTTP. This service provider is an OAuth 2.0 protected resource: it accepts bearer access tokens (RFC 6750) and validates them as JWT access tokens (RFC 9068 Section 4).
+
+- A static shared secret is not accepted. RFC 7644 Section 7.4: "Bearer tokens MUST have a limited lifetime that can be determined directly or indirectly (e.g., by checking with a validation service) by the service provider." An access token carries its lifetime in `exp`.
+- The token's `iss` must be the authorization server (`{origin}/oauth2` by default) and its `aud` the SCIM base URI (`{origin}/scim/v2`).
+- `scim.read` authorizes `GET` and `POST /scim/v2/.search`. `scim.write` authorizes `POST`, `PUT`, `PATCH`, `DELETE`, `/scim/v2/Bulk` and `/scim/client/*`.
+- `GET /scim/v2/ServiceProviderConfig` needs no token (RFC 7643 Section 5), so a client can read `authenticationSchemes` first.
+- A refused request gets a `WWW-Authenticate: Bearer` challenge (RFC 7644 Section 2, RFC 6750 Section 3) and an RFC 7644 Section 3.12 error body: `401` with no or an invalid token, `403` with `error="insufficient_scope"` when the token lacks the scope.
+- A token bound to a key (`cnf`, as DPoP produces) is refused: this service provider supports the Bearer scheme alone.
+
+The federation service seeds the client `scim-client` (`client_credentials`, scopes `scim.read` and `scim.write`). Its secret is listed at `GET /oauth2/demo/clients`, like every Mock IdP demo client.
+
+```bash
+ACCESS_TOKEN=$(curl -s -u "scim-client:$SCIM_CLIENT_SECRET" \
+  -d grant_type=client_credentials -d "scope=scim.read scim.write" \
+  http://localhost:8080/oauth2/token | jq -r .access_token)
+
+curl -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8080/scim/v2/Users
+```
+
 ## Outbound Reconciliation
 
 `POST /scim/client/provision` and `POST /scim/client/sync` both send real outbound SCIM requests to the exact base URL supplied in `targetUrl`. Server-managed attributes (`id`, `meta`, `groups`, `password`) are stripped before a resource is forwarded; the source id is preserved as `externalId` for correlation.
@@ -40,7 +61,7 @@ Use SCIM service for identity provisioning testing with SCIM-compatible IdPs, in
 
 ```bash
 curl -X POST http://localhost:8080/scim/client/sync \
-  -H "Authorization: Bearer $SCIM_API_TOKEN" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"targetUrl":"https://app.example.com/scim/v2","authToken":"target-service-token"}'
 ```
@@ -54,7 +75,11 @@ Production targets must use HTTPS and must not resolve to a loopback, private, o
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SHOWCASE_BASE_URL` | Yes | `http://localhost:8080` | External base URL |
-| `SCIM_API_TOKEN` | Yes in production | - | Bearer token for authenticated requests and outbound client operations |
+| `SCIM_AS_JWKS_URI` | When no authorization server runs in the process | - | JWK Set URL of the authorization server that issues the access tokens. The standalone image does not start without it. The monolith validates in process and leaves it unset. |
+| `SCIM_AS_ISSUER` | No | `{SHOWCASE_BASE_URL}/oauth2` | Issuer identifier the access token's `iss` must equal (RFC 9068 Section 4) |
+| `SCIM_RESOURCE` | No | `{SHOWCASE_BASE_URL}/scim/v2` | Resource indicator the access token's `aud` must contain. Set the same value on the federation service when it differs from the default. |
+| `SCIM_AS_INTROSPECT_URI` | No | - | RFC 7662 introspection endpoint. When set, the split service asks it whether each token is still active, so a revoked token is refused before it expires. |
+| `SCIM_AS_INTROSPECT_CLIENT_SECRET` | With `SCIM_AS_INTROSPECT_URI` | - | Secret for authenticating to introspection as the resource server registration `scim-service-provider`. Must equal `SCIM_SERVICE_PROVIDER_CLIENT_SECRET` on the federation service. |
 | `SCIM_DATA_DIR` | No | `./data` | SQLite database directory |
 | `SCIM_RETENTION` | No | `24h` | Retention for visitor-created users and groups (`updated_at`). `0` disables the reaper. Demo data is re-seeded after each sweep. |
 | `SHOWCASE_ENV` | No | `development` | Environment mode |
@@ -62,20 +87,22 @@ Production targets must use HTTPS and must not resolve to a loopback, private, o
 ## Run
 
 ```bash
-docker run -p 8080:8080 \
-  -e SHOWCASE_BASE_URL=http://localhost:8080 \
-  -e SCIM_API_TOKEN=change-me \
+docker run -p 8081:8080 \
+  -e SHOWCASE_BASE_URL=http://localhost:8081 \
+  -e SCIM_AS_ISSUER=http://localhost:8080/oauth2 \
+  -e SCIM_AS_JWKS_URI=http://host.docker.internal:8080/api/.well-known/jwks.json \
   -e SCIM_DATA_DIR=/app/data \
   -v scim-data:/app/data \
   ghcr.io/parlesec/protocolsoup-scim:latest
 ```
 
+This runs the service provider beside a federation service on port 8080, which issues the access tokens. Start that service with `SCIM_RESOURCE=http://localhost:8081/scim/v2` so the tokens it issues for `scim.read` and `scim.write` name this service provider in `aud`. The Compose stack wires both for you.
+
 ## Operational Notes
 
-- IdP connector URL is typically `http(s)://<host>/scim/v2`.
+- A SCIM client's base URL is `http(s)://<host>/scim/v2`. The client must be able to obtain OAuth 2.0 access tokens; a connector that can only send a fixed secret cannot authenticate.
 - Demo data (users and groups) is seeded on first startup.
-- `SCIM_API_TOKEN` is checked via bearer auth middleware. Treat it as a credential.
-- The same bearer authentication protects `/scim/client/*`, including outbound provisioning and sync.
+- `/scim/client/*`, including outbound provisioning and sync, needs an access token that grants `scim.write`.
 - Mount `SCIM_DATA_DIR` for persistent provisioning state across container restarts.
 
 | Hosted instance | Not for real identity data |

@@ -36,6 +36,22 @@ const SSFStreamClientID = "ssf-stream-client"
 // in-process Transmitter, which does not introspect, works.
 const SSFTransmitterClientID = "ssf-transmitter"
 
+// SCIMClientID is the seeded confidential client for the SCIM service
+// provider. It is registered with client_credentials and the scim.read /
+// scim.write scopes. Pin SCIM_CLIENT_SECRET in production so the secret
+// survives restarts; otherwise it is generated at process start.
+const SCIMClientID = "scim-client"
+
+// SCIMServiceProviderClientID is the registration the SCIM service provider
+// uses as a resource server when it calls the introspection endpoint (RFC
+// 7662 Section 2.1). It has no grant types: it cannot obtain tokens, only ask
+// about tokens whose aud names the SCIM resource. The split SCIM image and
+// this authorization server share its secret through
+// SCIM_SERVICE_PROVIDER_CLIENT_SECRET; when that is unset the secret is
+// generated at process start and only the in-process service provider, which
+// does not introspect, works.
+const SCIMServiceProviderClientID = "scim-service-provider"
+
 // MockIdP provides a mock identity provider for demonstrations
 type MockIdP struct {
 	users                map[string]*models.User
@@ -257,6 +273,8 @@ func (idp *MockIdP) initDemoData() {
 	machineClientSecret := envOrRandom("MOCKIDP_MACHINE_CLIENT_SECRET", 32)
 	ssfStreamClientSecret := envOrRandom("SSF_STREAM_CLIENT_SECRET", 32)
 	ssfTransmitterClientSecret := envOrRandom("SSF_TRANSMITTER_CLIENT_SECRET", 32)
+	scimClientSecret := envOrRandom("SCIM_CLIENT_SECRET", 32)
+	scimServiceProviderClientSecret := envOrRandom("SCIM_SERVICE_PROVIDER_CLIENT_SECRET", 32)
 
 	// Demo users
 	alice := &models.User{
@@ -440,6 +458,28 @@ func (idp *MockIdP) initDemoData() {
 		ID:           SSFTransmitterClientID,
 		Secret:       ssfTransmitterClientSecret,
 		Name:         "SSF Transmitter (resource server)",
+		RedirectURIs: []string{},
+		GrantTypes:   []string{},
+		Scopes:       []string{},
+		Public:       false,
+		CreatedAt:    time.Now(),
+	}
+
+	idp.clients[SCIMClientID] = &models.Client{
+		ID:           SCIMClientID,
+		Secret:       scimClientSecret,
+		Name:         "SCIM Client",
+		RedirectURIs: []string{},
+		GrantTypes:   []string{"client_credentials"},
+		Scopes:       []string{"scim.read", "scim.write"},
+		Public:       false,
+		CreatedAt:    time.Now(),
+	}
+
+	idp.clients[SCIMServiceProviderClientID] = &models.Client{
+		ID:           SCIMServiceProviderClientID,
+		Secret:       scimServiceProviderClientSecret,
+		Name:         "SCIM Service Provider (resource server)",
 		RedirectURIs: []string{},
 		GrantTypes:   []string{},
 		Scopes:       []string{},
