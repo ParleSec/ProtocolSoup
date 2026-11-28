@@ -22,6 +22,8 @@ servers:
     description: Production SCIM service
 security: []
 tags:
+  - name: Query
+    description: Queries across resource types and POST queries.
   - name: Health
     description: Service health and API index endpoints.
   - name: Discovery
@@ -256,21 +258,13 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - in: query
-          name: filter
-          schema:
-            type: string
-          description: SCIM filter expression.
-        - in: query
-          name: startIndex
-          schema:
-            type: integer
-            minimum: 1
-        - in: query
-          name: count
-          schema:
-            type: integer
-            minimum: 1
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/SortBy"
+        - $ref: "#/components/parameters/SortOrder"
+        - $ref: "#/components/parameters/StartIndex"
+        - $ref: "#/components/parameters/Count"
+        - $ref: "#/components/parameters/Attributes"
+        - $ref: "#/components/parameters/ExcludedAttributes"
       responses:
         "200":
           description: User list response.
@@ -470,6 +464,13 @@ paths:
       tags: [Users]
       summary: Replace user
       operationId: replaceUser
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag the resource must still have for the change to be made.
       security:
         - bearerAuth: []
       requestBody:
@@ -487,6 +488,14 @@ paths:
                 $ref: "#/components/schemas/ScimUser"
         "400":
           description: Invalid request payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "412":
+          description: >-
+            The If-Match entity-tag is not the resource's current version (RFC
+            7644 Section 3.14). Nothing was changed.
           content:
             application/scim+json:
               schema:
@@ -518,6 +527,13 @@ paths:
       tags: [Users]
       summary: Patch user attributes
       operationId: patchUser
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag the resource must still have for the change to be made.
       security:
         - bearerAuth: []
       requestBody:
@@ -535,6 +551,14 @@ paths:
                 $ref: "#/components/schemas/ScimUser"
         "400":
           description: Invalid patch request.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "412":
+          description: >-
+            The If-Match entity-tag is not the resource's current version (RFC
+            7644 Section 3.14). Nothing was changed.
           content:
             application/scim+json:
               schema:
@@ -566,11 +590,26 @@ paths:
       tags: [Users]
       summary: Delete user
       operationId: deleteUser
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag the resource must still have for the change to be made.
       security:
         - bearerAuth: []
       responses:
         "204":
           description: User deleted.
+        "412":
+          description: >-
+            The If-Match entity-tag is not the resource's current version (RFC
+            7644 Section 3.14). Nothing was changed.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
         "401":
           description: >-
             No bearer access token, or one that failed validation (expired,
@@ -601,6 +640,14 @@ paths:
       operationId: listGroups
       security:
         - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/SortBy"
+        - $ref: "#/components/parameters/SortOrder"
+        - $ref: "#/components/parameters/StartIndex"
+        - $ref: "#/components/parameters/Count"
+        - $ref: "#/components/parameters/Attributes"
+        - $ref: "#/components/parameters/ExcludedAttributes"
       responses:
         "200":
           description: Group list response.
@@ -714,6 +761,13 @@ paths:
       tags: [Groups]
       summary: Replace group
       operationId: replaceGroup
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag the resource must still have for the change to be made.
       security:
         - bearerAuth: []
       requestBody:
@@ -731,6 +785,14 @@ paths:
                 $ref: "#/components/schemas/ScimGroup"
         "400":
           description: Invalid group payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "412":
+          description: >-
+            The If-Match entity-tag is not the resource's current version (RFC
+            7644 Section 3.14). Nothing was changed.
           content:
             application/scim+json:
               schema:
@@ -762,6 +824,13 @@ paths:
       tags: [Groups]
       summary: Patch group
       operationId: patchGroup
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag the resource must still have for the change to be made.
       security:
         - bearerAuth: []
       requestBody:
@@ -779,6 +848,14 @@ paths:
                 $ref: "#/components/schemas/ScimGroup"
         "400":
           description: Invalid patch payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "412":
+          description: >-
+            The If-Match entity-tag is not the resource's current version (RFC
+            7644 Section 3.14). Nothing was changed.
           content:
             application/scim+json:
               schema:
@@ -810,11 +887,26 @@ paths:
       tags: [Groups]
       summary: Delete group
       operationId: deleteGroup
+      parameters:
+        - in: header
+          name: If-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag the resource must still have for the change to be made.
       security:
         - bearerAuth: []
       responses:
         "204":
           description: Group deleted.
+        "412":
+          description: >-
+            The If-Match entity-tag is not the resource's current version (RFC
+            7644 Section 3.14). Nothing was changed.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
         "401":
           description: >-
             No bearer access token, or one that failed validation (expired,
@@ -843,6 +935,14 @@ paths:
       tags: [Bulk]
       summary: Execute bulk operations
       operationId: bulkOperations
+      description: >-
+        Each operation is performed as the single request it stands for, with
+        the same checks. The response lists every processed operation with
+        its status and location, and the error body of each that failed.
+        A value "bulkId:{id}" in data or path is replaced with the id of the
+        resource the POST operation with that bulkId created, whatever the
+        order of the operations. failOnErrors stops the job after that many
+        errors.
       security:
         - bearerAuth: []
       requestBody:
@@ -861,6 +961,14 @@ paths:
                 additionalProperties: true
         "400":
           description: Invalid bulk payload.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "413":
+          description: >-
+            More than 1000 operations, or a body over 1048576 bytes. The error
+            names the limit exceeded (RFC 7644 Section 3.7.4).
           content:
             application/scim+json:
               schema:
@@ -884,9 +992,13 @@ paths:
                 $ref: "#/components/schemas/ScimError"
   /scim/v2/.search:
     post:
-      tags: [Bulk]
-      summary: Execute POST-based search
+      tags: [Query]
+      summary: Query every resource type
       operationId: searchScimResources
+      description: >-
+        POST query (RFC 7644 Section 3.4.3). The body carries what a GET query
+        carries in its URL: filter, sortBy, sortOrder, startIndex, count,
+        attributes and excludedAttributes.
       security:
         - bearerAuth: []
       requestBody:
@@ -894,17 +1006,18 @@ paths:
         content:
           application/scim+json:
             schema:
-              type: object
-              additionalProperties: true
+              $ref: "#/components/schemas/ScimSearchRequest"
       responses:
         "200":
-          description: Search result list.
+          description: The matching resources.
           content:
             application/scim+json:
               schema:
                 $ref: "#/components/schemas/ScimListResponse"
         "400":
-          description: Invalid search payload.
+          description: >-
+            The body does not name the SearchRequest schema, or the filter is
+            not valid (scimType invalidFilter).
           content:
             application/scim+json:
               schema:
@@ -922,6 +1035,170 @@ paths:
           description: >-
             The access token does not grant the scope the request needs.
             WWW-Authenticate carries error="insufficient_scope" and that scope.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Users/.search:
+    post:
+      tags: [Query]
+      summary: Query users with POST
+      operationId: searchUsers
+      description: >-
+        POST query (RFC 7644 Section 3.4.3). The body carries what a GET query
+        carries in its URL: filter, sortBy, sortOrder, startIndex, count,
+        attributes and excludedAttributes.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimSearchRequest"
+      responses:
+        "200":
+          description: The matching resources.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "400":
+          description: >-
+            The body does not name the SearchRequest schema, or the filter is
+            not valid (scimType invalidFilter).
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Groups/.search:
+    post:
+      tags: [Query]
+      summary: Query groups with POST
+      operationId: searchGroups
+      description: >-
+        POST query (RFC 7644 Section 3.4.3). The body carries what a GET query
+        carries in its URL: filter, sortBy, sortOrder, startIndex, count,
+        attributes and excludedAttributes.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimSearchRequest"
+      responses:
+        "200":
+          description: The matching resources.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "400":
+          description: >-
+            The body does not name the SearchRequest schema, or the filter is
+            not valid (scimType invalidFilter).
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2:
+    get:
+      tags: [Query]
+      summary: Query every resource type
+      operationId: queryScimResources
+      description: >-
+        A query against the Base URI covers Users and Groups (RFC 7644 Section
+        3.4.2.1). An attribute a resource type does not define has no value
+        there. Filter on meta.resourceType to keep one type.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Filter"
+        - $ref: "#/components/parameters/SortBy"
+        - $ref: "#/components/parameters/SortOrder"
+        - $ref: "#/components/parameters/StartIndex"
+        - $ref: "#/components/parameters/Count"
+        - $ref: "#/components/parameters/Attributes"
+        - $ref: "#/components/parameters/ExcludedAttributes"
+      responses:
+        "200":
+          description: The matching resources.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+        "400":
+          description: Invalid filter or parameter.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "401":
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+  /scim/v2/Me:
+    get:
+      tags: [Query]
+      summary: Authenticated subject alias (not offered)
+      operationId: getMe
+      description: >-
+        This service provider does not offer the /Me alias and answers 501, as
+        RFC 7644 Section 3.11 recommends. Every method gets the same answer.
+      security:
+        - bearerAuth: []
+      responses:
+        "501":
+          description: Not implemented.
           content:
             application/scim+json:
               schema:
@@ -1042,6 +1319,73 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
 components:
+  parameters:
+    Filter:
+      in: query
+      name: filter
+      schema:
+        type: string
+      description: >-
+        Filter expression (RFC 7644 Section 3.4.2.2): the operators eq, ne,
+        co, sw, ew, pr, gt, ge, lt and le, joined with and, or and not,
+        grouped with round brackets, and value filters in square brackets
+        such as emails[type eq "work" and value co "@example.com"]. An
+        attribute may carry its schema URI. Comparison follows the
+        attribute's type and caseExact. An invalid filter gets 400 with
+        scimType invalidFilter.
+      example: userName eq "alice@example.com"
+    SortBy:
+      in: query
+      name: sortBy
+      schema:
+        type: string
+      description: >-
+        Attribute to order by, in attribute notation such as name.familyName
+        (RFC 7644 Section 3.4.2.3). A multi-valued attribute sorts by its
+        primary value, or else its first. Resources with no value come last
+        when ascending and first when descending.
+    SortOrder:
+      in: query
+      name: sortOrder
+      schema:
+        type: string
+        enum: [ascending, descending]
+        default: ascending
+    StartIndex:
+      in: query
+      name: startIndex
+      schema:
+        type: integer
+        default: 1
+      description: 1-based index of the first result. A value less than 1 is read as 1.
+    Count:
+      in: query
+      name: count
+      schema:
+        type: integer
+      description: >-
+        Most results to return in the page. 0 returns totalResults and no
+        resources; a negative value is read as 0. The service provider
+        returns at most 200, and that many when count is absent.
+    Attributes:
+      in: query
+      name: attributes
+      schema:
+        type: string
+      description: >-
+        Comma-separated attribute names to return, with id and schemas, which
+        are always returned (RFC 7644 Section 3.9). Sub-attributes may be
+        named, as in name.givenName. Mutually exclusive with
+        excludedAttributes.
+      example: userName,name.givenName
+    ExcludedAttributes:
+      in: query
+      name: excludedAttributes
+      schema:
+        type: string
+      description: >-
+        Comma-separated attribute names to leave out of the default set. It
+        has no effect on id and schemas.
   securitySchemes:
     bearerAuth:
       type: http
@@ -1053,6 +1397,35 @@ components:
         Its aud is the SCIM base URI. Scope scim.read authorizes GET and POST
         /scim/v2/.search; scim.write authorizes every other method.
   schemas:
+    ScimSearchRequest:
+      type: object
+      required: [schemas]
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - urn:ietf:params:scim:api:messages:2.0:SearchRequest
+        filter:
+          type: string
+        sortBy:
+          type: string
+        sortOrder:
+          type: string
+          enum: [ascending, descending]
+        startIndex:
+          type: integer
+        count:
+          type: integer
+        attributes:
+          type: array
+          items:
+            type: string
+        excludedAttributes:
+          type: array
+          items:
+            type: string
     ErrorResponse:
       type: object
       required: [error]

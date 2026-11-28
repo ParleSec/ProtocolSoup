@@ -123,8 +123,8 @@ func TestRequestWithoutCredentialsIsChallengedWithBearer(t *testing.T) {
 				t.Errorf("WWW-Authenticate = %q, want the bare Bearer challenge", got)
 			}
 			body := scimErrorBody(t, recorder)
-			// RFC 7644 Section 3.12: status is "The HTTP status code ...
-			// expressed as a JSON string."
+			// RFC 7644 Section 3.12, status: "The HTTP status code (see
+			// Section 6 of [RFC7231]) expressed as a JSON string."
 			if status, ok := body["status"].(string); !ok || status != "401" {
 				t.Errorf("status = %#v, want the JSON string \"401\"", body["status"])
 			}

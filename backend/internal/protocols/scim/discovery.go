@@ -96,24 +96,47 @@ func GetResourceTypes(baseURL string) []*ResourceType {
 // GetSchemas returns all supported schemas
 func GetSchemas(baseURL string) []*Schema {
 	return []*Schema{
-		getUserSchema(baseURL),
-		getGroupSchema(baseURL),
-		getEnterpriseUserSchema(baseURL),
+		GetSchema(baseURL, SchemaURNUser),
+		GetSchema(baseURL, SchemaURNGroup),
+		GetSchema(baseURL, SchemaURNEnterpriseUser),
+	}
+}
+
+// completeAttributes fills in the characteristics a definition leaves unset
+// with their defaults. RFC 7643 Section 2.2: an attribute is by default not
+// required, case insensitive, "readWrite", returned by "default" and of
+// uniqueness "none".
+func completeAttributes(attributes []Attribute) {
+	for i := range attributes {
+		attribute := &attributes[i]
+		if attribute.Mutability == "" {
+			attribute.Mutability = "readWrite"
+		}
+		if attribute.Returned == "" {
+			attribute.Returned = "default"
+		}
+		if attribute.Uniqueness == "" {
+			attribute.Uniqueness = "none"
+		}
+		completeAttributes(attribute.SubAttributes)
 	}
 }
 
 // GetSchema returns a specific schema by ID
 func GetSchema(baseURL, schemaID string) *Schema {
+	var schema *Schema
 	switch schemaID {
 	case SchemaURNUser:
-		return getUserSchema(baseURL)
+		schema = getUserSchema(baseURL)
 	case SchemaURNGroup:
-		return getGroupSchema(baseURL)
+		schema = getGroupSchema(baseURL)
 	case SchemaURNEnterpriseUser:
-		return getEnterpriseUserSchema(baseURL)
+		schema = getEnterpriseUserSchema(baseURL)
 	default:
 		return nil
 	}
+	completeAttributes(schema.Attributes)
+	return schema
 }
 
 func getUserSchema(baseURL string) *Schema {
@@ -270,6 +293,36 @@ func getUserSchema(baseURL string) *Schema {
 					{Name: "display", Type: "string", Description: "Display name", Mutability: "readWrite", Returned: "default"},
 					{Name: "type", Type: "string", Description: "Type (work, home, mobile, fax, pager, other)", CanonicalValues: []string{"work", "home", "mobile", "fax", "pager", "other"}, Mutability: "readWrite", Returned: "default"},
 					{Name: "primary", Type: "boolean", Description: "Is primary number", Mutability: "readWrite", Returned: "default"},
+				},
+			},
+			{
+				Name:        "ims",
+				Type:        "complex",
+				MultiValued: true,
+				Description: "Instant messaging addresses for the User.",
+				Required:    false,
+				Mutability:  "readWrite",
+				Returned:    "default",
+				SubAttributes: []Attribute{
+					{Name: "value", Type: "string", Description: "Instant messaging address for the User.", Mutability: "readWrite", Returned: "default"},
+					{Name: "display", Type: "string", Description: "Display name", Mutability: "readWrite", Returned: "default"},
+					{Name: "type", Type: "string", Description: "Type (aim, gtalk, icq, xmpp, msn, skype, qq, yahoo)", CanonicalValues: []string{"aim", "gtalk", "icq", "xmpp", "msn", "skype", "qq", "yahoo"}, Mutability: "readWrite", Returned: "default"},
+					{Name: "primary", Type: "boolean", Description: "Is primary messenger", Mutability: "readWrite", Returned: "default"},
+				},
+			},
+			{
+				Name:        "photos",
+				Type:        "complex",
+				MultiValued: true,
+				Description: "URLs of photos of the User.",
+				Required:    false,
+				Mutability:  "readWrite",
+				Returned:    "default",
+				SubAttributes: []Attribute{
+					{Name: "value", Type: "reference", Description: "URL of a photo of the User.", ReferenceTypes: []string{"external"}, Mutability: "readWrite", Returned: "default"},
+					{Name: "display", Type: "string", Description: "Display name", Mutability: "readWrite", Returned: "default"},
+					{Name: "type", Type: "string", Description: "Type (photo, thumbnail)", CanonicalValues: []string{"photo", "thumbnail"}, Mutability: "readWrite", Returned: "default"},
+					{Name: "primary", Type: "boolean", Description: "Is primary photo", Mutability: "readWrite", Returned: "default"},
 				},
 			},
 			{

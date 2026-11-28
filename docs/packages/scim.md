@@ -76,7 +76,8 @@ RFC alignment target: RFC 7642, RFC 7643, and RFC 7644.
 ### Bulk And Search Endpoints
 
 - `POST /scim/v2/Bulk`
-- `POST /scim/v2/.search`
+- `POST /scim/v2/.search`, `POST /scim/v2/Users/.search`, `POST /scim/v2/Groups/.search`
+- `GET /scim/v2` — query Users and Groups together
 
 ### Outbound Client Endpoints
 

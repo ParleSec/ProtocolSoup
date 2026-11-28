@@ -442,71 +442,6 @@ func (s *Storage) DeleteUser(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListUsers returns users with optional filtering
-func (s *Storage) ListUsers(ctx context.Context, filter string, startIndex, count int) ([]*User, int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// Build query with filter
-	query := `SELECT data, version FROM scim_users`
-	countQuery := `SELECT COUNT(*) FROM scim_users`
-	var args []interface{}
-
-	if filter != "" {
-		whereClause, filterArgs, err := buildFilterClause(filter, "user")
-		if err != nil {
-			return nil, 0, err
-		}
-		if whereClause != "" {
-			query += " WHERE " + whereClause
-			countQuery += " WHERE " + whereClause
-			args = filterArgs
-		}
-	}
-
-	// Get total count
-	var totalCount int
-	err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count users: %w", err)
-	}
-
-	// Add pagination
-	if startIndex < 1 {
-		startIndex = 1
-	}
-	if count < 1 {
-		count = 100
-	}
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d OFFSET %d", count, startIndex-1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list users: %w", err)
-	}
-	defer rows.Close()
-
-	var users []*User
-	for rows.Next() {
-		var data string
-		var version int
-		if err := rows.Scan(&data, &version); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan user: %w", err)
-		}
-
-		var user User
-		if err := json.Unmarshal([]byte(data), &user); err != nil {
-			return nil, 0, fmt.Errorf("failed to unmarshal user: %w", err)
-		}
-		if user.Meta != nil {
-			user.Meta.Version = GenerateETag(version)
-		}
-		users = append(users, &user)
-	}
-
-	return users, totalCount, nil
-}
-
 // ListAllUsers returns the complete local source set for outbound
 // reconciliation. Unlike the public SCIM list endpoint, this internal storage
 // operation is intentionally not paginated.
@@ -744,6 +679,48 @@ func (s *Storage) UpdateGroup(ctx context.Context, id string, group *Group, expe
 	return group, nil
 }
 
+// ListAllGroups returns every group with its members, oldest first.
+func (s *Storage) ListAllGroups(ctx context.Context) ([]*Group, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx, `SELECT data, version FROM scim_groups ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all groups: %w", err)
+	}
+	groups := make([]*Group, 0)
+	for rows.Next() {
+		var data string
+		var version int
+		if err := rows.Scan(&data, &version); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("failed to scan group: %w", err)
+		}
+		var group Group
+		if err := json.Unmarshal([]byte(data), &group); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("failed to unmarshal group: %w", err)
+		}
+		if group.Meta != nil {
+			group.Meta.Version = GenerateETag(version)
+		}
+		groups = append(groups, &group)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("failed while listing groups: %w", err)
+	}
+	rows.Close()
+	for _, group := range groups {
+		members, err := s.getGroupMembers(ctx, group.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read the members of group %s: %w", group.ID, err)
+		}
+		group.Members = members
+	}
+	return groups, nil
+}
+
 // DeleteGroup deletes a group
 func (s *Storage) DeleteGroup(ctx context.Context, id string) error {
 	s.mu.Lock()
@@ -763,68 +740,6 @@ func (s *Storage) DeleteGroup(ctx context.Context, id string) error {
 	}
 
 	return nil
-}
-
-// ListGroups returns groups with optional filtering
-func (s *Storage) ListGroups(ctx context.Context, filter string, startIndex, count int) ([]*Group, int, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	query := `SELECT data, version FROM scim_groups`
-	countQuery := `SELECT COUNT(*) FROM scim_groups`
-	var args []interface{}
-
-	if filter != "" {
-		whereClause, filterArgs, err := buildFilterClause(filter, "group")
-		if err != nil {
-			return nil, 0, err
-		}
-		if whereClause != "" {
-			query += " WHERE " + whereClause
-			countQuery += " WHERE " + whereClause
-			args = filterArgs
-		}
-	}
-
-	var totalCount int
-	err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&totalCount)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count groups: %w", err)
-	}
-
-	if startIndex < 1 {
-		startIndex = 1
-	}
-	if count < 1 {
-		count = 100
-	}
-	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d OFFSET %d", count, startIndex-1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list groups: %w", err)
-	}
-	defer rows.Close()
-
-	var groups []*Group
-	for rows.Next() {
-		var data string
-		var version int
-		if err := rows.Scan(&data, &version); err != nil {
-			return nil, 0, fmt.Errorf("failed to scan group: %w", err)
-		}
-
-		var group Group
-		if err := json.Unmarshal([]byte(data), &group); err != nil {
-			return nil, 0, fmt.Errorf("failed to unmarshal group: %w", err)
-		}
-		if group.Meta != nil {
-			group.Meta.Version = GenerateETag(version)
-		}
-		groups = append(groups, &group)
-	}
-
-	return groups, totalCount, nil
 }
 
 // AddGroupMember adds a user to a group
@@ -1011,29 +926,6 @@ func containsAt(s, substr string) bool {
 		}
 	}
 	return false
-}
-
-// buildFilterClause converts SCIM filter to SQL WHERE clause
-// This is a simplified implementation - full implementation is in filter.go
-func buildFilterClause(filter string, resourceType string) (string, []interface{}, error) {
-	if filter == "" {
-		return "", nil, nil
-	}
-
-	// Parse the filter using the SCIM filter parser
-	parsed, err := ParseFilter(filter)
-	if err != nil {
-		return "", nil, ErrInvalidFilter(err.Error())
-	}
-
-	// Translate to SQL using the SQL translator
-	translator := NewSQLTranslator(resourceType)
-	sql, params, err := translator.Translate(parsed)
-	if err != nil {
-		return "", nil, ErrInvalidFilter(err.Error())
-	}
-
-	return sql, params, nil
 }
 
 // SeedDemoData creates initial demo data
