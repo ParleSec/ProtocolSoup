@@ -414,6 +414,7 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 	demoAppSecret := idp.getClientSecret("demo-app")
 	machineSecret := idp.getClientSecret("machine-client")
 	ssfStreamSecret := idp.getClientSecret(SSFStreamClientID)
+	scimSecret := idp.getClientSecret(SCIMClientID)
 
 	return []DemoClientPreset{
 		{
@@ -450,6 +451,15 @@ func (idp *MockIdP) GetDemoClientPresets() []DemoClientPreset {
 			GrantTypes:  []string{"client_credentials"},
 			Scopes:      []string{"ssf.read", "ssf.manage"},
 			Secret:      ssfStreamSecret,
+		},
+		{
+			ID:          SCIMClientID,
+			Name:        "SCIM Client",
+			Description: "Confidential client_credentials client for the SCIM service provider (scim.read and scim.write)",
+			Type:        "machine",
+			GrantTypes:  []string{"client_credentials"},
+			Scopes:      []string{"scim.read", "scim.write"},
+			Secret:      scimSecret,
 		},
 	}
 }

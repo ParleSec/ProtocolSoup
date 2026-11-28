@@ -68,16 +68,22 @@ If your frontend is at a custom domain, add that origin.
 
 ## SCIM requests return 401
 
-**Symptom:** All SCIM API calls return `401 Unauthorized`.
+**Symptom:** SCIM API calls return `401 Unauthorized` with a `WWW-Authenticate: Bearer` header.
 
-**Cause:** SCIM endpoints require a bearer token.
+**Cause:** Every SCIM endpoint except `GET /scim/v2/ServiceProviderConfig` requires an OAuth 2.0 access token whose `aud` is the SCIM base URI. A static token is not accepted (RFC 7644 Section 7.4). When the challenge carries `error="invalid_token"`, its `error_description` says which check failed.
 
-**Fix:** Set `SCIM_API_TOKEN` on the SCIM service, then include it in every request:
+**Fix:** Request an access token as the seeded `scim-client` (its secret is at `GET /oauth2/demo/clients`) and send it:
 
 ```bash
-curl -H "Authorization: Bearer <your-token>" \
+ACCESS_TOKEN=$(curl -s -u "scim-client:$SCIM_CLIENT_SECRET" \
+  -d grant_type=client_credentials -d "scope=scim.read scim.write" \
+  http://localhost:8080/oauth2/token | jq -r .access_token)
+
+curl -H "Authorization: Bearer $ACCESS_TOKEN" \
   http://localhost:8080/scim/v2/Users
 ```
+
+A `403` with `error="insufficient_scope"` means the token lacks the scope the challenge names: `scim.read` to retrieve, `scim.write` to create, modify or delete.
 
 ## WebSocket connection fails for Looking Glass
 

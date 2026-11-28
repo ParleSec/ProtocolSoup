@@ -166,18 +166,6 @@ func TestNormalizeSCIMTargetURLRejectsUnresolvableHostInProduction(t *testing.T)
 	}
 }
 
-func TestPluginRequiresAuthTokenInProduction(t *testing.T) {
-	t.Setenv("SCIM_API_TOKEN", "")
-	p := NewPlugin()
-	err := p.Initialize(context.Background(), plugin.PluginConfig{
-		Environment: "production",
-		BaseURL:     "https://scim.example.test",
-	})
-	if err == nil || !strings.Contains(err.Error(), "SCIM_API_TOKEN") {
-		t.Fatalf("initialize error = %v", err)
-	}
-}
-
 func TestHandleClientSyncDoesNotAdvanceLastSyncAfterUserFailure(t *testing.T) {
 	storage, err := NewStorage(t.TempDir())
 	if err != nil {

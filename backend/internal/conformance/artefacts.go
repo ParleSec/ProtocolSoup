@@ -79,10 +79,19 @@ type ExampleSource struct {
 	Message string `json:"message"`
 	// Location names the place in that message, such as "the DPoP header".
 	Location string `json:"location"`
+	// FormField is set when the value is a control of an
+	// application/x-www-form-urlencoded body, which carries it
+	// percent-encoded. It names the control.
+	FormField string `json:"form_field,omitempty"`
 }
 
 // How an example was checked when it was captured.
 const (
+	// VerifiedByXMLSignature is for a SAML message: its enveloped XML
+	// Signature, and that of each Assertion in it, verified with the signing
+	// certificate in the issuer's SAML metadata, which one of the example's
+	// exchanges fetched and whose entityID equals the message's Issuer.
+	VerifiedByXMLSignature = "xml_signature"
 	// VerifiedByIssuerMetadata is for an SD-JWT VC: the signature verified
 	// under the key, selected by kid, in the JWT VC Issuer Metadata one of
 	// the example's exchanges fetched, whose issuer equals the credential's
@@ -93,6 +102,14 @@ const (
 	// signature: the member that names its issuer equals the issuer
 	// identifier the request URL was built from.
 	VerifiedByIssuer = "issuer"
+	// VerifiedByLocation is for a SCIM resource, which carries no signature:
+	// the value is the whole body of the response to a GET of the URI its
+	// own meta.location names; that response's Content-Location and ETag
+	// headers equal meta.location and meta.version (RFC 7643 Section 3.1);
+	// and the 201 response that created the resource, in one of the
+	// example's exchanges, named the same URI in its Location header and the
+	// same id in its body (RFC 7644 Section 3.3).
+	VerifiedByLocation = "location"
 	// VerifiedByEmbeddedJWK means the signature verified under the public
 	// key in the value's own jwk header parameter.
 	VerifiedByEmbeddedJWK = "embedded_jwk"
@@ -110,12 +127,16 @@ type ExampleVerification struct {
 	KeyID     string `json:"key_id,omitempty"`
 	// JWKSExchange indexes the exchange that fetched the keys: the JWK Set
 	// for VerifiedByJWKS, the JWT VC Issuer Metadata for
-	// VerifiedByIssuerMetadata.
+	// VerifiedByIssuerMetadata, the SAML metadata for VerifiedByXMLSignature.
 	JWKSExchange *int `json:"jwks_exchange,omitempty"`
 	// IssuerMember names the member that carries the issuer, and Issuer is
 	// its value, for VerifiedByIssuer.
 	IssuerMember string `json:"issuer_member,omitempty"`
 	Issuer       string `json:"issuer,omitempty"`
+	// Location is the resource's meta.location, and CreatedExchange indexes
+	// the exchange that created the resource, for VerifiedByLocation.
+	Location        string `json:"location,omitempty"`
+	CreatedExchange *int   `json:"created_exchange,omitempty"`
 }
 
 // CapturedExample is one example value with the exchanges that carried and

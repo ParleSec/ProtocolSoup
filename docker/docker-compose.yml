@@ -95,6 +95,9 @@ services:
       # Secret of the ssf-transmitter resource server registration; the SSF
       # service presents the same value at /oauth2/introspect (RFC 7662).
       - SSF_TRANSMITTER_CLIENT_SECRET=${SSF_TRANSMITTER_CLIENT_SECRET:-ssf-transmitter-introspection-lab}
+      # Secret of the scim-service-provider resource server registration; the
+      # SCIM service presents the same value at /oauth2/introspect (RFC 7662).
+      - SCIM_SERVICE_PROVIDER_CLIENT_SECRET=${SCIM_SERVICE_PROVIDER_CLIENT_SECRET:-scim-service-provider-introspection-lab}
       - SHOWCASE_MDOC_PKI_PATH=/app/mdoc-pki
     volumes:
       - mdoc-issuer-pki:/app/mdoc-pki
@@ -144,10 +147,13 @@ services:
       - SHOWCASE_BASE_URL=http://localhost:8080
       - SHOWCASE_CORS_ORIGINS=http://localhost:3000,http://localhost:5173
       - SCIM_DATA_DIR=/app/data
-      # SCIM API Token for Okta/Azure AD integration
-      # Set this to enable authentication on SCIM endpoints
-      # Generate with: openssl rand -hex 32
-      - SCIM_API_TOKEN=${SCIM_API_TOKEN:-}
+      # The SCIM service provider is an OAuth 2.0 protected resource (RFC 7644
+      # Section 2). The federation service issues its access tokens; this
+      # service validates them with that service's JWK Set and asks its
+      # introspection endpoint whether a token has been revoked.
+      - SCIM_AS_JWKS_URI=http://federation-service:8080/api/.well-known/jwks.json
+      - SCIM_AS_INTROSPECT_URI=http://federation-service:8080/oauth2/introspect
+      - SCIM_AS_INTROSPECT_CLIENT_SECRET=${SCIM_SERVICE_PROVIDER_CLIENT_SECRET:-scim-service-provider-introspection-lab}
     volumes:
       - scim-data:/app/data
     networks:

@@ -13,4 +13,7 @@ import (
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/oidc"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/rfc9449"
 	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/rfc9901"
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/saml"
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/scim"
+	_ "github.com/ParleSec/ProtocolSoup/internal/conformance/capture/ssf"
 )

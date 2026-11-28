@@ -41,32 +41,41 @@ type targetError struct {
 // authorization server MUST use a default resource indicator in the "aud"
 // claim. If a "scope" parameter is present in the request, the authorization
 // server SHOULD use it to infer the value of the default resource indicator
-// to be used in the "aud" claim." ssf.read and ssf.manage have meaning only
-// at the SSF Transmitter; every other scope this server grants belongs to
-// /oauth2/resource.
+// to be used in the "aud" claim."
 func (p *Plugin) defaultResource(scope string) (string, *targetError) {
-	ssf, other := false, false
+	resource := ""
 	for _, item := range strings.Fields(scope) {
-		if item == "ssf.read" || item == "ssf.manage" {
-			ssf = true
-		} else {
-			other = true
+		at := p.scopeResource(item)
+		if resource != "" && at != resource {
+			// RFC 9068 Section 3: "If the values in the "scope" parameter
+			// refer to different default resource indicator values, the
+			// authorization server SHOULD reject the request with
+			// "invalid_scope" as described in Section 4.1.2.1 of [RFC6749]."
+			return "", &targetError{
+				code:        "invalid_scope",
+				description: "the requested scope values belong to different resources; request the scope values of one resource (ssf.*, scim.* or the others) at a time",
+			}
 		}
+		resource = at
 	}
-	switch {
-	case ssf && other:
-		// RFC 9068 Section 3: "If the values in the "scope" parameter refer
-		// to different default resource indicator values, the authorization
-		// server SHOULD reject the request with "invalid_scope" as described
-		// in Section 4.1.2.1 of [RFC6749]."
-		return "", &targetError{
-			code:        "invalid_scope",
-			description: "the requested scope values belong to different resources; request ssf.read and ssf.manage separately from the other scopes",
-		}
-	case ssf:
-		return p.ssfResourceAudience(), nil
-	default:
+	if resource == "" {
 		return p.resourceURL(), nil
+	}
+	return resource, nil
+}
+
+// scopeResource is the protected resource a scope value has meaning at.
+// ssf.read and ssf.manage have meaning only at the SSF Transmitter, scim.read
+// and scim.write only at the SCIM service provider; every other scope this
+// server grants belongs to /oauth2/resource.
+func (p *Plugin) scopeResource(scope string) string {
+	switch scope {
+	case "ssf.read", "ssf.manage":
+		return p.ssfResourceAudience()
+	case "scim.read", "scim.write":
+		return p.scimResourceAudience()
+	default:
+		return p.resourceURL()
 	}
 }
 
@@ -89,7 +98,7 @@ func (p *Plugin) tokenAudience(resources []string, scope string) (string, *targe
 		if err != nil || !parsed.IsAbs() || parsed.Fragment != "" || strings.Contains(value, "#") {
 			return "", &targetError{code: "invalid_target", description: "resource must be an absolute URI with no fragment component (RFC 8707 Section 2)"}
 		}
-		if value != p.resourceURL() && value != p.ssfResourceAudience() {
+		if value != p.resourceURL() && value != p.ssfResourceAudience() && value != p.scimResourceAudience() {
 			return "", &targetError{code: "invalid_target", description: "resource does not name a protected resource this authorization server issues access tokens for"}
 		}
 		if requested != "" && requested != value {

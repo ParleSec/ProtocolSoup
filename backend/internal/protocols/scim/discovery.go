@@ -5,11 +5,16 @@ import (
 	"net/http"
 )
 
+// documentationURL is this service provider's help documentation (RFC 7643
+// Section 5, documentationUri), which also covers how a client obtains an
+// access token.
+const documentationURL = "https://docs.protocolsoup.com/protocols/scim/"
+
 // GetServiceProviderConfig returns the SCIM service provider configuration
 func GetServiceProviderConfig(baseURL string) *ServiceProviderConfig {
 	return &ServiceProviderConfig{
 		Schemas:          []string{SchemaURNServiceProviderConfig},
-		DocumentationURI: "https://tools.ietf.org/html/rfc7644",
+		DocumentationURI: documentationURL,
 		Patch: SupportedConfig{
 			Supported: true,
 		},
@@ -22,8 +27,10 @@ func GetServiceProviderConfig(baseURL string) *ServiceProviderConfig {
 			Supported:  true,
 			MaxResults: 200,
 		},
+		// The "password" attribute is dropped on input and never stored, so
+		// a client cannot change a password here.
 		ChangePassword: SupportedConfig{
-			Supported: true,
+			Supported: false,
 		},
 		Sort: SupportedConfig{
 			Supported: true,
@@ -31,20 +38,16 @@ func GetServiceProviderConfig(baseURL string) *ServiceProviderConfig {
 		ETag: SupportedConfig{
 			Supported: true,
 		},
+		// The one scheme auth.go accepts. RFC 7643 Section 5 defines the type
+		// value "oauthbearertoken".
 		AuthenticationSchemes: []AuthScheme{
 			{
 				Type:             "oauthbearertoken",
 				Name:             "OAuth Bearer Token",
-				Description:      "Authentication scheme using the OAuth 2.0 Bearer Token standard",
-				SpecURI:          "https://tools.ietf.org/html/rfc6750",
-				DocumentationURI: baseURL + "/docs/scim/auth",
+				Description:      "Authentication scheme using the OAuth Bearer Token Standard",
+				SpecURI:          "https://www.rfc-editor.org/info/rfc6750",
+				DocumentationURI: documentationURL,
 				Primary:          true,
-			},
-			{
-				Type:        "httpbasic",
-				Name:        "HTTP Basic",
-				Description: "Authentication scheme using HTTP Basic authentication (for testing)",
-				SpecURI:     "https://tools.ietf.org/html/rfc7617",
 			},
 		},
 		Meta: &Meta{

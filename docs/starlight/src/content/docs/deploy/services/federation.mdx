@@ -37,6 +37,8 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 - Client credentials tokens with `ssf.read` / `ssf.manage` last 900 seconds and carry `aud` = `SSF_RESOURCE` (default `SHOWCASE_BASE_URL`)
 - Seeded resource server registration `ssf-transmitter` (no grant types); the split SSF Transmitter authenticates with it at `/oauth2/introspect`. Secret from `SSF_TRANSMITTER_CLIENT_SECRET` or auto-generated
 - Seeded confidential client `ssf-stream-client` (`client_credentials`, `ssf.read` / `ssf.manage`); secret from `SSF_STREAM_CLIENT_SECRET` or auto-generated, listed at `GET /oauth2/demo/clients`
+- Seeded confidential client `scim-client` (`client_credentials`, `scim.read` / `scim.write`); secret from `SCIM_CLIENT_SECRET`. Its access tokens carry the SCIM base URI in `aud`.
+- Seeded resource server registration `scim-service-provider` (no grant types); the split SCIM service authenticates with it at `/oauth2/introspect`.
 
 ### OIDC
 
@@ -77,6 +79,9 @@ Use federation when you need OAuth 2.0, OIDC, SAML 2.0, OID4VCI, and OID4VP in a
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
 | `SSF_STREAM_CLIENT_SECRET` | No | auto-generated | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
 | `SSF_TRANSMITTER_CLIENT_SECRET` | With a split SSF service | auto-generated | Secret for the seeded `ssf-transmitter` resource server registration. Set it to the SSF service's `SSF_AS_INTROSPECT_CLIENT_SECRET`. |
+| `SCIM_CLIENT_SECRET` | No | auto-generated | Secret for the seeded `scim-client`. Pin in production so the secret survives restarts. |
+| `SCIM_SERVICE_PROVIDER_CLIENT_SECRET` | With a split SCIM service | auto-generated | Secret for the seeded `scim-service-provider` resource server registration. Must equal `SCIM_AS_INTROSPECT_CLIENT_SECRET` on the SCIM service. |
+| `SCIM_RESOURCE` | No | `{SHOWCASE_BASE_URL}/scim/v2` | Resource indicator placed in `aud` of access tokens issued for `scim.read` and `scim.write`. |
 | `OID4VP_VERIFIER_ATTESTATION_ISSUER` | No | `<SHOWCASE_BASE_URL>/oid4vp/verifier-attestation` | Issuer URL exposed for `verifier_attestation` metadata and JWKS |
 | `OID4VP_VERIFIER_ATTESTATION_CLIENT_ID` | No | `verifier_attestation:<public-host>` | Verifier client ID used when `client_id_scheme=verifier_attestation` |
 | `OID4VP_VERIFIER_ATTESTATION_PRIVATE_KEY_PEM` | No | Ephemeral in-memory key | PEM-encoded stable signing key for verifier attestation JWTs and JWKS |

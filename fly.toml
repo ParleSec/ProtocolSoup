@@ -80,7 +80,9 @@ primary_region = 'syd'
 
 # Secrets required (set via `fly secrets set`):
 # - SPIRE_JOIN_TOKEN: Join token from SPIRE Server for agent bootstrap
-# - SCIM_API_TOKEN: Bearer token for SCIM authentication
+# - SCIM_CLIENT_SECRET: pin the seeded scim-client secret so SCIM
+#   client_credentials stays stable across restarts. The SCIM service
+#   provider validates access tokens in this process; it has no static token.
 # - SSF_TO_FEDERATION_TOKEN: Bearer token shared with federation for the CAEP
 #   session-revoked demo hop. Without it the hop returns 401.
 # - SSF_STREAM_CLIENT_SECRET: pin the seeded ssf-stream-client secret so

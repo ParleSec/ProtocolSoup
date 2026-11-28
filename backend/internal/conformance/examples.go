@@ -36,6 +36,12 @@ const ExampleFormatJSON = "json"
 // the Disclosure's array: "salt", "name" and "value".
 const ExampleFormatSDJWT = "sd-jwt"
 
+// ExampleFormatSAML is a SAML 2.0 protocol message as the HTTP POST binding
+// carries it: the base64 encoding of an XML document, in an HTML form
+// control. Its one part is the decoded document ("response"), whose members
+// are the root element's attributes and child elements (example_xml.go).
+const ExampleFormatSAML = "saml"
+
 // exampleDisclosurePart names the part each Disclosure of an SD-JWT becomes.
 const exampleDisclosurePart = "disclosure"
 
@@ -45,6 +51,7 @@ var exampleParts = map[string][]string{
 	ExampleFormatJWT:   {"header", "payload"},
 	ExampleFormatJSON:  {"document"},
 	ExampleFormatSDJWT: {"header", "payload", exampleDisclosurePart},
+	ExampleFormatSAML:  {"response"},
 }
 
 var exampleIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -210,10 +217,12 @@ func containsString(values []string, want string) bool {
 type ExamplePart struct {
 	Name string `json:"name"`
 	// JSON is the part exactly as it was decoded from the value: the same
-	// bytes, in the same member order.
+	// bytes, in the same member order. For a SAML message it is the XML
+	// document.
 	JSON string `json:"json"`
 	// Indented is JSON with line breaks and indentation added between its
-	// tokens. No token is changed or moved.
+	// tokens. No token is changed or moved. For a SAML message the breaks
+	// and indentation are added between tags.
 	Indented string `json:"indented"`
 	// Members are the part's members in the order they appear, each nested
 	// member a field annotates following its parent.
@@ -262,6 +271,18 @@ func (e Example) DecodeExample(value string) ([]ExamplePart, error) {
 			parts = append(parts, part)
 		}
 		return parts, nil
+	case ExampleFormatSAML:
+		// The HTTP POST binding base64-encodes the message before placing
+		// it in the form control.
+		document, err := base64.StdEncoding.DecodeString(value)
+		if err != nil {
+			return nil, fmt.Errorf("value is not the base64 encoding of a SAML message: %w", err)
+		}
+		part, err := xmlPart(exampleParts[ExampleFormatSAML][0], document, annotated)
+		if err != nil {
+			return nil, err
+		}
+		return []ExamplePart{part}, nil
 	case ExampleFormatJSON:
 		part, err := examplePart(exampleParts[ExampleFormatJSON][0], []byte(value), annotated)
 		if err != nil {

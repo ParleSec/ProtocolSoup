@@ -2308,15 +2308,30 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 
 // protectedResourceOf returns the resource identifier a registration serves
 // as a resource server, or "" for a registration that is only a client. The
-// SSF Transmitter is the one resource server that calls the introspection
-// endpoint: on the split SSF image it has no access to this server's
-// revocation list. /oauth2/resource, UserInfo and the Credential Issuer run
-// in this process and validate tokens locally.
+// SSF Transmitter and the SCIM service provider are the resource servers that
+// call the introspection endpoint: on their split images they have no access
+// to this server's revocation list. /oauth2/resource, UserInfo and the
+// Credential Issuer run in this process and validate tokens locally.
 func (p *Plugin) protectedResourceOf(client *models.Client) string {
-	if client != nil && client.ID == mockidp.SSFTransmitterClientID {
+	if client == nil {
+		return ""
+	}
+	switch client.ID {
+	case mockidp.SSFTransmitterClientID:
 		return p.ssfResourceAudience()
+	case mockidp.SCIMServiceProviderClientID:
+		return p.scimResourceAudience()
 	}
 	return ""
+}
+
+// scimResourceAudience is the resource indicator of the SCIM service
+// provider: its base URI, the one RFC 7644 Section 1.3 calls the "Base URI".
+func (p *Plugin) scimResourceAudience() string {
+	if v := strings.TrimSpace(os.Getenv("SCIM_RESOURCE")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return strings.TrimRight(p.baseURL, "/") + "/scim/v2"
 }
 
 func (p *Plugin) ssfResourceAudience() string {

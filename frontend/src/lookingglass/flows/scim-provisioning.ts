@@ -14,8 +14,8 @@ import { FlowExecutorBase, FlowExecutorConfig, generateSecureRandom } from './ba
 export interface SCIMProvisioningConfig extends FlowExecutorConfig {
   /** SCIM server base URL (default: /scim/v2) */
   scimBaseUrl?: string
-  /** Bearer token for authentication */
-  bearerToken?: string
+  /** Token endpoint of the authorization server that issues the service provider's access tokens (default: /oauth2/token) */
+  tokenEndpoint?: string
 }
 
 export interface SCIMUser {
@@ -136,12 +136,44 @@ const SCHEMA_PATCH_OP = 'urn:ietf:params:scim:api:messages:2.0:PatchOp'
 
 abstract class SCIMExecutorBase extends FlowExecutorBase {
   protected scimBaseUrl: string
-  protected bearerToken: string
+  private tokenEndpoint: string
+  private accessToken = ''
 
   constructor(config: SCIMProvisioningConfig) {
     super(config)
     this.scimBaseUrl = config.scimBaseUrl || '/scim/v2'
-    this.bearerToken = config.bearerToken || ''
+    this.tokenEndpoint = config.tokenEndpoint || '/oauth2/token'
+  }
+
+  /**
+   * Requests the access token the SCIM requests carry. RFC 7644 Section 2
+   * leaves authentication to HTTP: this service provider accepts OAuth 2.0
+   * bearer access tokens (RFC 6750) issued for its base URI, and the scope
+   * decides what the client may do (scim.read to retrieve, scim.write to
+   * create, modify and delete).
+   */
+  protected async requestAccessToken(scope: string): Promise<void> {
+    this.updateState({ currentStep: 'Requesting an access token (client_credentials)' })
+    if (!this.config.clientSecret) {
+      throw new Error('The scim-client secret could not be read from /oauth2/demo/clients, so no access token can be requested')
+    }
+
+    const { response, data } = await this.makeRequest('POST', this.tokenEndpoint, {
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': `Basic ${btoa(`${this.config.clientId}:${this.config.clientSecret}`)}`,
+      },
+      body: { grant_type: 'client_credentials', scope },
+      step: 'Request an access token for the SCIM service provider',
+      rfcReference: 'RFC 6749 Section 4.4',
+    })
+    const tokenResponse = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>
+    if (!response.ok || typeof tokenResponse.access_token !== 'string') {
+      const error = typeof tokenResponse.error === 'string' ? tokenResponse.error : response.statusText
+      throw new Error(`The token request was refused: ${response.status} ${error}`)
+    }
+    this.processTokenResponse(tokenResponse)
+    this.accessToken = tokenResponse.access_token
   }
 
   protected async makeSCIMRequest<T>(
@@ -158,9 +190,10 @@ abstract class SCIMExecutorBase extends FlowExecutorBase {
       'Accept': 'application/scim+json',
     })
 
-    // Bearer token authentication is required for SCIM operations
-    if (this.bearerToken) {
-      headers['Authorization'] = `Bearer ${this.bearerToken}`
+    // RFC 6750 Section 2.1: the access token travels in the Authorization
+    // header with the Bearer scheme.
+    if (this.accessToken) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`
     }
 
     let bodyStr: string | undefined
@@ -260,6 +293,8 @@ export class UserLifecycleExecutor extends SCIMExecutorBase {
     this.updateState({ status: 'executing', currentStep: 'Starting user lifecycle flow' })
 
     try {
+      await this.requestAccessToken('scim.read scim.write')
+
       // Step 1: Create User
       await this.createUser()
 
@@ -477,6 +512,8 @@ export class GroupManagementExecutor extends SCIMExecutorBase {
     this.updateState({ status: 'executing', currentStep: 'Starting group management flow' })
 
     try {
+      await this.requestAccessToken('scim.read scim.write')
+
       // Get an existing user to add to group
       await this.getExistingUser()
 
@@ -688,6 +725,8 @@ export class FilterQueryExecutor extends SCIMExecutorBase {
     this.updateState({ status: 'executing', currentStep: 'Starting filter query demos' })
 
     try {
+      await this.requestAccessToken('scim.read')
+
       // Demo various filter expressions
       await this.listAllUsers()
       await this.filterByUsername()
@@ -846,6 +885,8 @@ export class SchemaDiscoveryExecutor extends SCIMExecutorBase {
     this.updateState({ status: 'executing', currentStep: 'Starting schema discovery' })
 
     try {
+      await this.requestAccessToken('scim.read')
+
       await this.getServiceProviderConfig()
       await this.getResourceTypes()
       await this.getSchemas()
@@ -971,6 +1012,8 @@ export class BulkOperationsExecutor extends SCIMExecutorBase {
     this.updateState({ status: 'executing', currentStep: 'Starting bulk operations demo' })
 
     try {
+      await this.requestAccessToken('scim.read scim.write')
+
       await this.executeBulkCreate()
 
       this.updateState({ status: 'completed', currentStep: 'Bulk operations complete' })

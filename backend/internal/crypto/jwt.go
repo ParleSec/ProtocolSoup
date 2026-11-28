@@ -386,6 +386,45 @@ func (s *JWTService) ValidateAccessToken(tokenString, issuer, audience string) (
 	if err != nil {
 		return nil, &AccessTokenError{Check: "signature", Reason: err.Error()}
 	}
+	return accessTokenClaims(token, issuer, audience)
+}
+
+// ValidateAccessTokenWithJWKS is ValidateAccessToken for a resource server
+// that runs apart from its authorization server and holds the JWK Set the
+// authorization server publishes. RFC 9068 Section 4: "The resource server
+// MUST use the keys provided by the authorization server." Section 2.1 has
+// both parties support RS256, which is the algorithm accepted here.
+func ValidateAccessTokenWithJWKS(tokenString string, jwks *JWKS, issuer, audience string) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		if err := RejectCriticalHeader(token.Header); err != nil {
+			return nil, err
+		}
+		kid, _ := token.Header["kid"].(string)
+		switch {
+		case kid != "":
+			key, err := jwks.GetKeyByID(kid)
+			if err != nil {
+				return nil, err
+			}
+			return key.ToPublicKey()
+		case len(jwks.Keys) == 1:
+			return jwks.Keys[0].ToPublicKey()
+		default:
+			return nil, errors.New("token kid is required when the authorization server's JWK Set has more than one key")
+		}
+	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithExpirationRequired())
+	if err != nil {
+		return nil, &AccessTokenError{Check: "signature", Reason: fmt.Sprintf("token validation failed: %v", err)}
+	}
+	if !token.Valid {
+		return nil, &AccessTokenError{Check: "signature", Reason: "invalid token"}
+	}
+	return accessTokenClaims(token, issuer, audience)
+}
+
+// accessTokenClaims applies the RFC 9068 Section 4 checks that follow the
+// signature and expiry: typ, iss and aud.
+func accessTokenClaims(token *jwt.Token, issuer, audience string) (jwt.MapClaims, error) {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, &AccessTokenError{Check: "signature", Reason: "invalid claims format"}

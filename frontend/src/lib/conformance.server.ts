@@ -103,7 +103,7 @@ export interface ConformanceExampleLink {
 
 export interface ConformanceExampleSummary extends ConformanceExampleLink {
   summary: string
-  format: 'jwt' | 'json' | 'sd-jwt'
+  format: 'jwt' | 'json' | 'sd-jwt' | 'saml'
   indexable: boolean
 }
 
@@ -149,10 +149,12 @@ export interface ConformanceExampleSource {
   exchange: number
   message: 'request' | 'response'
   location: string
+  /** Set when the value is a control of a form-encoded body. */
+  form_field?: string
 }
 
 export interface ConformanceExampleVerification {
-  method: 'embedded_jwk' | 'jwks' | 'issuer' | 'jwt_vc_issuer_metadata'
+  method: 'embedded_jwk' | 'jwks' | 'issuer' | 'jwt_vc_issuer_metadata' | 'xml_signature' | 'location'
   /** JWS alg of a signed value. */
   algorithm?: string
   key_id?: string
@@ -160,6 +162,9 @@ export interface ConformanceExampleVerification {
   /** For method issuer: the member that names the issuer, and its value. */
   issuer_member?: string
   issuer?: string
+  /** For method location: the resource's meta.location, and the exchange that created the resource. */
+  location?: string
+  created_exchange?: number
 }
 
 /**

@@ -42,6 +42,9 @@
 | `SSF_STREAM_CLIENT_SECRET` | No | `(auto-generated)` | Secret for the seeded `ssf-stream-client` Stream Management client. Pin in production so the secret survives restarts. |
 | `SSF_RESOURCE` | No | `SHOWCASE_BASE_URL` | Audience written into `ssf.read` / `ssf.manage` client-credentials tokens |
 | `SSF_TRANSMITTER_CLIENT_SECRET` | With a split SSF service | `(auto-generated)` | Secret for the seeded resource server registration `ssf-transmitter`, which the split SSF Transmitter uses at `/oauth2/introspect`. Set it to the SSF service's `SSF_AS_INTROSPECT_CLIENT_SECRET`. |
+| `SCIM_CLIENT_SECRET` | No | `(auto-generated)` | Secret for the seeded `scim-client` (`client_credentials`, `scim.read` / `scim.write`). Pin in production so the secret survives restarts. |
+| `SCIM_SERVICE_PROVIDER_CLIENT_SECRET` | With a split SCIM service | `(auto-generated)` | Secret for the seeded resource server registration `scim-service-provider`, which the split SCIM service uses at `/oauth2/introspect`. |
+| `SCIM_RESOURCE` | No | `{SHOWCASE_BASE_URL}/scim/v2` | Resource indicator placed in `aud` of access tokens issued for `scim.read` and `scim.write`. |
 
 ### Storage And Volumes
 

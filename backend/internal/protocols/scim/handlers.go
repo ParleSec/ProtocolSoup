@@ -3,6 +3,7 @@ package scim
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,7 +37,23 @@ func (p *Plugin) handleServiceProviderConfig(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(config)
 }
 
+// refuseDiscoveryFilter answers a filtered query of ResourceTypes or Schemas.
+// RFC 7644 Section 4: "If a "filter" is provided, the service provider SHOULD
+// respond with HTTP status code 403 (Forbidden) to ensure that clients cannot
+// incorrectly assume that any matching conditions specified in a filter are
+// true."
+func refuseDiscoveryFilter(w http.ResponseWriter, r *http.Request) bool {
+	if !r.URL.Query().Has("filter") {
+		return false
+	}
+	WriteError(w, ErrForbidden("a filter is not applied to this endpoint (RFC 7644 Section 4)"))
+	return true
+}
+
 func (p *Plugin) handleResourceTypes(w http.ResponseWriter, r *http.Request) {
+	if refuseDiscoveryFilter(w, r) {
+		return
+	}
 	p.emitEvent("scim.request", "ResourceTypes", map[string]interface{}{
 		"method": "GET",
 		"path":   "/ResourceTypes",
@@ -73,6 +90,9 @@ func (p *Plugin) handleResourceType(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Plugin) handleSchemas(w http.ResponseWriter, r *http.Request) {
+	if refuseDiscoveryFilter(w, r) {
+		return
+	}
 	schemas := GetSchemas(p.baseURL)
 
 	response := NewListResponse()
@@ -106,6 +126,185 @@ func (p *Plugin) handleSchema(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", ContentTypeSCIM)
 	json.NewEncoder(w).Encode(schema)
+}
+
+// ================== Resource Requests And Responses ==================
+
+// checkSchemas validates the "schemas" attribute of a resource a client sent.
+// RFC 7643 Section 3: "The "schemas" attribute is a REQUIRED attribute", it
+// "MUST only contain values defined as "schema" and "schemaExtensions" for the
+// resource's defined "resourceType"", and "Duplicate values MUST NOT be
+// included." The core schema URI is one of them: "This same value is also
+// present in the resource's "schemas" attribute."
+func checkSchemas(schemas []string, core string, extensions ...string) *SCIMError {
+	if len(schemas) == 0 {
+		return ErrInvalidValue("schemas is required")
+	}
+	seen := map[string]bool{}
+	for _, uri := range schemas {
+		defined := uri == core
+		for _, extension := range extensions {
+			defined = defined || uri == extension
+		}
+		if !defined {
+			return ErrInvalidSyntax(fmt.Sprintf("schemas value %q is not a schema of this resource type", uri))
+		}
+		if seen[uri] {
+			return ErrInvalidSyntax(fmt.Sprintf("schemas repeats %q", uri))
+		}
+		seen[uri] = true
+	}
+	if !seen[core] {
+		return ErrInvalidSyntax(fmt.Sprintf("schemas does not include %q", core))
+	}
+	return nil
+}
+
+// checkUser validates a User a client sent with POST or PUT. RFC 7643 Section
+// 4.1.1: "Each User MUST include a non-empty userName value." Extended
+// attributes sit under the schema extension URI (Section 3), which "schemas"
+// must then name.
+func checkUser(user *User) *SCIMError {
+	if scimErr := checkSchemas(user.Schemas, SchemaURNUser, SchemaURNEnterpriseUser); scimErr != nil {
+		return scimErr
+	}
+	if user.UserName == "" {
+		return ErrInvalidValue("userName is required")
+	}
+	if user.EnterpriseUser != nil {
+		for _, uri := range user.Schemas {
+			if uri == SchemaURNEnterpriseUser {
+				return nil
+			}
+		}
+		return ErrInvalidSyntax(fmt.Sprintf("the resource carries %q attributes and schemas does not name that schema", SchemaURNEnterpriseUser))
+	}
+	return nil
+}
+
+// userStoreError maps a storage failure for a User to its SCIM error.
+func userStoreError(id string, err error) *SCIMError {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return ErrResourceNotFound("User", id)
+	case errors.Is(err, ErrVersionConflict):
+		return ErrPreconditionFailed("ETag mismatch")
+	case errors.Is(err, ErrConflict):
+		// RFC 7644 Section 3.3: "the service provider MUST return HTTP status
+		// code 409 (Conflict) with a "scimType" error code of "uniqueness"".
+		return ErrConflictUniqueness("userName")
+	case errors.Is(err, ErrUserNameNotAllowed):
+		return ErrInvalidValue(err.Error())
+	default:
+		return ErrInternalServer(err.Error())
+	}
+}
+
+// describeUser completes a stored User for a response: its location, and the
+// groups it belongs to, which are derived from group membership.
+func (p *Plugin) describeUser(ctx context.Context, user *User) {
+	user.Meta.Location = p.baseURL + "/scim/v2/Users/" + user.ID
+	groups, _ := p.storage.GetUserGroups(ctx, user.ID)
+	for i := range groups {
+		groups[i].Ref = p.baseURL + "/scim/v2/Groups/" + groups[i].Value
+	}
+	user.Groups = groups
+}
+
+// writeResource writes one resource representation.
+//
+// RFC 7643 Section 3.1 on meta.location: "This value MUST be the same as the
+// "Content-Location" HTTP response header". On meta.version: "This value must
+// be the same as the entity-tag (ETag) HTTP response header". RFC 7644 Section
+// 3.3 on a created resource: "The URI of the created resource SHALL include,
+// in the HTTP "Location" header and the HTTP body, a JSON representation
+// [RFC7159] with the attribute "meta.location"."
+func writeResource(w http.ResponseWriter, status int, meta *Meta, resource interface{}) {
+	w.Header().Set("Content-Type", ContentTypeSCIM)
+	w.Header().Set("Content-Location", meta.Location)
+	w.Header().Set("ETag", meta.Version)
+	if status == http.StatusCreated {
+		w.Header().Set("Location", meta.Location)
+	}
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(resource)
+}
+
+// notModified answers a conditional retrieval of a resource that has not
+// changed. RFC 7644 Section 3.14: "If the resource has not changed, the
+// service provider simply returns an empty body with a 304 (Not Modified)
+// response code." RFC 7232 Section 3.2 has If-None-Match compared with the
+// weak comparison function, which ignores the "W/" prefix.
+func notModified(w http.ResponseWriter, r *http.Request, meta *Meta) bool {
+	header := r.Header.Get("If-None-Match")
+	if header == "" {
+		return false
+	}
+	current := strings.TrimPrefix(meta.Version, "W/")
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || strings.TrimPrefix(candidate, "W/") == current {
+			w.Header().Set("Content-Location", meta.Location)
+			w.Header().Set("ETag", meta.Version)
+			w.WriteHeader(http.StatusNotModified)
+			return true
+		}
+	}
+	return false
+}
+
+// acceptJSON labels responses application/json for a client that asks for
+// that media type and not for application/scim+json. RFC 7644 Section 3.8:
+// "Service providers MUST support the "Accept" header "Accept:
+// application/scim+json" and SHOULD support the header "Accept:
+// application/json", both of which specify JSON documents conforming to
+// [RFC7159]. The format defaults to "application/scim+json" if no format is
+// specified."
+func acceptJSON(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plain, scim := false, false
+		for _, value := range r.Header.Values("Accept") {
+			for _, item := range strings.Split(value, ",") {
+				mediaType, _, _ := strings.Cut(item, ";")
+				switch strings.ToLower(strings.TrimSpace(mediaType)) {
+				case "application/json":
+					plain = true
+				case ContentTypeSCIM, "*/*", "application/*":
+					scim = true
+				}
+			}
+		}
+		if plain && !scim {
+			w = &jsonLabel{ResponseWriter: w}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// jsonLabel replaces the application/scim+json Content-Type of a response
+// with application/json as the header is written.
+type jsonLabel struct {
+	http.ResponseWriter
+	labelled bool
+}
+
+func (w *jsonLabel) label() {
+	if !w.labelled {
+		w.labelled = true
+		if w.Header().Get("Content-Type") == ContentTypeSCIM {
+			w.Header().Set("Content-Type", "application/json")
+		}
+	}
+}
+
+func (w *jsonLabel) WriteHeader(status int) {
+	w.label()
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *jsonLabel) Write(body []byte) (int, error) {
+	w.label()
+	return w.ResponseWriter.Write(body)
 }
 
 // ================== User Handlers ==================
@@ -213,16 +412,13 @@ func (p *Plugin) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate required fields
-	if user.UserName == "" {
-		WriteError(w, ErrInvalidValue("userName is required"))
+	if scimErr := checkUser(&user); scimErr != nil {
+		WriteError(w, scimErr)
 		return
 	}
-
-	// Ensure schemas are set
-	if len(user.Schemas) == 0 {
-		user.Schemas = []string{SchemaURNUser}
-	}
+	// RFC 7644 Section 3.3: "In the request body, attributes whose mutability
+	// is "readOnly" (see Sections 2.2 and 7 of [RFC7643]) SHALL be ignored."
+	// The store issues "id" and "meta" itself and drops "groups".
 
 	p.emitEvent("scim.request", "Create User", map[string]interface{}{
 		"method":   "POST",
@@ -232,19 +428,16 @@ func (p *Plugin) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	created, err := p.storage.CreateUser(ctx, &user)
 	if err != nil {
-		if err == ErrConflict {
+		if errors.Is(err, ErrConflict) {
 			p.emitEvent("scim.error", "Uniqueness Violation", map[string]interface{}{
 				"userName": user.UserName,
 			})
-			WriteError(w, ErrConflictUniqueness("userName"))
-			return
 		}
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, userStoreError("", err))
 		return
 	}
 
-	// Set location
-	created.Meta.Location = p.baseURL + "/scim/v2/Users/" + created.ID
+	p.describeUser(ctx, created)
 
 	// Log provisioning event from external IdP
 	p.logProvisioningAction(r, "create", "User", created.ID, map[string]interface{}{
@@ -258,11 +451,7 @@ func (p *Plugin) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		"userName": created.UserName,
 	})
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("Location", created.Meta.Location)
-	w.Header().Set("ETag", created.Meta.Version)
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	writeResource(w, http.StatusCreated, created.Meta, created)
 }
 
 func (p *Plugin) handleGetUser(w http.ResponseWriter, r *http.Request) {
@@ -284,21 +473,11 @@ func (p *Plugin) handleGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set location
-	user.Meta.Location = p.baseURL + "/scim/v2/Users/" + user.ID
-
-	// Add groups
-	groups, _ := p.storage.GetUserGroups(ctx, user.ID)
-	if len(groups) > 0 {
-		for i := range groups {
-			groups[i].Ref = p.baseURL + "/scim/v2/Groups/" + groups[i].Value
-		}
-		user.Groups = groups
+	p.describeUser(ctx, user)
+	if notModified(w, r, user.Meta) {
+		return
 	}
-
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("ETag", user.Meta.Version)
-	json.NewEncoder(w).Encode(user)
+	writeResource(w, http.StatusOK, user.Meta, user)
 }
 
 func (p *Plugin) handleReplaceUser(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +496,15 @@ func (p *Plugin) handleReplaceUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RFC 7644 Section 3.5.1: 'If an attribute is "required", clients MUST
+	// specify the attribute in the PUT request', and for readOnly attributes
+	// "Any values provided SHALL be ignored." The store keeps "id" and
+	// "meta" and drops "groups".
+	if scimErr := checkUser(&user); scimErr != nil {
+		WriteError(w, scimErr)
+		return
+	}
+
 	// Check If-Match header for optimistic locking
 	expectedVersion := 0
 	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
@@ -331,32 +519,18 @@ func (p *Plugin) handleReplaceUser(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := p.storage.UpdateUser(ctx, id, &user, expectedVersion)
 	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("User", id))
-			return
-		}
-		if err == ErrVersionConflict {
-			WriteError(w, ErrPreconditionFailed("ETag mismatch"))
-			return
-		}
-		if err == ErrConflict {
-			WriteError(w, ErrConflictUniqueness("userName"))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, userStoreError(id, err))
 		return
 	}
 
-	updated.Meta.Location = p.baseURL + "/scim/v2/Users/" + updated.ID
+	p.describeUser(ctx, updated)
 
 	p.emitEvent("scim.user.updated", "User Replaced", map[string]interface{}{
 		"id":       updated.ID,
 		"userName": updated.UserName,
 	})
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("ETag", updated.Meta.Version)
-	json.NewEncoder(w).Encode(updated)
+	writeResource(w, http.StatusOK, updated.Meta, updated)
 }
 
 func (p *Plugin) handlePatchUser(w http.ResponseWriter, r *http.Request) {
@@ -412,11 +586,11 @@ func (p *Plugin) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 	expectedVersion, _ := ParseETag(user.Meta.Version)
 	updated, err := p.storage.UpdateUser(ctx, id, user, expectedVersion)
 	if err != nil {
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, userStoreError(id, err))
 		return
 	}
 
-	updated.Meta.Location = p.baseURL + "/scim/v2/Users/" + updated.ID
+	p.describeUser(ctx, updated)
 
 	// Log provisioning event from external IdP
 	p.logProvisioningAction(r, "update", "User", updated.ID, map[string]interface{}{
@@ -429,9 +603,7 @@ func (p *Plugin) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 		"changes": changes,
 	})
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("ETag", updated.Meta.Version)
-	json.NewEncoder(w).Encode(updated)
+	writeResource(w, http.StatusOK, updated.Meta, updated)
 }
 
 func (p *Plugin) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -527,13 +699,13 @@ func (p *Plugin) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if scimErr := checkSchemas(group.Schemas, SchemaURNGroup); scimErr != nil {
+		WriteError(w, scimErr)
+		return
+	}
 	if group.DisplayName == "" {
 		WriteError(w, ErrInvalidValue("displayName is required"))
 		return
-	}
-
-	if len(group.Schemas) == 0 {
-		group.Schemas = []string{SchemaURNGroup}
 	}
 
 	created, err := p.storage.CreateGroup(ctx, &group)
@@ -548,11 +720,7 @@ func (p *Plugin) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	created.Meta.Location = p.baseURL + "/scim/v2/Groups/" + created.ID
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("Location", created.Meta.Location)
-	w.Header().Set("ETag", created.Meta.Version)
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	writeResource(w, http.StatusCreated, created.Meta, created)
 }
 
 func (p *Plugin) handleGetGroup(w http.ResponseWriter, r *http.Request) {
@@ -576,9 +744,10 @@ func (p *Plugin) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("ETag", group.Meta.Version)
-	json.NewEncoder(w).Encode(group)
+	if notModified(w, r, group.Meta) {
+		return
+	}
+	writeResource(w, http.StatusOK, group.Meta, group)
 }
 
 func (p *Plugin) handleReplaceGroup(w http.ResponseWriter, r *http.Request) {
@@ -618,9 +787,7 @@ func (p *Plugin) handleReplaceGroup(w http.ResponseWriter, r *http.Request) {
 
 	updated.Meta.Location = p.baseURL + "/scim/v2/Groups/" + updated.ID
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("ETag", updated.Meta.Version)
-	json.NewEncoder(w).Encode(updated)
+	writeResource(w, http.StatusOK, updated.Meta, updated)
 }
 
 func (p *Plugin) handlePatchGroup(w http.ResponseWriter, r *http.Request) {
@@ -673,9 +840,7 @@ func (p *Plugin) handlePatchGroup(w http.ResponseWriter, r *http.Request) {
 
 	updated.Meta.Location = p.baseURL + "/scim/v2/Groups/" + updated.ID
 
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	w.Header().Set("ETag", updated.Meta.Version)
-	json.NewEncoder(w).Encode(updated)
+	writeResource(w, http.StatusOK, updated.Meta, updated)
 }
 
 func (p *Plugin) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
@@ -815,9 +980,13 @@ func (p *Plugin) bulkCreate(resourceType string, data json.RawMessage, bulkID st
 			result.Status = "400"
 			return result
 		}
+		if scimErr := checkUser(&user); scimErr != nil {
+			result.Status = "400"
+			return result
+		}
 		created, err := p.storage.CreateUser(ctx, &user)
 		if err != nil {
-			result.Status = "409"
+			result.Status = strconv.Itoa(userStoreError("", err).Status)
 			return result
 		}
 		result.Status = "201"
@@ -859,13 +1028,13 @@ func (p *Plugin) bulkReplace(resourceType, id string, data json.RawMessage, bulk
 			result.Status = "400"
 			return result
 		}
+		if scimErr := checkUser(&user); scimErr != nil {
+			result.Status = "400"
+			return result
+		}
 		updated, err := p.storage.UpdateUser(ctx, id, &user, 0)
 		if err != nil {
-			if err == ErrNotFound {
-				result.Status = "404"
-			} else {
-				result.Status = "500"
-			}
+			result.Status = strconv.Itoa(userStoreError(id, err).Status)
 			return result
 		}
 		result.Status = "200"
@@ -1061,7 +1230,7 @@ func (p *Plugin) handleInfo(w http.ResponseWriter, r *http.Request) {
 			"filter":         true,
 			"sort":           true,
 			"etag":           true,
-			"changePassword": true,
+			"changePassword": false,
 		},
 	}
 
@@ -1355,8 +1524,6 @@ func (p *Plugin) handleProvisioningEvents(w http.ResponseWriter, r *http.Request
 
 // handleConnectionStatus returns the current SCIM connection configuration
 func (p *Plugin) handleConnectionStatus(w http.ResponseWriter, r *http.Request) {
-	config := GetAuthConfig()
-
 	// Count recent events to determine if IdP is actively connecting
 	events := GetProvisioningEvents(10)
 	activeConnection := len(events) > 0
@@ -1368,7 +1535,12 @@ func (p *Plugin) handleConnectionStatus(w http.ResponseWriter, r *http.Request) 
 	}
 
 	status := map[string]interface{}{
-		"authEnabled":      config.RequireAuth,
+		"authentication": map[string]interface{}{
+			"scheme":              "oauthbearertoken",
+			"authorizationServer": p.asIssuer,
+			"resource":            p.resource,
+			"scopes":              []string{ScopeRead, ScopeWrite},
+		},
 		"activeConnection": activeConnection,
 		"detectedIdP":      detectedIdP,
 		"scimEndpoint":     p.baseURL + "/scim/v2",
@@ -1378,7 +1550,7 @@ func (p *Plugin) handleConnectionStatus(w http.ResponseWriter, r *http.Request) 
 			"filter":         true,
 			"etag":           true,
 			"sort":           true,
-			"changePassword": true,
+			"changePassword": false,
 		},
 		"recentEventsCount": len(events),
 		"configuration": map[string]string{

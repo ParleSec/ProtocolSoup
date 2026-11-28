@@ -10,6 +10,7 @@ description: "Identity provisioning with user/group lifecycle, bulk operations, 
 - RFC 7642 -- SCIM Definitions, Overview, Concepts
 - RFC 7643 -- SCIM Core Schema
 - RFC 7644 -- SCIM Protocol
+- RFC 6750, RFC 9068 -- the bearer access tokens SCIM clients authenticate with
 
 ## Available Flows
 
@@ -45,7 +46,41 @@ Outbound provisioning exists as a documented SCIM client pattern (`outbound-prov
 | `/scim/v2/Bulk` | POST | Bulk operations |
 | `/scim/v2/.search` | POST | Server-side search |
 
+## Authentication
+
+RFC 7644 Section 2 defines no SCIM-specific scheme: "SCIM depends on the use of Transport Layer Security (TLS) and/or standard HTTP authentication and authorization schemes". This service provider is an OAuth 2.0 protected resource. Every flow starts by requesting an access token, which Looking Glass shows as its first step.
+
+1. `GET /scim/v2/ServiceProviderConfig` needs no token. Its `authenticationSchemes` names one scheme, `oauthbearertoken`.
+2. The client requests a token from `POST /oauth2/token` with `grant_type=client_credentials` as the seeded client `scim-client` (secret at `GET /oauth2/demo/clients`). Scope `scim.read` authorizes retrieval; `scim.write` authorizes creation, modification and deletion.
+3. The token is an RFC 9068 JWT access token. Its `aud` is the SCIM base URI `{origin}/scim/v2` and its `exp` bounds its lifetime, which RFC 7644 Section 7.4 requires of every bearer token.
+4. The client sends `Authorization: Bearer <access_token>` on each SCIM request.
+
+What the service provider returns when it refuses a request:
+
+| Request | Status | `WWW-Authenticate` |
+|---------|--------|--------------------|
+| No `Authorization` header, or a scheme other than Bearer | `401` | `Bearer realm="scim"` |
+| Token that is expired, revoked, from another issuer or for another resource | `401` | `Bearer realm="scim", error="invalid_token", error_description="..."` |
+| Token without the scope the request needs | `403` | `Bearer realm="scim", error="insufficient_scope", error_description="...", scope="scim.write"` |
+
+The body is the RFC 7644 Section 3.12 error, with `status` as a JSON string. Deployment settings are on the [SCIM service page](/deploy/services/scim/).
+
+## How A Resource Is Returned
+
+These are the rules a provisioning client can rely on here, with the text they come from. The [SCIM User example page](https://protocolsoup.com/example/scim-user) shows a captured User with every attribute annotated.
+
+- **`id` is the service provider's.** RFC 7643 Section 3.1: "The value of the "id" attribute is always issued by the service provider and MUST NOT be specified by the client." An `id`, `meta` or `groups` in a `POST` or `PUT` body is ignored (RFC 7644 Sections 3.3 and 3.5.1).
+- **`meta.location` matches the headers.** A `201` carries the User's URI in `Location` (RFC 7644 Section 3.3). Every response that returns one resource carries it in `Content-Location`, and `meta.version` in `ETag` (RFC 7643 Section 3.1).
+- **`userName` is unique without regard to case.** `Alice@example.com` and `alice@EXAMPLE.com` are the same userName, compared with the PRECIS UsernameCaseMapped profile (RFC 7644 Section 5). A second one gets `409` with `scimType` `uniqueness`. A userName the profile does not allow, such as one with a space, gets `400` with `invalidValue`.
+- **`schemas` is checked.** It must be present, name the core schema of the resource type, name only schemas that type defines, and repeat nothing (RFC 7643 Section 3). Otherwise the response is `400`.
+- **Conditional retrieval works.** `GET` with `If-None-Match` set to the current entity-tag returns `304` and no body (RFC 7644 Section 3.14).
+- **`Accept: application/json` is honoured.** The same JSON is labelled `application/json` for a client that asks for that and not for `application/scim+json` (RFC 7644 Section 3.8).
+- **Email domains are lower-cased** on input (RFC 7643 Section 4.1.2).
+- **Passwords are not kept.** The `password` attribute is dropped on input and never returned, so `ServiceProviderConfig` reports `changePassword.supported` as `false`.
+
 ## What To Validate
+
+- Authentication: the `WWW-Authenticate` challenge on a `401`, and the `403` a `scim.read` token gets on `POST /scim/v2/Users`
 
 - User schema: `userName`, `name`, `emails`, `active`, `meta`
 - Group membership: `members` array with `$ref` and `display`

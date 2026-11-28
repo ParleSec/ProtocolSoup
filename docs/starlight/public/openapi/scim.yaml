@@ -6,6 +6,17 @@ info:
   description: |
     Public contract for the ProtocolSoup SCIM service.
     Implements RFC 7642/7643/7644 style resource provisioning and discovery.
+
+    The service provider is an OAuth 2.0 protected resource (RFC 7644 Section
+    2). Every endpoint under /scim except GET /scim/v2/ServiceProviderConfig
+    requires a bearer access token (RFC 6750) issued by the authorization
+    server at /oauth2 for the SCIM base URI: scope scim.read to retrieve,
+    scim.write to create, modify or delete. A refused request carries a
+    WWW-Authenticate Bearer challenge.
+
+    Responses are application/scim+json. A client that sends "Accept:
+    application/json" and not application/scim+json gets the same JSON
+    labelled application/json (RFC 7644 Section 3.8).
 servers:
   - url: https://protocolsoup.com
     description: Production SCIM service
@@ -65,8 +76,10 @@ paths:
       tags: [Discovery]
       summary: Get service provider capabilities
       operationId: getServiceProviderConfig
-      security:
-        - bearerAuth: []
+      description: >-
+        Needs no access token. RFC 7643 Section 5 has the service provider
+        make authenticationSchemes readable without prior authentication.
+      security: []
       responses:
         "200":
           description: SCIM service provider configuration.
@@ -79,12 +92,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: true
-        "401":
-          description: Unauthorized request.
-          content:
-            application/scim+json:
-              schema:
-                $ref: "#/components/schemas/ScimError"
   /scim/v2/ResourceTypes:
     get:
       tags: [Discovery]
@@ -103,7 +110,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimListResponse"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -130,7 +148,18 @@ paths:
                 type: object
                 additionalProperties: true
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -159,7 +188,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimListResponse"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -186,7 +226,18 @@ paths:
                 type: object
                 additionalProperties: true
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -246,7 +297,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -280,19 +342,60 @@ paths:
               $ref: "#/components/schemas/ScimUser"
       responses:
         "201":
-          description: User created.
+          description: >-
+            User created. The service provider issues id and meta; an id, meta
+            or groups in the request is ignored (RFC 7644 Section 3.3).
+          headers:
+            Location:
+              description: The URI of the created User, equal to meta.location (RFC 7644 Section 3.3).
+              schema:
+                type: string
+                format: uri
+            Content-Location:
+              description: Equal to meta.location (RFC 7643 Section 3.1).
+              schema:
+                type: string
+                format: uri
+            ETag:
+              description: Weak entity-tag, equal to meta.version (RFC 7644 Section 3.14).
+              schema:
+                type: string
           content:
             application/scim+json:
               schema:
                 $ref: "#/components/schemas/ScimUser"
         "400":
-          description: Invalid user payload.
+          description: >-
+            Invalid user payload. scimType is invalidValue when schemas or
+            userName is missing or the userName cannot be prepared for
+            comparison (RFC 7644 Section 5), and invalidSyntax when schemas
+            names a schema the User resource type does not define, repeats a
+            value, or omits the schema of the attributes sent.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "409":
+          description: >-
+            Another User has this userName, compared without regard to case
+            (RFC 7643 Section 4.1.1). scimType is uniqueness.
           content:
             application/scim+json:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -310,15 +413,49 @@ paths:
       operationId: getUser
       security:
         - bearerAuth: []
+      parameters:
+        - in: header
+          name: If-None-Match
+          schema:
+            type: string
+          description: >-
+            Entity-tag of the representation the client holds. When it matches
+            the current one the response is 304 (RFC 7644 Section 3.14).
       responses:
         "200":
           description: User resource.
+          headers:
+            Content-Location:
+              description: Equal to meta.location (RFC 7643 Section 3.1).
+              schema:
+                type: string
+                format: uri
+            ETag:
+              description: Weak entity-tag, equal to meta.version (RFC 7644 Section 3.14).
+              schema:
+                type: string
           content:
             application/scim+json:
               schema:
                 $ref: "#/components/schemas/ScimUser"
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "304":
+          description: The User has not changed since the entity-tag in If-None-Match. No body.
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -355,7 +492,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -392,7 +540,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -413,7 +572,18 @@ paths:
         "204":
           description: User deleted.
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -439,7 +609,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimListResponse"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -470,7 +651,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -496,7 +688,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimGroup"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -533,7 +736,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -570,7 +784,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -591,7 +816,18 @@ paths:
         "204":
           description: Group deleted.
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -630,7 +866,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -663,7 +910,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Unauthorized request.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -701,7 +959,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Missing or invalid service bearer token.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -750,7 +1019,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScimError"
         "401":
-          description: Missing or invalid service bearer token.
+          description: >-
+            No bearer access token, or one that failed validation (expired,
+            revoked, wrong iss or aud). WWW-Authenticate carries the Bearer
+            challenge of RFC 6750 Section 3.
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimError"
+        "403":
+          description: >-
+            The access token does not grant the scope the request needs.
+            WWW-Authenticate carries error="insufficient_scope" and that scope.
           content:
             application/scim+json:
               schema:
@@ -766,7 +1046,12 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      bearerFormat: token
+      bearerFormat: JWT
+      description: >-
+        OAuth 2.0 access token (RFC 9068) from POST /oauth2/token, for example
+        with grant_type=client_credentials as the seeded client scim-client.
+        Its aud is the SCIM base URI. Scope scim.read authorizes GET and POST
+        /scim/v2/.search; scim.write authorizes every other method.
   schemas:
     ErrorResponse:
       type: object

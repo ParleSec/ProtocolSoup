@@ -1,16 +1,11 @@
 package ssf
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/ParleSec/ProtocolSoup/internal/crypto"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type tokenRevoker interface {
@@ -122,69 +117,15 @@ func (p *Plugin) validateBearerJWT(tokenString string) (receiverIdentity, error)
 		return receiverIdentity{}, fmt.Errorf("authorization server JWKS is not configured")
 	}
 
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}))
-	unverified := jwt.MapClaims{}
-	_, _, err := parser.ParseUnverified(tokenString, unverified)
-	if err != nil {
-		return receiverIdentity{}, err
-	}
-
 	jwks, err := p.jwksFetch.Fetch(p.asJWKSURI)
 	if err != nil {
 		return receiverIdentity{}, fmt.Errorf("fetch AS JWKS: %w", err)
 	}
 
-	token, err := jwt.ParseWithClaims(tokenString, jwt.MapClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if err := crypto.RejectCriticalHeader(token.Header); err != nil {
-			return nil, err
-		}
-		kid, _ := token.Header["kid"].(string)
-		var jwk interface{ ToPublicKey() (interface{}, error) }
-		if kid != "" {
-			key, keyErr := jwks.GetKeyByID(kid)
-			if keyErr != nil {
-				return nil, keyErr
-			}
-			jwk = key
-		} else if len(jwks.Keys) == 1 {
-			jwk = &jwks.Keys[0]
-		} else {
-			return nil, fmt.Errorf("token kid is required when the AS JWKS has multiple keys")
-		}
-		return jwk.ToPublicKey()
-	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithExpirationRequired())
-	if err != nil || token == nil || !token.Valid {
-		if err == nil {
-			err = fmt.Errorf("invalid access token")
-		}
+	// RFC 9068 Section 4: signature, expiry, typ, iss and aud.
+	claims, err := crypto.ValidateAccessTokenWithJWKS(tokenString, jwks, p.asIssuer, p.asAudience)
+	if err != nil {
 		return receiverIdentity{}, err
-	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return receiverIdentity{}, fmt.Errorf("invalid access token claims")
-	}
-
-	// RFC 9068 Section 4: "The resource server MUST verify that the "typ"
-	// header value is "at+jwt" or "application/at+jwt" and reject tokens
-	// carrying any other value."
-	typ, _ := token.Header["typ"].(string)
-	if !strings.EqualFold(typ, crypto.AccessTokenType) && !strings.EqualFold(typ, "application/"+crypto.AccessTokenType) {
-		return receiverIdentity{}, fmt.Errorf("invalid typ header")
-	}
-
-	// "The issuer identifier for the authorization server (which is
-	// typically obtained during discovery) MUST exactly match the value of
-	// the "iss" claim."
-	if iss, _ := claims["iss"].(string); iss != p.asIssuer {
-		return receiverIdentity{}, fmt.Errorf("invalid issuer")
-	}
-
-	// "The JWT access token MUST be rejected if "aud" does not contain a
-	// resource indicator of the current resource server as a valid
-	// audience."
-	if !crypto.AudienceContains(claims["aud"], p.asAudience) {
-		return receiverIdentity{}, fmt.Errorf("invalid audience")
 	}
 
 	if err := p.checkAccessTokenRevocation(tokenString); err != nil {
@@ -220,42 +161,11 @@ func (p *Plugin) checkAccessTokenRevocation(tokenString string) error {
 	if strings.TrimSpace(p.introspectURL) == "" {
 		return nil
 	}
-	form := url.Values{}
-	form.Set("token", tokenString)
-	req, err := http.NewRequest(http.MethodPost, p.introspectURL, strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// RFC 7662 Section 2.1: the endpoint requires "some form of
-	// authorization", and Section 4 has the authorization server decide
-	// whether the token can be used at the resource server that is calling.
-	// The Transmitter therefore authenticates as its own resource server
-	// registration; the token under introspection is not a credential.
 	if p.introspectSecret == "" {
 		return fmt.Errorf("token introspection is configured without SSF_AS_INTROSPECT_CLIENT_SECRET")
 	}
-	req.SetBasicAuth(introspectionClientID, p.introspectSecret)
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("token introspection failed: %w", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("token introspection HTTP %d", resp.StatusCode)
-	}
-	var out struct {
-		Active bool `json:"active"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		return fmt.Errorf("token introspection response: %w", err)
-	}
-	if !out.Active {
-		return fmt.Errorf("access token is not active")
-	}
-	return nil
+	// The Transmitter authenticates as its own resource server registration.
+	return crypto.IntrospectAccessToken(p.introspectURL, introspectionClientID, p.introspectSecret, tokenString)
 }
 
 // writeBearerError returns an RFC 6750 Section 3.1 error response.

@@ -7,7 +7,7 @@ A standards-compliant implementation of [SCIM 2.0](https://scim.cloud/) (System 
 This implementation provides:
 
 - **Real SCIM Server**: Full RFC 7644 compliant REST API for user and group provisioning
-- **IdP Integration**: Bearer token authentication for Okta, Azure AD, and other SCIM clients
+- **OAuth 2.0 Protected Resource**: SCIM clients authenticate with OAuth 2.0 bearer access tokens (RFC 6750, RFC 9068)
 - **SQLite Persistence**: Durable storage with automatic schema migrations
 - **RFC 7644 Filtering**: Complete filter expression parser with SQL translation
 - **PATCH Operations**: RFC-compliant add, remove, and replace operations with path expressions
@@ -164,7 +164,7 @@ When running standalone, set `SHOWCASE_BASE_URL` to the public URL you want SCIM
 | POST | `/scim/client/provision` | Create a single user on a target SCIM service |
 | POST | `/scim/client/sync` | Discover a target SCIM service and reconcile all local users with durable ID mappings |
 
-Both endpoints require the same `SCIM_API_TOKEN` bearer token as the inbound API and accept the target's exact SCIM base URL (e.g. `https://app.example.com/scim/v2`). Server-managed attributes (`id`, `meta`, `groups`, `password`) are always stripped before a resource is forwarded outbound; the source id is preserved as `externalId` for correlation.
+Both endpoints require an access token that grants `scim.write` and accept the target's exact SCIM base URL (e.g. `https://app.example.com/scim/v2`). Server-managed attributes (`id`, `meta`, `groups`, `password`) are always stripped before a resource is forwarded outbound; the source id is preserved as `externalId` for correlation.
 
 The sync endpoint additionally creates unmapped users, updates mapped users, persists successful mappings, and emits operation-level Looking Glass events. It returns `207 Multi-Status` when individual users fail. It does not infer remote deletions; deprovisioning requires an explicit policy.
 
@@ -172,23 +172,23 @@ In production, target URLs must use HTTPS and must not resolve to a loopback, pr
 
 ## Authentication
 
-### Bearer Token Authentication
+RFC 7644 Section 2 defines no SCIM-specific scheme and leaves authentication to HTTP. This service provider is an OAuth 2.0 protected resource: it accepts bearer access tokens (RFC 6750) and validates them as JWT access tokens (RFC 9068 Section 4).
 
-All endpoints under `/scim/v2/*` (except discovery) require Bearer token authentication:
+- A static shared secret is not accepted. RFC 7644 Section 7.4: "Bearer tokens MUST have a limited lifetime that can be determined directly or indirectly (e.g., by checking with a validation service) by the service provider." An access token carries its lifetime in `exp`.
+- The token's `iss` must be the authorization server (`{origin}/oauth2` by default) and its `aud` the SCIM base URI (`{origin}/scim/v2`).
+- `scim.read` authorizes `GET` and `POST /scim/v2/.search`. `scim.write` authorizes `POST`, `PUT`, `PATCH`, `DELETE`, `/scim/v2/Bulk` and `/scim/client/*`.
+- `GET /scim/v2/ServiceProviderConfig` needs no token (RFC 7643 Section 5), so a client can read `authenticationSchemes` first.
+- A refused request gets a `WWW-Authenticate: Bearer` challenge (RFC 7644 Section 2, RFC 6750 Section 3) and an RFC 7644 Section 3.12 error body: `401` with no or an invalid token, `403` with `error="insufficient_scope"` when the token lacks the scope.
+- A token bound to a key (`cnf`, as DPoP produces) is refused: this service provider supports the Bearer scheme alone.
 
-```http
-Authorization: Bearer {SCIM_API_TOKEN}
-```
-
-Configure the token via environment variable:
+The federation service seeds the client `scim-client` (`client_credentials`, scopes `scim.read` and `scim.write`). Its secret is listed at `GET /oauth2/demo/clients`, like every Mock IdP demo client.
 
 ```bash
-# Set on Fly.io
-fly secrets set SCIM_API_TOKEN=your-secure-token-here
+ACCESS_TOKEN=$(curl -s -u "scim-client:$SCIM_CLIENT_SECRET" \
+  -d grant_type=client_credentials -d "scope=scim.read scim.write" \
+  http://localhost:8080/oauth2/token | jq -r .access_token)
 
-# Or in docker-compose.yml
-environment:
-  - SCIM_API_TOKEN=your-secure-token-here
+curl -H "Authorization: Bearer $ACCESS_TOKEN" http://localhost:8080/scim/v2/Users
 ```
 
 ### IdP Detection
@@ -204,9 +204,6 @@ The system automatically detects the source Identity Provider from request heade
 | Generic | Default fallback |
 
 This information is logged for audit purposes and displayed in the Looking Glass.
-
-> Note: If `SCIM_API_TOKEN` is not set, authentication is disabled for demo and local testing.
-> For production deployments, configure `SCIM_API_TOKEN` and require it on your IdP connector.
 
 ## Filter Expressions
 
@@ -398,7 +395,11 @@ The following flows are available in the Looking Glass for educational visualiza
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SCIM_API_TOKEN` | Bearer token for authentication | (none - auth disabled if not set) |
+| `SCIM_AS_JWKS_URI` | JWK Set URL of the authorization server; required when none runs in the process | (none) |
+| `SCIM_AS_ISSUER` | Issuer identifier the access token's `iss` must equal | `{SHOWCASE_BASE_URL}/oauth2` |
+| `SCIM_RESOURCE` | Resource indicator the access token's `aud` must contain | `{SHOWCASE_BASE_URL}/scim/v2` |
+| `SCIM_AS_INTROSPECT_URI` | RFC 7662 introspection endpoint the split service asks about revocation | (none) |
+| `SCIM_AS_INTROSPECT_CLIENT_SECRET` | Secret of the `scim-service-provider` resource server registration | (none) |
 | `SCIM_DATA_DIR` | Directory for SQLite database | `./data` or `/data/scim` on Fly.io |
 | `SCIM_LOOKING_GLASS` | Enable Looking Glass capture | `true` |
 
@@ -420,7 +421,9 @@ The following flows are available in the Looking Glass for educational visualiza
 services:
   scim-service:
     environment:
-      - SCIM_API_TOKEN=${SCIM_API_TOKEN}
+      - SCIM_AS_JWKS_URI=http://federation-service:8080/api/.well-known/jwks.json
+      - SCIM_AS_INTROSPECT_URI=http://federation-service:8080/oauth2/introspect
+      - SCIM_AS_INTROSPECT_CLIENT_SECRET=${SCIM_SERVICE_PROVIDER_CLIENT_SECRET}
       - SCIM_DATA_DIR=/app/data
     volumes:
       - scim-data:/app/data

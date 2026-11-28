@@ -268,6 +268,73 @@ func TestSDJWTExampleKeepsEachDisclosureAsItWasSent(t *testing.T) {
 	}
 }
 
+func TestSAMLExampleListsAttributesAndChildElementsAsSent(t *testing.T) {
+	const document = `<?xml version="1.0"?><p:Response xmlns:p="urn:p" xmlns:a="urn:a" ID="_r1" Version="2.0">` +
+		`<a:Issuer>https://idp.example</a:Issuer>` +
+		`<a:Assertion ID="_a1"><a:Issuer>https://idp.example</a:Issuer><a:Subject><a:NameID>alice</a:NameID></a:Subject>` +
+		`<a:Attribute Name="x"/><a:Attribute Name="y"/></a:Assertion></p:Response>`
+	field := func(path string) ExampleField {
+		return ExampleField{Path: path, Reference: "Test Section 1", URL: "https://example.test/spec", Statement: "s"}
+	}
+	example := Example{
+		ID:     "sample-saml",
+		Format: ExampleFormatSAML,
+		Fields: []ExampleField{
+			field("response.@ID"), field("response.@Version"), field("response.Issuer"), field("response.Assertion"),
+			field("response.Assertion.@ID"), field("response.Assertion.Subject.NameID"),
+		},
+	}
+	value := base64.StdEncoding.EncodeToString([]byte(document))
+	parts, err := example.DecodeExample(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parts) != 1 || parts[0].Name != "response" || parts[0].JSON != document {
+		t.Fatalf("parts = %+v", parts)
+	}
+	// Namespace declarations are not members. Below the root, only what a
+	// field annotates, or what leads to it, is listed.
+	want := []ExampleMember{
+		{Path: "response.@ID", Value: "_r1"},
+		{Path: "response.@Version", Value: "2.0"},
+		{Path: "response.Issuer", Value: `<a:Issuer>https://idp.example</a:Issuer>`},
+		// An element that holds other elements has no value of its own.
+		{Path: "response.Assertion"},
+		{Path: "response.Assertion.@ID", Value: "_a1"},
+		{Path: "response.Assertion.Subject"},
+		{Path: "response.Assertion.Subject.NameID", Value: `<a:NameID>alice</a:NameID>`},
+	}
+	if !reflect.DeepEqual(parts[0].Members, want) {
+		t.Fatalf("members = %+v\nwant %+v", parts[0].Members, want)
+	}
+	// Indenting adds only line breaks and spaces between tags.
+	if strings.Join(strings.Fields(parts[0].Indented), "") != strings.Join(strings.Fields(document), "") {
+		t.Fatalf("indented view changed the document:\n%s", parts[0].Indented)
+	}
+	if !strings.Contains(parts[0].Indented, "\n    <a:Subject>\n      <a:NameID>alice</a:NameID>\n    </a:Subject>\n") {
+		t.Fatalf("indented = %s", parts[0].Indented)
+	}
+	// Subject is listed only because it leads to an annotated member, so the
+	// check must not demand a field for it; Assertion is a root member.
+	if err := example.CheckExample(value); err != nil {
+		t.Fatal(err)
+	}
+
+	// A path cannot tell two children of one name apart.
+	example.Fields = append(example.Fields, field("response.Assertion.Attribute"))
+	if _, err := example.DecodeExample(value); err == nil || !strings.Contains(err.Error(), "more than one <Attribute>") {
+		t.Fatalf("err = %v, want the ambiguous child named", err)
+	}
+	for name, broken := range map[string]string{
+		"not base64":      "<Response/>",
+		"not well-formed": base64.StdEncoding.EncodeToString([]byte("<Response><Issuer></Response>")),
+	} {
+		if _, err := example.DecodeExample(broken); err == nil {
+			t.Errorf("%s must not decode", name)
+		}
+	}
+}
+
 func TestExampleWithoutAFlowOffersNoneToRun(t *testing.T) {
 	registry := catalogueRegistry()
 	example := exampleFixture()

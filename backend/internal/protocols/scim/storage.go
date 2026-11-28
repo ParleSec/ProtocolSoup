@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/secure/precis"
 	_ "modernc.org/sqlite" // Pure Go SQLite driver
 )
 
@@ -19,7 +21,75 @@ var (
 	ErrNotFound        = errors.New("resource not found")
 	ErrConflict        = errors.New("resource already exists")
 	ErrVersionConflict = errors.New("version conflict")
+	// ErrUserNameNotAllowed is a userName the PRECIS profile refuses, such
+	// as one with a space in it.
+	ErrUserNameNotAllowed = errors.New("userName is not a username the PRECIS UsernameCaseMapped profile (RFC 7613 Section 3.2) allows")
 )
+
+// userNameKey prepares a userName for comparison. RFC 7644 Section 5: "Before
+// comparing or evaluating the uniqueness of a "userName" or "password"
+// attribute, service providers MUST use the preparation, enforcement, and
+// comparison of internationalized strings (PRECIS) preparation and comparison
+// rules described in Sections 3 and 4, respectively, of [RFC7613]". RFC 7643
+// Section 4.1.1 says of userName: "This attribute is REQUIRED and is case
+// insensitive", which is the UsernameCaseMapped profile of RFC 7613 Section
+// 3.2.
+func userNameKey(userName string) (string, error) {
+	key, err := precis.UsernameCaseMapped.CompareKey(userName)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrUserNameNotAllowed, err)
+	}
+	return key, nil
+}
+
+// canonicalizeEmails lower-cases the domain of each address. RFC 7643
+// Section 4.1.2 on emails: "Service providers SHOULD canonicalize the value
+// according to [RFC5321], e.g., "bjensen@example.com" instead of
+// "bjensen@EXAMPLE.COM"." RFC 5321 Section 2.4 has the local part case
+// sensitive and the domain not.
+func canonicalizeEmails(emails []MultiValue) {
+	for i := range emails {
+		if at := strings.LastIndex(emails[i].Value, "@"); at >= 0 {
+			emails[i].Value = emails[i].Value[:at] + strings.ToLower(emails[i].Value[at:])
+		}
+	}
+}
+
+// userNameInUse reports whether another user already has userName. RFC 7643
+// Section 4.1.1: "This identifier MUST be unique across the service
+// provider's entire set of Users." The caller holds the write lock, so the
+// answer stays true until it stores the user. Every row is compared because
+// SQLite cannot compute the PRECIS key; the table holds the demo users and
+// what visitors created within the retention period.
+func (s *Storage) userNameInUse(ctx context.Context, userName, exceptID string) (bool, error) {
+	key, err := userNameKey(userName)
+	if err != nil {
+		return false, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, user_name FROM scim_users`)
+	if err != nil {
+		return false, fmt.Errorf("failed to read user names: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, existing string
+		if err := rows.Scan(&id, &existing); err != nil {
+			return false, fmt.Errorf("failed to read user names: %w", err)
+		}
+		if id == exceptID {
+			continue
+		}
+		// A stored name the profile no longer allows is compared as it is.
+		existingKey, err := userNameKey(existing)
+		if err != nil {
+			existingKey = existing
+		}
+		if existingKey == key {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
 
 // Storage handles SQLite persistence for SCIM resources
 type Storage struct {
@@ -174,9 +244,18 @@ func (s *Storage) CreateUser(ctx context.Context, user *User) (*User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Generate ID if not provided
-	if user.ID == "" {
-		user.ID = uuid.New().String()
+	// RFC 7643 Section 3.1: "The value of the "id" attribute is always issued
+	// by the service provider and MUST NOT be specified by the client." The
+	// same section has the service provider assign "meta", and "groups" is
+	// readOnly (Section 4.1.2), so whatever the caller put there is dropped.
+	user.ID = uuid.New().String()
+	user.Groups = nil
+	canonicalizeEmails(user.Emails)
+
+	if inUse, err := s.userNameInUse(ctx, user.UserName, ""); err != nil {
+		return nil, err
+	} else if inUse {
+		return nil, ErrConflict
 	}
 
 	// Set timestamps
@@ -200,7 +279,7 @@ func (s *Storage) CreateUser(ctx context.Context, user *User) (*User, error) {
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO scim_users (id, external_id, user_name, data, version, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 1, ?, ?)`,
-		user.ID, user.ExternalID, user.UserName, string(data), now.Format(time.RFC3339), now.Format(time.RFC3339))
+		user.ID, user.ExternalID, user.UserName, string(data), now.Format(time.RFC3339Nano), now.Format(time.RFC3339))
 
 	if err != nil {
 		if isUniqueConstraintError(err) {
@@ -294,10 +373,21 @@ func (s *Storage) UpdateUser(ctx context.Context, id string, user *User, expecte
 		return nil, ErrVersionConflict
 	}
 
-	// Update user
+	if inUse, err := s.userNameInUse(ctx, user.UserName, id); err != nil {
+		return nil, err
+	} else if inUse {
+		return nil, ErrConflict
+	}
+
+	// Update user. "groups" is readOnly (RFC 7643 Section 4.1.2): it is
+	// derived from group membership and never stored with the user.
 	user.ID = id
+	user.Groups = nil
+	canonicalizeEmails(user.Emails)
 	now := time.Now().UTC()
-	created, _ := time.Parse(time.RFC3339, createdAt)
+	// meta.created keeps the instant the resource was created, to the
+	// precision it was first returned with.
+	created, _ := time.Parse(time.RFC3339Nano, createdAt)
 	newVersion := currentVersion + 1
 
 	user.Meta = &Meta{
@@ -459,9 +549,8 @@ func (s *Storage) CreateGroup(ctx context.Context, group *Group) (*Group, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if group.ID == "" {
-		group.ID = uuid.New().String()
-	}
+	// RFC 7643 Section 3.1: "id" is "always issued by the service provider".
+	group.ID = uuid.New().String()
 
 	now := time.Now().UTC()
 	group.Meta = &Meta{
@@ -485,7 +574,7 @@ func (s *Storage) CreateGroup(ctx context.Context, group *Group) (*Group, error)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO scim_groups (id, external_id, display_name, data, version, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, 1, ?, ?)`,
-		group.ID, group.ExternalID, group.DisplayName, string(data), now.Format(time.RFC3339), now.Format(time.RFC3339))
+		group.ID, group.ExternalID, group.DisplayName, string(data), now.Format(time.RFC3339Nano), now.Format(time.RFC3339))
 
 	if err != nil {
 		if isUniqueConstraintError(err) {
@@ -603,7 +692,7 @@ func (s *Storage) UpdateGroup(ctx context.Context, id string, group *Group, expe
 
 	group.ID = id
 	now := time.Now().UTC()
-	created, _ := time.Parse(time.RFC3339, createdAt)
+	created, _ := time.Parse(time.RFC3339Nano, createdAt)
 	newVersion := currentVersion + 1
 
 	group.Meta = &Meta{
@@ -961,7 +1050,7 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 	// Create demo users
 	demoUsers := []*User{
 		{
-			BaseResource: BaseResource{Schemas: []string{SchemaURNUser}, ExternalID: "ext-alice"},
+			BaseResource: BaseResource{Schemas: []string{SchemaURNUser, SchemaURNEnterpriseUser}, ExternalID: "ext-alice"},
 			UserName:     "alice@example.com",
 			DisplayName:  "Alice Johnson",
 			Name:         &Name{GivenName: "Alice", FamilyName: "Johnson", Formatted: "Alice Johnson"},
@@ -974,7 +1063,7 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 			},
 		},
 		{
-			BaseResource: BaseResource{Schemas: []string{SchemaURNUser}, ExternalID: "ext-bob"},
+			BaseResource: BaseResource{Schemas: []string{SchemaURNUser, SchemaURNEnterpriseUser}, ExternalID: "ext-bob"},
 			UserName:     "bob@example.com",
 			DisplayName:  "Bob Smith",
 			Name:         &Name{GivenName: "Bob", FamilyName: "Smith", Formatted: "Bob Smith"},
@@ -987,7 +1076,7 @@ func (s *Storage) SeedDemoData(ctx context.Context, baseURL string) error {
 			},
 		},
 		{
-			BaseResource: BaseResource{Schemas: []string{SchemaURNUser}, ExternalID: "ext-carol"},
+			BaseResource: BaseResource{Schemas: []string{SchemaURNUser, SchemaURNEnterpriseUser}, ExternalID: "ext-carol"},
 			UserName:     "carol@example.com",
 			DisplayName:  "Carol Williams",
 			Name:         &Name{GivenName: "Carol", FamilyName: "Williams", Formatted: "Carol Williams"},

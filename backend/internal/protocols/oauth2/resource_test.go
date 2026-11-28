@@ -1859,3 +1859,71 @@ func TestAuthorizationCodeReplayRevokesRefreshedTokens(t *testing.T) {
 	}
 	t.Fatalf("replay event not found in %#v", stored.Events)
 }
+
+// TestSCIMClientCredentialsTokenNamesTheSCIMResource covers RFC 9068 Section
+// 3 for the SCIM service provider: "If a "scope" parameter is present in the
+// request, the authorization server SHOULD use it to infer the value of the
+// default resource indicator to be used in the "aud" claim." scim.read and
+// scim.write have meaning only at the SCIM base URI. RFC 7644 Section 7.4:
+// "Bearer tokens MUST have a limited lifetime that can be determined directly
+// or indirectly", which here is the "exp" claim.
+func TestSCIMClientCredentialsTokenNamesTheSCIMResource(t *testing.T) {
+	server := newOAuthAssertionTestServer(t)
+	client, _ := server.idp.GetClient(mockidp.SCIMClientID)
+	serviceProvider, _ := server.idp.GetClient(mockidp.SCIMServiceProviderClientID)
+	transmitter, _ := server.idp.GetClient(mockidp.SSFTransmitterClientID)
+	if client == nil || client.Secret == "" || serviceProvider == nil || transmitter == nil {
+		t.Fatal("the seeded scim-client and the SCIM service provider resource server are required")
+	}
+
+	accessToken, _ := clientCredentialsToken(t, server, mockidp.SCIMClientID, client.Secret, "scim.read scim.write")
+	_, claims := accessTokenParts(t, accessToken)
+	wantAudience := server.plugin.baseURL + "/scim/v2"
+	if claims["aud"] != wantAudience {
+		t.Errorf("aud = %v, want the SCIM base URI %s", claims["aud"], wantAudience)
+	}
+	if claims["scope"] != "scim.read scim.write" {
+		t.Errorf("scope = %v", claims["scope"])
+	}
+	if claims["client_id"] != mockidp.SCIMClientID {
+		t.Errorf("client_id = %v", claims["client_id"])
+	}
+	if _, ok := claims["exp"].(float64); !ok {
+		t.Errorf("exp = %#v, want a lifetime the service provider can determine", claims["exp"])
+	}
+
+	// A scope of the SCIM resource and one of another resource are refused.
+	server.idp.RegisterClient(&models.Client{
+		ID:         "scim-and-api-client",
+		Secret:     "scim-and-api-secret",
+		Name:       "Client Registered For Two Resources",
+		GrantTypes: []string{"client_credentials"},
+		Scopes:     []string{"api:read", "scim.read"},
+	})
+	status, body := postTokenRequest(t, server.server.URL, url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {"scim-and-api-client"},
+		"client_secret": {"scim-and-api-secret"},
+		"scope":         {"api:read scim.read"},
+	}, "")
+	if status != http.StatusBadRequest || body["error"] != "invalid_scope" {
+		t.Errorf("status = %d, error = %v; want 400 invalid_scope; body = %#v", status, body["error"], body)
+	}
+
+	// RFC 7662 Section 4: the resource server the aud names is answered, and
+	// another resource server is not.
+	for name, call := range map[string]struct {
+		clientID, secret string
+		active           bool
+	}{
+		"the SCIM service provider": {mockidp.SCIMServiceProviderClientID, serviceProvider.Secret, true},
+		"the SSF Transmitter":       {mockidp.SSFTransmitterClientID, transmitter.Secret, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			status, body := introspect(t, server, call.clientID, call.secret, accessToken)
+			if status != http.StatusOK || body["active"] != call.active {
+				t.Fatalf("status = %d, active = %v, want %v; body = %#v", status, body["active"], call.active, body)
+			}
+		})
+	}
+}
