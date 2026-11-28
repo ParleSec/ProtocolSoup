@@ -217,8 +217,10 @@ func TestScopeDecidesRetrievalAndUpdate(t *testing.T) {
 	read := "Bearer " + server.accessToken(t, nil)
 	write := "Bearer " + server.accessToken(t, func(token *crypto.AccessToken) { token.Scope = ScopeWrite })
 	both := "Bearer " + server.accessToken(t, func(token *crypto.AccessToken) { token.Scope = ScopeRead + " " + ScopeWrite })
-	const user = `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"scope.test@example.com"}`
-	const search = `{"schemas":["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],"filter":"userName pr"}`
+	// Request bodies. Neither holds a credential: createBody is a SCIM User
+	// resource with a userName under example.com.
+	const createBody = `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"scope.test@example.com"}`
+	const searchBody = `{"schemas":["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],"filter":"userName pr"}`
 
 	cases := []struct {
 		name, method, path, authorization, body string
@@ -226,11 +228,11 @@ func TestScopeDecidesRetrievalAndUpdate(t *testing.T) {
 		wantScope                               string
 	}{
 		{"read token retrieves", http.MethodGet, "/scim/v2/Users", read, "", http.StatusOK, ""},
-		{"read token queries with POST", http.MethodPost, "/scim/v2/.search", read, search, http.StatusOK, ""},
-		{"read token cannot create", http.MethodPost, "/scim/v2/Users", read, user, http.StatusForbidden, ScopeWrite},
+		{"read token queries with POST", http.MethodPost, "/scim/v2/.search", read, searchBody, http.StatusOK, ""},
+		{"read token cannot create", http.MethodPost, "/scim/v2/Users", read, createBody, http.StatusForbidden, ScopeWrite},
 		{"read token cannot delete", http.MethodDelete, "/scim/v2/Users/any", read, "", http.StatusForbidden, ScopeWrite},
 		{"write token cannot retrieve", http.MethodGet, "/scim/v2/Users", write, "", http.StatusForbidden, ScopeRead},
-		{"write token creates", http.MethodPost, "/scim/v2/Users", write, user, http.StatusCreated, ""},
+		{"write token creates", http.MethodPost, "/scim/v2/Users", write, createBody, http.StatusCreated, ""},
 		{"a token with both retrieves", http.MethodGet, "/scim/v2/Groups", both, "", http.StatusOK, ""},
 	}
 	for _, testCase := range cases {
