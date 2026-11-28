@@ -183,9 +183,9 @@ type MemberRef struct {
 type ListResponse struct {
 	Schemas      []string          `json:"schemas"`
 	TotalResults int               `json:"totalResults"`
-	StartIndex   int               `json:"startIndex,omitempty"`
-	ItemsPerPage int               `json:"itemsPerPage,omitempty"`
-	Resources    []json.RawMessage `json:"Resources,omitempty"`
+	StartIndex   int               `json:"startIndex"`
+	ItemsPerPage int               `json:"itemsPerPage"`
+	Resources    []json.RawMessage `json:"Resources"`
 }
 
 // NewListResponse creates a new list response
@@ -335,20 +335,6 @@ type BulkOperationResult struct {
 	Location string          `json:"location,omitempty"`
 	Status   string          `json:"status"`
 	Response json.RawMessage `json:"response,omitempty"`
-}
-
-// ================== Search Request (RFC 7644 Section 3.4.3) ==================
-
-// SearchRequest represents a SCIM search request via POST
-type SearchRequest struct {
-	Schemas            []string `json:"schemas"`
-	Attributes         []string `json:"attributes,omitempty"`
-	ExcludedAttributes []string `json:"excludedAttributes,omitempty"`
-	Filter             string   `json:"filter,omitempty"`
-	SortBy             string   `json:"sortBy,omitempty"`
-	SortOrder          string   `json:"sortOrder,omitempty"` // ascending, descending
-	StartIndex         int      `json:"startIndex,omitempty"`
-	Count              int      `json:"count,omitempty"`
 }
 
 // ================== Error Response (RFC 7644 Section 3.12) ==================

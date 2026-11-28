@@ -135,9 +135,8 @@ func ErrMutability(attribute string) *SCIMError {
 // ErrPreconditionFailed returns a 412 error for ETag mismatch
 func ErrPreconditionFailed(detail string) *SCIMError {
 	return &SCIMError{
-		Status:   http.StatusPreconditionFailed,
-		ScimType: ErrorTypeInvalidVers,
-		Detail:   detail,
+		Status: http.StatusPreconditionFailed,
+		Detail: detail,
 	}
 }
 

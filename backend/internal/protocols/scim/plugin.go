@@ -3,6 +3,7 @@ package scim
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,8 @@ type Plugin struct {
 	lookingGlass *lookingglass.Engine
 	baseURL      string
 	client       *Client
+	// resources serves the SCIM endpoints under /scim/v2.
+	resources http.Handler
 
 	// How access tokens are validated (see auth.go). authorizationServer is
 	// set when the authorization server runs in this process; otherwise
@@ -159,47 +162,56 @@ func (p *Plugin) sweepRetention(ctx context.Context, retention time.Duration) {
 
 // RegisterRoutes registers SCIM HTTP endpoints
 func (p *Plugin) RegisterRoutes(router chi.Router) {
-	// SCIM 2.0 routes at /v2/* (mounted under /scim by server)
-	router.Route("/v2", func(r chi.Router) {
-		r.Use(acceptJSON)
+	// SCIM 2.0 routes at /v2/* (mounted under /scim by server). The router
+	// is kept: a bulk request sends each of its operations through it.
+	resources := chi.NewRouter()
+	p.resources = resources
+	resources.Use(acceptJSON)
+	resources.NotFound(handleNotFound)
+	resources.MethodNotAllowed(handleMethodNotAllowed)
 
-		// RFC 7643 Section 5, authenticationSchemes: "To enable seamless
-		// discovery of configurations, the service provider SHOULD, with the
-		// appropriate security considerations, make the authenticationSchemes
-		// attribute publicly accessible without prior authentication." The
-		// document names features and no resource, so it is served to anyone.
-		r.Get("/ServiceProviderConfig", p.handleServiceProviderConfig)
+	// RFC 7643 Section 5, authenticationSchemes: "To enable seamless
+	// discovery of configurations, the service provider SHOULD, with the
+	// appropriate security considerations, make the authenticationSchemes
+	// attribute publicly accessible without prior authentication." The
+	// document names features and no resource, so it is served to anyone.
+	resources.Get("/ServiceProviderConfig", p.handleServiceProviderConfig)
 
-		// Every other endpoint needs an access token (auth.go).
-		r = r.With(p.authorize)
+	// Every other endpoint needs an access token (auth.go).
+	resources.Group(func(r chi.Router) {
+		r.Use(p.authorize)
 
 		r.Get("/ResourceTypes", p.handleResourceTypes)
 		r.Get("/ResourceTypes/{id}", p.handleResourceType)
 		r.Get("/Schemas", p.handleSchemas)
 		r.Get("/Schemas/{id}", p.handleSchema)
 
-		// User endpoints
-		r.Get("/Users", p.handleListUsers)
+		// Users
+		r.Get("/Users", p.handleQuery(true, false))
 		r.Post("/Users", p.handleCreateUser)
+		r.Post("/Users/.search", p.handleSearch(true, false))
 		r.Get("/Users/{id}", p.handleGetUser)
 		r.Put("/Users/{id}", p.handleReplaceUser)
 		r.Patch("/Users/{id}", p.handlePatchUser)
 		r.Delete("/Users/{id}", p.handleDeleteUser)
 
-		// Group endpoints
-		r.Get("/Groups", p.handleListGroups)
+		// Groups
+		r.Get("/Groups", p.handleQuery(false, true))
 		r.Post("/Groups", p.handleCreateGroup)
+		r.Post("/Groups/.search", p.handleSearch(false, true))
 		r.Get("/Groups/{id}", p.handleGetGroup)
 		r.Put("/Groups/{id}", p.handleReplaceGroup)
 		r.Patch("/Groups/{id}", p.handlePatchGroup)
 		r.Delete("/Groups/{id}", p.handleDeleteGroup)
 
-		// Bulk operations
-		r.Post("/Bulk", p.handleBulk)
+		// The Base URI: every resource type (RFC 7644 Section 3.4.2.1)
+		r.Get("/", p.handleQuery(true, true))
+		r.Post("/.search", p.handleSearch(true, true))
 
-		// Search via POST
-		r.Post("/.search", p.handleSearch)
+		r.Post("/Bulk", p.handleBulk)
+		r.HandleFunc("/Me", handleMe)
 	})
+	router.Mount("/v2", resources)
 
 	// API info endpoint (mounted under /scim, so this becomes /scim/info)
 	router.Get("/info", p.handleInfo)
@@ -266,14 +278,14 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"Content-Type": "application/scim+json (REQUIRED)",
 						"schemas":      "urn:ietf:params:scim:schemas:core:2.0:User (REQUIRED)",
 						"userName":     "Unique identifier for the user (REQUIRED, RFC 7643 §4.1.1)",
-						"name":         "{givenName, familyName} - user's name components (RECOMMENDED)",
-						"emails":       "Array of {value, type, primary} objects (RECOMMENDED)",
+						"name":         "{givenName, familyName} - user's name components (optional)",
+						"emails":       "Array of {value, type, primary} objects (optional)",
 						"active":       "true (default) - account status flag",
 					},
 					Security: []string{
 						"This service provider requires an OAuth 2.0 access token that grants scim.write; RFC 7644 §2 leaves the scheme to HTTP and requires a WWW-Authenticate challenge",
 						"userName uniqueness MUST be enforced by the server (RFC 7643 §4.1.1)",
-						"HTTPS is REQUIRED for all SCIM operations to protect PII in transit",
+						"TLS is REQUIRED for all SCIM operations (RFC 7644 §7.2)",
 					},
 				},
 				{
@@ -286,8 +298,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					Parameters: map[string]string{
 						"status":   "201 Created",
 						"Location": "Full URL of the new user resource (REQUIRED)",
-						"ETag":     "Resource version for concurrency control (RECOMMENDED)",
-						"id":       "Server-assigned unique identifier (REQUIRED, immutable)",
+						"ETag":     "Weak entity-tag of the resource, equal to meta.version (RFC 7644 §3.14)",
+						"id":       "Identifier the service provider issues (always returned, readOnly; RFC 7643 §3.1)",
 						"meta":     "resourceType, created, lastModified, location, version",
 					},
 					Security: []string{
@@ -350,7 +362,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"value":    "false",
 					},
 					Security: []string{
-						"Deactivation SHOULD immediately revoke access to downstream applications",
+						"Deactivation protects nothing until downstream applications act on it and revoke access",
 						"Prefer deactivation over deletion for audit trail preservation",
 						"The user's group memberships are typically preserved during deactivation",
 					},
@@ -358,7 +370,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       6,
 					Name:        "User Deactivated",
-					Description: "Server returns 200 OK with the user resource showing active=false. The server SHOULD enforce that deactivated users cannot authenticate or access resources. Applications receiving this update should terminate active sessions for this user.",
+					Description: "Server returns 200 OK with the user resource showing active=false. RFC 7643 §4.1.1 leaves what active means to the service provider; typically a user whose active is false cannot log in. Applications receiving this update should terminate active sessions for this user.",
 					From:        "SCIM Server",
 					To:          "IdP",
 					Type:        "response",
@@ -368,7 +380,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"ETag":   "Updated resource version",
 					},
 					Security: []string{
-						"Downstream applications SHOULD terminate active sessions for deactivated users",
+						"Downstream applications have to end the sessions of a deactivated user themselves",
 						"Re-activation requires another PATCH with active=true",
 					},
 				},
@@ -382,18 +394,18 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					Parameters: map[string]string{
 						"method":   "DELETE",
 						"endpoint": "/Users/{id}",
-						"If-Match": "ETag value for concurrency safety (RECOMMENDED)",
+						"If-Match": "Entity-tag the resource must still have (optional, RFC 7644 §3.14); a stale one gets 412",
 					},
 					Security: []string{
 						"DELETE is permanent and irreversible - implement a grace period before hard deletion",
-						"Server SHOULD remove the user from all groups (RFC 7644 §3.6)",
+						"This service provider removes a deleted user from the groups it was a member of",
 						"Consider data retention policies before implementing hard delete",
 					},
 				},
 				{
 					Order:       8,
 					Name:        "User Deleted",
-					Description: "Server returns 204 No Content with an empty body confirming permanent deletion (RFC 7644 §3.6). Subsequent GET requests for this user MUST return 404 Not Found. The user's 'id' SHOULD NOT be reused.",
+					Description: "Server returns 204 No Content with an empty body confirming permanent deletion (RFC 7644 §3.6). Subsequent GET requests for this user MUST return 404 Not Found. The 'id' is a stable, non-reassignable identifier (RFC 7643 §3.1).",
 					From:        "SCIM Server",
 					To:          "IdP",
 					Type:        "response",
@@ -403,7 +415,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					},
 					Security: []string{
 						"Any subsequent requests for this user ID MUST return 404",
-						"The user's SCIM ID SHOULD NOT be reassigned to prevent identity confusion",
+						"The id MUST be a stable, non-reassignable identifier (RFC 7643 §3.1)",
 						"Audit log should record the deletion event with timestamp and actor",
 					},
 				},
@@ -432,8 +444,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"members":      "Array of {value, display, $ref} objects (OPTIONAL on create)",
 					},
 					Security: []string{
-						"Client MUST be authorized to create groups - typically requires admin scope",
-						"displayName SHOULD be unique but uniqueness is server-defined (RFC 7643 §4.2)",
+						"The request needs an access token that grants scim.write",
+						"displayName is REQUIRED (RFC 7643 §4.2); this service provider does not require it to be unique",
 					},
 				},
 				{
@@ -446,7 +458,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					Parameters: map[string]string{
 						"status":   "201 Created",
 						"Location": "Full URL of the new group resource (REQUIRED)",
-						"ETag":     "Resource version for concurrency control (RECOMMENDED)",
+						"ETag":     "Weak entity-tag of the resource, equal to meta.version (RFC 7644 §3.14)",
 						"id":       "Server-assigned unique identifier (REQUIRED)",
 						"meta":     "Resource metadata: resourceType, created, lastModified, location, version",
 					},
@@ -472,8 +484,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"value":        "[{\"value\": \"user-scim-id\"}] - array of member references",
 					},
 					Security: []string{
-						"Server MUST validate that referenced user IDs exist (RFC 7644 §3.5.2)",
-						"If member already exists, server SHOULD NOT produce an error per spec",
+						"This service provider refuses a member that is not one of its Users with 400",
+						"Adding a member that is already there changes nothing and succeeds (RFC 7644 §3.5.2.1)",
 						"Use If-Match header with ETag for optimistic concurrency control",
 					},
 				},
@@ -505,8 +517,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"path":     "members[value eq \"{user-scim-id}\"] - value filter selects specific member",
 					},
 					Security: []string{
-						"Path filter MUST correctly identify the member to remove",
-						"Removing a non-existent member SHOULD NOT produce an error per spec",
+						"The value filter in the path selects the member to remove",
+						"A value filter that matches no member gets 400 with scimType noTarget (RFC 7644 §3.12)",
 						"Consider using replace operation on entire members list for bulk changes",
 					},
 				},
@@ -539,7 +551,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 				{
 					Order:       1,
 					Name:        "List All Users",
-					Description: "GET /Users retrieves all user resources with server-side pagination (RFC 7644 §3.4.1). Without filters, the server returns all accessible users wrapped in a ListResponse. Large datasets SHOULD use pagination via startIndex and count parameters.",
+					Description: "GET /Users retrieves all user resources with server-side pagination (RFC 7644 §3.4.1). Without filters, the server returns all accessible users wrapped in a ListResponse. A large result set is paged with the startIndex and count parameters.",
 					From:        "IdP",
 					To:          "SCIM Server",
 					Type:        "request",
@@ -551,9 +563,9 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"attributes": "Comma-separated list of attribute names to return (projection)",
 					},
 					Security: []string{
-						"Server SHOULD enforce a maximum page size to prevent resource exhaustion",
+						"This service provider returns at most 200 resources in a page (filter.maxResults)",
 						"Omitting 'attributes' returns the full resource - use projection to limit data exposure",
-						"HTTPS is REQUIRED for all SCIM operations (RFC 7644 §2)",
+						"TLS is REQUIRED for all SCIM operations (RFC 7644 §7.2)",
 					},
 				},
 				{
@@ -567,12 +579,12 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"status":       "200 OK",
 						"schemas":      "urn:ietf:params:scim:api:messages:2.0:ListResponse",
 						"totalResults": "Total number of matching resources across all pages (REQUIRED)",
-						"startIndex":   "1-based index of first result in this page (REQUIRED)",
-						"itemsPerPage": "Number of resources in this page (REQUIRED)",
+						"startIndex":   "1-based index of first result in this page (REQUIRED when the results are paged)",
+						"itemsPerPage": "Number of resources in this page (REQUIRED when the results are paged)",
 						"Resources":    "Array of User resources for this page",
 					},
 					Security: []string{
-						"Client MUST iterate through pages using startIndex + itemsPerPage until all results are fetched",
+						"A client pages through with startIndex + itemsPerPage until it holds totalResults resources",
 						"totalResults may be approximate for large datasets per spec",
 					},
 				},
@@ -594,8 +606,8 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"ew":       "Ends with - suffix match",
 					},
 					Security: []string{
-						"Filter values MUST be URL-encoded in query parameters",
-						"Server MUST NOT expose users the client is not authorized to see",
+						"A filter is URL-encoded in the query string",
+						"A query needs an access token that grants scim.read",
 						"String comparisons are case-insensitive per RFC 7644 §3.4.2.2",
 					},
 				},
@@ -634,7 +646,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"ge/le":    "Greater or equal / Less or equal",
 					},
 					Security: []string{
-						"Complex filters may be expensive - server SHOULD enforce query complexity limits",
+						"A service provider may refuse a query that would return too many results with scimType tooMany (RFC 7644 §3.4.2)",
 						"Grouping with parentheses is NOT supported in SCIM filter syntax",
 						"Operator precedence: NOT > AND > OR (RFC 7644 §3.4.2.2)",
 					},
@@ -652,7 +664,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"Resources":    "Array of matching User resources with all requested attributes",
 					},
 					Security: []string{
-						"Server SHOULD return 400 with scimType 'invalidFilter' for unsupported filter expressions",
+						"A filter operation the service provider does not recognise MUST be declined with 400 and scimType invalidFilter (RFC 7644 §3.4.2.2)",
 						"sortBy and sortOrder parameters can be combined with filters for ordered results (RFC 7644 §3.4.2.3)",
 					},
 				},
@@ -700,9 +712,9 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"error_handling":    "Continue or abort based on failOnErrors threshold",
 					},
 					Security: []string{
-						"Failed operations MUST NOT affect already-completed operations (no rollback per spec)",
-						"Server SHOULD validate all operations before processing when possible",
-						"Circular bulkId references are invalid and MUST be rejected",
+						"The service provider MUST continue performing as many changes as possible and disregard partial failures (RFC 7644 §3.7)",
+						"failOnErrors sets how many errors the service provider accepts before it stops the job",
+						"The service provider MUST try to resolve circular cross-references and MAY answer 409 when it cannot (RFC 7644 §3.7.1)",
 					},
 				},
 				{
@@ -719,7 +731,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"status_per_op": "Individual HTTP status codes (201, 200, 204, 4xx, etc.)",
 					},
 					Security: []string{
-						"Client MUST check individual operation status codes - overall 200 does not mean all succeeded",
+						"Each operation carries its own status: an overall 200 does not mean every operation succeeded",
 						"Failed operations include scimType error detail for diagnosis",
 						"Location headers in responses provide permanent URLs for created resources",
 					},
@@ -745,14 +757,14 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"endpoint": "/ServiceProviderConfig",
 					},
 					Security: []string{
-						"This endpoint SHOULD be publicly accessible without authentication (RFC 7644 §4)",
+						"ServiceProviderConfig is served without an access token",
 						"Response is read-only - clients cannot modify server configuration via SCIM",
 					},
 				},
 				{
 					Order:       2,
 					Name:        "ServiceProviderConfig Response",
-					Description: "Server returns its feature support matrix (RFC 7643 §5). Each feature has a 'supported' boolean and feature-specific configuration. Clients MUST check these capabilities before using optional features like PATCH, bulk, or filter operations.",
+					Description: "Server returns its feature support matrix (RFC 7643 §5). Each feature has a 'supported' boolean and feature-specific configuration. A client reads these capabilities before it uses optional features such as PATCH, bulk or filtering.",
 					From:        "SCIM Server",
 					To:          "Client",
 					Type:        "response",
@@ -785,7 +797,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"endpoint": "/ResourceTypes",
 					},
 					Security: []string{
-						"This endpoint SHOULD be publicly accessible without authentication",
+						"This endpoint needs an access token that grants scim.read",
 						"Individual resource types can be fetched via GET /ResourceTypes/{name}",
 					},
 				},
@@ -820,7 +832,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"endpoint": "/Schemas",
 					},
 					Security: []string{
-						"This endpoint SHOULD be publicly accessible without authentication",
+						"This endpoint needs an access token that grants scim.read",
 						"Individual schemas can be fetched via GET /Schemas/{schemaUri}",
 					},
 				},
@@ -842,7 +854,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 					},
 					Security: []string{
 						"writeOnly attributes (like passwords) are never returned in responses",
-						"Clients SHOULD cache schema definitions to avoid repeated discovery calls",
+						"Schema definitions change rarely, so a client can cache them",
 						"Custom schemas can extend the standard User/Group schemas with additional attributes",
 					},
 				},
@@ -889,7 +901,7 @@ func (p *Plugin) GetFlowDefinitions() []plugin.FlowDefinition {
 						"check_filter": "Verify filter support for incremental sync queries",
 					},
 					Security: []string{
-						"Client MUST adapt behavior based on server capabilities",
+						"The client adapts to what the target's ServiceProviderConfig says it supports",
 						"If PATCH is unsupported, fall back to PUT for updates (full resource replacement)",
 					},
 				},

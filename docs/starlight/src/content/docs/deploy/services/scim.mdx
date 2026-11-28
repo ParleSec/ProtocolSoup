@@ -28,7 +28,8 @@ Use SCIM service for identity provisioning testing with SCIM-compatible IdPs, in
 - `GET|POST /scim/v2/Users`, `GET|PUT|PATCH|DELETE /scim/v2/Users/{id}`
 - `GET|POST /scim/v2/Groups`, `GET|PUT|PATCH|DELETE /scim/v2/Groups/{id}`
 - `POST /scim/v2/Bulk`
-- `POST /scim/v2/.search`
+- `POST /scim/v2/.search`, `POST /scim/v2/Users/.search`, `POST /scim/v2/Groups/.search`
+- `GET /scim/v2` — query Users and Groups together
 - `POST /scim/client/provision` — create a single user on an external SCIM service
 - `POST /scim/client/sync` — reconcile local users to an external SCIM service
 

@@ -9,10 +9,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ParleSec/ProtocolSoup/internal/lookingglass"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -22,16 +24,16 @@ var timeNow = time.Now
 // ================== Discovery Handlers ==================
 
 func (p *Plugin) handleServiceProviderConfig(w http.ResponseWriter, r *http.Request) {
-	p.emitEvent("scim.request", "ServiceProviderConfig", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "ServiceProviderConfig", map[string]interface{}{
 		"method": "GET",
 		"path":   "/ServiceProviderConfig",
-	})
+	}, "RFC 7644 Section 4")
 
 	config := GetServiceProviderConfig(p.baseURL)
 
-	p.emitEvent("scim.response", "ServiceProviderConfig", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "ServiceProviderConfig", map[string]interface{}{
 		"status": 200,
-	})
+	}, "RFC 7644 Section 4")
 
 	w.Header().Set("Content-Type", ContentTypeSCIM)
 	json.NewEncoder(w).Encode(config)
@@ -54,10 +56,10 @@ func (p *Plugin) handleResourceTypes(w http.ResponseWriter, r *http.Request) {
 	if refuseDiscoveryFilter(w, r) {
 		return
 	}
-	p.emitEvent("scim.request", "ResourceTypes", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "ResourceTypes", map[string]interface{}{
 		"method": "GET",
 		"path":   "/ResourceTypes",
-	})
+	}, "RFC 7644 Section 4")
 
 	resourceTypes := GetResourceTypes(p.baseURL)
 
@@ -130,12 +132,13 @@ func (p *Plugin) handleSchema(w http.ResponseWriter, r *http.Request) {
 
 // ================== Resource Requests And Responses ==================
 
-// checkSchemas validates the "schemas" attribute of a resource a client sent.
-// RFC 7643 Section 3: "The "schemas" attribute is a REQUIRED attribute", it
-// "MUST only contain values defined as "schema" and "schemaExtensions" for the
-// resource's defined "resourceType"", and "Duplicate values MUST NOT be
-// included." The core schema URI is one of them: "This same value is also
-// present in the resource's "schemas" attribute."
+// checkSchemas validates the "schemas" attribute of a resource or message a
+// client sent. RFC 7643 Section 3: "The "schemas" attribute is a REQUIRED
+// attribute", it "MUST only contain values defined as "schema" and
+// "schemaExtensions" for the resource's defined "resourceType"", and
+// "Duplicate values MUST NOT be included." The core schema URI is one of
+// them: "This same value is also present in the resource's "schemas"
+// attribute."
 func checkSchemas(schemas []string, core string, extensions ...string) *SCIMError {
 	if len(schemas) == 0 {
 		return ErrInvalidValue("schemas is required")
@@ -160,10 +163,10 @@ func checkSchemas(schemas []string, core string, extensions ...string) *SCIMErro
 	return nil
 }
 
-// checkUser validates a User a client sent with POST or PUT. RFC 7643 Section
-// 4.1.1: "Each User MUST include a non-empty userName value." Extended
-// attributes sit under the schema extension URI (Section 3), which "schemas"
-// must then name.
+// checkUser validates a User a client sent with POST or PUT, or that a PATCH
+// produced. RFC 7643 Section 4.1.1: "Each User MUST include a non-empty
+// userName value." Extended attributes sit under the schema extension URI
+// (Section 3), which "schemas" must then name.
 func checkUser(user *User) *SCIMError {
 	if scimErr := checkSchemas(user.Schemas, SchemaURNUser, SchemaURNEnterpriseUser); scimErr != nil {
 		return scimErr
@@ -182,17 +185,47 @@ func checkUser(user *User) *SCIMError {
 	return nil
 }
 
-// userStoreError maps a storage failure for a User to its SCIM error.
-func userStoreError(id string, err error) *SCIMError {
+// checkGroup validates a Group a client sent, or that a PATCH produced. RFC
+// 7643 Section 4.2 on displayName: "A human-readable name for the Group.
+// REQUIRED." A member is a resource of this service provider, and its type is
+// one this service provider keeps as a member: a User.
+func (p *Plugin) checkGroup(ctx context.Context, group *Group) *SCIMError {
+	if scimErr := checkSchemas(group.Schemas, SchemaURNGroup); scimErr != nil {
+		return scimErr
+	}
+	if group.DisplayName == "" {
+		return ErrInvalidValue("displayName is required")
+	}
+	seen := map[string]bool{}
+	members := group.Members[:0]
+	for _, member := range group.Members {
+		if member.Type != "" && member.Type != "User" {
+			return ErrInvalidValue(fmt.Sprintf("member type %q is not supported: members of a Group here are Users", member.Type))
+		}
+		if _, err := p.storage.GetUser(ctx, member.Value); err != nil {
+			return ErrInvalidValue(fmt.Sprintf("member %q is not a User of this service provider", member.Value))
+		}
+		if !seen[member.Value] {
+			seen[member.Value] = true
+			members = append(members, member)
+		}
+	}
+	group.Members = members
+	return nil
+}
+
+// storeError maps a storage failure to its SCIM error. unique names the
+// attribute a conflict is about.
+func storeError(resourceType, id, unique string, err error) *SCIMError {
 	switch {
 	case errors.Is(err, ErrNotFound):
-		return ErrResourceNotFound("User", id)
+		return ErrResourceNotFound(resourceType, id)
 	case errors.Is(err, ErrVersionConflict):
-		return ErrPreconditionFailed("ETag mismatch")
+		return ErrPreconditionFailed("the resource has changed on the server")
 	case errors.Is(err, ErrConflict):
 		// RFC 7644 Section 3.3: "the service provider MUST return HTTP status
 		// code 409 (Conflict) with a "scimType" error code of "uniqueness"".
-		return ErrConflictUniqueness("userName")
+		return ErrConflictUniqueness(unique)
 	case errors.Is(err, ErrUserNameNotAllowed):
 		return ErrInvalidValue(err.Error())
 	default:
@@ -201,14 +234,39 @@ func userStoreError(id string, err error) *SCIMError {
 }
 
 // describeUser completes a stored User for a response: its location, and the
-// groups it belongs to, which are derived from group membership.
+// groups it belongs to, which are derived from group membership. RFC 7643
+// Section 4.1.2 defines the type "direct" for membership through the Group
+// itself.
 func (p *Plugin) describeUser(ctx context.Context, user *User) {
 	user.Meta.Location = p.baseURL + "/scim/v2/Users/" + user.ID
 	groups, _ := p.storage.GetUserGroups(ctx, user.ID)
 	for i := range groups {
 		groups[i].Ref = p.baseURL + "/scim/v2/Groups/" + groups[i].Value
+		groups[i].Type = "direct"
 	}
 	user.Groups = groups
+}
+
+// describeGroup completes a stored Group for a response: its location and the
+// URI of each member.
+func (p *Plugin) describeGroup(group *Group) {
+	group.Meta.Location = p.baseURL + "/scim/v2/Groups/" + group.ID
+	for i := range group.Members {
+		group.Members[i].Type = "User"
+		group.Members[i].Ref = p.baseURL + "/scim/v2/Users/" + group.Members[i].Value
+	}
+}
+
+// requestProjection reads the attributes a client asked to have returned
+// (RFC 7644 Section 3.9), before the operation runs. It answers the request
+// itself when they are not valid.
+func requestProjection(w http.ResponseWriter, r *http.Request) (projection, bool) {
+	p, scimErr := projectionOf(r.URL.Query())
+	if scimErr != nil {
+		WriteError(w, scimErr)
+		return p, false
+	}
+	return p, true
 }
 
 // writeResource writes one resource representation.
@@ -219,7 +277,16 @@ func (p *Plugin) describeUser(ctx context.Context, user *User) {
 // 3.3 on a created resource: "The URI of the created resource SHALL include,
 // in the HTTP "Location" header and the HTTP body, a JSON representation
 // [RFC7159] with the attribute "meta.location"."
-func writeResource(w http.ResponseWriter, status int, meta *Meta, resource interface{}) {
+func writeResource(w http.ResponseWriter, status int, meta *Meta, resource interface{}, selected projection) {
+	body := resource
+	if !selected.empty() {
+		item, err := newQueryItem(resource)
+		if err != nil {
+			WriteError(w, ErrInternalServer(err.Error()))
+			return
+		}
+		body = selected.apply(item.object)
+	}
 	w.Header().Set("Content-Type", ContentTypeSCIM)
 	w.Header().Set("Content-Location", meta.Location)
 	w.Header().Set("ETag", meta.Version)
@@ -227,7 +294,7 @@ func writeResource(w http.ResponseWriter, status int, meta *Meta, resource inter
 		w.Header().Set("Location", meta.Location)
 	}
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(resource)
+	json.NewEncoder(w).Encode(body)
 }
 
 // notModified answers a conditional retrieval of a resource that has not
@@ -251,6 +318,27 @@ func notModified(w http.ResponseWriter, r *http.Request, meta *Meta) bool {
 		}
 	}
 	return false
+}
+
+// preconditionFailed refuses a change the client made conditional on a
+// version the resource no longer has. RFC 7644 Section 3.14: "the client MAY
+// supply an If-Match header (Section 3.1 of [RFC7232]) for PUT and PATCH
+// operations to ensure that the requested operation succeeds only if the
+// supplied ETag matches the latest service provider resource". Table 8 gives
+// 412 (Precondition Failed) for PUT, PATCH and DELETE: "Failed to update.
+// Resource has changed on the server."
+func preconditionFailed(w http.ResponseWriter, r *http.Request, meta *Meta) bool {
+	header := r.Header.Get("If-Match")
+	if header == "" {
+		return false
+	}
+	for _, candidate := range strings.Split(header, ",") {
+		if candidate = strings.TrimSpace(candidate); candidate == "*" || candidate == meta.Version {
+			return false
+		}
+	}
+	WriteError(w, ErrPreconditionFailed(fmt.Sprintf("the If-Match entity-tag is not the resource's current version %s", meta.Version)))
+	return true
 }
 
 // acceptJSON labels responses application/json for a client that asks for
@@ -307,111 +395,138 @@ func (w *jsonLabel) Write(body []byte) (int, error) {
 	return w.ResponseWriter.Write(body)
 }
 
-// ================== User Handlers ==================
+// handleNotFound answers a request for an endpoint that does not exist. RFC
+// 7644 Section 3.12: "implementers MUST return the errors in the body of the
+// response in a JSON format", and Table 8 gives 404 when the "Specified
+// resource (e.g., User) or endpoint does not exist."
+func handleNotFound(w http.ResponseWriter, r *http.Request) {
+	WriteError(w, &SCIMError{Status: http.StatusNotFound, Detail: fmt.Sprintf("%s is not an endpoint of this service provider", r.URL.Path)})
+}
 
-func (p *Plugin) handleListUsers(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+// handleMethodNotAllowed answers a method an endpoint does not take.
+func handleMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	WriteError(w, &SCIMError{Status: http.StatusMethodNotAllowed, Detail: fmt.Sprintf("%s is not a method of %s", r.Method, r.URL.Path)})
+}
 
-	// Parse query parameters
-	filter := r.URL.Query().Get("filter")
-	startIndex, _ := strconv.Atoi(r.URL.Query().Get("startIndex"))
-	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+// handleMe answers the "/Me" alias, which this service provider does not
+// offer. RFC 7644 Section 3.11: "A service provider that does NOT support
+// this feature SHOULD respond with HTTP status code 501 (Not Implemented)."
+func handleMe(w http.ResponseWriter, r *http.Request) {
+	WriteError(w, ErrNotImplemented("The /Me authenticated subject alias"))
+}
 
-	if startIndex < 1 {
-		startIndex = 1
+// ================== Query Handlers ==================
+
+// queryItems loads every resource of the types a query covers, as returned
+// to a client.
+func (p *Plugin) queryItems(ctx context.Context, users, groups bool) ([]queryItem, error) {
+	var items []queryItem
+	add := func(resource interface{}) error {
+		item, err := newQueryItem(resource)
+		items = append(items, item)
+		return err
 	}
-	if count < 1 || count > 200 {
-		count = 100
-	}
-
-	p.emitEvent("scim.request", "List Users", map[string]interface{}{
-		"method":     "GET",
-		"path":       "/Users",
-		"filter":     filter,
-		"startIndex": startIndex,
-		"count":      count,
-	})
-
-	// Parse and emit filter analysis
-	if filter != "" {
-		parsed, err := ParseFilter(filter)
+	if users {
+		all, err := p.storage.ListAllUsers(ctx)
 		if err != nil {
-			p.emitEvent("scim.error", "Invalid Filter", map[string]interface{}{
-				"filter": filter,
-				"error":  err.Error(),
-			})
-			WriteError(w, ErrInvalidFilter(err.Error()))
+			return nil, err
+		}
+		for _, user := range all {
+			p.describeUser(ctx, user)
+			if err := add(user); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if groups {
+		all, err := p.storage.ListAllGroups(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range all {
+			p.describeGroup(group)
+			if err := add(group); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return items, nil
+}
+
+// answerQuery runs a query and writes the list response (RFC 7644 Section
+// 3.4.2).
+func (p *Plugin) answerQuery(w http.ResponseWriter, r *http.Request, q query, scimErr *SCIMError, users, groups bool) {
+	data := map[string]interface{}{"endpoint": r.Method + " " + r.URL.Path}
+	if scimErr == nil {
+		var items []queryItem
+		items, err := p.queryItems(r.Context(), users, groups)
+		if err != nil {
+			WriteError(w, ErrInternalServer(err.Error()))
 			return
 		}
-
-		translator := NewSQLTranslator("user")
-		sql, params, _ := translator.Translate(parsed)
-		p.emitEvent("scim.filter.parsed", "Filter Analysis", map[string]interface{}{
-			"filter":     filter,
-			"ast":        parsed.String(),
-			"sql":        sql,
-			"parameters": params,
-		})
-	}
-
-	users, total, err := p.storage.ListUsers(ctx, filter, startIndex, count)
-	if err != nil {
-		if scimErr, ok := err.(*SCIMError); ok {
-			WriteError(w, scimErr)
-		} else {
-			WriteError(w, ErrInternalServer(err.Error()))
-		}
-		return
-	}
-
-	// Build list response
-	response := NewListResponse()
-	response.TotalResults = total
-	response.StartIndex = startIndex
-	response.ItemsPerPage = len(users)
-
-	for _, user := range users {
-		// Add location to meta
-		if user.Meta != nil {
-			user.Meta.Location = p.baseURL + "/scim/v2/Users/" + user.ID
-		}
-		// Add groups
-		groups, _ := p.storage.GetUserGroups(ctx, user.ID)
-		if len(groups) > 0 {
-			for i := range groups {
-				groups[i].Ref = p.baseURL + "/scim/v2/Groups/" + groups[i].Value
+		var response *ListResponse
+		if response, scimErr = q.run(items); scimErr == nil {
+			if q.filter != nil {
+				data["filter"] = q.filter.String()
 			}
-			user.Groups = groups
+			data["totalResults"] = response.TotalResults
+			data["startIndex"] = response.StartIndex
+			data["itemsPerPage"] = response.ItemsPerPage
+			p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM Query Evaluated", data, "RFC 7644 Section 3.4.2")
+			w.Header().Set("Content-Type", ContentTypeSCIM)
+			json.NewEncoder(w).Encode(response)
+			return
 		}
-		data, _ := json.Marshal(user)
-		response.Resources = append(response.Resources, data)
 	}
-
-	p.emitEvent("scim.response", "Users Listed", map[string]interface{}{
-		"status":       200,
-		"totalResults": total,
-		"returned":     len(users),
-	})
-
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	json.NewEncoder(w).Encode(response)
+	data["scimType"] = scimErr.ScimType
+	data["detail"] = scimErr.Detail
+	p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "SCIM Query Refused", data, "RFC 7644 Section 3.4.2.2")
+	WriteError(w, scimErr)
 }
+
+// handleQuery answers a GET query of one resource type, or of the Base URI
+// when both types are covered: "A query against a server root indicates that
+// all resources within the server SHALL be included, subject to filtering."
+func (p *Plugin) handleQuery(users, groups bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q, scimErr := queryFromURL(r.URL.Query())
+		p.answerQuery(w, r, q, scimErr, users, groups)
+	}
+}
+
+// handleSearch answers a POST query (RFC 7644 Section 3.4.3): 'The inclusion
+// of "/.search" on the end of a valid SCIM endpoint SHALL be used to indicate
+// that the HTTP POST verb is intended to be a query operation.'
+func (p *Plugin) handleSearch(users, groups bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			WriteError(w, ErrBadRequest("Failed to read request body"))
+			return
+		}
+		q, scimErr := queryFromSearchRequest(body)
+		p.answerQuery(w, r, q, scimErr, users, groups)
+	}
+}
+
+// ================== User Handlers ==================
 
 func (p *Plugin) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
+	selected, ok := requestProjection(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
 	}
-
 	var user User
 	if err := json.Unmarshal(body, &user); err != nil {
 		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
 		return
 	}
-
 	if scimErr := checkUser(&user); scimErr != nil {
 		WriteError(w, scimErr)
 		return
@@ -419,793 +534,389 @@ func (p *Plugin) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	// RFC 7644 Section 3.3: "In the request body, attributes whose mutability
 	// is "readOnly" (see Sections 2.2 and 7 of [RFC7643]) SHALL be ignored."
 	// The store issues "id" and "meta" itself and drops "groups".
-
-	p.emitEvent("scim.request", "Create User", map[string]interface{}{
-		"method":   "POST",
-		"path":     "/Users",
-		"userName": user.UserName,
-	})
-
 	created, err := p.storage.CreateUser(ctx, &user)
 	if err != nil {
-		if errors.Is(err, ErrConflict) {
-			p.emitEvent("scim.error", "Uniqueness Violation", map[string]interface{}{
-				"userName": user.UserName,
-			})
-		}
-		WriteError(w, userStoreError("", err))
+		scimErr := storeError("User", "", "userName", err)
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "SCIM User Not Created", map[string]interface{}{
+			"userName": user.UserName, "status": scimErr.Status, "scimType": scimErr.ScimType, "detail": scimErr.Detail,
+		}, "RFC 7644 Section 3.3")
+		WriteError(w, scimErr)
 		return
 	}
-
 	p.describeUser(ctx, created)
 
-	// Log provisioning event from external IdP
 	p.logProvisioningAction(r, "create", "User", created.ID, map[string]interface{}{
 		"userName":    created.UserName,
 		"displayName": created.DisplayName,
 		"active":      created.Active,
 	})
-
-	p.emitEvent("scim.user.created", "User Created", map[string]interface{}{
-		"id":       created.ID,
-		"userName": created.UserName,
-	})
-
-	writeResource(w, http.StatusCreated, created.Meta, created)
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM User Created", map[string]interface{}{
+		"id": created.ID, "userName": created.UserName, "location": created.Meta.Location, "version": created.Meta.Version,
+	}, "RFC 7644 Section 3.3")
+	writeResource(w, http.StatusCreated, created.Meta, created, selected)
 }
 
 func (p *Plugin) handleGetUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
-	p.emitEvent("scim.request", "Get User", map[string]interface{}{
-		"method": "GET",
-		"path":   "/Users/" + id,
-	})
-
-	user, err := p.storage.GetUser(ctx, id)
-	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("User", id))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+	selected, ok := requestProjection(w, r)
+	if !ok {
 		return
 	}
-
+	user, err := p.storage.GetUser(ctx, id)
+	if err != nil {
+		WriteError(w, storeError("User", id, "userName", err))
+		return
+	}
 	p.describeUser(ctx, user)
 	if notModified(w, r, user.Meta) {
 		return
 	}
-	writeResource(w, http.StatusOK, user.Meta, user)
+	writeResource(w, http.StatusOK, user.Meta, user, selected)
 }
 
 func (p *Plugin) handleReplaceUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
+	selected, ok := requestProjection(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
 	}
-
 	var user User
 	if err := json.Unmarshal(body, &user); err != nil {
 		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
 		return
 	}
-
-	// RFC 7644 Section 3.5.1: 'If an attribute is "required", clients MUST
-	// specify the attribute in the PUT request', and for readOnly attributes
-	// "Any values provided SHALL be ignored." The store keeps "id" and
-	// "meta" and drops "groups".
+	// RFC 7644 Section 3.5.1: "Because SCIM resource identifiers are assigned
+	// by the service provider, HTTP PUT MUST NOT be used to create new
+	// resources."
+	current, err := p.storage.GetUser(ctx, id)
+	if err != nil {
+		WriteError(w, storeError("User", id, "userName", err))
+		return
+	}
+	if preconditionFailed(w, r, current.Meta) {
+		return
+	}
+	// 'If an attribute is "required", clients MUST specify the attribute in
+	// the PUT request', and for readOnly attributes "Any values provided
+	// SHALL be ignored." The store keeps "id" and "meta" and drops "groups".
 	if scimErr := checkUser(&user); scimErr != nil {
 		WriteError(w, scimErr)
 		return
 	}
-
-	// Check If-Match header for optimistic locking
-	expectedVersion := 0
-	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
-		expectedVersion, _ = ParseETag(ifMatch)
-	}
-
-	p.emitEvent("scim.request", "Replace User", map[string]interface{}{
-		"method": "PUT",
-		"path":   "/Users/" + id,
-		"etag":   r.Header.Get("If-Match"),
-	})
-
-	updated, err := p.storage.UpdateUser(ctx, id, &user, expectedVersion)
+	expected, _ := ParseETag(current.Meta.Version)
+	updated, err := p.storage.UpdateUser(ctx, id, &user, expected)
 	if err != nil {
-		WriteError(w, userStoreError(id, err))
+		WriteError(w, storeError("User", id, "userName", err))
 		return
 	}
-
 	p.describeUser(ctx, updated)
 
-	p.emitEvent("scim.user.updated", "User Replaced", map[string]interface{}{
-		"id":       updated.ID,
-		"userName": updated.UserName,
-	})
-
-	writeResource(w, http.StatusOK, updated.Meta, updated)
+	p.logProvisioningAction(r, "update", "User", updated.ID, map[string]interface{}{"userName": updated.UserName})
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM User Replaced", map[string]interface{}{
+		"id": updated.ID, "userName": updated.UserName, "version": updated.Meta.Version,
+	}, "RFC 7644 Section 3.5.1")
+	writeResource(w, http.StatusOK, updated.Meta, updated, selected)
 }
 
 func (p *Plugin) handlePatchUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
+	selected, ok := requestProjection(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
 	}
-
-	var patchReq PatchRequest
-	if err := json.Unmarshal(body, &patchReq); err != nil {
-		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
+	current, err := p.storage.GetUser(ctx, id)
+	if err != nil {
+		WriteError(w, storeError("User", id, "userName", err))
+		return
+	}
+	if preconditionFailed(w, r, current.Meta) {
 		return
 	}
 
-	p.emitEvent("scim.request", "Patch User", map[string]interface{}{
-		"method":     "PATCH",
-		"path":       "/Users/" + id,
-		"operations": len(patchReq.Operations),
-	})
+	var patched User
+	scimErr := patchResource(body, current, &patched, userResourceSchema)
+	if scimErr == nil {
+		// The password attribute is not kept, so it changes nothing here.
+		patched.Password = ""
+		scimErr = checkUser(&patched)
+	}
+	if scimErr != nil {
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "SCIM PATCH Refused", map[string]interface{}{
+			"id": id, "status": scimErr.Status, "scimType": scimErr.ScimType, "detail": scimErr.Detail, "resource": "unchanged",
+		}, "RFC 7644 Section 3.5.2")
+		WriteError(w, scimErr)
+		return
+	}
 
-	// Get current user
-	user, err := p.storage.GetUser(ctx, id)
-	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("User", id))
+	updated := current
+	changed := !sameResource(current, &patched)
+	if changed {
+		expected, _ := ParseETag(current.Meta.Version)
+		if updated, err = p.storage.UpdateUser(ctx, id, &patched, expected); err != nil {
+			WriteError(w, storeError("User", id, "userName", err))
 			return
 		}
-		WriteError(w, ErrInternalServer(err.Error()))
-		return
+		p.logProvisioningAction(r, "update", "User", updated.ID, map[string]interface{}{"userName": updated.UserName})
 	}
-
-	// Apply patch operations
-	changes, err := ApplyPatchToUser(user, &patchReq)
-	if err != nil {
-		if scimErr, ok := err.(*SCIMError); ok {
-			WriteError(w, scimErr)
-		} else {
-			WriteError(w, ErrInvalidValue(err.Error()))
-		}
-		return
-	}
-
-	p.emitEvent("scim.patch.applied", "Patch Applied", map[string]interface{}{
-		"userId":  id,
-		"changes": changes,
-	})
-
-	// Save updated user
-	expectedVersion, _ := ParseETag(user.Meta.Version)
-	updated, err := p.storage.UpdateUser(ctx, id, user, expectedVersion)
-	if err != nil {
-		WriteError(w, userStoreError(id, err))
-		return
-	}
-
 	p.describeUser(ctx, updated)
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM PATCH Applied", map[string]interface{}{
+		"id": updated.ID, "changed": changed, "version": updated.Meta.Version,
+	}, "RFC 7644 Section 3.5.2")
+	// "On successful completion, the server either MUST return a 200 OK
+	// response code and the entire resource within the response body, subject
+	// to the "attributes" query parameter (see Section 3.9), or MAY return
+	// HTTP status code 204 (No Content)".
+	writeResource(w, http.StatusOK, updated.Meta, updated, selected)
+}
 
-	// Log provisioning event from external IdP
-	p.logProvisioningAction(r, "update", "User", updated.ID, map[string]interface{}{
-		"userName": updated.UserName,
-		"changes":  changes,
-	})
+// patchResource applies the PATCH request in body to current and decodes the
+// result into patched. current is not changed.
+func patchResource(body []byte, current, patched interface{}, schema *resourceSchema) *SCIMError {
+	operations, scimErr := parsePatchRequest(body)
+	if scimErr != nil {
+		return scimErr
+	}
+	item, err := newQueryItem(current)
+	if err != nil {
+		return ErrInternalServer(err.Error())
+	}
+	if scimErr := applyPatch(item.object, schema, operations); scimErr != nil {
+		return scimErr
+	}
+	result, err := json.Marshal(item.object)
+	if err != nil {
+		return ErrInternalServer(err.Error())
+	}
+	if err := json.Unmarshal(result, patched); err != nil {
+		return ErrInvalidValue(err.Error())
+	}
+	return nil
+}
 
-	p.emitEvent("scim.user.updated", "User Patched", map[string]interface{}{
-		"id":      updated.ID,
-		"changes": changes,
-	})
-
-	writeResource(w, http.StatusOK, updated.Meta, updated)
+// sameResource reports whether two resources have the same representation.
+// RFC 7644 Section 3.5.2.1: "If the target location already contains the
+// value specified, no changes SHOULD be made to the resource, and a success
+// response SHOULD be returned. Unless other operations change the resource,
+// this operation SHALL NOT change the modify timestamp of the resource."
+func sameResource(a, b interface{}) bool {
+	left, errLeft := newQueryItem(a)
+	right, errRight := newQueryItem(b)
+	return errLeft == nil && errRight == nil && reflect.DeepEqual(left.object, right.object)
 }
 
 func (p *Plugin) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
-	p.emitEvent("scim.request", "Delete User", map[string]interface{}{
-		"method": "DELETE",
-		"path":   "/Users/" + id,
-	})
-
-	err := p.storage.DeleteUser(ctx, id)
+	current, err := p.storage.GetUser(ctx, id)
 	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("User", id))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, storeError("User", id, "userName", err))
 		return
 	}
-
-	// Log provisioning event from external IdP
+	if preconditionFailed(w, r, current.Meta) {
+		return
+	}
+	if err := p.storage.DeleteUser(ctx, id); err != nil {
+		WriteError(w, storeError("User", id, "userName", err))
+		return
+	}
 	p.logProvisioningAction(r, "delete", "User", id, nil)
-
-	p.emitEvent("scim.user.deleted", "User Deleted", map[string]interface{}{
-		"id": id,
-	})
-
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM User Deleted", map[string]interface{}{"id": id}, "RFC 7644 Section 3.6")
+	// "In response to a successful DELETE, the server SHALL return a
+	// successful HTTP status code 204 (No Content)."
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // ================== Group Handlers ==================
 
-func (p *Plugin) handleListGroups(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	filter := r.URL.Query().Get("filter")
-	startIndex, _ := strconv.Atoi(r.URL.Query().Get("startIndex"))
-	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
-
-	if startIndex < 1 {
-		startIndex = 1
-	}
-	if count < 1 || count > 200 {
-		count = 100
-	}
-
-	groups, total, err := p.storage.ListGroups(ctx, filter, startIndex, count)
-	if err != nil {
-		if scimErr, ok := err.(*SCIMError); ok {
-			WriteError(w, scimErr)
-		} else {
-			WriteError(w, ErrInternalServer(err.Error()))
-		}
-		return
-	}
-
-	response := NewListResponse()
-	response.TotalResults = total
-	response.StartIndex = startIndex
-	response.ItemsPerPage = len(groups)
-
-	for _, group := range groups {
-		if group.Meta != nil {
-			group.Meta.Location = p.baseURL + "/scim/v2/Groups/" + group.ID
-		}
-		// Add member refs
-		for i := range group.Members {
-			if group.Members[i].Type == "User" || group.Members[i].Type == "" {
-				group.Members[i].Ref = p.baseURL + "/scim/v2/Users/" + group.Members[i].Value
-			}
-		}
-		data, _ := json.Marshal(group)
-		response.Resources = append(response.Resources, data)
-	}
-
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	json.NewEncoder(w).Encode(response)
-}
-
 func (p *Plugin) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-
+	selected, ok := requestProjection(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
 	}
-
 	var group Group
 	if err := json.Unmarshal(body, &group); err != nil {
 		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
 		return
 	}
-
-	if scimErr := checkSchemas(group.Schemas, SchemaURNGroup); scimErr != nil {
+	if scimErr := p.checkGroup(ctx, &group); scimErr != nil {
 		WriteError(w, scimErr)
 		return
 	}
-	if group.DisplayName == "" {
-		WriteError(w, ErrInvalidValue("displayName is required"))
-		return
-	}
-
 	created, err := p.storage.CreateGroup(ctx, &group)
 	if err != nil {
-		if err == ErrConflict {
-			WriteError(w, ErrConflictUniqueness("displayName"))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, storeError("Group", "", "displayName", err))
 		return
 	}
-
-	created.Meta.Location = p.baseURL + "/scim/v2/Groups/" + created.ID
-
-	writeResource(w, http.StatusCreated, created.Meta, created)
+	p.describeGroup(created)
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM Group Created", map[string]interface{}{
+		"id": created.ID, "displayName": created.DisplayName, "members": len(created.Members), "location": created.Meta.Location,
+	}, "RFC 7644 Section 3.3")
+	writeResource(w, http.StatusCreated, created.Meta, created, selected)
 }
 
 func (p *Plugin) handleGetGroup(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
-	group, err := p.storage.GetGroup(ctx, id)
-	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("Group", id))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+	selected, ok := requestProjection(w, r)
+	if !ok {
 		return
 	}
-
-	group.Meta.Location = p.baseURL + "/scim/v2/Groups/" + group.ID
-	for i := range group.Members {
-		if group.Members[i].Type == "User" || group.Members[i].Type == "" {
-			group.Members[i].Ref = p.baseURL + "/scim/v2/Users/" + group.Members[i].Value
-		}
+	group, err := p.storage.GetGroup(r.Context(), id)
+	if err != nil {
+		WriteError(w, storeError("Group", id, "displayName", err))
+		return
 	}
-
+	p.describeGroup(group)
 	if notModified(w, r, group.Meta) {
 		return
 	}
-	writeResource(w, http.StatusOK, group.Meta, group)
+	writeResource(w, http.StatusOK, group.Meta, group, selected)
 }
 
 func (p *Plugin) handleReplaceGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
+	selected, ok := requestProjection(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
 	}
-
 	var group Group
 	if err := json.Unmarshal(body, &group); err != nil {
 		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
 		return
 	}
-
-	expectedVersion := 0
-	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
-		expectedVersion, _ = ParseETag(ifMatch)
-	}
-
-	updated, err := p.storage.UpdateGroup(ctx, id, &group, expectedVersion)
+	current, err := p.storage.GetGroup(ctx, id)
 	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("Group", id))
-			return
-		}
-		if err == ErrVersionConflict {
-			WriteError(w, ErrPreconditionFailed("ETag mismatch"))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, storeError("Group", id, "displayName", err))
 		return
 	}
-
-	updated.Meta.Location = p.baseURL + "/scim/v2/Groups/" + updated.ID
-
-	writeResource(w, http.StatusOK, updated.Meta, updated)
+	if preconditionFailed(w, r, current.Meta) {
+		return
+	}
+	if scimErr := p.checkGroup(ctx, &group); scimErr != nil {
+		WriteError(w, scimErr)
+		return
+	}
+	expected, _ := ParseETag(current.Meta.Version)
+	updated, err := p.storage.UpdateGroup(ctx, id, &group, expected)
+	if err != nil {
+		WriteError(w, storeError("Group", id, "displayName", err))
+		return
+	}
+	p.describeGroup(updated)
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM Group Replaced", map[string]interface{}{
+		"id": updated.ID, "displayName": updated.DisplayName, "members": len(updated.Members), "version": updated.Meta.Version,
+	}, "RFC 7644 Section 3.5.1")
+	writeResource(w, http.StatusOK, updated.Meta, updated, selected)
 }
 
 func (p *Plugin) handlePatchGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
+	selected, ok := requestProjection(w, r)
+	if !ok {
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		WriteError(w, ErrBadRequest("Failed to read request body"))
 		return
 	}
-
-	var patchReq PatchRequest
-	if err := json.Unmarshal(body, &patchReq); err != nil {
-		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
+	current, err := p.storage.GetGroup(ctx, id)
+	if err != nil {
+		WriteError(w, storeError("Group", id, "displayName", err))
+		return
+	}
+	if preconditionFailed(w, r, current.Meta) {
 		return
 	}
 
-	group, err := p.storage.GetGroup(ctx, id)
-	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("Group", id))
+	var patched Group
+	scimErr := patchResource(body, current, &patched, groupResourceSchema)
+	if scimErr == nil {
+		scimErr = p.checkGroup(ctx, &patched)
+	}
+	if scimErr != nil {
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "SCIM PATCH Refused", map[string]interface{}{
+			"id": id, "status": scimErr.Status, "scimType": scimErr.ScimType, "detail": scimErr.Detail, "resource": "unchanged",
+		}, "RFC 7644 Section 3.5.2")
+		WriteError(w, scimErr)
+		return
+	}
+
+	updated := current
+	changed := !sameMembers(current, &patched) || current.DisplayName != patched.DisplayName || current.ExternalID != patched.ExternalID
+	if changed {
+		expected, _ := ParseETag(current.Meta.Version)
+		if updated, err = p.storage.UpdateGroup(ctx, id, &patched, expected); err != nil {
+			WriteError(w, storeError("Group", id, "displayName", err))
 			return
 		}
-		WriteError(w, ErrInternalServer(err.Error()))
-		return
 	}
+	p.describeGroup(updated)
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM PATCH Applied", map[string]interface{}{
+		"id": updated.ID, "changed": changed, "members": len(updated.Members), "version": updated.Meta.Version,
+	}, "RFC 7644 Section 3.5.2")
+	writeResource(w, http.StatusOK, updated.Meta, updated, selected)
+}
 
-	changes, err := ApplyPatchToGroup(group, &patchReq)
-	if err != nil {
-		if scimErr, ok := err.(*SCIMError); ok {
-			WriteError(w, scimErr)
-		} else {
-			WriteError(w, ErrInvalidValue(err.Error()))
+// sameMembers reports whether two Groups have the same members.
+func sameMembers(a, b *Group) bool {
+	if len(a.Members) != len(b.Members) {
+		return false
+	}
+	members := map[string]bool{}
+	for _, member := range a.Members {
+		members[member.Value] = true
+	}
+	for _, member := range b.Members {
+		if !members[member.Value] {
+			return false
 		}
-		return
 	}
-
-	p.emitEvent("scim.patch.applied", "Group Patch Applied", map[string]interface{}{
-		"groupId": id,
-		"changes": changes,
-	})
-
-	expectedVersion, _ := ParseETag(group.Meta.Version)
-	updated, err := p.storage.UpdateGroup(ctx, id, group, expectedVersion)
-	if err != nil {
-		WriteError(w, ErrInternalServer(err.Error()))
-		return
-	}
-
-	updated.Meta.Location = p.baseURL + "/scim/v2/Groups/" + updated.ID
-
-	writeResource(w, http.StatusOK, updated.Meta, updated)
+	return true
 }
 
 func (p *Plugin) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := chi.URLParam(r, "id")
-
-	err := p.storage.DeleteGroup(ctx, id)
+	current, err := p.storage.GetGroup(ctx, id)
 	if err != nil {
-		if err == ErrNotFound {
-			WriteError(w, ErrResourceNotFound("Group", id))
-			return
-		}
-		WriteError(w, ErrInternalServer(err.Error()))
+		WriteError(w, storeError("Group", id, "displayName", err))
 		return
 	}
-
+	if preconditionFailed(w, r, current.Meta) {
+		return
+	}
+	if err := p.storage.DeleteGroup(ctx, id); err != nil {
+		WriteError(w, storeError("Group", id, "displayName", err))
+		return
+	}
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "SCIM Group Deleted", map[string]interface{}{"id": id}, "RFC 7644 Section 3.6")
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// ================== Bulk Handler ==================
-
-func (p *Plugin) handleBulk(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		WriteError(w, ErrBadRequest("Failed to read request body"))
-		return
-	}
-
-	// Check payload size
-	if len(body) > 1048576 { // 1MB
-		WriteError(w, ErrPayloadTooLarge(1048576))
-		return
-	}
-
-	var bulkReq BulkRequest
-	if err := json.Unmarshal(body, &bulkReq); err != nil {
-		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
-		return
-	}
-
-	if len(bulkReq.Operations) > 1000 {
-		WriteError(w, ErrBadRequest("Too many operations (max 1000)"))
-		return
-	}
-
-	p.emitEvent("scim.request", "Bulk Operation", map[string]interface{}{
-		"method":       "POST",
-		"path":         "/Bulk",
-		"operations":   len(bulkReq.Operations),
-		"failOnErrors": bulkReq.FailOnErrors,
-	})
-
-	response := &BulkResponse{
-		Schemas:    []string{SchemaURNBulkResponse},
-		Operations: make([]BulkOperationResult, 0, len(bulkReq.Operations)),
-	}
-
-	errorCount := 0
-	for i, op := range bulkReq.Operations {
-		p.emitEvent("scim.bulk.progress", "Processing Operation", map[string]interface{}{
-			"index":  i + 1,
-			"total":  len(bulkReq.Operations),
-			"method": op.Method,
-			"path":   op.Path,
-		})
-
-		result := p.executeBulkOperation(op)
-		response.Operations = append(response.Operations, result)
-
-		if strings.HasPrefix(result.Status, "4") || strings.HasPrefix(result.Status, "5") {
-			errorCount++
-			if bulkReq.FailOnErrors > 0 && errorCount >= bulkReq.FailOnErrors {
-				break
-			}
-		}
-	}
-
-	p.emitEvent("scim.response", "Bulk Complete", map[string]interface{}{
-		"status":     200,
-		"operations": len(response.Operations),
-		"errors":     errorCount,
-	})
-
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	json.NewEncoder(w).Encode(response)
-}
-
-func (p *Plugin) executeBulkOperation(op BulkOperation) BulkOperationResult {
-	result := BulkOperationResult{
-		Method: op.Method,
-		BulkID: op.BulkID,
-	}
-
-	// Parse path to determine resource type and ID
-	path := strings.TrimPrefix(op.Path, "/")
-	parts := strings.Split(path, "/")
-
-	if len(parts) == 0 {
-		result.Status = "400"
-		errResp, _ := json.Marshal(NewErrorResponse(400, ErrorTypeInvalidPath, "Invalid path"))
-		result.Response = errResp
-		return result
-	}
-
-	resourceType := parts[0]
-	var resourceID string
-	if len(parts) > 1 {
-		resourceID = parts[1]
-	}
-
-	switch strings.ToUpper(op.Method) {
-	case "POST":
-		result = p.bulkCreate(resourceType, op.Data, op.BulkID)
-	case "PUT":
-		result = p.bulkReplace(resourceType, resourceID, op.Data, op.BulkID)
-	case "PATCH":
-		result = p.bulkPatch(resourceType, resourceID, op.Data, op.BulkID)
-	case "DELETE":
-		result = p.bulkDelete(resourceType, resourceID, op.BulkID)
-	default:
-		result.Status = "400"
-		errResp, _ := json.Marshal(NewErrorResponse(400, ErrorTypeInvalidValue, "Invalid method"))
-		result.Response = errResp
-	}
-
-	return result
-}
-
-func (p *Plugin) bulkCreate(resourceType string, data json.RawMessage, bulkID string) BulkOperationResult {
-	result := BulkOperationResult{Method: "POST", BulkID: bulkID}
-	ctx := context.Background()
-
-	switch resourceType {
-	case "Users":
-		var user User
-		if err := json.Unmarshal(data, &user); err != nil {
-			result.Status = "400"
-			return result
-		}
-		if scimErr := checkUser(&user); scimErr != nil {
-			result.Status = "400"
-			return result
-		}
-		created, err := p.storage.CreateUser(ctx, &user)
-		if err != nil {
-			result.Status = strconv.Itoa(userStoreError("", err).Status)
-			return result
-		}
-		result.Status = "201"
-		result.Location = p.baseURL + "/scim/v2/Users/" + created.ID
-		result.Version = created.Meta.Version
-		resp, _ := json.Marshal(created)
-		result.Response = resp
-	case "Groups":
-		var group Group
-		if err := json.Unmarshal(data, &group); err != nil {
-			result.Status = "400"
-			return result
-		}
-		created, err := p.storage.CreateGroup(ctx, &group)
-		if err != nil {
-			result.Status = "409"
-			return result
-		}
-		result.Status = "201"
-		result.Location = p.baseURL + "/scim/v2/Groups/" + created.ID
-		result.Version = created.Meta.Version
-		resp, _ := json.Marshal(created)
-		result.Response = resp
-	default:
-		result.Status = "400"
-	}
-
-	return result
-}
-
-func (p *Plugin) bulkReplace(resourceType, id string, data json.RawMessage, bulkID string) BulkOperationResult {
-	result := BulkOperationResult{Method: "PUT", BulkID: bulkID}
-	ctx := context.Background()
-
-	switch resourceType {
-	case "Users":
-		var user User
-		if err := json.Unmarshal(data, &user); err != nil {
-			result.Status = "400"
-			return result
-		}
-		if scimErr := checkUser(&user); scimErr != nil {
-			result.Status = "400"
-			return result
-		}
-		updated, err := p.storage.UpdateUser(ctx, id, &user, 0)
-		if err != nil {
-			result.Status = strconv.Itoa(userStoreError(id, err).Status)
-			return result
-		}
-		result.Status = "200"
-		result.Location = p.baseURL + "/scim/v2/Users/" + updated.ID
-		result.Version = updated.Meta.Version
-	case "Groups":
-		var group Group
-		if err := json.Unmarshal(data, &group); err != nil {
-			result.Status = "400"
-			return result
-		}
-		updated, err := p.storage.UpdateGroup(ctx, id, &group, 0)
-		if err != nil {
-			if err == ErrNotFound {
-				result.Status = "404"
-			} else {
-				result.Status = "500"
-			}
-			return result
-		}
-		result.Status = "200"
-		result.Location = p.baseURL + "/scim/v2/Groups/" + updated.ID
-		result.Version = updated.Meta.Version
-	default:
-		result.Status = "400"
-	}
-
-	return result
-}
-
-func (p *Plugin) bulkPatch(resourceType, id string, data json.RawMessage, bulkID string) BulkOperationResult {
-	result := BulkOperationResult{Method: "PATCH", BulkID: bulkID}
-	ctx := context.Background()
-
-	var patchReq PatchRequest
-	if err := json.Unmarshal(data, &patchReq); err != nil {
-		result.Status = "400"
-		return result
-	}
-
-	switch resourceType {
-	case "Users":
-		user, err := p.storage.GetUser(ctx, id)
-		if err != nil {
-			result.Status = "404"
-			return result
-		}
-		if _, err := ApplyPatchToUser(user, &patchReq); err != nil {
-			result.Status = "400"
-			return result
-		}
-		updated, err := p.storage.UpdateUser(ctx, id, user, 0)
-		if err != nil {
-			result.Status = "500"
-			return result
-		}
-		result.Status = "200"
-		result.Location = p.baseURL + "/scim/v2/Users/" + updated.ID
-		result.Version = updated.Meta.Version
-	case "Groups":
-		group, err := p.storage.GetGroup(ctx, id)
-		if err != nil {
-			result.Status = "404"
-			return result
-		}
-		if _, err := ApplyPatchToGroup(group, &patchReq); err != nil {
-			result.Status = "400"
-			return result
-		}
-		updated, err := p.storage.UpdateGroup(ctx, id, group, 0)
-		if err != nil {
-			result.Status = "500"
-			return result
-		}
-		result.Status = "200"
-		result.Location = p.baseURL + "/scim/v2/Groups/" + updated.ID
-		result.Version = updated.Meta.Version
-	default:
-		result.Status = "400"
-	}
-
-	return result
-}
-
-func (p *Plugin) bulkDelete(resourceType, id, bulkID string) BulkOperationResult {
-	result := BulkOperationResult{Method: "DELETE", BulkID: bulkID}
-	ctx := context.Background()
-
-	var err error
-	switch resourceType {
-	case "Users":
-		err = p.storage.DeleteUser(ctx, id)
-	case "Groups":
-		err = p.storage.DeleteGroup(ctx, id)
-	default:
-		result.Status = "400"
-		return result
-	}
-
-	if err != nil {
-		if err == ErrNotFound {
-			result.Status = "404"
-		} else {
-			result.Status = "500"
-		}
-		return result
-	}
-
-	result.Status = "204"
-	return result
-}
-
-// ================== Search Handler ==================
-
-func (p *Plugin) handleSearch(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		WriteError(w, ErrBadRequest("Failed to read request body"))
-		return
-	}
-
-	var searchReq SearchRequest
-	if err := json.Unmarshal(body, &searchReq); err != nil {
-		WriteError(w, ErrInvalidSyntax("Invalid JSON: "+err.Error()))
-		return
-	}
-
-	p.emitEvent("scim.request", "Search", map[string]interface{}{
-		"method": "POST",
-		"path":   "/.search",
-		"filter": searchReq.Filter,
-	})
-
-	// For now, search both Users and Groups
-	ctx := r.Context()
-
-	startIndex := searchReq.StartIndex
-	if startIndex < 1 {
-		startIndex = 1
-	}
-	count := searchReq.Count
-	if count < 1 || count > 200 {
-		count = 100
-	}
-
-	users, userTotal, _ := p.storage.ListUsers(ctx, searchReq.Filter, startIndex, count)
-	groups, groupTotal, _ := p.storage.ListGroups(ctx, searchReq.Filter, startIndex, count)
-
-	response := NewListResponse()
-	response.TotalResults = userTotal + groupTotal
-	response.StartIndex = startIndex
-	response.ItemsPerPage = len(users) + len(groups)
-
-	for _, user := range users {
-		if user.Meta != nil {
-			user.Meta.Location = p.baseURL + "/scim/v2/Users/" + user.ID
-		}
-		data, _ := json.Marshal(user)
-		response.Resources = append(response.Resources, data)
-	}
-
-	for _, group := range groups {
-		if group.Meta != nil {
-			group.Meta.Location = p.baseURL + "/scim/v2/Groups/" + group.ID
-		}
-		data, _ := json.Marshal(group)
-		response.Resources = append(response.Resources, data)
-	}
-
-	w.Header().Set("Content-Type", ContentTypeSCIM)
-	json.NewEncoder(w).Encode(response)
 }
 
 // ================== Info Handler ==================
@@ -1272,35 +983,35 @@ func (p *Plugin) handleClientProvision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.emitEvent("scim.client.request", "Outbound Provision", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "Outbound Provision", map[string]interface{}{
 		"target":   targetURL,
 		"userName": req.User.UserName,
-	})
+	}, "RFC 7644 Section 3")
 
 	client := NewClient(targetURL, req.AuthToken)
 	created, err := client.CreateUser(r.Context(), outboundUserCopy(req.User))
 	if err != nil {
-		p.emitEvent("scim.error", "Provision Failed", map[string]interface{}{
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "Provision Failed", map[string]interface{}{
 			"target": targetURL,
 			"error":  err.Error(),
-		})
+		}, "RFC 7644 Section 3")
 		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM provisioning failed: " + err.Error()})
 		return
 	}
 	if created.ID == "" {
-		p.emitEvent("scim.error", "Provision Failed", map[string]interface{}{
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "Provision Failed", map[string]interface{}{
 			"target": targetURL,
 			"error":  "target returned a created user without the required id attribute",
-		})
+		}, "RFC 7644 Section 3")
 		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM service returned a created user without the required id attribute"})
 		return
 	}
 
-	p.emitEvent("scim.user.created", "Outbound User Created", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "Outbound User Created", map[string]interface{}{
 		"localId":   req.User.ID,
 		"remoteId":  created.ID,
 		"targetUrl": targetURL,
-	})
+	}, "RFC 7644 Section 3")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(created)
@@ -1332,10 +1043,10 @@ func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
 	client := NewClient(targetURL, req.AuthToken)
 	capabilities, err := client.GetServiceProviderConfig(r.Context())
 	if err != nil {
-		p.emitEvent("scim.error", "Target Discovery Failed", map[string]interface{}{
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "Target Discovery Failed", map[string]interface{}{
 			"target": targetURL,
 			"error":  err.Error(),
-		})
+		}, "RFC 7644 Section 3")
 		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM discovery failed: " + err.Error()})
 		return
 	}
@@ -1356,20 +1067,20 @@ func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p.emitEvent("scim.client.request", "Sync Started", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "Sync Started", map[string]interface{}{
 		"target":               targetURL,
 		"sourceUserCount":      len(users),
 		"existingMappingCount": len(mappings),
 		"previousLastSync":     previousSync,
 		"capabilities":         capabilities,
-	})
+	}, "RFC 7644 Section 3")
 
 	result, err := client.SyncUsers(r.Context(), users, mappings)
 	if err != nil {
-		p.emitEvent("scim.error", "Sync Failed", map[string]interface{}{
+		p.emitEvent(r, lookingglass.EventTypeSecurityWarning, "Sync Failed", map[string]interface{}{
 			"target": targetURL,
 			"error":  err.Error(),
-		})
+		}, "RFC 7644 Section 3")
 		WriteError(w, &SCIMError{Status: http.StatusBadGateway, Detail: "target SCIM sync failed: " + err.Error()})
 		return
 	}
@@ -1391,7 +1102,7 @@ func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
 		usersByID[user.ID] = outboundUserCopy(user)
 	}
 	for _, detail := range result.Details {
-		p.emitEvent("scim.client.operation", "Outbound User Operation", map[string]interface{}{
+		p.emitEvent(r, lookingglass.EventTypeFlowStep, "Outbound User Operation", map[string]interface{}{
 			"target":      targetURL,
 			"localId":     detail.LocalID,
 			"remoteId":    detail.RemoteID,
@@ -1399,7 +1110,7 @@ func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
 			"status":      detail.Status,
 			"error":       detail.Error,
 			"requestBody": usersByID[detail.LocalID],
-		})
+		}, "RFC 7644 Section 3")
 	}
 
 	status := "completed"
@@ -1428,10 +1139,10 @@ func (p *Plugin) handleClientSync(w http.ResponseWriter, r *http.Request) {
 		LastSuccessfulSync: lastSuccessfulSync,
 		Result:             result,
 	}
-	p.emitEvent("scim.client.response", "Sync Completed", map[string]interface{}{
+	p.emitEvent(r, lookingglass.EventTypeFlowStep, "Sync Completed", map[string]interface{}{
 		"target":   targetURL,
 		"response": response,
-	})
+	}, "RFC 7644 Section 3")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
@@ -1566,12 +1277,21 @@ func (p *Plugin) handleConnectionStatus(w http.ResponseWriter, r *http.Request) 
 
 // ================== Helper Functions ==================
 
-func (p *Plugin) emitEvent(eventType, name string, data map[string]interface{}) {
-	// Event emission for Looking Glass integration
-	// Currently a no-op as SCIM events are logged via logProvisioningAction
-	_ = eventType
-	_ = name
-	_ = data
+// emitEvent records a SCIM operation in the Looking Glass session the request
+// belongs to, with the specification section that governs it.
+func (p *Plugin) emitEvent(r *http.Request, eventType lookingglass.EventType, title string, data map[string]interface{}, reference string) {
+	sessionID := r.Header.Get("X-Looking-Glass-Session")
+	if sessionID == "" {
+		sessionID = r.URL.Query().Get("lg_session")
+	}
+	if p.lookingGlass == nil || sessionID == "" {
+		return
+	}
+	p.lookingGlass.NewEventBroadcaster(sessionID).Emit(eventType, title, data, lookingglass.Annotation{
+		Type:      lookingglass.AnnotationTypeRFCReference,
+		Title:     title,
+		Reference: reference,
+	})
 }
 
 // logProvisioningAction logs a provisioning action from an external IdP
@@ -1589,11 +1309,4 @@ func (p *Plugin) logProvisioningAction(r *http.Request, action, resource, resour
 	}
 
 	LogProvisioningEvent(event)
-
-	// Also emit to Looking Glass
-	p.emitEvent("scim.provisioning."+action, action+" "+resource, map[string]interface{}{
-		"source":     source,
-		"resourceId": resourceID,
-		"data":       data,
-	})
 }

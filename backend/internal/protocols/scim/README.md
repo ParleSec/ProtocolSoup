@@ -9,7 +9,7 @@ This implementation provides:
 - **Real SCIM Server**: Full RFC 7644 compliant REST API for user and group provisioning
 - **OAuth 2.0 Protected Resource**: SCIM clients authenticate with OAuth 2.0 bearer access tokens (RFC 6750, RFC 9068)
 - **SQLite Persistence**: Durable storage with automatic schema migrations
-- **RFC 7644 Filtering**: Complete filter expression parser with SQL translation
+- **RFC 7644 Queries**: Filters parsed from the RFC grammar and evaluated against the published schema, with sorting, paging and attribute selection
 - **PATCH Operations**: RFC-compliant add, remove, and replace operations with path expressions
 - **Bulk Operations**: Multi-operation requests per RFC 7644 Section 3.7
 - **Schema Discovery**: ServiceProviderConfig, ResourceTypes, and Schemas endpoints
@@ -65,7 +65,7 @@ When running standalone, set `SHOWCASE_BASE_URL` to the public URL you want SCIM
 │  │  │                   │  │                   │  │                 │  │    │
 │  │  │ • /ServiceProv... │  │ • Lexer           │  │ • Path Parsing  │  │    │
 │  │  │ • /ResourceTypes  │  │ • Parser          │  │ • Op Execution  │  │    │
-│  │  │ • /Schemas        │  │ • SQL Generation  │  │ • Value Filters │  │    │
+│  │  │ • /Schemas        │  │ • Evaluation      │  │ • Value Filters │  │    │
 │  │  └───────────────────┘  └───────────────────┘  └─────────────────┘  │    │
 │  │                                                                     │    │
 │  │  ┌───────────────────┐  ┌───────────────────┐                       │    │
@@ -110,7 +110,10 @@ When running standalone, set `SHOWCASE_BASE_URL` to the public URL you want SCIM
 | `storage.go` | SQLite storage layer with migrations, CRUD operations, and query building |
 | `resources.go` | SCIM resource type definitions (User, Group, EnterpriseUser extension) |
 | `discovery.go` | Schema discovery endpoints (ServiceProviderConfig, ResourceTypes, Schemas) |
-| `filter.go` | RFC 7644 filter expression lexer, parser, and SQL translator |
+| `filter.go` | RFC 7644 filter and PATCH path parser, and filter evaluation |
+| `query.go` | Sorting, paging and attribute selection for queries |
+| `schema.go` | Attribute lookup over the schemas served at `/Schemas` |
+| `bulk.go` | Bulk requests, each operation sent through the single-request handlers |
 | `patch.go` | PATCH operation engine with path expression parsing and execution |
 | `auth.go` | Bearer token authentication middleware and IdP detection |
 | `errors.go` | SCIM-specific error types per RFC 7644 Section 3.12 |
@@ -155,7 +158,8 @@ When running standalone, set `SHOWCASE_BASE_URL` to the public URL you want SCIM
 | Method | Endpoint | Description | RFC Reference |
 |--------|----------|-------------|---------------|
 | POST | `/scim/v2/Bulk` | Bulk operations | RFC 7644 §3.7 |
-| POST | `/scim/v2/.search` | Server-side search | RFC 7644 §3.4.3 |
+| POST | `/scim/v2/.search`, `/scim/v2/Users/.search`, `/scim/v2/Groups/.search` | Query with the parameters in the body | RFC 7644 §3.4.3 |
+| GET | `/scim/v2` | Query Users and Groups together | RFC 7644 §3.4.2.1 |
 
 ### Outbound Client (Authenticated)
 

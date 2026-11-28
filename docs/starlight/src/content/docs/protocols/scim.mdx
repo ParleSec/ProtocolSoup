@@ -44,7 +44,9 @@ Outbound provisioning exists as a documented SCIM client pattern (`outbound-prov
 | `/scim/v2/Groups` | GET, POST | List/create groups |
 | `/scim/v2/Groups/{id}` | GET, PUT, PATCH, DELETE | Group operations |
 | `/scim/v2/Bulk` | POST | Bulk operations |
-| `/scim/v2/.search` | POST | Server-side search |
+| `/scim/v2/.search`, `/scim/v2/Users/.search`, `/scim/v2/Groups/.search` | POST | Query with the parameters in the body |
+| `/scim/v2` | GET | Query Users and Groups together |
+| `/scim/v2/Me` | any | Not offered: answers `501` (RFC 7644 Section 3.11) |
 
 ## Authentication
 
@@ -77,6 +79,26 @@ These are the rules a provisioning client can rely on here, with the text they c
 - **`Accept: application/json` is honoured.** The same JSON is labelled `application/json` for a client that asks for that and not for `application/scim+json` (RFC 7644 Section 3.8).
 - **Email domains are lower-cased** on input (RFC 7643 Section 4.1.2).
 - **Passwords are not kept.** The `password` attribute is dropped on input and never returned, so `ServiceProviderConfig` reports `changePassword.supported` as `false`.
+
+## Querying
+
+A query runs against one resource type, or against the Base URI for Users and Groups together (RFC 7644 Section 3.4.2).
+
+- **Filters** follow the grammar of Section 3.4.2.2: `eq`, `ne`, `co`, `sw`, `ew`, `pr`, `gt`, `ge`, `lt`, `le`, joined with `and`, `or` and `not`, grouped with round brackets. A value filter in square brackets applies to one value of a multi-valued attribute: `emails[type eq "work" and value co "@example.com"]`.
+- **Comparison follows the attribute.** `userName eq "ALICE@example.com"` matches because `userName` is not case exact; `id` is. Dates compare chronologically. `gt` on a boolean gets `400` with `scimType` `invalidFilter`, and so does an operator the grammar does not have.
+- **Attribute names** may carry their schema URI, which extension attributes should: `urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department eq "Security"`.
+- **Sorting** takes `sortBy` and `sortOrder`. Resources with no value for the attribute come last when ascending and first when descending. A multi-valued attribute sorts by its primary value.
+- **Paging** takes `startIndex` and `count`. `count=0` returns `totalResults` and no resources. A page holds at most 200.
+- **`attributes` and `excludedAttributes`** choose what is returned, on queries and on the responses of `GET`, `POST`, `PUT` and `PATCH`. `id` and `schemas` are always returned.
+
+## Changing Resources
+
+- **PATCH is atomic.** If one operation fails, none is applied (RFC 7644 Section 3.5.2). A PATCH that changes nothing leaves `meta.version` and `meta.lastModified` as they were.
+- **PATCH respects the schema.** Changing a read-only attribute such as `id`, `meta` or a User's `groups`, or removing a required one such as `userName`, gets `400` with `scimType` `mutability`. A value filter that matches nothing gets `noTarget`.
+- **One primary value.** Setting `primary` to `true` on one value of a multi-valued attribute sets it to `false` on the others.
+- **`If-Match` is honoured** on `PUT`, `PATCH` and `DELETE`: an entity-tag that is not the current `meta.version` gets `412` and nothing changes (RFC 7644 Section 3.14).
+- **Group members are Users of this service provider.** A member that is not one gets `400`. A User's `groups` attribute is read-only and follows the Groups.
+- **Bulk** performs each operation as the single request it stands for and reports each result. `bulkId:` references are resolved whatever the order of the operations. More than 1000 operations or 1 MiB gets `413`.
 
 ## What To Validate
 
