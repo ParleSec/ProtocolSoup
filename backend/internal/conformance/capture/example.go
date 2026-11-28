@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -48,6 +49,9 @@ type ExampleResult struct {
 	// request URL from.
 	IssuerMember string
 	Issuer       string
+	// CreatedExchange is for a SCIM resource: it indexes the recorded
+	// exchange whose 201 response created the resource.
+	CreatedExchange *int
 }
 
 // kindExample labels a Mismatch that concerns an example rather than a
@@ -98,9 +102,15 @@ func captureExample(ctx context.Context, env *Env, recorder *Recorder, definitio
 	var verification conformance.ExampleVerification
 	switch definition.Format {
 	case conformance.ExampleFormatJSON:
-		verification, err = verifyDocument(result, exchanges)
+		if result.CreatedExchange != nil {
+			verification, err = verifyResource(result, exchanges)
+		} else {
+			verification, err = verifyDocument(result, exchanges)
+		}
 	case conformance.ExampleFormatSDJWT:
 		verification, err = verifySDJWTVC(result.Value, exchanges, result.JWKSExchange)
+	case conformance.ExampleFormatSAML:
+		verification, err = verifySAMLMessage(result.Value, exchanges, result.JWKSExchange)
 	default:
 		verification, err = verifyExample(result.Value, exchanges, result.JWKSExchange)
 	}
@@ -142,6 +152,22 @@ func onTheWire(exchanges []lookingglass.CapturedExchange, source conformance.Exa
 	raw, err := payloadBytes(message.Raw)
 	if err != nil {
 		return err
+	}
+	if source.FormField != "" {
+		// A form body carries the value percent-encoded, so it is compared
+		// after form decoding: it must be the one value of that control.
+		body, err := payloadBytes(message.Body)
+		if err != nil {
+			return err
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			return fmt.Errorf("parse the %s of exchange %d as a form: %w", source.Message, source.Exchange, err)
+		}
+		if controls := form[source.FormField]; len(controls) != 1 || controls[0] != value {
+			return fmt.Errorf("the value is not the %s control of the recorded %s of exchange %d", source.FormField, source.Message, source.Exchange)
+		}
+		return nil
 	}
 	if !bytes.Contains(raw, []byte(value)) {
 		return fmt.Errorf("the value is not in the recorded %s of exchange %d", source.Message, source.Exchange)
@@ -314,6 +340,88 @@ func verifyDocument(result ExampleResult, exchanges []lookingglass.CapturedExcha
 		IssuerMember: result.IssuerMember,
 		Issuer:       result.Issuer,
 	}, nil
+}
+
+// verifyResource checks a SCIM resource, which carries no signature, against
+// the exchanges that created and retrieved it. RFC 7644 Section 3.3: "The URI
+// of the created resource SHALL include, in the HTTP "Location" header and
+// the HTTP body, a JSON representation [RFC7159] with the attribute
+// "meta.location"." RFC 7643 Section 3.1 on meta.location: "This value MUST be
+// the same as the "Content-Location" HTTP response header", and on
+// meta.version: "This value must be the same as the entity-tag (ETag) HTTP
+// response header".
+func verifyResource(result ExampleResult, exchanges []lookingglass.CapturedExchange) (conformance.ExampleVerification, error) {
+	var none conformance.ExampleVerification
+	if result.Source.Message != conformance.ExampleInResponse {
+		return none, fmt.Errorf("a resource example is the body of a response, not of a %s", result.Source.Message)
+	}
+	retrieved := exchanges[result.Source.Exchange]
+	body, err := payloadBytes(retrieved.Response.Body)
+	if err != nil {
+		return none, err
+	}
+	if string(body) != result.Value {
+		return none, fmt.Errorf("the value is not the whole body of the response in exchange %d", result.Source.Exchange)
+	}
+	var resource struct {
+		ID   string `json:"id"`
+		Meta struct {
+			Location string `json:"location"`
+			Version  string `json:"version"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(body, &resource); err != nil {
+		return none, fmt.Errorf("parse the resource: %w", err)
+	}
+	if resource.ID == "" || resource.Meta.Location == "" {
+		return none, fmt.Errorf("the resource has no id or no meta.location")
+	}
+	if retrieved.Request.Method != http.MethodGet || retrieved.Request.URL != resource.Meta.Location || retrieved.Response.Status != http.StatusOK {
+		return none, fmt.Errorf("the value was not retrieved with a GET of its meta.location %s: exchange %d is %s %s, answered %d",
+			resource.Meta.Location, result.Source.Exchange, retrieved.Request.Method, retrieved.Request.URL, retrieved.Response.Status)
+	}
+	if got := headerValue(retrieved.Response.Headers, "Content-Location"); got != resource.Meta.Location {
+		return none, fmt.Errorf("the Content-Location header %q is not meta.location %q", got, resource.Meta.Location)
+	}
+	if got := headerValue(retrieved.Response.Headers, "ETag"); got != resource.Meta.Version {
+		return none, fmt.Errorf("the ETag header %q is not meta.version %q", got, resource.Meta.Version)
+	}
+
+	if result.CreatedExchange == nil || *result.CreatedExchange < 0 || *result.CreatedExchange >= len(exchanges) || *result.CreatedExchange == result.Source.Exchange {
+		return none, fmt.Errorf("a resource example needs the recorded exchange that created the resource")
+	}
+	created := exchanges[*result.CreatedExchange]
+	if created.Request.Method != http.MethodPost || created.Response.Status != http.StatusCreated {
+		return none, fmt.Errorf("exchange %d is %s answered %d, not a POST answered 201 (Created)", *result.CreatedExchange, created.Request.Method, created.Response.Status)
+	}
+	if got := headerValue(created.Response.Headers, "Location"); got != resource.Meta.Location {
+		return none, fmt.Errorf("the Location header %q of the 201 response is not meta.location %q", got, resource.Meta.Location)
+	}
+	createdBody, err := payloadBytes(created.Response.Body)
+	if err != nil {
+		return none, err
+	}
+	var createdResource struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(createdBody, &createdResource); err != nil || createdResource.ID != resource.ID {
+		return none, fmt.Errorf("the 201 response does not carry the resource whose id is %q", resource.ID)
+	}
+	return conformance.ExampleVerification{
+		Method:          conformance.VerifiedByLocation,
+		Location:        resource.Meta.Location,
+		CreatedExchange: result.CreatedExchange,
+	}, nil
+}
+
+// headerValue returns the one value of a recorded header field, or "".
+func headerValue(headers map[string][]string, name string) string {
+	for field, values := range headers {
+		if strings.EqualFold(field, name) && len(values) == 1 {
+			return values[0]
+		}
+	}
+	return ""
 }
 
 // exampleSignatureAlgorithms are the asymmetric JWS algorithms an example

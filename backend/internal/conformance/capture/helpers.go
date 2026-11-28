@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // Helpers shared by the scenario packages. They only prepare or tidy up
@@ -19,28 +20,42 @@ import (
 // endpoint from /oauth2/demo/clients, the public listing Looking Glass's
 // client-credentials flow uses.
 func MachineClient(ctx context.Context, env *Env) (clientID, secret, tokenEndpoint string, err error) {
+	secret, tokenEndpoint, err = DemoClient(ctx, env, "machine-client")
+	return "machine-client", secret, tokenEndpoint, err
+}
+
+// DemoClient reads the secret of one of the Mock IdP's seeded clients, and
+// the token endpoint, from /oauth2/demo/clients. The secret is read at run
+// time, so the capture holds no credential.
+func DemoClient(ctx context.Context, env *Env, clientID string) (secret, tokenEndpoint string, err error) {
 	req, err := http.NewRequest(http.MethodGet, env.BaseURL+"/oauth2/demo/clients", nil)
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	resp, err := env.Setup(ctx, req)
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	body, err := resp.JSON()
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	tokenEndpoint, _ = body["token_endpoint"].(string)
 	clients, _ := body["clients"].([]any)
 	for _, raw := range clients {
 		client, _ := raw.(map[string]any)
-		if client["id"] == "machine-client" {
+		if client["id"] == clientID {
 			secret, _ = client["secret"].(string)
-			return "machine-client", secret, tokenEndpoint, nil
+			return secret, tokenEndpoint, nil
 		}
 	}
-	return "", "", "", fmt.Errorf("machine-client is not listed by /oauth2/demo/clients")
+	return "", "", fmt.Errorf("%s is not listed by /oauth2/demo/clients", clientID)
+}
+
+// AccessTokenLifetime reads expires_in from a token response.
+func AccessTokenLifetime(tokens map[string]any) time.Duration {
+	seconds, _ := tokens["expires_in"].(float64)
+	return time.Duration(seconds) * time.Second
 }
 
 // RevokeAccessToken revokes a token the run obtained (RFC 7009), so the

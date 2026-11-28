@@ -1510,7 +1510,7 @@ components:
               description: What the message is, in one or two sentences.
             format:
               type: string
-              enum: [jwt, json, sd-jwt]
+              enum: [jwt, json, sd-jwt, saml]
               description: >-
                 `jwt` is a compact JWS whose payload is a JWT Claims Set. Its
                 decoded parts are `header` and `payload`. `json` is a JSON
@@ -1518,7 +1518,11 @@ components:
                 document. Its one part is `document`. `sd-jwt` is an SD-JWT as
                 an Issuer sends it: its parts are `header`, `payload` and one
                 `disclosure` per Disclosure, whose members are `salt`, `name`
-                and `value`.
+                and `value`. `saml` is a SAML 2.0 message as the HTTP POST
+                binding carries it, the base64 encoding of an XML document.
+                Its one part is `response`, the decoded document, whose
+                members are attributes (`response.@ID`) and child elements
+                (`response.Assertion.Subject`).
             indexable:
               type: boolean
     ConformanceExamplesResponse:
@@ -1665,6 +1669,12 @@ components:
                 location:
                   type: string
                   example: the DPoP header
+                form_field:
+                  type: string
+                  description: >-
+                    Set when the value is a control of a form-encoded body,
+                    which carries it percent-encoded. It names the control.
+                  example: SAMLResponse
             verification:
               type: object
               description: The check the capture run made on the value.
@@ -1672,7 +1682,7 @@ components:
               properties:
                 method:
                   type: string
-                  enum: [embedded_jwk, jwks, issuer, jwt_vc_issuer_metadata]
+                  enum: [embedded_jwk, jwks, issuer, jwt_vc_issuer_metadata, xml_signature, location]
                   description: >-
                     `embedded_jwk` means the signature verified under the
                     public key in the value's own `jwk` header parameter.
@@ -1684,10 +1694,23 @@ components:
                     `issuer` equals the credential's `iss`; the end-entity
                     certificate in `x5c` carries the same key; and each
                     Disclosure's digest appears once in `_sd`.
+                    `xml_signature` is for a SAML message: its enveloped XML
+                    Signature, and that of each Assertion in it, verified with
+                    the signing certificate in the SAML metadata fetched in
+                    exchange `jwks_exchange`, whose `entityID` equals the
+                    `Issuer` of both.
                     `issuer` is for a metadata document, which is not signed:
                     its `issuer_member` equals `issuer`, the issuer identifier
                     the request URL was built from, and the request went to
                     that issuer's host.
+                    `location` is for a SCIM resource, which is not signed: the
+                    value is the whole body of the response to a GET of
+                    `location`, the URI its own `meta.location` names; that
+                    response's `Content-Location` and `ETag` headers equal
+                    `meta.location` and `meta.version` (RFC 7643 Section 3.1);
+                    and the 201 response in exchange `created_exchange`, which
+                    created the resource, named the same URI in its `Location`
+                    header (RFC 7644 Section 3.3).
                 algorithm:
                   type: string
                   description: JWS `alg` of a signed value.
@@ -1704,6 +1727,15 @@ components:
                 issuer:
                   type: string
                   description: The issuer identifier the request URL was built from, for method `issuer`.
+                location:
+                  type: string
+                  format: uri
+                  description: The resource's `meta.location`, for method `location`.
+                created_exchange:
+                  type: integer
+                  description: >-
+                    Zero-based index into `exchanges` of the exchange that
+                    created the resource, for method `location`.
             exchanges:
               type: array
               items:

@@ -3018,3 +3018,556 @@ examples:
           The claim value, as it would be used in a regular JWT payload. The
           value can be of any type that is allowed in JSON, including numbers,
           strings, booleans, arrays, null, and objects.
+
+  - id: security-event-token
+    title: Security Event Token
+    question: "What does a Security Event Token (SET) look like?"
+    summary: >-
+      A Security Event Token (SET) is a JWT that states that a security event
+      happened to a subject, such as a session being revoked. Its events claim
+      names the event and carries its details (RFC 8417 Section 2).
+    format: jwt
+    looking_glass:
+      protocol: ssf
+      flow: ssf-poll-delivery
+    fields:
+      - path: header.alg
+        reference: RFC 7515 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.1
+        statement: >-
+          The "alg" (algorithm) Header Parameter identifies the cryptographic
+          algorithm used to secure the JWS. The JWS Signature value is not
+          valid if the "alg" value does not represent a supported algorithm or
+          if there is not a key for use with that algorithm associated with
+          the party that digitally signed or MACed the content. "alg" values
+          should either be registered in the IANA "JSON Web Signature and
+          Encryption Algorithms" registry established by [JWA] or be a value
+          that contains a Collision-Resistant Name. The "alg" value is a
+          case-sensitive ASCII string containing a StringOrURI value. This
+          Header Parameter MUST be present and MUST be understood and
+          processed by implementations.
+      - path: header.kid
+        reference: RFC 7515 Section 4.1.4
+        url: https://www.rfc-editor.org/rfc/rfc7515.html#section-4.1.4
+        statement: >-
+          The "kid" (key ID) Header Parameter is a hint indicating which key
+          was used to secure the JWS. This parameter allows originators to
+          explicitly signal a change of key to recipients. The structure of
+          the "kid" value is unspecified. Its value MUST be a case-sensitive
+          string. Use of this Header Parameter is OPTIONAL.
+        note: >-
+          The value matches the kid of one key in the JWK Set at the jwks_uri
+          of the Transmitter Configuration Metadata. That key verifies the
+          signature.
+      - path: header.typ
+        reference: RFC 8417 Section 2.3
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.3
+        statement: >-
+          This specification registers the "application/secevent+jwt" media
+          type, which can be used to indicate that the content is a SET. SETs
+          MAY include this media type in the "typ" header parameter of the JWT
+          representing the SET to explicitly declare that the JWT is a SET.
+          This MUST be included if the SET could be used in an application
+          context in which it could be confused with other kinds of JWTs. Per
+          the definition of "typ" in Section 4.1.9 of [RFC7515], it is
+          RECOMMENDED that the "application/" prefix be omitted. Therefore,
+          the "typ" value used SHOULD be "secevent+jwt".
+      - path: payload.iss
+        reference: RFC 8417 Section 2.2
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2
+        statement: >-
+          As defined by Section 4.1.1 of [RFC7519], this claim contains a
+          string identifying the service provider publishing the SET (the
+          issuer). In some cases, the issuer of the SET will not be the issuer
+          associated with the security subject of the SET. Therefore,
+          implementers cannot assume that the issuers are the same unless the
+          profiling specification specifies that they are for SETs conforming
+          to that profile. This claim is REQUIRED.
+        note: >-
+          The value is the Transmitter's issuer, the same string as issuer in
+          its Transmitter Configuration Metadata.
+      - path: payload.aud
+        reference: RFC 8417 Section 2.2
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2
+        statement: >-
+          As defined by Section 4.1.3 of [RFC7519], this claim contains one or
+          more audience identifiers for the SET. This claim is RECOMMENDED.
+        note: >-
+          The audience is the client that created the stream.
+      - path: payload.iat
+        reference: RFC 8417 Section 2.2
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2
+        statement: >-
+          As defined by Section 4.1.6 of [RFC7519], this claim contains a
+          value representing when the SET was issued. This claim is REQUIRED.
+      - path: payload.jti
+        reference: RFC 8417 Section 2.2
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2
+        statement: >-
+          As defined by Section 4.1.7 of [RFC7519], this claim contains a
+          unique identifier for the SET. The identifier MUST be unique within
+          a particular event feed and MAY be used by clients to track whether
+          a particular SET has already been received. This claim is REQUIRED.
+        note: >-
+          The poll response keys the token by this value, and the Receiver
+          acknowledges the token by sending it back.
+      - path: payload.events
+        reference: RFC 8417 Section 2.2
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2
+        statement: >-
+          This claim contains a set of event statements that each provide
+          information describing a single logical event that has occurred
+          about a security subject (e.g., a state change to the subject).
+          Multiple event identifiers with the same value MUST NOT be used. The
+          "events" claim MUST NOT be used to express multiple independent
+          logical events.
+        note: >-
+          The one event is a Verification Event. Its state is the value the
+          Receiver sent in the verification request, which is among the
+          exchanges below.
+      - path: payload.sub_id
+        reference: RFC 9493 Section 4.1
+        url: https://www.rfc-editor.org/rfc/rfc9493.html#section-4.1
+        statement: >-
+          This document defines the JWT "sub_id" Claim, in accordance with
+          Section 4.2 of [RFC7519], as a common claim that identifies the JWT
+          Subject using a Subject Identifier. When present, the value of this
+          claim MUST be a Subject Identifier that identifies the subject of
+          the JWT.
+        note: >-
+          The subject of a Verification Event is the stream itself: the
+          Subject Identifier has the opaque format and its id is the
+          stream_id.
+      - path: payload.txn
+        reference: RFC 8417 Section 2.2
+        url: https://www.rfc-editor.org/rfc/rfc8417.html#section-2.2
+        statement: >-
+          An OPTIONAL string value that represents a unique transaction
+          identifier. In cases in which multiple related JWTs are issued, the
+          transaction identifier claim can be used to correlate these related
+          JWTs.
+
+  - id: saml-response
+    title: SAML 2.0 Response
+    question: "What does a SAML Response look like?"
+    summary: >-
+      A SAML Response is the XML message an identity provider sends a service
+      provider to answer an authentication request. It carries a status and
+      an Assertion that says who the user is, when they signed in and who the
+      statement is for (SAML Core 2.0 Sections 3.3.3 and 2.3.3).
+    format: saml
+    looking_glass:
+      protocol: saml
+      flow: sp_initiated_sso
+    fields:
+      - path: response.@ID
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          ID [Required] An identifier for the response. It is of type xs:ID,
+          and MUST follow the requirements specified in Section 1.3.4 for
+          identifier uniqueness.
+      - path: response.@Version
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          Version [Required] The version of this response. The identifier for
+          the version of SAML defined in this specification is "2.0". SAML
+          versioning is discussed in Section 4.
+      - path: response.@IssueInstant
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          IssueInstant [Required] The time instant of issue of the response.
+          The time value is encoded in UTC, as described in Section 1.3.3.
+      - path: response.@Destination
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          Destination [Optional] A URI reference indicating the address to
+          which this response has been sent. This is useful to prevent
+          malicious forwarding of responses to unintended recipients, a
+          protection that is required by some protocol bindings. If it is
+          present, the actual recipient MUST check that the URI reference
+          identifies the location at which the message was received. If it
+          does not, the response MUST be discarded. Some protocol bindings may
+          require the use of this attribute (see [SAMLBind]).
+        note: >-
+          The value is the service provider's Assertion Consumer Service URL,
+          the address the message was posted to.
+      - path: response.@InResponseTo
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          InResponseTo [Optional] A reference to the identifier of the request
+          to which the response corresponds, if any. If the response is not
+          generated in response to a request, or if the ID attribute value of
+          a request cannot be determined (for example, the request is
+          malformed), then this attribute MUST NOT be present. Otherwise, it
+          MUST be present and its value MUST match the value of the
+          corresponding request's ID attribute.
+        note: >-
+          The value is the ID of the AuthnRequest the service provider sent,
+          which is among the exchanges below.
+      - path: response.Issuer
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <saml:Issuer> [Optional] Identifies the entity that generated the
+          response message. (For more information on this element, see Section
+          2.2.5.)
+        note: >-
+          The value is the identity provider's entityID, the same string its
+          metadata carries.
+      - path: response.Signature
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <ds:Signature> [Optional] An XML Signature that authenticates the
+          responder and provides message integrity, as described below and in
+          Section 5.
+        note: >-
+          The capture run verified this signature with the certificate in the
+          identity provider's metadata, which is among the exchanges below.
+      - path: response.Status
+        reference: SAML Core 2.0 Section 3.2.2
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <Status> [Required] A code representing the status of the
+          corresponding request.
+      - path: response.Status.StatusCode
+        reference: SAML Core 2.0 Section 3.2.2.1
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <StatusCode> [Required] A code representing the status of the
+          activity carried out in response to the corresponding request.
+      - path: response.Assertion
+        reference: SAML Core 2.0 Section 3.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <saml:Assertion> or <saml:EncryptedAssertion> [Any Number] Specifies
+          an assertion by value, or optionally an encrypted assertion by
+          value. See Section 2.3.3 for more information on these elements.
+      - path: response.Assertion.@ID
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          ID [Required] The identifier for this assertion. It is of type
+          xs:ID, and MUST follow the requirements specified in Section 1.3.4
+          for identifier uniqueness.
+      - path: response.Assertion.@Version
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          Version [Required] The version of this assertion. The identifier for
+          the version of SAML defined in this specification is "2.0". SAML
+          versioning is discussed in Section 4.
+      - path: response.Assertion.@IssueInstant
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          IssueInstant [Required] The time instant of issue in UTC, as
+          described in Section 1.3.3.
+      - path: response.Assertion.Issuer
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <Issuer> [Required] The SAML authority that is making the claim(s)
+          in the assertion. The issuer SHOULD be unambiguous to the intended
+          relying parties. This specification defines no particular
+          relationship between the entity represented by this element and the
+          signer of the assertion (if any). Any such requirements imposed by a
+          relying party that consumes the assertion or by specific profiles
+          are application-specific.
+      - path: response.Assertion.Signature
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <ds:Signature> [Optional] An XML Signature that protects the
+          integrity of and authenticates the issuer of the assertion, as
+          described below and in Section 5.
+        note: >-
+          The assertion carries its own signature, separate from the one on
+          the Response. The capture run verified both.
+      - path: response.Assertion.Subject
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <Subject> [Optional] The subject of the statement(s) in the
+          assertion.
+      - path: response.Assertion.Subject.NameID
+        reference: SAML Core 2.0 Section 2.4.1
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <BaseID>, <NameID>, or <EncryptedID> [Optional] Identifies the
+          subject.
+        note: >-
+          The subject is a demo user of the Mock IdP. Its users exist to be
+          inspected and are not real identities.
+      - path: response.Assertion.Subject.SubjectConfirmation
+        reference: SAML Core 2.0 Section 2.4.1
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <SubjectConfirmation> [Zero or More] Information that allows the
+          subject to be confirmed. If more than one subject confirmation is
+          provided, then satisfying any one of them is sufficient to confirm
+          the subject for the purpose of applying the assertion.
+      - path: response.Assertion.Conditions
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <Conditions> [Optional] Conditions that MUST be evaluated when
+          assessing the validity of and/or when using the assertion. See
+          Section 2.5 for additional information on how to evaluate
+          conditions.
+      - path: response.Assertion.Conditions.@NotBefore
+        reference: SAML Core 2.0 Section 2.5.1
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          NotBefore [Optional] Specifies the earliest time instant at which
+          the assertion is valid. The time value is encoded in UTC, as
+          described in Section 1.3.3.
+      - path: response.Assertion.Conditions.@NotOnOrAfter
+        reference: SAML Core 2.0 Section 2.5.1
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          NotOnOrAfter [Optional] Specifies the time instant at which the
+          assertion has expired. The time value is encoded in UTC, as
+          described in Section 1.3.3.
+        note: >-
+          This identity provider sets it five minutes after NotBefore.
+      - path: response.Assertion.Conditions.AudienceRestriction
+        reference: SAML Core 2.0 Section 2.5.1
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <AudienceRestriction> [Any Number] Specifies that the assertion is
+          addressed to a particular audience.
+        note: >-
+          The one audience is the service provider's entityID.
+      - path: response.Assertion.AuthnStatement
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <AuthnStatement> An authentication statement.
+      - path: response.Assertion.AttributeStatement
+        reference: SAML Core 2.0 Section 2.3.3
+        url: https://docs.oasis-open.org/security/saml/v2.0/saml-core-2.0-os.pdf
+        statement: >-
+          <AttributeStatement> An attribute statement.
+
+  - id: scim-user
+    title: SCIM User
+    question: "What does a SCIM User resource look like?"
+    summary: >-
+      A SCIM User is the JSON object a SCIM service provider keeps for one
+      user account and returns to a provisioning client. It carries the
+      attributes common to every SCIM resource, id, externalId and meta, and
+      the attributes of the core User schema, such as userName (RFC 7643
+      Sections 3.1 and 4.1).
+    format: json
+    looking_glass:
+      protocol: scim
+      flow: user-lifecycle
+    fields:
+      - path: document.schemas
+        reference: RFC 7643 Section 3
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3
+        statement: >-
+          The "schemas" attribute is a REQUIRED attribute and is an array of
+          Strings containing URIs that are used to indicate the namespaces of
+          the SCIM schemas that define the attributes present in the current
+          JSON structure. This attribute may be used by parsers to define the
+          attributes present in the JSON structure that is the body to an HTTP
+          request or response. Each String value must be a unique URI. All
+          representations of SCIM schemas MUST include a non-empty array with
+          value(s) of the URIs supported by that representation. The "schemas"
+          attribute for a resource MUST only contain values defined as
+          "schema" and "schemaExtensions" for the resource's defined
+          "resourceType". Duplicate values MUST NOT be included. Value order
+          is not specified and MUST NOT impact behavior.
+        note: >-
+          A User with no extension names one schema, the core User schema.
+      - path: document.id
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          id A unique identifier for a SCIM resource as defined by the service
+          provider. Each representation of the resource MUST include a
+          non-empty "id" value. This identifier MUST be unique across the SCIM
+          service provider's entire set of resources. It MUST be a stable,
+          non-reassignable identifier that does not change when the same
+          resource is returned in subsequent requests. The value of the "id"
+          attribute is always issued by the service provider and MUST NOT be
+          specified by the client. The string "bulkId" is a reserved keyword
+          and MUST NOT be used within any unique identifier value. The
+          attribute characteristics are "caseExact" as "true", a mutability of
+          "readOnly", and a "returned" characteristic of "always". See Section
+          9 for additional considerations regarding privacy.
+        note: >-
+          The service provider issued this value when it created the user. A
+          client that sends an id in the request has it ignored.
+      - path: document.externalId
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          externalId A String that is an identifier for the resource as
+          defined by the provisioning client. The "externalId" may simplify
+          identification of a resource between the provisioning client and the
+          service provider by allowing the client to use a filter to locate
+          the resource with an identifier from the provisioning domain,
+          obviating the need to store a local mapping between the provisioning
+          domain's identifier of the resource and the identifier used by the
+          service provider. Each resource MAY include a non-empty "externalId"
+          value. The value of the "externalId" attribute is always issued by
+          the provisioning client and MUST NOT be specified by the service
+          provider. The service provider MUST always interpret the externalId
+          as scoped to the provisioning domain. While the server does not
+          enforce uniqueness, it is assumed that the value's uniqueness is
+          controlled by the client setting the value. See Section 9 for
+          additional considerations regarding privacy. This attribute has
+          "caseExact" as "true" and a mutability of "readWrite". This
+          attribute is OPTIONAL.
+        note: >-
+          The value is the one the client sent in the request that created the
+          user, which is among the exchanges below.
+      - path: document.meta
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          meta A complex attribute containing resource metadata. All "meta"
+          sub-attributes are assigned by the service provider (have a
+          "mutability" of "readOnly"), and all of these sub-attributes have a
+          "returned" characteristic of "default". This attribute SHALL be
+          ignored when provided by clients.
+      - path: document.meta.resourceType
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          resourceType The name of the resource type of the resource. This
+          attribute has a mutability of "readOnly" and "caseExact" as "true".
+      - path: document.meta.created
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          created The "DateTime" that the resource was added to the service
+          provider. This attribute MUST be a DateTime.
+      - path: document.meta.lastModified
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          lastModified The most recent DateTime that the details of this
+          resource were updated at the service provider. If this resource has
+          never been modified since its initial creation, the value MUST be
+          the same as the value of "created".
+        note: >-
+          The user was not modified after it was created, so the two values
+          are equal.
+      - path: document.meta.location
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          location The URI of the resource being returned. This value MUST be
+          the same as the "Content-Location" HTTP response header (see Section
+          3.1.4.2 of [RFC7231]).
+        note: >-
+          This is the URI the client sent the GET request to, and the
+          Content-Location header of the response carries the same value.
+      - path: document.meta.version
+        reference: RFC 7643 Section 3.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-3.1
+        statement: >-
+          version The version of the resource being returned. This value must
+          be the same as the entity-tag (ETag) HTTP response header (see
+          Sections 2.1 and 2.3 of [RFC7232]). This attribute has "caseExact"
+          as "true". Service provider support for this attribute is optional
+          and subject to the service provider's support for versioning (see
+          Section 3.14 of [RFC7644]). If a service provider provides "version"
+          (entity-tag) for a representation and the generation of that
+          entity-tag does not satisfy all of the characteristics of a strong
+          validator (see Section 2.1 of [RFC7232]), then the origin server
+          MUST mark the "version" (entity-tag) as weak by prefixing its opaque
+          value with "W/" (case sensitive).
+        note: >-
+          The ETag header of the response carries the same value. The JSON
+          text escapes the quotation marks inside it.
+      - path: document.userName
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          userName A service provider's unique identifier for the user,
+          typically used by the user to directly authenticate to the service
+          provider. Often displayed to the user as their unique identifier
+          within the system (as opposed to "id" or "externalId", which are
+          generally opaque and not user-friendly identifiers). Each User MUST
+          include a non-empty userName value. This identifier MUST be unique
+          across the service provider's entire set of Users. This attribute is
+          REQUIRED and is case insensitive.
+        note: >-
+          The user was created by the conformance client for this capture. It
+          is not a real identity.
+      - path: document.name
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          name The components of the user's name. Service providers MAY return
+          just the full name as a single string in the formatted
+          sub-attribute, or they MAY return just the individual component
+          attributes using the other sub-attributes, or they MAY return both.
+          If both variants are returned, they SHOULD be describing the same
+          name, with the formatted name indicating how the component
+          attributes should be combined.
+      - path: document.name.formatted
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          formatted The full name, including all middle names, titles, and
+          suffixes as appropriate, formatted for display (e.g., "Ms. Barbara
+          Jane Jensen, III").
+      - path: document.name.familyName
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          familyName The family name of the User, or last name in most Western
+          languages (e.g., "Jensen" given the full name "Ms. Barbara Jane
+          Jensen, III").
+      - path: document.name.givenName
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          givenName The given name of the User, or first name in most Western
+          languages (e.g., "Barbara" given the full name "Ms. Barbara Jane
+          Jensen, III").
+      - path: document.displayName
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          displayName The name of the user, suitable for display to end-users.
+          Each user returned MAY include a non-empty displayName value. The
+          name SHOULD be the full name of the User being described, if known
+          (e.g., "Babs Jensen" or "Ms. Barbara J Jensen, III") but MAY be a
+          username or handle, if that is all that is available (e.g.,
+          "bjensen"). The value provided SHOULD be the primary textual label
+          by which this User is normally displayed by the service provider
+          when presenting it to end-users.
+      - path: document.active
+        reference: RFC 7643 Section 4.1.1
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.1
+        statement: >-
+          active A Boolean value indicating the user's administrative status.
+          The definitive meaning of this attribute is determined by the
+          service provider. As a typical example, a value of true implies that
+          the user is able to log in, while a value of false implies that the
+          user's account has been suspended.
+      - path: document.emails
+        reference: RFC 7643 Section 4.1.2
+        url: https://www.rfc-editor.org/rfc/rfc7643.html#section-4.1.2
+        statement: >-
+          emails Email addresses for the User. The value SHOULD be specified
+          according to [RFC5321]. Service providers SHOULD canonicalize the
+          value according to [RFC5321], e.g., "bjensen@example.com" instead of
+          "bjensen@EXAMPLE.COM". The "display" sub-attribute MAY be used to
+          return the canonicalized representation of the email value. The
+          "type" sub-attribute is used to provide a classification meaningful
+          to the (human) user. The user interface should encourage the use of
+          basic values of "work", "home", and "other" and MAY allow additional
+          type values to be used at the discretion of SCIM clients.

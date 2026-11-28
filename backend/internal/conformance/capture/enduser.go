@@ -73,7 +73,7 @@ func AuthenticateEndUser(ctx context.Context, env *Env, authorizationURL string,
 	if err != nil {
 		return "", err
 	}
-	email, password, err := demoUser(ctx, env)
+	email, password, err := DemoUser(ctx, env)
 	if err != nil {
 		return "", err
 	}
@@ -106,9 +106,9 @@ func openAuthorizationRequest(ctx context.Context, env *Env, authorizationURL st
 	return string(match[1]), nil
 }
 
-// demoUser reads the first demo user's credentials from /oauth2/demo/users,
+// DemoUser reads the first demo user's credentials from /oauth2/demo/users,
 // the public listing the Mock IdP's login page offers for autofill.
-func demoUser(ctx context.Context, env *Env) (email, password string, err error) {
+func DemoUser(ctx context.Context, env *Env) (email, password string, err error) {
 	req, err := http.NewRequest(http.MethodGet, env.BaseURL+"/oauth2/demo/users", nil)
 	if err != nil {
 		return "", "", err

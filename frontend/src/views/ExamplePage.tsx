@@ -40,6 +40,7 @@ const PART_TITLES: Record<string, string> = {
   header: 'JOSE Header',
   payload: 'JWT Claims Set',
   document: 'JSON document, indented',
+  response: 'Response, decoded and indented',
 }
 
 /** How a message format is named on the page. */
@@ -51,6 +52,8 @@ function formatLabel(format: ConformanceExampleResponse['format']): string {
       return 'JSON document'
     case 'sd-jwt':
       return 'SD-JWT, Issuer-signed JWT and Disclosures'
+    case 'saml':
+      return 'SAML 2.0 message, base64 in a form control'
   }
 }
 
@@ -65,7 +68,9 @@ function MemberRow({ path, value, field }: { path: string; value?: string; field
     <li className={`rounded-lg border border-white/10 bg-surface-950/40 p-3 space-y-2 ${nested ? 'ml-4 sm:ml-6' : ''}`}>
       <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
         <code className="font-semibold text-white">{memberName(path)}</code>
-        {value !== undefined && <code className="min-w-0 break-all text-surface-200">{value}</code>}
+        {/* An XML element that holds other elements has no value of its own:
+            the document above shows it in full. */}
+        {value && <code className="min-w-0 break-all text-surface-200">{value}</code>}
       </p>
       {field ? (
         <>
@@ -171,7 +176,11 @@ function VerificationView({ verification }: { verification: ConformanceExampleVe
       <p>
         <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300">
           <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-          {verification.method === 'issuer' ? 'Issuer checked when captured' : 'Signature verified when captured'}
+          {verification.method === 'issuer'
+            ? 'Issuer checked when captured'
+            : verification.method === 'location'
+              ? 'Location checked when captured'
+              : 'Signature verified when captured'}
         </span>
       </p>
       {verification.method === 'issuer' ? (
@@ -180,6 +189,24 @@ function VerificationView({ verification }: { verification: ConformanceExampleVe
           <code className="break-all">{verification.issuer}</code>, the issuer identifier the request URL was built
           from, and that the request went to that issuer&apos;s own host. The document is not signed, so there is no
           signature to verify.
+        </p>
+      ) : verification.method === 'location' ? (
+        <p className="text-sm leading-relaxed text-surface-200">
+          The capture run checked that this resource is the whole body of the response to a GET of{' '}
+          <code className="break-all">{verification.location}</code>, the URI its own <code>meta.location</code> names,
+          and that the response&apos;s <code>Content-Location</code> and <code>ETag</code> headers equal{' '}
+          <code>meta.location</code> and <code>meta.version</code> (RFC 7643 Section 3.1). The 201 response that
+          created the resource, in exchange {(verification.created_exchange ?? 0) + 1} below, named the same URI in its{' '}
+          <code>Location</code> header (RFC 7644 Section 3.3). The resource is not signed, so there is no signature to
+          verify. The capture deleted the resource afterwards, so that URI no longer answers with it.
+        </p>
+      ) : verification.method === 'xml_signature' ? (
+        <p className="text-sm leading-relaxed text-surface-200">
+          The capture run verified the XML Signature of the Response and of the Assertion in it (
+          <code className="break-all">{verification.algorithm}</code>) with the signing certificate in the identity
+          provider&apos;s metadata, fetched in exchange {(verification.jwks_exchange ?? 0) + 1} below, after checking
+          that the metadata&apos;s <code>entityID</code> equals the <code>Issuer</code> of both. Certificates are
+          replaced over time, so check this message against that metadata, not against the one published today.
         </p>
       ) : verification.method === 'jwt_vc_issuer_metadata' ? (
         <p className="text-sm leading-relaxed text-surface-200">

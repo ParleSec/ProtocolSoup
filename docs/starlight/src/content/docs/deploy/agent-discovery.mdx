@@ -211,14 +211,18 @@ does a valid DPoP proof look like?") and opens by saying what the message is.
 It then shows a real one: a message the deployed server issued or accepted in
 an exchange CI captured after the deploy, exactly as it was sent.
 
-A page shows one of three formats. A JWT is decoded into its JOSE Header and
+A page shows one of four formats. A SAML message, at `/example/saml-response`,
+is shown as the base64 text the HTTP POST binding carried and as the decoded
+XML, with its attributes and child elements listed. A JWT is decoded into its JOSE Header and
 JWT Claims Set. An SD-JWT, at `/example/sd-jwt-vc`, adds its Disclosures: each
 is shown as the array the Issuer sent, with the digest that ties it to `_sd`
 in the signed JWT. A JSON document is one part. The three metadata documents are
 shown this way: the OpenID Provider configuration at
 `/example/openid-configuration`, the authorization server metadata at
 `/example/oauth-authorization-server`, and the OpenID4VCI Credential Issuer
-metadata at `/example/openid-credential-issuer`.
+metadata at `/example/openid-credential-issuer`. A SCIM User, at
+`/example/scim-user`, is shown the same way, as the service provider returned
+it to a GET of the User's URI.
 
 Below the message, every member of its decoded parts is listed in the order
 the sender wrote it. Each member has its value as sent, the specification's
@@ -233,7 +237,8 @@ citations come from one registry.
 fails the run otherwise:
 
 - The value is present in the recorded request or response it is attributed
-  to.
+  to. A value carried in a form body, such as a `SAMLResponse`, is compared
+  after form decoding, because the body percent-encodes it.
 - Every top-level member of the value has a field in the registry, and every
   registry field is present in the value.
 - The value passes the check its format allows. A metadata document is not
@@ -242,13 +247,24 @@ fails the run otherwise:
   identifier the request URL was built from, that the request went to that
   issuer's host at a well-known location, and that the value is the whole
   response body (RFC 8414 Section 3.3, OpenID Connect Discovery 1.0
-  Section 4.3, OpenID4VCI 1.0 Section 12.2.4). A signed value must verify. A
+  Section 4.3, OpenID4VCI 1.0 Section 12.2.4). A SCIM resource is not signed
+  either. The run checks that the value is the whole body of the response to
+  a GET of the URI its own `meta.location` names, that the response's
+  `Content-Location` and `ETag` headers equal `meta.location` and
+  `meta.version` (RFC 7643 Section 3.1), and that the 201 response that
+  created the resource named the same URI in its `Location` header (RFC 7644
+  Section 3.3). The run deletes the resource afterwards. A signed value must verify. A
   DPoP proof verifies under the public key in its own `jwk` header
   parameter. An access token verifies under the key its
   `kid` selects from the JWK Set the run fetches from the `jwks_uri` in the
   token issuer's RFC 8414 metadata. An ID Token verifies under the key its
   `kid` selects from the JWK Set at the `jwks_uri` of the OpenID Provider's
-  discovery document. An SD-JWT VC verifies under the key its `kid` selects
+  discovery document. A SAML Response verifies when its XML Signature and
+  that of its Assertion check out against the signing certificate in the
+  identity provider's metadata, whose `entityID` must equal the `Issuer` of
+  both. A Security Event Token verifies under the key its
+  `kid` selects from the JWK Set at the `jwks_uri` of the Transmitter
+  Configuration Metadata. An SD-JWT VC verifies under the key its `kid` selects
   from the Issuer's JWT VC Issuer Metadata, whose `issuer` must equal the
   credential's `iss`. The run also requires the end-entity certificate in
   `x5c` to carry that key, and each Disclosure's digest to appear once in
